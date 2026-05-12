@@ -24,7 +24,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/spotlight_engine"]
+packages = ["src/spotlights_engine"]
 
 [tool.uv.sources]
 spotlight-observability = { path = "../spotlight-observability", editable = true }

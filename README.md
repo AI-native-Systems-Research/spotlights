@@ -23,8 +23,8 @@ See `discovery_engine_proposal.md` for the full architecture.
 Only the `schemas` module is part of the contract surface. Everything else is internal and may change without notice.
 
 ```python
-from spotlight_engine.schemas import Candidate, Change
-from spotlight_engine.schemas import TraceSummary, WorkloadProfile, Anomaly  # re-exported from spotlight-observability
+from spotlights_engine.schemas import Candidate, Change
+from spotlights_engine.schemas import TraceSummary, WorkloadProfile, Anomaly  # re-exported from spotlight-observability
 ```
 
 ## Getting started
