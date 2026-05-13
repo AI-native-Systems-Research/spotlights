@@ -1,9 +1,7 @@
 # Implementation Plan: Evidence-Backed Code Optimization Pipeline
 
-> **Status:** Plan only — no implementation code.
 > **Pipeline name (placeholder):** `optquest`. Replace freely.
-> **Fast-changing items carry a "last verified: 2026-05-13" tag.** The CLIs have shipped multiple breaking flag changes in the past 12 months; re-verify before implementation if more than ~30 days have passed.
-> **Stage 2 provider — pinned by user directive: GPT Researcher only**, configured against an OpenAI-compatible LiteLLM proxy. See §6 for the exact configuration; all multi-provider tiering removed.
+> **Fast-changing items carry a "last verified: 2026-05-13" tag.** Re-verify CLI flags before implementation if more than ~30 days have passed.
 
 ---
 
@@ -27,12 +25,12 @@ Build a Python pipeline that, given `(repo_url_or_path, module_path)`, produces 
 | Claude Code CLI | `>= 2.5.0` (the version emitting `total_cost_usd` in the `result` event) | Telemetry stability |
 | Codex CLI | latest published release with `codex exec --json --output-schema` and `--add-dir` (released summer 2025; flags still current 2026-05-13) | Schema enforcement |
 | Stage 1 / Stage 3b agent models | Whatever Claude Code / Codex CLIs default to; pin explicitly via wrapper config (`--model` for `claude`, `-c model='"…"'` for `codex`) | Decoupled from the rest of the model surface; user controls via their proxy/account |
-| **Stage 2 — GPT Researcher** | `gpt-researcher >= 0.13` (library mode) | **Sole Stage-2 provider — user directive** |
-| **Stage 2 — LLM endpoint** | OpenAI-compatible HTTP endpoint at `OPENAI_BASE_URL=https://ete-litellm.ai-models.vpc-int.res.ibm.com` (LiteLLM proxy). Model name `<MODEL_NAME>` — placeholder in user-provided snippet, to be filled in | User-mandated |
-| **Stage 2 — retriever (search backend)** | **OPEN** — Tavily / Serper / Exa / SearXNG / Brave / DuckDuckGo. Must be reachable from inside the VPC. See §11 Q5. | GPT Researcher requires a retriever **separately** from the LLM endpoint |
-| Embeddings (Stage 3a) | Default: an embedding model served by the same LiteLLM proxy (e.g., a `text-embedding-3-large`-compatible deployment); self-hosted fallback `BAAI/bge-m3` (1024-d) via `sentence-transformers` | Keeps everything behind one endpoint; voyage-code-3 dropped because it requires Voyage SaaS egress that may not work from the VPC |
+| **Stage 2 — GPT Researcher** | `gpt-researcher >= 0.13` (library mode) | Sole Stage-2 provider |
+| **Stage 2 — LLM endpoint** | OpenAI-compatible HTTP endpoint at `OPENAI_BASE_URL=https://ete-litellm.ai-models.vpc-int.res.ibm.com` (LiteLLM proxy). Model name `<MODEL_NAME>` — placeholder, to be filled in | |
+| **Stage 2 — retriever (search backend)** | Default `arxiv` (free, key-less); auto-upgrades to `tavily,arxiv` when `TAVILY_API_KEY` is set. See §6.3. | GPT Researcher requires a retriever **separately** from the LLM endpoint |
+| Embeddings | **Not used by the MVP mapping.** Stage 3a maps per-finding via coding agents reading the code directly (§7.1). Embedding scaffolding (`BAAI/bge-m3` local fallback; proxy `/v1/embeddings` probe at M0) retained for a v2 hybrid-retrieval pre-filter. | |
 | Python | `>= 3.11` (matches GPT Researcher's runtime requirement) | |
-| Key libs | `pydantic >= 2.7`, `rank-bm25 >= 0.2.2`, `openai >= 1.40` (the HTTP client for the LiteLLM proxy), `gpt-researcher >= 0.13`, `httpx >= 0.27`, `anyio >= 4`, `sentence-transformers >= 3` (only for bge-m3 fallback) | Anthropic SDK and Voyage SDK removed |
+| Key libs | `pydantic >= 2.7`, `rank-bm25 >= 0.2.2`, `openai >= 1.40` (the HTTP client for the LiteLLM proxy), `gpt-researcher >= 0.13`, `httpx >= 0.27`, `anyio >= 4`, `sentence-transformers >= 3` (only for bge-m3 fallback) | |
 
 ---
 
@@ -128,7 +126,7 @@ All four artifacts live under `~/.cache/optquest/<repo_slug>/<run_id>/`. All sch
 }
 ```
 
-> **Telemetry note:** the LiteLLM proxy may or may not surface `usage` blocks in chat completions. If it does, we record token counts and (proxy-provided) cost; if not, the orchestrator records `tokens_*` as best-effort from response payloads and sets `cost_unknown: true`. See §11 Q6.
+> **Telemetry note:** the LiteLLM proxy may or may not surface `usage` blocks in chat completions. If it does, we record token counts and (proxy-provided) cost; if not, the orchestrator records `tokens_*` as best-effort from response payloads and sets `cost_unknown: true`. See §10 Q5.
 
 ### 2.3 `mapping.json` — Stage 3a output (consumed by Stage 3b)
 
@@ -136,11 +134,14 @@ All four artifacts live under `~/.cache/optquest/<repo_slug>/<run_id>/`. All sch
 {
   "schema_version": "1.0",
   "k": 5,
-  "method": "hybrid_shortlist+alternating_agent_review",
-  "stage3a_2": {
-    "iters": 2,
-    "stop_reason": "edge_set_stability",
-    "agents": ["claude_code", "codex", "claude_code"]
+  "method": "per_finding_agent_fanout",
+  "stage3a": {
+    "findings_total": 24,
+    "findings_succeeded": 23,
+    "findings_failed": 1,
+    "agent_assignment": "alternating",
+    "agents_used": {"claude_code": 12, "codex": 12},
+    "prefilter": "none"
   },
   "mappings": [
     {
@@ -149,20 +150,24 @@ All four artifacts live under `~/.cache/optquest/<repo_slug>/<run_id>/`. All sch
         {
           "finding_id": "find-0007",
           "score": 0.86,
-          "score_breakdown": {"bm25": 0.42, "dense": 0.91, "llm_judge": 0.88, "agent_final": 0.86},
           "reasoning": "scheduler.py touches block allocation for the KV cache; the finding's paged-attention technique applies directly to the loop at line 142",
-          "source_iter": 2,
-          "in_shortlist": true
+          "agent": "claude_code"
         },
-        {"finding_id": "find-0011", "score": 0.71, "source_iter": 0, "in_shortlist": true}
+        {"finding_id": "find-0011", "score": 0.71, "reasoning": "...", "agent": "codex"}
       ]
     }
   ],
-  "orphans": []
+  "orphans": [],
+  "raw_edges": [
+    {"finding_id": "find-0007", "candidate_id": "cand-0001", "score": 0.86, "reasoning": "...", "agent": "claude_code"}
+  ],
+  "meta": {
+    "drops": {"unknown_candidate_id": 0, "schema_invalid": 1, "stalled": 0}
+  }
 }
 ```
 
-Stage 3a-1 emits a sibling `shortlist.json` with the same shape minus the `reasoning` / `source_iter` / `agent_final` fields. `--mapping-review off` produces a `mapping.json` whose `stage3a_2` block is `null` and `method` is `hybrid_shortlist_only`.
+`raw_edges[]` is the un-pivoted per-finding result list; `mappings[]` is the candidate-centric view (top-K per candidate) materialized for Stage 3b. They're redundant on purpose — `raw_edges` is for traceability / re-ranking experiments; `mappings` is for the change-gen prompt.
 
 ### 2.4 `changes.json` — final artifact
 
@@ -236,20 +241,15 @@ Stage 3a-1 emits a sibling `shortlist.json` with the same shape minus the `reaso
                  └─────────────────────┬───────────────────────┘
                                        ▼
                        ┌──────────────────────────────────┐
-                       │  Stage 3a-1: Shortlist           │
-                       │  BM25 + proxy embeddings +       │
-                       │  optional LLM rerank →           │
-                       │  top-10 findings per candidate   │
-                       │  → shortlist.json                │
-                       └─────────────────┬────────────────┘
-                                         ▼
-                       ┌──────────────────────────────────┐
-                       │  Stage 3a-2: Mapping review loop │
-                       │  (CORAL-style loop, like Stage 1)│
-                       │  bootstrap:  Claude Code         │
-                       │  review #1:  Codex               │
-                       │  review #2:  Claude Code         │
-                       │  ↓ (until stop cond.)            │
+                       │  Stage 3a: Per-finding fan-out   │
+                       │  for each finding (parallel,     │
+                       │  semaphore-bounded):             │
+                       │    finding[i] → Claude or Codex  │
+                       │      (round-robin by index)      │
+                       │      reads finding + candidates  │
+                       │      + repo (--add-dir)          │
+                       │      → edges[{cand_id,score,why}]│
+                       │  invert to candidate-centric →   │
                        │  → mapping.json                  │
                        └─────────────────┬────────────────┘
                                          ▼
@@ -266,16 +266,16 @@ Stage 3a-1 emits a sibling `shortlist.json` with the same shape minus the `reaso
 
 ## 4. CORAL: What to Lift, What to Skip
 
-The user's spec references `coral/agent/builtin/claude_code.py`, `coral/agent/builtin/codex.py`, and `coral/workspace/repo.py`; the current public repo (last verified 2026-05-13, https://github.com/Human-Agent-Society/CORAL, `main` at 10 commits, README dated 2026-03-18) places these at `coral/agent/runtime.py` and `coral/workspace/setup.py` (Architecture section of README). The deltas are noted below.
+Source repo: https://github.com/Human-Agent-Society/CORAL (last verified 2026-05-13). Paths below reference its `main` README's Architecture section; confirm the exact tree to lift from before implementation (§10 Q1).
 
 | CORAL artifact | Decision | Reason |
 |---|---|---|
-| `coral/agent/runtime.py` (subprocess wrapper for Claude / Codex / OpenCode) | **Lift** — the Popen pattern, log-tailing thread, JSONL parsing of `stream-json` / `--json` | Single best-tested non-interactive wrapper; saves a week. Note the path differs from the spec's `builtin/claude_code.py`; surface this delta to the user before implementation (§11 Q1). |
+| `coral/agent/runtime.py` (subprocess wrapper for Claude / Codex / OpenCode) | **Lift** — the Popen pattern, log-tailing thread, JSONL parsing of `stream-json` / `--json` | Single best-tested non-interactive wrapper; saves a week. |
 | `coral/agent/manager.py` lifecycle (spawn, heartbeat, reboot on max_turns) | **Lift selectively** — keep spawn + max_turns reboot; **skip** heartbeat interrupts and `/loop`-style prompts | Our pipeline is finite, not evolutionary. |
 | Agent class registry (`coral/agent/runtime.py` selects by `runtime: claude_code|codex|opencode` from YAML) | **Lift** as a thin `AgentRunner` protocol with two implementations | Same `runtime: …` config UX; lets us add `opencode` later. |
 | `_clean_env` style env scrubbing (referenced in CORAL workspace setup) | **Lift** | Prevents `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, and telemetry envs from leaking into agent subprocesses unintentionally. **Important interaction with §6:** the orchestrator process holds `OPENAI_API_KEY` / `OPENAI_BASE_URL` for the GPT Researcher call; the agent subprocesses (Claude Code, Codex) must receive their own credentials and *not* inherit the LiteLLM-proxy envs (Codex would otherwise try to call the LiteLLM endpoint instead of OpenAI). |
 | Worktrees (`coral/workspace/setup.py` clones a git worktree per agent) | **Skip** for Stages 1 and 3 — both read-mostly; mount the repo read-only (or workspace-write of a separate artifacts dir). **Optionally use** if we ever auto-apply patches in v2. | Worktrees add ~3–5s/agent and a git checkpoint surface area we don't need. |
-| `.coral/public/` shared knowledge hub, attempts, notes, skills | **Skip** | Only useful for evolutionary improvement loops — orthogonal to a one-shot candidate-discovery pass. The user explicitly flagged these as skip candidates and we agree. |
+| `.coral/public/` shared knowledge hub, attempts, notes, skills | **Skip** | Only useful for evolutionary improvement loops — orthogonal to a one-shot candidate-discovery pass. |
 | `TaskGrader` / `function_grader` (`coral/grader/`) | **Skip**. Replace with JSON-schema validation (pydantic) per stage. | We don't have a benchmark score; we have schema correctness + URL reachability + path existence. |
 | `coral eval` post-commit hook | **Skip** | No commits. |
 | `coral ui` web dashboard | **Skip** for MVP; revisit in v2 — the dashboard's leaderboard concept maps cleanly to "ranked changes per candidate". |
@@ -321,9 +321,9 @@ codex exec - \                                       # prompt on stdin
 ```
 
 - `codex exec` is the documented non-interactive entry point. Plain `codex` is TUI-only and fails with "stdout is not a terminal" under a non-tty parent (smithery.ai/skills/Lucklyric/codex).
-- **`--sandbox read-only` + `--add-dir` interaction (the user's flagged uncertainty):** the Codex docs (https://www.simplified.guide/codex/writable-directory-add, https://github.com/openai/codex/issues/2797, https://developers.openai.com/codex/cli/features) consistently describe `--add-dir` as "expose more **writable** roots", and the canonical example is `codex exec -s workspace-write --add-dir /tmp/codex-writable …`. Read-only mode has no writable roots by definition (https://developers.openai.com/codex/concepts/sandboxing). **Conclusion**: `--sandbox read-only --add-dir X` is *not* a supported "read everything, write only to X" combination. **Recommended workaround**: use `--sandbox workspace-write` with `-C <artifacts_dir>` as the workspace root and add the target repo via `--add-dir <repo>`. Codex's `sandbox_workspace_write.exclude_*` keys prevent unintended writes to system tmp. If strict read-only of the repo is mandatory, run the target repo on a read-only bind mount and let workspace-write apply only to the artifacts directory.
+- **`--sandbox read-only` + `--add-dir` interaction:** the Codex docs (https://www.simplified.guide/codex/writable-directory-add, https://github.com/openai/codex/issues/2797, https://developers.openai.com/codex/cli/features) consistently describe `--add-dir` as "expose more **writable** roots", and the canonical example is `codex exec -s workspace-write --add-dir /tmp/codex-writable …`. Read-only mode has no writable roots by definition (https://developers.openai.com/codex/concepts/sandboxing). **Conclusion**: `--sandbox read-only --add-dir X` is *not* a supported "read everything, write only to X" combination. **Recommended workaround**: use `--sandbox workspace-write` with `-C <artifacts_dir>` as the workspace root and add the target repo via `--add-dir <repo>`. Codex's `sandbox_workspace_write.exclude_*` keys prevent unintended writes to system tmp. If strict read-only of the repo is mandatory, run the target repo on a read-only bind mount and let workspace-write apply only to the artifacts directory.
 - Output channels: `--json` writes NDJSON state events to stdout; `--output-last-message <path>` writes the final assistant message to a file; `--output-schema` validates the final response against a JSON Schema. Use all three.
-- **`--output-schema` enforcement strength is open** — see §11 Q3.
+- **`--output-schema` enforcement strength is open** — see §10 Q3.
 - Session id: every `codex exec` prints `session id: <uuid>` near the top of the formatted output and emits a session-init event in the JSON stream. We extract it from the JSON stream for v2 resume.
 - Argv limit: same Linux 128 KB MAX_ARG_STRLEN applies. **Workaround**: `codex exec -` reads the prompt from stdin (the dash is explicit and documented at developers.openai.com/codex/noninteractive).
 - Cost telemetry: tokens-in/out and tool calls (including `web_search`) appear in the JSON event stream; wallclock is measured by the orchestrator.
@@ -370,7 +370,7 @@ Large modules need pruning. Strategy stack, tried in order:
 
 - **Agentless** (https://arxiv.org/abs/2407.01489) — its file-localization → relevant-code-locations decomposition matches our two-stage scope-then-list pattern. Adopted: emit a "scope" sub-output before the candidate list (folded into the bootstrap prompt's "What to read first" step).
 - **SWE-agent / SWE-bench solver families** (https://swe-agent.com) — their ACI primitives (open, search, scroll) inform what *not* to do: we don't replicate the agentic environment; the agent uses the underlying CLI's built-in file tools instead.
-- **OpenHands** (https://github.com/All-Hands-AI/OpenHands) — evaluated as a §10 baseline. Its general "agent does everything in one loop" is exactly what we *don't* want for the cost-disciplined separation of research from coding.
+- **OpenHands** (https://github.com/All-Hands-AI/OpenHands) — evaluated as an M5 baseline. Its general "agent does everything in one loop" is exactly what we *don't* want for the cost-disciplined separation of research from coding.
 - **KernelBench's prompting style** (https://scalingintelligence.stanford.edu/blogs/kernelbench/) — for GPU-kernel candidates, their explicit "replace this PyTorch op with a custom kernel" framing maps to the `tags=[kernel-launch, fusion-opportunity]` cluster.
 - **PIE (pie4perf)** and **FasterPy** — both prove that performance-aware retrieval (give the model exemplars of past optimization edits) significantly beats blind prompting. We borrow this by mandating that Stage-2 findings include `suggested_changes[]` in a form the Stage-3b prompt can show as exemplar guidance.
 
@@ -462,8 +462,6 @@ delta arrays to []. Do NOT pad.
 
 ## 6. Stage 2 Mechanics — Deep Research via GPT Researcher
 
-**Single provider, pinned by user directive.** All previous multi-tier comparisons are removed.
-
 ### 6.1 Provider: GPT Researcher
 
 - Repo: https://github.com/assafelovic/gpt-researcher (Apache-2.0)
@@ -473,22 +471,7 @@ delta arrays to []. Do NOT pad.
 
 ### 6.2 LLM configuration — LiteLLM proxy
 
-GPT Researcher honors `OPENAI_API_KEY` and `OPENAI_BASE_URL` from the process environment (and equivalent config-file keys). The user-provided client snippet:
-
-```python
-import openai
-client = openai.OpenAI(
-    api_key="some key",
-    base_url="https://ete-litellm.ai-models.vpc-int.res.ibm.com",
-)
-
-response = client.chat.completions.create(
-    model="<MODEL_NAME>",         # placeholder — must be filled in
-    messages=[{"role": "user", "content": "Your prompt here"}],
-)
-```
-
-…is exactly the contract GPT Researcher uses internally. The wrapper sets:
+GPT Researcher honors `OPENAI_API_KEY` and `OPENAI_BASE_URL` from the process environment (and equivalent config-file keys). The wrapper sets:
 
 ```bash
 export OPENAI_API_KEY="…"                                            # the proxy key
@@ -502,11 +485,11 @@ export EMBEDDING="openai:<EMBEDDING_MODEL_NAME>"   # see §6.4
 
 …before constructing `GPTResearcher(query=…, report_type="deep_research", report_format="markdown")`. The orchestrator must isolate these vars from the Claude Code / Codex subprocesses (see §4 _clean_env note).
 
-**Image input is not used by Stage 2.** The `encode_image` helper in the user-provided snippet is for vision-capable models; Stage 2 is text-only literature/engineering search, so we ignore that path. The same client config works either way.
+Stage 2 is text-only; no image / vision input.
 
 ### 6.3 Retriever (search backend) — default `arxiv`, Tavily recommended
 
-**Resolved 2026-05-13.** Stage 2 has two retriever modes:
+Stage 2 has two retriever modes:
 
 - **Default — `RETRIEVER=arxiv`.** No API key, no install-time secret, no paid egress. Calls the arxiv API directly; authors / abstracts / arxiv categories survive into `findings.json` unchanged. Always on; works out of the box on a node with internet access.
 - **Recommended add-on — `RETRIEVER=tavily,arxiv`.** Adds Tavily's AI-curated web search in parallel with the arxiv API. Surfaces what arxiv can't: engineering blogs (Cloudflare/Meta/Netflix/etc.), GitHub issues and PRs, vendor docs (CUDA/PyTorch/JAX/MLIR), Stack Overflow, conference talks, news. Requires `TAVILY_API_KEY`. Paid — see costs below.
@@ -546,9 +529,14 @@ Running arxiv-only is a **known degraded mode**, not a failure: smaller findings
 
 **If Tavily egress is ever lost** (e.g., deployment moves into a restricted VPC), in-VPC alternatives: `RETRIEVER=custom,arxiv` with an adapter for an internal search index ([custom retriever docs](https://docs.gptr.dev/docs/gpt-researcher/search-engines/retrievers#custom-retriever)), or `RETRIEVER=searx,arxiv` against a self-hosted [SearXNG](https://github.com/searxng/searxng). The arxiv default keeps working in either case.
 
-### 6.4 Embeddings (consumed by Stage 3a, but procured via the same proxy)
+### 6.4 Embeddings — not used by MVP mapping; deferred
 
-If the LiteLLM proxy exposes an embedding endpoint (most LiteLLM deployments do — `/v1/embeddings`), use it directly: `client.embeddings.create(model="<EMBEDDING_MODEL_NAME>", input=[...])`. If not, fall back to `sentence-transformers` running `BAAI/bge-m3` locally. Voyage AI is dropped because it requires SaaS egress.
+The per-finding fan-out (§7.1) judges applicability inside each coding-agent call, so no embeddings endpoint is needed for the MVP. This section is a scaffold for a possible v2 hybrid-retrieval pre-filter:
+
+- A v2 `--prefilter embeddings` (not implemented) would call `client.embeddings.create(model="<EMBEDDING_MODEL_NAME>", input=[...])` against the LiteLLM proxy, with a `sentence-transformers` / `BAAI/bge-m3` local fallback.
+- The M0 proxy selftest probes `/v1/embeddings` so the endpoint's availability is recorded; result is informational only.
+
+The MVP's only `--prefilter` option is `bm25` (pure `rank_bm25`, no embedding endpoint touched).
 
 ### 6.5 Single-call vs deep-research mode
 
@@ -558,7 +546,7 @@ GPT Researcher's `report_type` options (https://docs.gptr.dev/docs/gpt-researche
 - `detailed_report` — section-by-section, deeper.
 - `deep_research` — multi-agent, tree-of-thought style search, deepest. Best for our use case.
 
-Recommended pin: `report_type="deep_research"`. Expect 5–15 minutes wall-clock per call.
+Pin: `report_type="deep_research"`. Expect 5–15 minutes wall-clock per call.
 
 ### 6.6 Markdown-to-schema coercion (mandatory)
 
@@ -573,15 +561,15 @@ COERCION CALL
   response_format: {"type": "json_schema", "json_schema": findings_schema}
 ```
 
-If the proxy's `<MODEL_NAME>` does not support `response_format=json_schema`, the wrapper falls back to plain JSON-mode (`response_format={"type":"json_object"}`) and then validates with pydantic, retrying once on parse failure with a strict reminder. See §11 Q7.
+If the proxy's `<MODEL_NAME>` does not support `response_format=json_schema`, the wrapper falls back to plain JSON-mode (`response_format={"type":"json_object"}`) and then validates with pydantic, retrying once on parse failure with a strict reminder. See §10 Q6.
 
 ### 6.7 Per-call budget cap
 
-Even with a single provider, runaway cost is possible. Enforce:
+Enforce:
 
 - `--stage2-wallclock-s` (default 1800 s = 30 min) — hard timeout on the GPT Researcher call.
 - `--stage2-max-iterations` — pass to GPT Researcher `config_path` to bound the deep-research tree.
-- `--stage2-budget-usd` — best-effort; only enforceable if the LiteLLM proxy returns `usage` blocks (§11 Q6).
+- `--stage2-budget-usd` — best-effort; only enforceable if the LiteLLM proxy returns `usage` blocks (§10 Q5).
 
 ### 6.8 Validation
 
@@ -667,172 +655,117 @@ appear in source code or in a code-review rationale (e.g., "kv_cache", "block_ta
 
 ## 7. Stage 3 Mechanics — Mapping + Change Generation
 
-### 7.1 Mapping (Stage 3a) — two-pass: hybrid-retrieval shortlist + alternating-agent review
+### 7.1 Mapping (Stage 3a) — per-finding agent fan-out, alternating Claude Code / Codex
 
-Stage 3a runs in two passes:
+Stage 3a iterates over **findings**, not pairs. For each finding the orchestrator spawns **one** coding-agent subprocess that receives:
 
-- **Stage 3a-1 (programmatic shortlist).** BM25 + embeddings + an optional LLM rerank produce a per-candidate shortlist of the top-N findings (default N=10). Fast (seconds per repo), no coding-agent invocation.
-- **Stage 3a-2 (alternating Claude Code ↔ Codex review).** A coding agent reads the shortlist, the full candidates / findings files, and the actual repo code (via `--add-dir`), and emits `mapping.json` with a per-edge score and reasoning. The opposite agent then reviews and revises. Loop continues until a stop condition triggers — same six-condition shape as Stage 1 (§5.2).
+- the single finding (technique name, summary, target_components, claimed_gains, suggested_changes)
+- the full `candidates.json` (typical Stage 1 output is 5–50 candidates, well under an agent's context budget)
+- read-only access to the repo via `--add-dir`
 
-**Why split.** Pure embeddings/BM25 conflate topical similarity with applicability: "this finding talks about quantization and this candidate is about quantization" is not the same as "this finding's specific technique applies to this code shape". Agents reading the actual code can make that call; running them across N×M pairs without a shortlist would blow context and cost. Conversely, agents without retrieval would need to read every finding for every candidate. The shortlist narrows the search space; the agent loop adjudicates within it. The alternating Claude↔Codex pattern from Stage 1 carries over: same debiasing motivation, same convergence shape.
+…and returns the subset of candidates the finding actually applies to, with a per-edge score and reasoning. Agents alternate Claude Code / Codex by finding index (round-robin: `findings[0]→claude`, `findings[1]→codex`, `findings[2]→claude`, …) to debias single-model failure modes — same pattern as Stage 3b's `--changegen-agent alternating`, not the iterative-critique pattern of Stage 1.
 
-#### 7.1.1 Stage 3a-1: Hybrid-retrieval shortlist
+Once all per-finding subprocesses complete, the orchestrator inverts the edge list to a candidate-centric `mapping.json` (top-K findings per candidate, K=5 default) for Stage 3b.
 
-```
-INPUT: candidates: List[Candidate], findings: List[Finding]
-OUTPUT: shortlist: {candidate_id -> [(finding_id, hybrid_score)]} top-N (N=10 default)
-
-1. Build candidate document:
-     cand_doc(c) = c.rationale + " " + c.file + " " + c.symbol + " " +
-                   " ".join(c.tags) + " " + code_excerpt(c)[:2000]
-
-2. Build finding document:
-     find_doc(f) = f.technique_name + " " + f.technique_summary + " " +
-                   " ".join(f.target_components[*].component_hint) + " " +
-                   " ".join(f.target_components[*].file_or_symbol_hints) + " " +
-                   " ".join(f.target_components[*].keywords_for_matching)
-
-3. Sparse: BM25 (rank_bm25) over the tokenized symbol+keyword space.
-     bm25_score(c, f) ∈ [0, ~]
-
-4. Dense: embeddings via the same LiteLLM proxy (§6.4).
-     # POST {OPENAI_BASE_URL}/v1/embeddings, model=<EMBEDDING_MODEL_NAME>.
-     # Batch candidates and findings separately to amortize cost.
-     # Self-hosted fallback: BAAI/bge-m3 via sentence-transformers.
-     dense_score(c, f) = cosine(emb(cand_doc(c)), emb(find_doc(f)))
-
-5. Linear blend:
-     hybrid(c, f) = 0.4 * normalize(bm25_score) + 0.6 * dense_score
-   (weights tunable; sweep on a held-out repo)
-
-6. For each c, keep top 10 findings by hybrid score.
-
-7. Optional LLM re-rank (default: ON when proxy is responsive, OFF otherwise):
-     Same proxy / same <MODEL_NAME> with the RERANK_PROMPT(c, top10_findings).
-     Output: re-ordered list with scalar scores ∈ [0,1].
-     Final score = 0.7 * llm_judge + 0.3 * hybrid.
-
-8. Emit `shortlist.json` (top-N per candidate, N=10 default) as input to Stage 3a-2.
-```
-
-The shortlist is an **intermediate artifact**, not the final mapping. Stage 3a-2 may drop, demote, or reorder edges — but cannot add findings outside the shortlist (that's what 3a-1 is for; widening the search at the agent layer would defeat the cost split).
-
-#### 7.1.2 Stage 3a-2: Alternating-agent review loop
+#### 7.1.1 Mechanics
 
 ```
-i=0: claude_code bootstrap (--permission-mode plan, --add-dir <repo-path>)
-     prompt: STAGE3A_BOOTSTRAP_PROMPT
-     reads:  candidates.json, findings.json, shortlist.json, repo (read-only)
-     emits:  mapping_v0.json
-             # per edge: {candidate_id, finding_id, score ∈ [0,1], reasoning, source_iter}
+INPUT:  candidates.json (N candidates), findings.json (M findings), repo
+OUTPUT: mapping.json (candidate-centric, top-K findings per candidate)
 
-i=1: codex review (--sandbox workspace-write, workspace=artifacts, --add-dir <repo-path>)
-     prompt: STAGE3A_REVIEW_PROMPT(mapping_v0.json, role="adversarial reviewer")
-     emits:  mapping_v1.json + meta.delta = {added:[], removed:[], modified:[], rescored:[]}
+semaphore     = asyncio.Semaphore(--max-parallel-agents)        # default 4
+agents_cycle  = itertools.cycle(["claude_code", "codex"])        # alternating
 
-i=2: claude review
-     prompt: STAGE3A_REVIEW_PROMPT(mapping_v1.json, role="adversarial reviewer")
-     emits:  mapping_v2.json
+async def map_one_finding(f, agent_choice):
+    async with semaphore:
+        invoke agent_choice with:
+            - --permission-mode plan (claude) / --sandbox workspace-write (codex)
+            - --add-dir <repo-path>                  # read-only repo access
+            - stdin: STAGE3A_MAP_PROMPT(f, candidates.json)
+            - timeout: --per-finding-wallclock-s     # default 90s
+        returns: {finding_id, edges: [{candidate_id, score ∈ [0,1], reasoning}]}
 
-... until stop condition ...
+tasks = [map_one_finding(f, next(agents_cycle)) for f in findings]
+per_finding_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+edges = flatten([r.edges for r in per_finding_results
+                 if not isinstance(r, Exception) and r.get("edges")])
+
+# Invert per-finding edges into a candidate-centric view for Stage 3b
+mapping = group_by_candidate(edges, top_k=K)                     # K=5 default
+orphans = [c.id for c in candidates
+           if c.id not in mapping or max_score(mapping[c.id]) < --map-min-score]
 ```
 
-The reviewer is instructed to: **demote** edges where the finding's technique doesn't actually apply to the code shape (e.g., a CUDA-kernel finding mapped to pure-Python candidate); **promote** shortlist edges the bootstrap missed; **rescore** edges where the reasoning is weak or contradicted by the code; **mark for inspection** candidates whose top edge fell below `--map-min-score` (default 0.45). Reviewers may **not** introduce findings outside the shortlist.
+`--mapping-agent {alternating|claude_code|codex}` — default `alternating`. Same flag shape as `--changegen-agent`.
 
-`--mapping-review {alternating|claude_code|codex|off}` — default `alternating`. Setting `off` skips Stage 3a-2 entirely; `mapping.json` then comes straight from the hybrid shortlist (the prior behavior). Useful for cost-floored runs and for ablation in M3.
+#### 7.1.2 Per-finding budget, timeouts, and validation
 
-#### 7.1.3 Stop conditions (ALL evaluated each iteration; ANY triggers exit)
+- **Wallclock per finding:** `--per-finding-wallclock-s` (default 90s — bounded task: read one finding + N candidates + verify in code).
+- **Cost per finding:** `--per-finding-budget-usd` (default $0.20).
+- **Stage-3a parent budget:** `--stage3a-budget-usd` (default $4 — covers ~20 findings × $0.20).
+- **Schema validation:** parse each per-finding result with the `mapping_edges` pydantic schema. On parse failure, retry once with a strict-mode reminder appended to the prompt. On second failure: record `{finding_id, edges: [], error: "schema_invalid"}` and continue — **do not** fail the stage.
+- **Reference integrity:** drop any edge whose `candidate_id` is not in `candidates.json`; record the drop count in `mapping.json.meta.drops` for diagnostics.
+- **Score sanity:** clamp scores to [0, 1]; require `reasoning` length ≥ 20 chars (else clamp the edge to score 0.45 with a warning).
+- **Per-finding hang detection:** if a subprocess produces no NDJSON output for `--per-finding-stall-s` (default 60s), kill it and record `{error: "stalled"}` for that finding.
 
-1. **Canonical-JSON equality**: `canonical_json(mapping_iN) == canonical_json(mapping_i{N-1})` after sorting by `(candidate_id, finding_id)` and rounding scores to 2 dp.
-2. **Edge-set stability**: |symmetric-difference of edges| / |total edges| ≤ 5%.
-3. **Score stability**: mean per-edge `|score_iN - score_i{N-1}|` ≤ 0.05.
-4. **"No changes" predicate**: reviewer's `meta.delta` is empty across all four lists.
-5. **Max-iter cap**: `--stage3a-max-iters` (default 3 — mapping converges faster than candidate discovery; the search space is bounded by the shortlist).
-6. **Budget guard**: cumulative Stage-3a-2 `cost_usd` ≥ `--stage3a-budget-usd` (default $2). The combined `--stage3-budget-usd` (default $6 = $2 mapping + $4 changegen) is a parent cap.
-7. **Hard-failure latch**: invalid JSON twice in a row after retry → abort 3a-2, emit last good mapping (or fall back to the 3a-1 shortlist if iter 0 failed).
+#### 7.1.3 Optional BM25 pre-filter for large candidate sets
 
-#### 7.1.4 Per-iteration validation
+If `len(candidates) > --map-prefilter-threshold` (default 100), each per-finding agent receives a BM25-narrowed shortlist of the top-50 candidates instead of the full list, to keep the prompt under context budget. Disabled by default because typical Stage 1 outputs are well under 100. Configured via `--prefilter {none|bm25}` (default `none`). Pure `rank_bm25` over the tokenized symbol + keyword space — no embedding endpoint required.
 
-- pydantic schema parse on `mapping.json` → reject on failure (retry once with a strict-mode reminder).
-- Every `candidate_id` and `finding_id` referenced must exist in the input files; unknown ids → invalid iter.
-- Score ∈ [0, 1]; reasoning ≥ 20 characters.
-- Edges not in the shortlist are dropped with a warning (do not fail the iter).
+#### 7.1.4 Completeness check (mapping output)
 
-#### 7.1.5 Completeness check (mapping output)
+Every candidate must have ≥1 edge with score ≥ `--map-min-score` (default 0.45). Otherwise the candidate is recorded in `mapping.json.orphans[]` and proceeds to Stage 3b with `mapped_findings: []`; the change-gen prompt falls back to general performance heuristics. Orphan rate is surfaced as a CLI summary warning.
 
-Every candidate must have ≥1 edge with score ≥ `--map-min-score` (default 0.45). Otherwise the candidate lands in `mapping.json`'s `orphans[]` and proceeds to Stage 3b with `mapped_findings: []` — the change-generation prompt then falls back to general performance heuristics.
+**Many-to-many shape preserved.** A finding may map to multiple candidates; a candidate may collect edges from multiple findings. The candidate-centric `mapping.json` is a *view* over the raw per-finding edges (also persisted under `mapping.json.raw_edges[]` for traceability and re-ranking experiments).
 
-**Many-to-many shape:** a finding may appear under multiple candidates (expected and desirable; not deduped). For Stage 3b inputs we materialize a **candidate-centric** view (top-K findings per candidate, K=5 default, ≤ N=10).
+#### 7.1.5 Concrete Stage-3a prompt (drop-in)
 
-#### 7.1.6 Concrete Stage-3a-2 prompts (drop-in)
-
-**Bootstrap prompt** (`prompts/stage3a_bootstrap.md`):
+`prompts/stage3a_map.md`:
 
 ```
-You map performance optimization CANDIDATES (specific code locations) to research
-FINDINGS (techniques from papers / blogs / PRs / issues).
-
-## Inputs you have
-- `candidates.json` — list of candidate code locations with rationale and tags
-- `findings.json`   — list of research findings with techniques and applicability hints
-- `shortlist.json`  — top-10 findings per candidate from a hybrid-retrieval pre-pass
-                      (BM25 + embeddings). Treat as your candidate set — do NOT
-                      introduce findings outside it.
-- the repository (read-only via --add-dir) — open files, read code, verify fits
-
-## Rules
-- For each candidate, pick the findings (from its shortlist) whose technique
-  ACTUALLY applies to the code shape at that location. A finding can match in
-  topic but fail in shape (e.g., "fused-attention kernel" → a pure-Python
-  bytecode-level candidate). Demote those.
-- Use score ∈ [0, 1]: 0.85+ = high confidence the technique applies, 0.6 =
-  plausible, 0.45 = weak / speculative, <0.45 = drop.
-- Read the actual code around each candidate's (file, symbol, line range)
-  before assigning a score above 0.6.
-- Reasoning ≥ 20 chars and grounded in what you read.
-
-## Output (REQUIRED — strict JSON, matches @mapping.schema.json)
-{
-  "edges": [
-    {"candidate_id": "...", "finding_id": "...", "score": 0.0–1.0,
-     "reasoning": "...", "source_iter": 0}
-  ],
-  "orphans": ["candidate_id", ...],
-  "meta": {"delta": {"added": [...], "removed": [...], "modified": [...],
-                     "rescored": [...]}}
-}
-No prose outside the JSON.
-```
-
-**Review prompt** (`prompts/stage3a_review.md`):
-
-```
-You are an adversarial reviewer of a candidate↔finding mapping produced by
-another agent.
+You map ONE research finding to a list of code optimization candidates. You do
+NOT propose changes — that happens later. Your only job is to decide which
+candidates this finding applies to, and explain why.
 
 ## Inputs
-- `candidates.json`, `findings.json`, `shortlist.json` (same as bootstrap)
-- `mapping.json` — the previous iteration's edges
-- the repository (read-only)
+- the finding (below) — a technique surfaced by deep-research (paper / blog /
+  PR / issue / talk). Includes technique_name, technique_summary,
+  target_components, claimed_gains, suggested_changes.
+- `candidates.json` — the full candidate list from Stage 1. Each candidate has
+  file, symbol, line range, rationale, tags.
+- the repository (read-only via --add-dir) — open files, read code, verify
+  whether the technique actually applies to each candidate's location.
 
 ## Rules
-- Demote (or drop) edges where the finding's technique doesn't actually apply
-  to the code at the candidate's location. Open the code and verify.
-- Promote shortlist edges the previous iteration missed if you can justify ≥0.6.
-- Rescore edges whose reasoning is weak, contradicted by the code, or
-  speculative.
-- You may NOT add findings outside `shortlist.json`.
-- Keep edits minimal — if the previous mapping is correct, return it unchanged
-  with `meta.delta` lists empty.
+- For each candidate, decide whether THIS finding's technique applies to the
+  code at THIS location. A topic match is not enough — the code shape must fit.
+  Example reject: a "fused-attention CUDA kernel" finding mapped to a
+  pure-Python bytecode candidate, even if both involve attention.
+- Read the actual code around (file, symbol, line range) before assigning any
+  score above 0.6. Don't extrapolate from the rationale alone.
+- Score ∈ [0, 1]:
+    0.85+ = high confidence the technique applies as-is
+    0.60  = plausible, would need some adaptation
+    0.45  = weak / speculative; lowest score worth emitting
+    <0.45 = do not emit
+- Reasoning ≥ 20 chars and grounded in what you read (cite file:line if useful).
+- Emit ONLY candidates the finding actually maps to. Don't enumerate rejections.
+- If NO candidate fits, emit `"edges": []` — that's a valid result.
 
-## Output (REQUIRED — strict JSON, matches @mapping.schema.json)
-Same shape as the bootstrap. `meta.delta` must accurately describe the diff
-from the input mapping; the orchestrator uses it for the stop conditions.
+## Finding
+{finding_json}
+
+## Output (REQUIRED — strict JSON, no prose outside)
+{
+  "finding_id": "{finding_id}",
+  "edges": [
+    {"candidate_id": "cand-XXXX", "score": 0.0–1.0, "reasoning": "..."}
+  ]
+}
 ```
 
-**Embedding model choice rationale (unchanged):** the LiteLLM proxy is the single sanctioned egress for Stage 2 and Stage 3a-1. If it serves an embedding endpoint, use it; otherwise fall back to `BAAI/bge-m3` locally (1024-d, multilingual). voyage-code-3 dropped to honor the single-endpoint constraint.
-
-**Prior art consulted:** RepoCoder (https://arxiv.org/abs/2303.12570) for retrieval over code repos; CodeRAG-Bench (https://arxiv.org/abs/2406.14497) for code-retrieval evaluation; SWE-bench solver families (Agentless https://arxiv.org/abs/2407.01489, SWE-agent) for "code-to-spec" matching patterns; CodeXEmbed (https://arxiv.org/abs/2411.12644) as a counterpoint that argues large open-source code-retrieval models are catching up. The Stage 3a-2 review loop is a direct port of Stage 1's bootstrap+critique pattern; the same prior art motivates it.
+**Prior art consulted:** RepoCoder (https://arxiv.org/abs/2303.12570), CodeRAG-Bench (https://arxiv.org/abs/2406.14497), and Agentless (https://arxiv.org/abs/2407.01489) for retrieval and code-to-spec patterns. The per-finding fan-out is structurally identical to Stage 3b's per-candidate change-generation loop; only the unit of iteration (finding vs candidate) and the output schema differ.
 
 ### 7.2 Change generation (Stage 3b)
 
@@ -937,13 +870,11 @@ optquest/
 │   │   └── prompts/stage2_research.md, stage2_coerce.md
 │   ├── stage3/
 │   │   ├── mapping/
-│   │   │   ├── bm25.py
-│   │   │   ├── dense.py             # proxy /v1/embeddings | bge-m3 fallback
-│   │   │   ├── rerank.py            # LLM-judge re-rank via the same proxy
-│   │   │   ├── shortlist.py         # 3a-1: hybrid blend, top-N=10, emit shortlist.json
-│   │   │   ├── agent_loop.py        # 3a-2: bootstrap + alternating review, stop conds
-│   │   │   ├── validate.py          # per-iter schema parse, edge-in-shortlist check
-│   │   │   └── prompts/             # stage3a_bootstrap.md, stage3a_review.md
+│   │   │   ├── per_finding.py       # per-finding subprocess fan-out + semaphore + round-robin
+│   │   │   ├── invert.py            # raw_edges -> candidate-centric top-K mapping
+│   │   │   ├── prefilter_bm25.py    # optional pre-filter for >100-candidate sets (off by default)
+│   │   │   ├── validate.py          # per-finding schema parse, ref-integrity, score clamp
+│   │   │   └── prompts/stage3a_map.md
 │   │   ├── changegen/
 │   │   │   ├── runner.py            # per-candidate subprocess fan-out + semaphore
 │   │   │   └── prompts/stage3_changegen.md
@@ -981,17 +912,18 @@ optquest run \
   --module src/foo/bar \
   --scope-paths 'src/foo/bar/**/*.py' \
   --stage1-budget-usd 5 --stage2-wallclock-s 1800 \
-  --stage3a-budget-usd 2 --stage3a-max-iters 3 --mapping-review alternating \
-  --stage3-budget-usd 6 \
+  --mapping-agent alternating \
+  --per-finding-wallclock-s 90 --per-finding-budget-usd 0.20 \
+  --stage3a-budget-usd 4 --stage3-budget-usd 8 \
   --max-parallel-agents 4 \
   --out ~/.cache/optquest/owner__repo/2026-05-13--ab12
 
-# Sequential to ease debugging; skip the mapping-review loop (use shortlist directly)
+# Sequential to ease debugging; pin both mapping and changegen to one agent
 optquest run --repo . --module pkg/core \
   --sequential \
-  --mapping-review off \
+  --mapping-agent claude_code \
   --changegen-agent codex \
-  --no-llm-rerank
+  --prefilter none
 
 # Use a profiling artifact to bound scope; longer research budget
 optquest run --repo . --module src/scheduler \
@@ -1011,48 +943,19 @@ optquest stage2 --module . --out tmp/ --retriever duckduckgo
 
 ---
 
-## 10. Decisions Made
+## 10. Still-Open Questions
 
-| # | Decision | Rationale | Rejected alternative |
-|---|---|---|---|
-| 1 | Subprocess agents (`claude -p`, `codex exec`) instead of SDKs | The Anthropic Agent SDK and OpenAI Agents SDK both work, but the user explicitly asked for subprocess CLIs and the CORAL pattern is built around them. Subprocess is also the only path that gives identical UX across Claude Code and Codex. | Anthropic Agent SDK + OpenAI Agents SDK — lost because they fragment the integration and bypass CORAL reuse. |
-| 2 | Prompts on stdin / via `@file`, never as argv | Linux MAX_ARG_STRLEN = 128 KB per argv (confirmed in multiple kernel-source citations and a real bug report on Claude Code SDK when CLAUDE.md exceeded 128 KB — https://github.com/AndyMik90/Auto-Claude/issues/1414). | Inline argv — fails at scale. |
-| 3 | Claude Code uses `--permission-mode plan` in Stage 1 | Plan mode is documented (code.claude.com/docs/en/permission-modes) as "research and propose, do not edit". Exactly the Stage-1 semantic. | `--permission-mode acceptEdits` — allows edits we don't want. `--dangerously-skip-permissions` — overkill. |
-| 4 | Codex uses `--sandbox workspace-write` with workspace = artifacts dir, repo via `--add-dir`, not `--sandbox read-only --add-dir <writable>` | Docs are consistent that `--add-dir` expands writable roots in workspace-write mode; read-only has no writable roots. The combination "read-only with one writable scratch dir" is not natively supported. | The user's intuitive combination — not actually permitted. |
-| 5 | Stages 1 & 2 parallelized with **asyncio** + `anyio.to_thread.run_sync` for blocking-subprocess wait | asyncio gives us one event loop for fan-out, semaphores, and budget pumping. Subprocess.Popen still works inside an asyncio worker thread; we don't need `asyncio.create_subprocess_exec` everywhere because the agents are slow enough that thread-spawn cost is rounding. | Bare threads + `concurrent.futures` — fine but awkward to mix with semaphore-bounded Stage 3b. Pure `multiprocessing` — overkill, the work is IO-bound at the orchestrator level. |
-| **6** | **Stage 2 = GPT Researcher only, configured against a LiteLLM proxy (OPENAI_BASE_URL=https://ete-litellm.ai-models.vpc-int.res.ibm.com)** | **User directive.** Plan is no longer cost-tiered. All credentials/egress flow through one endpoint; multi-provider rejected. | OpenAI Deep Research API, Anthropic + web_search, Perplexity Sonar — all require additional egress paths the user did not authorize. |
-| 6a | Set GPT Researcher's LLM via OPENAI_API_KEY + OPENAI_BASE_URL env vars (plus FAST_LLM / SMART_LLM / STRATEGIC_LLM = `openai:<MODEL_NAME>`) | This is GPT Researcher's documented OpenAI-compatible config pattern (https://docs.gptr.dev/docs/gpt-researcher/llms/llms#openai); avoids monkey-patching the openai client. | Wrapping `openai.OpenAI(base_url=…)` directly inside a custom retriever — works but reimplements the planner. |
-| 6b | Force `report_type="deep_research"` with a hard `--stage2-wallclock-s` cap | `research_report` returns too thin a survey for downstream mapping; `detailed_report` is intermediate. The wallclock cap bounds open-ended exploration. | Always `detailed_report` — produces fewer findings; mapping orphans more often. |
-| 6c | Mandatory markdown→JSON coercion call to the same proxy | GPT Researcher emits markdown, mapper needs JSON; one extra LLM call is the simplest reliable bridge. | Regex/heuristic markdown parsing — brittle, costs us most of the structured fields. |
-| 6d | Default retriever `arxiv` (free, no key); auto-upgrades to `tavily,arxiv` if `TAVILY_API_KEY` is set | arxiv API is free and key-less, so the pipeline runs out of the box. Tavily (paid) is opt-in for blog / GitHub / vendor-doc coverage. The orchestrator switches modes by inspecting the env at startup. See §6.3. | Hard-pinning `tavily,arxiv` (blocks installs without a paid key); arxiv-only with no upgrade path (gives up the blog/issue coverage the user explicitly asked for). |
-| 7 | Stage 3a-1 shortlist: BM25 + proxy embeddings (or bge-m3 fallback), LLM-rerank optional; top-N=10 per candidate | Shortlist narrows the N×M search space before the agent loop. Hybrid retrieval is cheap and topical; agents adjudicate within it. voyage-code-3 dropped (separate SaaS); BM25 still important — embeddings drift on rare code tokens. | voyage-code-3 — disallowed by the single-endpoint constraint. text-embedding-3-large directly from openai.com — also disallowed. Agent-only mapping with no retrieval — would blow context for N×M pair evaluation. |
-| 8 | One subprocess per candidate in Stage 3b | Maximizes parallelism, isolates failures, makes per-candidate cost telemetry trivial. | One big batched prompt — argv-size pressure, harder to schema-validate, single failure kills the run. |
-| 9 | JSON Schema validation (pydantic) instead of CORAL graders | The pipeline has no scalar score; correctness is "shape + path-existence + URL-reachability". | CORAL `TaskGrader` — overkill. |
-| 10 | No session-resume in MVP | Resume halves the "two failures multiply" reliability story; saves <30% tokens; v2 work. | Resume from iter 1 → iter 2 — viable, deferred. |
-| 11 | Pipeline runs read-only against target repo; all writes go to `~/.cache/optquest/...` | The user's "target-repo mutation guard" requirement is non-negotiable. | Worktrees — overkill for read-only Stage 1; we adopt them only if v2 auto-applies patches. |
-| 12 | **Baseline considered for the "one big agent" alternative**: SWE-agent / OpenHands directly | SWE-agent (https://swe-agent.com) and OpenHands (https://github.com/All-Hands-AI/OpenHands) are general code-agent harnesses optimized for SWE-bench. They lack a built-in deep-research stage, and shoving "do research and propose changes" into one agent surrenders the cost discipline of separating cheap deep-research from expensive coding-agent loops. We use them as **eval baselines only** (see §12 milestones). | "Just run OpenHands on the repo" — strictly worse on the candidates-with-citations metric we care about. |
-| 13 | Stage-3a-1 optional LLM rerank uses the same `<MODEL_NAME>` via the same proxy | Same egress, same auth; per-pair rerank is cheap. ON by default when proxy is responsive; the agent loop in 3a-2 is the primary judgment layer, so the rerank is mainly a shortlist-quality booster. | Always-off rerank — wider shortlist quality variance into the agent loop. A *different* model for rerank — would mean another credential. |
-| 14 | Findings schema mandates `keywords_for_matching` | Drives BM25 quality without LLM-driven keyword extraction in Stage 3a. The coercion prompt enforces it. | LLM keyword extraction at map time — extra LLM call we don't need if the coercion step does its job. |
-| 15 | Strip `OPENAI_BASE_URL` and `OPENAI_API_KEY` from the env passed to Codex / Claude Code subprocesses | The LiteLLM proxy credentials are for Stage 2 / Stage 3a inside the orchestrator process only. Codex would otherwise try to call the proxy as if it were `api.openai.com` and break, or worse, succeed in unexpected ways. The lifted `_clean_env` is the cleanest mechanism. | Sharing the same env — produces silent misrouting bugs. |
-| 16 | No automatic compile+benchmark verification in MVP (proposed in v2) | Compile+benchmark requires GPU-capable runners, a per-repo benchmark harness, and per-proposal patch synthesis — three failure modes that compound. Defer until M6's hand-applied eval proves the proposals are worth this investment. | Auto-bench everything from M1 — premature. |
-| 17 | Stage 3a-2 mapping uses the same alternating Claude-Code↔Codex review pattern as Stage 1 | Mapping is a judgment task (does the finding's technique apply to this code shape?), not just a similarity calculation. The Stage-1 bootstrap+critique pattern debiases single-model failure modes here for the same reason it does in candidate discovery. Hybrid retrieval (3a-1) seeds a bounded shortlist so the agents don't drown in N×M context. | Pure-programmatic mapping (3a-1 alone) — what we had before; misses applicability judgments and produces more orphans. Single-agent mapping with no review — loses the debiasing. Agent-only with no shortlist — context blow-up. |
-
----
-
-## 11. Still-Open Questions
-
-1. **Exact CORAL paths.** The user's spec referenced `coral/agent/builtin/claude_code.py`, `coral/agent/builtin/codex.py`, and `coral/workspace/repo.py`. The public repo (as of 2026-05-13) lists `coral/agent/runtime.py` and `coral/workspace/setup.py` in its README's Architecture section. Either the user has a private/older fork, the README is stale, or the spec is approximate. **Resolution needed before implementation**: confirm with the user which tree to lift from.
+1. **Exact CORAL paths.** The CORAL public repo's README places the relevant code at `coral/agent/runtime.py` and `coral/workspace/setup.py` (Architecture section). **Resolution needed before implementation**: confirm the exact tree to lift from.
 2. **`claude --add-dir` vs `additionalDirectories` semantics in non-interactive mode.** The docs document `additionalDirectories` in `settings.json` (code.claude.com/docs/en/permission-modes) and shipyard.build/claude-code-cheat-sheet shows `--add-dir` working in CI; but the exact relationship between argv `--add-dir`, `settings.json:permissions.additionalDirectories`, and `--cwd` under `--print` is not crisply documented. **Resolution**: empirical smoke test in milestone M0.
 3. **Codex `--output-schema` enforcement strength.** Docs say "Codex validates tool output against it" — unclear whether the validator is hard (rejects + retries internally) or soft (just attaches schema to the system prompt). **Resolution**: M0 test; if soft, we layer pydantic on top.
 4. **Stage-2 URL reachability standard.** Some papers sit on arxiv preprints that move; some PR URLs become 404 after force-pushes. Threshold for "reachable" needs to be a policy decision — current plan: HTTP 200 within 10s, ≥1 KB body, no detected paywall block-page heuristics. **Resolution**: an `--allow-unreachable-urls` escape hatch with a warning.
-5. **Stage 2 retriever choice for the user's environment.** **RESOLVED 2026-05-13.** Stage 2 runs on a node with public internet egress. Default `RETRIEVER=arxiv` (free, key-less, papers only); the orchestrator auto-upgrades to `RETRIEVER=tavily,arxiv` when `TAVILY_API_KEY` is set in the env (adds blogs / GitHub issues / vendor docs / articles). No install-time secret required for the default path. See §6.3.
-6. **Whether the LiteLLM proxy returns `usage` blocks / cost data on chat completions.** LiteLLM by default does return `usage.prompt_tokens` and `usage.completion_tokens`, but cost (`response_cost`) only when the deployment is configured for it. The model name placeholder (`<MODEL_NAME>` in the user snippet) makes it impossible to predict ahead of time. **Resolution**: probe the proxy at M0; if cost is unavailable, set `cost_unknown: true` and rely on `--stage2-wallclock-s` as the primary budget guard.
-7. **Whether `<MODEL_NAME>` (to be filled in) supports `response_format=json_schema`.** OpenAI's gpt-4o-2024-08-06 and later support strict JSON-schema mode; LiteLLM passes this through for compatible upstream models but silently degrades for others. **Resolution**: probe at M0; coercion call falls back to `response_format={"type":"json_object"}` + pydantic validation + retry on failure.
-8. **Whether the alternating-review-loop materially improves quality vs a single Claude bootstrap, in BOTH Stage 1 (candidate discovery) and Stage 3a-2 (mapping).** Genuine uncertainty — no public benchmark for "performance candidate discovery" or "candidate↔finding mapping". **Resolution**: ablations in M3 of the eval. Stage 1: Claude-only vs Claude+1-Codex-review vs full alternating. Stage 3a: `--mapping-review off` (shortlist only) vs Claude-only bootstrap vs full alternating. The `off` mode preserves the previous purely-programmatic mapping as the ablation baseline.
+5. **Whether the LiteLLM proxy returns `usage` blocks / cost data on chat completions.** LiteLLM by default does return `usage.prompt_tokens` and `usage.completion_tokens`, but cost (`response_cost`) only when the deployment is configured for it. **Resolution**: probe the proxy at M0; if cost is unavailable, set `cost_unknown: true` and rely on `--stage2-wallclock-s` as the primary budget guard.
+6. **Whether `<MODEL_NAME>` (to be filled in) supports `response_format=json_schema`.** OpenAI's gpt-4o-2024-08-06 and later support strict JSON-schema mode; LiteLLM passes this through for compatible upstream models but silently degrades for others. **Resolution**: probe at M0; coercion call falls back to `response_format={"type":"json_object"}` + pydantic validation + retry on failure.
+7. **Whether alternating Claude-Code / Codex materially improves quality over a single-agent default, in both Stage 1 (iterative critique) and Stage 3a (per-finding fan-out, alternated across findings).** No public benchmark for "performance candidate discovery" or "finding↔candidate applicability mapping". **Resolution**: ablations in M3 of the eval. Stage 1: Claude-only vs Claude+1-Codex-review vs full alternating. Stage 3a: `--mapping-agent claude_code` vs `--mapping-agent codex` vs `--mapping-agent alternating` — measure orphan rate, edge-precision against a small hand-labeled set, per-finding cost spread.
 
 ---
 
-## 12. Milestones
+## 11. Milestones
 
 Each milestone is verifiable by a specific command + acceptance check.
 
@@ -1073,14 +976,16 @@ Each milestone is verifiable by a specific command + acceptance check.
 - Command: `optquest stage1 --repo . --module optquest/stage3/mapping --out tmp/`
 - Pass: `tmp/candidates.json` validates; ≥5 candidates; every `file` exists; stop condition triggered within 4 iters.
 
-**M3 — Mapping + change generation (Week 3).** Stage 3a-1, 3a-2, and 3b on artifacts from M1 and M2.
+**M3 — Mapping + change generation (Week 3).** Stage 3a (per-finding fan-out) and Stage 3b on artifacts from M1 and M2.
 - Command: `optquest stage3 --candidates tmp/candidates.json --findings tmp/findings.json --out tmp/`
 - Pass:
-  - `tmp/shortlist.json`, `tmp/mapping.json`, `tmp/changes.json` all validate.
-  - Stage 3a-2 stop condition (canonical equality, edge stability, score stability, or no-change predicate) triggers within `--stage3a-max-iters` (default 3) on ≥2 of 3 eval repos.
-  - Final orphan rate ≤ 30% (lower than 3a-1-only baseline by ≥10 pts — measured via `--mapping-review off` ablation; resolves §11 Q8 for mapping).
-  - Every change record has ≥1 proposal; mean per-candidate cost ≤ $0.50 (if cost reporting is available; else mean per-candidate wallclock ≤ 60s).
-  - Stage-3a-2 budget cap `--stage3a-budget-usd $2` not exceeded.
+  - `tmp/mapping.json` and `tmp/changes.json` validate against their pydantic schemas.
+  - Stage 3a: ≥ 90% of per-finding subprocesses succeed (no `schema_invalid` / `stalled` / timeout); `meta.drops.schema_invalid + meta.drops.stalled ≤ 10% of findings_total`.
+  - Final orphan rate ≤ 30%.
+  - Round-robin assignment is balanced: |`agents_used.claude_code` − `agents_used.codex`| ≤ 1.
+  - Stage-3a parent budget `--stage3a-budget-usd $4` not exceeded; per-finding p95 wallclock ≤ 90s.
+  - Every non-orphan change record has ≥1 proposal; mean per-candidate change-gen cost ≤ $0.50 (if cost reporting is available; else mean per-candidate wallclock ≤ 60s).
+  - Ablation: run with `--mapping-agent claude_code` and `--mapping-agent codex` on one eval repo; record orphan rate and edge-set Jaccard vs the `alternating` default (resolves §10 Q7 for mapping).
 
 **M4 — End-to-end parallel run (Week 4).** Full pipeline with Stage 1 || Stage 2.
 - Command: `optquest run --repo <small-test-repo> --module <subpath> --out tmp/`
@@ -1108,20 +1013,20 @@ Each milestone is verifiable by a specific command + acceptance check.
 
 ---
 
-## 13. Non-Goals
+## 12. Non-Goals
 
 - **Writing the implementation** (this is a plan only).
 - **Auto-applying patches** to the target repo. Stage 3 emits proposals; v2 may emit patches; this plan does neither apply nor PR.
 - **Multi-repo or multi-module batch mode.** One repo × one module per run.
-- **Replacing the pipeline with a single existing agent** (SWE-agent, OpenHands, Aider). Evaluated as a baseline in M5 (§12, decision #12); not adopted.
+- **Replacing the pipeline with a single existing agent** (SWE-agent, OpenHands, Aider). Evaluated as a baseline in M5; not adopted.
 - **Building a UI.** The CORAL `ui` is skipped; a plain markdown report is the deliverable. Re-evaluate in v2.
 - **Cross-language IR-level analysis.** We rely on the agent's textual understanding of code + optional profiler artifacts; we do not build AST or LLVM-IR passes.
-- **Multi-provider Stage 2.** Explicitly out of scope by user directive — GPT Researcher only.
-- **Image/vision input to Stage 2.** The user-provided snippet shows an `encode_image` helper; Stage 2 in this pipeline is text-only. Vision could be added in v2 for screenshots of flame graphs.
+- **Multi-provider Stage 2.** Out of scope — GPT Researcher only.
+- **Image/vision input to Stage 2.** Stage 2 is text-only; vision could be added in v2 for flame-graph screenshots.
 
 ---
 
-## 14. Possible Future Optimizations
+## 13. Possible Future Optimizations
 
 1. **Session resume across iterations** (Claude `--resume <uuid>`; Codex `codex exec resume`). Cuts Stage 1 tokens by 20–40%. Adds: session-id loss handling, drift-detection on resume.
 2. **Patch generation in Stage 3b.** Append a "now produce a unified diff for proposal #1" step gated by `--gen-patch`. Validate by `git apply --check` against the pinned sha.
@@ -1131,7 +1036,7 @@ Each milestone is verifiable by a specific command + acceptance check.
 6. **Cross-repo learning.** Maintain a persistent `findings_library.parquet` of validated findings across runs — Stage 2 then becomes "retrieve from library, top-up from web". Cuts Stage-2 wallclock by 50–80% after the library warms.
 7. **LLM-as-judge calibration.** Run the eval (M5) periodically and refit the LLM-judge weighting in the mapping rerank against the human rubric — current 0.7/0.3 blend is a guess.
 8. **MCP integration.** Both Claude Code and Codex speak MCP; expose an `optquest-mcp` server so other agents (Claude Desktop, OpenAI Apps) can invoke the pipeline as a tool. GPT Researcher already provides `gptr-mcp` (https://github.com/assafelovic/gptr-mcp) as a reference implementation.
-9. **Profiling-artifact-driven scope.** Tighter integration with `py-spy`, `nsys`, `pprof` — parse stack traces, weight candidates by self-time. PerfCoder, FasterPy, TritonForge, and MaxCode (cited in §12 M6) all suggest profiling-aware retrieval beats blind retrieval.
+9. **Profiling-artifact-driven scope.** Tighter integration with `py-spy`, `nsys`, `pprof` — parse stack traces, weight candidates by self-time. PerfCoder, FasterPy, TritonForge, and MaxCode (cited in §11 M6) all suggest profiling-aware retrieval beats blind retrieval.
 10. **Replace the deep-research call with a learned researcher.** Once we have a few hundred (candidate, finding) pairs from runs, fine-tune a small model (served via the same LiteLLM proxy) to do retrieval directly — cheaper than running GPT Researcher every time.
 11. **A `coral ui`-style dashboard** that streams the alternating-review loop live with per-iteration diffs of `candidates.json` — re-uses CORAL's web/ for free.
-12. **Vision input** (the `encode_image` path in the user-provided snippet) — feed flame-graph PNGs from `py-spy` or NVTX traces into Stage 1 or Stage 2 if the proxy's model is multimodal.
+12. **Vision input** — feed flame-graph PNGs from `py-spy` or NVTX traces into Stage 1 or Stage 2 if the proxy's model is multimodal.
