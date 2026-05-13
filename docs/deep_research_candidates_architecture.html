@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>optquest — High-level flow</title>
+<style>
+  html, body {
+    margin: 0; padding: 0;
+    background: #fafafa; color: #1a1a1a;
+    font-family: -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif;
+  }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 48px 24px; }
+  h1 { margin: 0 0 6px; font-weight: 600; font-size: 22px; }
+  .sub { color: #666; margin-bottom: 32px; font-size: 14px; }
+  svg { display: block; width: 100%; height: auto; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <h1>Workflow for changes per module using deep research</h1>
+
+  <svg viewBox="0 0 900 800" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+        <path d="M0,0 L10,5 L0,10 z" fill="#4a4a4a"/>
+      </marker>
+      <style>
+        .title  { font: 600 15px -apple-system, "Inter", system-ui, sans-serif; fill:#1a1a1a; }
+        .body   { font: 400 13px -apple-system, "Inter", system-ui, sans-serif; fill:#4a4a4a; }
+        .mono   { font: 500 13px ui-monospace, Menlo, monospace; fill:#1a1a1a; }
+        .line   { stroke:#4a4a4a; stroke-width:1.6; fill:none; }
+        .panel  { fill:#fff; stroke:#1a1a1a; stroke-width:1.4; }
+        .s1     { fill:#fff7e6; stroke:#d97706; stroke-width:1.6; }
+        .s2     { fill:#f3edff; stroke:#7c3aed; stroke-width:1.6; }
+        .s3a    { fill:#eef6ff; stroke:#2563eb; stroke-width:1.6; }
+        .s3b    { fill:#fef2f2; stroke:#dc2626; stroke-width:1.6; }
+        .s3c    { fill:#fff1f7; stroke:#be185d; stroke-width:1.6; }
+        .out    { fill:#ecfdf5; stroke:#059669; stroke-width:1.6; }
+        .label  { font: 600 11px -apple-system, "Inter", system-ui, sans-serif; fill:#666; letter-spacing:0.08em; }
+      </style>
+    </defs>
+
+    <!-- INPUT -->
+    <g transform="translate(330,20)">
+      <rect width="240" height="50" rx="8" class="panel"/>
+      <text x="120" y="30" text-anchor="middle" class="mono">repo  +  module_path</text>
+    </g>
+
+    <!-- fan-out connector from input -->
+    <path class="line" marker-end="url(#arr)" d="M450 70 V 100 H 230 V 130"/>
+    <path class="line" marker-end="url(#arr)" d="M450 100 H 670 V 130"/>
+    <text x="460" y="92" class="label">PARALLEL</text>
+
+    <!-- Stage 1 -->
+    <g transform="translate(60,130)">
+      <rect width="340" height="170" rx="10" class="s1"/>
+      <text x="20" y="32" class="label">STAGE 1</text>
+      <text x="20" y="58" class="title">Candidate discovery</text>
+      <text x="20" y="84" class="body">Claude Code ⇄ Codex alternating review</text>
+      <text x="20" y="104" class="body">over the target module (read-only).</text>
+      <text x="20" y="136" class="body">Output: list of code locations worth</text>
+      <text x="20" y="154" class="body">optimizing, each with a rationale.</text>
+    </g>
+
+    <!-- Stage 2 -->
+    <g transform="translate(500,130)">
+      <rect width="340" height="170" rx="10" class="s2"/>
+      <text x="20" y="32" class="label">STAGE 2</text>
+      <text x="20" y="58" class="title">Deep research</text>
+      <text x="20" y="84" class="body">GPT Researcher (LiteLLM proxy + web</text>
+      <text x="20" y="104" class="body">retriever) surveys papers, PRs, blogs.</text>
+      <text x="20" y="136" class="body">Output: findings — techniques with</text>
+      <text x="20" y="154" class="body">measured gains, each with a URL.</text>
+    </g>
+
+    <!-- join connector into Stage 3a -->
+    <path class="line" d="M230 300 V 340 H 450"/>
+    <path class="line" d="M670 300 V 340 H 450"/>
+    <path class="line" marker-end="url(#arr)" d="M450 340 V 370"/>
+    <text x="460" y="358" class="label">JOIN</text>
+
+    <!-- Stage 3a -->
+    <g transform="translate(120,370)">
+      <rect width="660" height="148" rx="10" class="s3a"/>
+      <text x="20" y="30" class="label">STAGE 3a · MAPPING</text>
+      <text x="20" y="56" class="title">Per-finding agent fan-out</text>
+      <text x="20" y="82" class="body">For each finding: one Claude Code or Codex subprocess reads the</text>
+      <text x="20" y="100" class="body">finding + candidates + repo and returns the candidates it applies</text>
+      <text x="20" y="118" class="body">to with score + reasoning.</text>
+      <text x="20" y="140" class="body">Edges are inverted into candidate-centric top-K mapping.</text>
+    </g>
+
+    <!-- fan-out from Stage 3a into 3b / 3c -->
+    <path class="line" marker-end="url(#arr)" d="M450 518 V 548 H 250 V 560"/>
+    <path class="line" marker-end="url(#arr)" d="M450 548 H 650 V 560"/>
+
+    <!-- Stage 3b -->
+    <g transform="translate(60,560)">
+      <rect width="380" height="140" rx="10" class="s3b"/>
+      <text x="20" y="30" class="label">STAGE 3b · EVIDENCE-BACKED</text>
+      <text x="20" y="56" class="title">Per (candidate × mapped finding)</text>
+      <text x="20" y="82" class="body">One Claude or Codex call per mapped</text>
+      <text x="20" y="100" class="body">(candidate, finding) pair, in parallel —</text>
+      <text x="20" y="118" class="body">emits a ranked, evidence-backed change.</text>
+    </g>
+
+    <!-- Stage 3c -->
+    <g transform="translate(460,560)">
+      <rect width="380" height="140" rx="10" class="s3c"/>
+      <text x="20" y="30" class="label">STAGE 3c · BEYOND RESEARCH</text>
+      <text x="20" y="56" class="title">Per-candidate proposals (agent knowledge)</text>
+      <text x="20" y="82" class="body">One Claude or Codex call per candidate —</text>
+      <text x="20" y="100" class="body">proposes additional changes NOT covered</text>
+      <text x="20" y="118" class="body">by the deep-research findings.</text>
+    </g>
+
+    <!-- join arrows into output -->
+    <path class="line" d="M250 700 V 730 H 450"/>
+    <path class="line" d="M650 700 V 730 H 450"/>
+    <path class="line" marker-end="url(#arr)" d="M450 730 V 750"/>
+
+    <!-- OUTPUT -->
+    <g transform="translate(330,750)">
+      <rect width="240" height="40" rx="8" class="out"/>
+      <text x="120" y="26" text-anchor="middle" class="mono">changes.json</text>
+    </g>
+
+  </svg>
+
+</div>
+</body>
+</html>
