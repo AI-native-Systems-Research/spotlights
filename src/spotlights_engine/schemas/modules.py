@@ -68,6 +68,12 @@ class ProjectTree(BaseModel):
 
         yield from _walk(self.modules, "")
 
+    def leaves(self) -> Iterable[tuple[str, Module]]:
+        """Yield `(qualified_name, module)` for every leaf module, in `walk()` order."""
+        for qn, m in self.walk():
+            if not m.submodules:
+                yield qn, m
+
     def resolve(self, qualified_name: str) -> Module | None:
         """Look up a module by its qualified name.
 
@@ -84,10 +90,12 @@ class ProjectTree(BaseModel):
         return None
 
     def to_json(self, path: Path) -> None:
+        """Serialize this tree to `path` as indented JSON (UTF-8, trailing newline)."""
         path.write_text(self.model_dump_json(indent=2) + "\n", encoding="utf-8")
 
     @classmethod
     def from_json(cls, path: Path) -> "ProjectTree":
+        """Load a `ProjectTree` from a JSON file written by `to_json`."""
         return cls.model_validate(json.loads(path.read_text(encoding="utf-8")))
 
 

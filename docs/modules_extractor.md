@@ -51,9 +51,11 @@ class ProjectTree(BaseModel):
 
 Methods:
 
-- `to_json(path)` / `from_json(path)` — round-trip safe; ordering preserved.
-- `walk() -> Iterable[tuple[str, Module]]` — preorder traversal yielding `(qualified_name, module)`.
-- `resolve(qualified_name: str) -> Module | None` — qualified-name lookup. Bare names accepted only when unambiguous.
+- `to_json(path: Path) -> None` — Serialize the tree to `path` as indented JSON (UTF-8, trailing newline).
+- `from_json(path: Path) -> ProjectTree` — Load a `ProjectTree` from a JSON file written by `to_json`. Round-trip safe; ordering preserved.
+- `walk() -> Iterable[tuple[str, Module]]` — Preorder traversal yielding `(qualified_name, module)` for every module in the tree.
+- `leaves() -> Iterable[tuple[str, Module]]` — Yield `(qualified_name, module)` for every module with no submodules, in `walk()` order.
+- `resolve(qualified_name: str) -> Module | None` — Look up a module by its qualified name. A bare `name` (no `/`) is accepted only when exactly one module in the tree carries it; otherwise returns `None`.
 
 #### Qualified names
 
@@ -75,7 +77,7 @@ A module's *qualified name* is the `/`-joined chain of `name`s from a top-level 
 | `path` | Repo-relative path, forward slashes, no trailing slash. |
 | `description` | 1–3 sentence description of what the module owns. Empty when no describer is configured. |
 | `depends_on` | Qualified names of modules this one depends on (e.g., `"v1/engine"`), or entries from `repository.external_dependencies`. |
-| `main_files` | Curated 3–7 files a reader should open first. |
+| `main_files` | Key entry-point files that best represent the module's purpose. |
 | `submodules` | Nested modules, same shape, sorted by `name`. |
 
 ### `File`
