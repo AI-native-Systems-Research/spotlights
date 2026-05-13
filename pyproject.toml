@@ -7,6 +7,7 @@ license = { file = "LICENSE" }
 requires-python = ">=3.11"
 authors = [{ name = "Spotlight Engine contributors" }]
 dependencies = [
+    "pydantic>=2",
     "spotlight-observability",
     "spotlight-knowledge",
 ]
