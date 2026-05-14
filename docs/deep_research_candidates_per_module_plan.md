@@ -108,137 +108,34 @@ Every finding has exactly five fields: `id`, `title`, `url`, `source_type`, `tec
 
 ### 2.4 `changes.json` — final artifact
 
-`changes.json` aggregates two parallel passes:
-- **Stage 3b — research-grounded** (`records[]`): finding-centric, one record per finding with proposals grouped by the candidates that finding mapped to. Every proposal has `source: "research_grounded"` and a non-null `from_finding_id`.
-- **Stage 3c — agent-novel** (`novel_records[]`): candidate-centric, one record per `(candidate, agent)` pair, where the agent proposed changes NOT mentioned in any Stage-2 finding. Every proposal has `source: "agent_novel"` and `from_finding_id: null`.
-
-A merged candidate-centric re-pivot (`by_candidate[]`) is materialized alongside for human reports — it inlines proposals from both passes, deduped and ranked together.
+Candidate-centric. Per candidate, two parallel lists of changes:
+- `from_findings` — research-grounded (Stage 3b): each entry links back to the finding it was derived from.
+- `from_agents` — agent-novel (Stage 3c): each entry records which coding agent proposed it.
 
 ```json
 {
-  "schema_version": "2.0",
-  "run_id": "2026-05-13T12-00-00Z--ab12cd34",
-  "stage3b": {
-    "findings_total": 24,
-    "sessions_total": 48,
-    "sessions_succeeded": 47,
-    "sessions_failed": 1,
-    "mode": "dual",
-    "agents_used": {"claude_code": 24, "codex": 24},
-    "findings_with_at_least_one_success": 24,
-    "orphan_candidates": ["cand-0014"],
-    "orphan_sweep_enabled": false,
-    "dedupe": {
-      "proposals_emitted_pre_dedupe": 71,
-      "rejected_cross_agent_duplicate": 18,
-      "kept": 53
-    }
-  },
-  "stage3c": {
-    "candidates_total": 12,
-    "sessions_total": 24,
-    "sessions_succeeded": 23,
-    "sessions_failed": 1,
-    "mode": "dual",
-    "agents_used": {"claude_code": 12, "codex": 12},
-    "dedupe": {
-      "novel_proposals_emitted": 47,
-      "rejected_overlap_with_findings": 9,
-      "rejected_cross_agent_duplicate": 6,
-      "kept": 32
-    }
-  },
-  "records": [
+  "module_qualified_name": "foo/bar",
+  "changes_per_candidate": [
     {
-      "finding_id": "find-0011",
-      "finding_title": "Ring-buffer slot pool for per-step allocations",
-      "url": "https://example.org/paper",
-      "mapped_candidates": ["cand-0001", "cand-0003"],
-      "candidate_proposals": [
+      "candidate_id": "cand-0001",
+      "from_findings": [
         {
-          "candidate_id": "cand-0001",
-          "location": {
-            "file": "src/foo/bar/scheduler.py",
-            "line_start": 142, "line_end": 211
-          },
-          "proposals": [
-            {
-              "rank": 1,
-              "source": "research_grounded",
-              "from_finding_id": "find-0011",
-              "title": "Replace per-step pending-list allocation with a reusable ring buffer",
-              "description": "Pre-allocate a fixed-capacity request slot pool; reuse across steps; track head/tail with atomic counters.",
-              "expected_impact": {"metric": "decode_step_latency", "estimate": "5-12% reduction", "evidence_strength": "medium"},
-              "prerequisites": ["request count bound known at init", "no holes mid-step"],
-              "effort_estimate": "S (≤1 day)",
-              "risk": "low",
-              "proposed_by": ["claude_code", "codex"],
-              "agreed_with_other_agent": true
-            }
-          ]
+          "finding_id": "find-0011",
+          "title": "Replace per-step pending-list allocation with a reusable ring buffer",
+          "description": "Pre-allocate a fixed-capacity request slot pool; reuse across steps; track head/tail with atomic counters."
         }
       ],
-      "per_agent_sessions": [
-        {"agent": "claude_code", "session_id": "01HFZ…", "telemetry": {"tokens_in": 42100, "tokens_out": 5800, "cost_usd": 0.41, "wallclock_s": 73}},
-        {"agent": "codex",       "session_id": "01HG1…", "telemetry": {"tokens_in": 39800, "tokens_out": 5100, "cost_usd": 0.38, "wallclock_s": 81}}
-      ]
-    }
-  ],
-  "novel_records": [
-    {
-      "candidate_id": "cand-0001",
-      "location": {"file": "src/foo/bar/scheduler.py", "line_start": 142, "line_end": 211},
-      "agent": "codex",
-      "negative_finding_ids": ["find-0007", "find-0011"],
-      "proposals": [
+      "from_agents": [
         {
-          "rank": 1,
-          "source": "agent_novel",
-          "from_finding_id": null,
+          "agent": "codex",
           "title": "Hoist the format-string log call out of the hot dispatch loop",
-          "description": "The `logger.debug(f\"dispatched {req_id} ...\")` at line 187 stringifies every iteration even when the level filters it out. Switch to `logger.debug(\"dispatched %s ...\", req_id)` or wrap in `isEnabledFor(DEBUG)`.",
-          "expected_impact": {"metric": "decode_step_latency", "estimate": "1-3% reduction at debug-off", "evidence_strength": "medium"},
-          "prerequisites": [],
-          "effort_estimate": "XS (<1h)",
-          "risk": "low",
-          "novelty_check": {"overlaps_finding_ids": [], "agreed_with_other_agent": true}
+          "description": "Switch `logger.debug(f\"dispatched {req_id} ...\")` at line 187 to `logger.debug(\"dispatched %s ...\", req_id)` or wrap in `isEnabledFor(DEBUG)` so the level filter short-circuits."
         }
-      ],
-      "session_id": "01HG0…",
-      "telemetry": {"tokens_in": 19200, "tokens_out": 2100, "cost_usd": 0.18, "wallclock_s": 41}
-    },
-    {
-      "candidate_id": "cand-0001",
-      "location": {"file": "src/foo/bar/scheduler.py", "line_start": 142, "line_end": 211},
-      "agent": "claude_code",
-      "negative_finding_ids": ["find-0007", "find-0011"],
-      "proposals": [
-        {
-          "rank": 1,
-          "source": "agent_novel",
-          "from_finding_id": null,
-          "title": "Hoist the format-string log call out of the hot dispatch loop",
-          "description": "...",
-          "novelty_check": {"overlaps_finding_ids": [], "agreed_with_other_agent": true}
-        }
-      ]
-    }
-  ],
-  "by_candidate": [
-    {
-      "candidate_id": "cand-0001",
-      "location": {"file": "src/foo/bar/scheduler.py", "line_start": 142, "line_end": 211},
-      "proposals": [
-        {"rank": 1, "source": "research_grounded", "from_finding_id": "find-0011", "title": "...", "effort_estimate": "S (≤1 day)", "risk": "low"},
-        {"rank": 2, "source": "agent_novel", "from_finding_id": null, "title": "Hoist the format-string log call ...", "agreed_with_other_agent": true, "effort_estimate": "XS (<1h)", "risk": "low"},
-        {"rank": 3, "source": "research_grounded", "from_finding_id": "find-0007", "title": "...", "effort_estimate": "L (>1 week)", "risk": "high"}
       ]
     }
   ]
 }
 ```
-
-Stage 3b proposals have `source: "research_grounded"` and a non-null `from_finding_id` (1:1 with the parent record's finding). Stage 3c proposals have `source: "agent_novel"` and `from_finding_id: null`. Both passes run dual-agent (Claude Code + Codex in parallel) by default; both carry `agreed_with_other_agent: bool` derived from cross-agent dedupe (§7.2 for 3b, §7.4 for 3c). The `by_candidate` view interleaves the two passes, deduped via the cross-stage rules in §7.4, and re-ranks per-candidate by the same `(expected_impact × evidence_strength / effort)` blend with a tie-break favoring `research_grounded` over `agent_novel` and `agreed_with_other_agent: true` over false.
 
 ---
 
