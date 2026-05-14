@@ -1,6 +1,6 @@
 # candidate_research_proposer — Stage 1: Candidate Discovery
 
-Stage 1 returns a `Candidates` pydantic model — a list of falsifiable, high-yield optimization candidate locations inside the target module — through a Claude Code bootstrap followed by alternating Claude Code ↔ Codex review iterations. The model is also serialized to `candidates.json` as the on-disk artifact consumed by Stage 3a. The pattern is lifted from [docs/old/modules_plan.md](old/modules_plan.md) and narrowed to a single module: bootstrap drafts, reviewers prune/sharpen/add, stop on convergence or cycle.
+Stage 1 returns a `Candidates` pydantic model — a list of falsifiable, high-yield optimization candidate locations inside the target module — through a Claude Code bootstrap followed by a fixed number of alternating Claude Code ↔ Codex review iterations. The model is also serialized to `candidates.json` as the on-disk artifact consumed by Stage 3a. The pattern is lifted from [docs/old/modules_plan.md](old/modules_plan.md) and narrowed to a single module: bootstrap drafts, reviewers prune/sharpen/add, run `num_review_iterations` reviews and stop.
 
 ## 1. Python API
 
@@ -12,13 +12,9 @@ from spotlights_engine.schemas.modules import Module
 
 result: DiscoveryResult = discover(DiscoveryConfig(
     repo_path=Path("/abs/path/to/repo"),
-    module_qualified_name="foo/bar",
     module=Module(...),                  # resolved from modules.json by the driver
-    artifacts_dir=Path(".../<run_id>/candidates_discovery/"),
+    artifacts_dir=Path(".../<run_id>/"),  # stage writes into <artifacts_dir>/candidate_discovery/
 ))
-# result.candidates       — pydantic Candidates (mirrors candidates.json)
-# result.iterations       — per-iteration telemetry
-# result.stop_reason      — why the loop ended
 ```
 
 ### `DiscoveryConfig` (input)
@@ -26,15 +22,10 @@ result: DiscoveryResult = discover(DiscoveryConfig(
 ```python
 class DiscoveryConfig(BaseModel):
     repo_path: Path                        # local checkout root; must exist
-    module_qualified_name: str             # ProjectTree.walk() key, e.g. "foo/bar"
     module: Module                         # resolved Module record (see schemas/modules.py)
-    artifacts_dir: Path                    # candidates.json + per-iter scratch land here
+    artifacts_dir: Path                    # shared run dir; stage writes into <artifacts_dir>/candidate_discovery/
 
-    max_review_iterations: int = 4         # 4 reviews + 1 bootstrap = 5 total runs
-    min_candidates: int = 5
-    max_candidates: int = 40
-    budget_usd: float = 5.0
-    per_iteration_wallclock_s: int = 600
+    num_review_iterations: int = 3         # fixed; 1 bootstrap + N reviews = N+1 total runs
 ```
 
 ### `Candidates` and `DiscoveryResult` (output)
@@ -61,63 +52,52 @@ class IterationTelemetry(BaseModel):
     n: int                                 # 0 = bootstrap, 1..N = reviews
     agent: Literal["claude_code", "codex"]
     duration_s: float
-    cost_usd: float
-    input_tokens: int
-    output_tokens: int
-    candidate_count: int
     added: list[str]                       # candidate ids added vs prev iter
     removed: list[str]                     # candidate ids removed vs prev iter
     modified: list[str]                    # candidate ids whose range/rationale changed
-    dropped_invalid_paths: int
-    dropped_invalid_ranges: int
+
 
 class DiscoveryResult(BaseModel):
     candidates: Candidates
     iterations: list[IterationTelemetry]
-    total_cost_usd: float
-    total_duration_s: float
-    stop_reason: Literal["converged", "cycle", "max_iterations", "budget_exceeded", "hard_failure"]
 ```
 
-`discover` also persists `candidates.json` (the canonical artifact consumed by Stage 3a) and a per-iteration `iterations.jsonl` telemetry file under `config.artifacts_dir`; the in-memory result and on-disk artifacts are equivalent.
+`discover` also persists `candidates.json` (the canonical artifact consumed by Stage 3a) and a per-iteration `iterations.jsonl` telemetry file under `config.artifacts_dir / "candidate_discovery"`; the in-memory result and on-disk artifacts are equivalent. The loop always runs `1 + num_review_iterations` iterations; validation failure inside an iteration raises rather than driving a stop reason (see §6).
 
 ## 2. Bootstrap + alternating review loop
 
 ```
-i=0: claude_code bootstrap          → candidates_v0.json
-i=1: codex      review (adversarial) → candidates_v1.json
-i=2: claude_code review              → candidates_v2.json
-i=3: codex      review               → candidates_v3.json
-...                                    until stop condition fires
+i=0: claude_code bootstrap            → candidates_v0.json
+i=1: codex      review (adversarial)  → candidates_v1.json
+i=2: claude_code review                → candidates_v2.json
+i=3: codex      review                 → candidates_v3.json   # for num_review_iterations=3
 ```
 
-`agents[(N-1) % 2]` picks the runtime for review iteration N; the default rotation is `["codex", "claude_code", "codex", "claude_code"]` so the bootstrap is reviewed first by the *other* agent. Each review reads the prior iteration's full `candidates.json`, prunes false positives, merges duplicates, sharpens rationales, and may add at most 5 new candidates.
+The bootstrap is always `claude_code`. Review iteration `N` (1-indexed) uses `agents[(N-1) % 2]` with `agents = ["codex", "claude_code"]`, so the bootstrap is reviewed first by the *other* agent. With the default `num_review_iterations=3` the full rotation is `claude_code → codex → claude_code → codex`. Each review reads the prior iteration's full `candidates.json`, prunes false positives, merges duplicates, sharpens rationales, and may add at most 5 new candidates.
 
 ## 3. Run directory layout
 
-Stage 1 owns its `artifacts_dir`, conventionally `~/.cache/optquest/<repo_slug>/<run_id>/candidates_discovery/` per the architecture doc. The driver creates `<run_id>/` and passes `<run_id>/candidates_discovery/` in.
+Stage 1 receives the shared run dir as `artifacts_dir` — conventionally `~/.cache/optquest/<repo_slug>/<run_id>/` per the architecture doc — and writes everything under its own `candidate_discovery/` subfolder. The driver creates `<run_id>/` and passes it in; the stage mints `<artifacts_dir>/candidate_discovery/` itself.
 
 ```
 <artifacts_dir>/
-  iter_0_bootstrap/
-    candidates.json        # validated candidates from claude_code
-    prompt.md              # the exact wrapped prompt sent
-    raw_stdout.log
-    raw_stderr.log
-    cost.json
-  iter_1_codex/
-    candidates.json
-    diff_from_prev.md      # human-readable structural diff vs iter_0
-    prompt.md
-    raw_stdout.log
-    raw_stderr.log
-    cost.json
-  iter_2_claude_code/...
-  candidates.json          # copy of the last successfully validated iter — the Stage 1 contract output
-  iterations.jsonl         # one IterationTelemetry per line
+  candidate_discovery/
+    iter_0_bootstrap/
+      candidates.json        # validated candidates from claude_code
+      prompt.md              # the exact wrapped prompt sent
+      raw_stdout.log
+      raw_stderr.log
+      cost.json
+    iter_1_codex/
+      candidates.json
+      diff_from_prev.md      # human-readable structural diff vs iter_0
+      prompt.md
+      raw_stdout.log
+      raw_stderr.log
+      cost.json
+    iter_2_claude_code/...
 ```
 
-`candidates.json` at the top of `artifacts_dir` is the only path Stage 3a is contracted to read; the per-iter directories are for debugging.
 
 ## 4. Subprocess invocation
 
@@ -177,22 +157,15 @@ For review iterations the orchestrator additionally inlines the prior iteration'
 
 Run after each subprocess exits:
 
-1. **Schema parse** — `Candidates.model_validate_json()`. On failure, retry once with a strict-mode reminder appended to the prompt; second failure trips the hard-failure latch.
+1. **Schema parse** — `Candidates.model_validate_json()`. On failure, retry once with a strict-mode reminder appended to the prompt; second failure raises `DiscoveryValidationError` and aborts the run.
 2. **Module containment** — every `candidate.file` must lie under `Module.path` (the resolved record's filesystem path). Violators are dropped; count goes to `IterationTelemetry.dropped_invalid_paths`.
 3. **Path existence** — every `candidate.file` must resolve to an existing file in `repo_path`. Same drop-and-count behavior.
 4. **Line range sanity** — `1 ≤ line_start ≤ line_end ≤ file_line_count`. Same drop-and-count, on `dropped_invalid_ranges`.
-5. **Size guard** — `min_candidates ≤ len(candidates) ≤ max_candidates`. Out of range → retry once with the size constraint reiterated; second failure trips the hard-failure latch.
-6. **Target-repo mutation guard** — diff the repo's `git status --porcelain=v1 -z` (or a lightweight manifest if not a git repo) before and after each subprocess; any change outside `<iter_dir>` is a protocol violation and ends the loop with `stop_reason="hard_failure"`.
+5. **Target-repo mutation guard** — diff the repo's `git status --porcelain=v1 -z` (or a lightweight manifest if not a git repo) before and after each subprocess; any change outside `<iter_dir>` is a protocol violation and raises `DiscoveryMutationError`.
 
-## 7. Stop conditions
+## 7. Loop termination
 
-Evaluated after each iteration N; the first to fire wins, recorded on `DiscoveryResult.stop_reason`. The final `candidates.json` is always the **last successfully validated** iteration.
-
-- **Converged** — `canonical_json(iter_N.candidates) == canonical_json(iter_{N-1}.candidates)`, where canonicalization sorts `candidates[]` by `(file, line_start, line_end, id)` and uses `json.dumps(sort_keys=True, separators=(",",":"))`.
-- **Cycle detected** — the canonical hash of iter N matches any prior iter in `[max(0, N-4), N-1]`. Catches Claude↔Codex ping-pong.
-- **Max iterations** — `N >= max_review_iterations`.
-- **Budget exceeded** — `sum(cost_usd) + projected_next_iter_cost > budget_usd`, projecting from the mean of prior iters.
-- **Hard failure** — two consecutive iterations failed validation, or the mutation guard tripped.
+The loop runs exactly `1 + num_review_iterations` iterations (bootstrap at `i=0`, reviews at `i=1..num_review_iterations`) and then returns. The final `candidates.json` is the **last successfully validated** iteration — by construction that is iteration `num_review_iterations`, since validation failures raise. There is no convergence, cycle, or budget logic: the iteration count is the only stop signal.
 
 ## 8. Bootstrap prompt
 
@@ -245,7 +218,7 @@ Emit ONE JSON object matching @candidates.schema.json:
 }
 
 Constraints:
-- {min_candidates} ≤ len(candidates) ≤ {max_candidates}
+- Aim for 5–40 candidates; quality beats quantity. Do not pad to hit a count.
 - Every `file` MUST be under `{module.path}` and exist in the checkout.
 - `id` values must be unique within this list; use `cand-NNNN` zero-padded.
 - Do NOT explain outside the JSON object. End the assistant message with "DONE"
