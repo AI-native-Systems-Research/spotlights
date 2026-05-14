@@ -42,44 +42,28 @@ All four artifacts live under `~/.cache/optquest/<repo_slug>/<run_id>/`. All sch
 
 ### 2.1 `candidates.json` — Stage 1 output
 
+The audited module is identified by its `qualified_name` in the sibling `modules.json` artifact (a `ProjectTree`; see [src/spotlights_engine/schemas/modules.py](../src/spotlights_engine/schemas/modules.py)). Consumers re-resolve the full `Module` record via `ProjectTree.from_json(modules_json).resolve(qualified_name)`; we intentionally do **not** duplicate the record into `candidates.json` to keep `modules.json` the single source of truth. Every candidate's `file` MUST lie within the resolved `module.path`.
+
 ```json
 {
-  "schema_version": "1.0",
-  "run_id": "2026-05-13T12-00-00Z--ab12cd34",
-  "target": {
-    "repo": "https://github.com/owner/repo",
-    "git_sha": "9f8e7d6c5b4a3210...",
-    "module_path": "src/foo/bar",
-    "scope_paths": ["src/foo/bar/**/*.py"]
-  },
-  "iterations": 3,
+  "module_qualified_name": "foo/bar",
   "candidates": [
     {
       "id": "cand-0001",
       "file": "src/foo/bar/scheduler.py",
-      "symbol": "Scheduler._dispatch_step",
       "line_start": 142,
       "line_end": 211,
-      "kind": "function",
-      "tags": ["hot-loop", "allocator-heavy", "python-overhead"],
-      "rationale": "Called once per decode step; allocates a new list of pending requests every call; iterates O(N) over the request table to filter.",
-      "evidence_pointers": [
-        {"kind": "profile", "path": "bench/profile.json", "note": "12% of self-time"},
-        {"kind": "issue", "url": "https://github.com/owner/repo/issues/1234"}
-      ],
-      "code_excerpt_sha256": "ab12...",
-      "discovered_by": "claude_code",
-      "confirmed_by": ["codex"],
-      "confidence": 0.78
+      "rationale": "Called once per decode step; allocates a new list of pending requests every call; iterates O(N) over the request table to filter."
     }
-  ],
-  "telemetry": {
-    "claude_calls": 4, "codex_calls": 4,
-    "tokens_in": 312000, "tokens_out": 41000,
-    "cost_usd": 2.81, "wallclock_s": 612
-  }
+  ]
 }
 ```
+
+Notes:
+- `module_qualified_name` is the `/`-joined preorder path from `ProjectTree.walk()` (e.g. `"v1/engine/core"`), **not** the filesystem path — the latter is `Module.path` and must be obtained by resolving against `modules.json`.
+- The audit is bounded to the resolved node; `Module.submodules` are out of scope (each submodule is audited in its own run).
+- `modules.json` is a hard input to the pipeline: if no upstream produced one, the modules-extractor stage runs first. Consumers MAY therefore assume `resolve(module_qualified_name)` is non-null when validating `candidates.json`.
+- Run-level metadata (git SHA, scope, iteration count, per-call telemetry) is **not** persisted in `candidates.json`. It lives in the per-run JSONL under `~/.cache/optquest/<repo_slug>/<run_id>/` (§1 acceptance criteria), keyed by `run_id` derived from the cache-dir path.
 
 ### 2.2 `findings.json` — Stage 2 output
 
@@ -224,7 +208,6 @@ A merged candidate-centric re-pivot (`by_candidate[]`) is materialized alongside
           "candidate_id": "cand-0001",
           "location": {
             "file": "src/foo/bar/scheduler.py",
-            "symbol": "Scheduler._dispatch_step",
             "line_start": 142, "line_end": 211
           },
           "proposals": [
@@ -253,7 +236,7 @@ A merged candidate-centric re-pivot (`by_candidate[]`) is materialized alongside
   "novel_records": [
     {
       "candidate_id": "cand-0001",
-      "location": {"file": "src/foo/bar/scheduler.py", "symbol": "Scheduler._dispatch_step", "line_start": 142, "line_end": 211},
+      "location": {"file": "src/foo/bar/scheduler.py", "line_start": 142, "line_end": 211},
       "agent": "codex",
       "negative_finding_ids": ["find-0007", "find-0011"],
       "proposals": [
@@ -275,7 +258,7 @@ A merged candidate-centric re-pivot (`by_candidate[]`) is materialized alongside
     },
     {
       "candidate_id": "cand-0001",
-      "location": {"file": "src/foo/bar/scheduler.py", "symbol": "Scheduler._dispatch_step", "line_start": 142, "line_end": 211},
+      "location": {"file": "src/foo/bar/scheduler.py", "line_start": 142, "line_end": 211},
       "agent": "claude_code",
       "negative_finding_ids": ["find-0007", "find-0011"],
       "proposals": [
@@ -293,7 +276,7 @@ A merged candidate-centric re-pivot (`by_candidate[]`) is materialized alongside
   "by_candidate": [
     {
       "candidate_id": "cand-0001",
-      "location": {"file": "src/foo/bar/scheduler.py", "symbol": "Scheduler._dispatch_step", "line_start": 142, "line_end": 211},
+      "location": {"file": "src/foo/bar/scheduler.py", "line_start": 142, "line_end": 211},
       "proposals": [
         {"rank": 1, "source": "research_grounded", "from_finding_id": "find-0011", "title": "...", "effort_estimate": "S (≤1 day)", "risk": "low"},
         {"rank": 2, "source": "agent_novel", "from_finding_id": null, "title": "Hoist the format-string log call ...", "agreed_with_other_agent": true, "effort_estimate": "XS (<1h)", "risk": "low"},
@@ -466,7 +449,7 @@ i=2: claude review
 
 Stop conditions (ALL evaluated each iteration; ANY trigger ends the loop):
 
-1. **Normalized-JSON equality**: `canonical_json(candidates_iN) == canonical_json(candidates_i{N-1})` after sorting by `(file, symbol, line_start)` and stripping whitespace/timestamps.
+1. **Normalized-JSON equality**: `canonical_json(candidates_iN) == canonical_json(candidates_i{N-1})` after sorting by `(file, line_start, line_end)` and stripping whitespace/timestamps.
 2. **"No changes" predicate**: the agent's emitted `meta.delta` field is `{"added":[],"removed":[],"modified":[]}`.
 3. **Cycle detection**: hash of canonical JSON has appeared before in this run.
 4. **Max-iter cap**: default 6; configurable.
@@ -487,15 +470,14 @@ Large modules need pruning. Strategy stack, tried in order:
 - **Agentless** (https://arxiv.org/abs/2407.01489) — its file-localization → relevant-code-locations decomposition matches our two-stage scope-then-list pattern. Adopted: emit a "scope" sub-output before the candidate list (folded into the bootstrap prompt's "What to read first" step).
 - **SWE-agent / SWE-bench solver families** (https://swe-agent.com) — their ACI primitives (open, search, scroll) inform what *not* to do: we don't replicate the agentic environment; the agent uses the underlying CLI's built-in file tools instead.
 - **OpenHands** (https://github.com/All-Hands-AI/OpenHands) — evaluated as an M5 baseline. Its general "agent does everything in one loop" is exactly what we *don't* want for the cost-disciplined separation of research from coding.
-- **KernelBench's prompting style** (https://scalingintelligence.stanford.edu/blogs/kernelbench/) — for GPU-kernel candidates, their explicit "replace this PyTorch op with a custom kernel" framing maps to the `tags=[kernel-launch, fusion-opportunity]` cluster.
+- **KernelBench's prompting style** (https://scalingintelligence.stanford.edu/blogs/kernelbench/) — for GPU-kernel candidates, their explicit "replace this PyTorch op with a custom kernel" framing carries over: when a candidate's `rationale` flags a kernel launch site or fusion opportunity, the Stage-3b prompt should be augmented with KernelBench-style "rewrite this op" exemplars.
 - **PIE (pie4perf)** and **FasterPy** — both prove that performance-aware retrieval (give the model exemplars of past optimization edits) significantly beats blind prompting. We borrow this by mandating that Stage-2 findings include `suggested_changes[]` in a form the Stage-3b prompt can show as exemplar guidance.
 
 ### 5.5 Validation per iteration
 
 - pydantic schema parse → reject on failure (retry once with a strict-mode reminder appended to the prompt).
-- Path existence: every `candidates[i].file` resolves to an existing file at the pinned `git_sha`; bad paths → mark candidate `invalid:true` and continue (don't fail the run).
-- Line range sanity: `1 ≤ line_start ≤ line_end ≤ file_line_count`.
-- Excerpt SHA: orchestrator computes `code_excerpt_sha256` itself to detect drift across iterations.
+- Path existence: every `candidates[i].file` resolves to an existing file in the working checkout; bad paths → drop the candidate and continue (don't fail the run); count drops in the per-run JSONL telemetry.
+- Line range sanity: `1 ≤ line_start ≤ line_end ≤ file_line_count`; out-of-range candidates dropped the same way.
 
 ### 5.6 Concrete Stage-1 prompts (drop-in)
 
@@ -532,15 +514,16 @@ A code location worth attention if any of the following are visibly true:
    fabricate URLs.
 
 ## Output (REQUIRED — strict JSON)
-Emit ONE JSON object matching the schema at @candidates.schema.json. Specifically:
-- 5 ≤ len(candidates) ≤ 40
-- every `file` must be a path that exists in this checkout
-- `rationale` ≤ 240 chars, falsifiable (cite the loop / the alloc / the sync)
-- `tags` chosen from the controlled vocabulary listed in the schema
-- `evidence_pointers` is optional but encouraged
-- emit `meta.delta = {"added": [...all ids...], "removed":[], "modified":[]}`
+Emit ONE JSON object matching the schema at @candidates.schema.json. Each candidate
+has exactly these fields:
+- `id`            — short slug (e.g. `cand-0001`); minted by you for new candidates
+- `file`          — repo-root-relative path that exists in this checkout
+- `line_start`    — 1-indexed inclusive
+- `line_end`      — 1-indexed inclusive, `≥ line_start`
+- `rationale`     — ≤ 240 chars, falsifiable (cite the loop / the alloc / the sync)
 
-Do NOT explain outside the JSON object.
+Also emit `meta.delta = {"added": [...all ids...], "removed":[], "modified":[]}`.
+Constraint: `5 ≤ len(candidates) ≤ 40`. Do NOT explain outside the JSON object.
 ````
 
 **Review prompt** (`prompts/stage1_review.md`):
@@ -558,9 +541,11 @@ candidates the previous pass missed.
 ## Rules
 - DO NOT inflate the list. If the previous pass was good, return it nearly unchanged.
 - Remove any candidate whose `file` does not exist or whose `line_start..line_end`
-  does not contain the claimed symbol.
-- Merge candidates that point at the same hot path with overlapping line ranges.
-- For each kept candidate, you MAY tighten `rationale` and `tags`.
+  is out of range for that file.
+- Merge candidates that point at the same hot path with overlapping line ranges
+  (keep one `id`, drop the others; list the dropped ones in `meta.delta.removed`).
+- For each kept candidate, you MAY tighten `rationale` or adjust `line_start` /
+  `line_end`. Don't change `id`.
 - For each NEW candidate, the rationale must cite a specific code construct
   (function name, loop, alloc call, sync primitive).
 
@@ -829,7 +814,7 @@ orphans   = [c.id for c in candidates
 
 #### 7.1.3 Optional BM25 pre-filter for large candidate sets
 
-If `len(candidates) > --map-prefilter-threshold` (default 100), each per-finding agent receives a BM25-narrowed shortlist of the top-50 candidates instead of the full list, to keep the prompt under context budget. Disabled by default because typical Stage 1 outputs are well under 100. Configured via `--prefilter {none|bm25}` (default `none`). Pure `rank_bm25` over the tokenized symbol + keyword space — no embedding endpoint required.
+If `len(candidates) > --map-prefilter-threshold` (default 100), each per-finding agent receives a BM25-narrowed shortlist of the top-50 candidates instead of the full list, to keep the prompt under context budget. Disabled by default because typical Stage 1 outputs are well under 100. Configured via `--prefilter {none|bm25}` (default `none`). Pure `rank_bm25` over the tokenized `(file, rationale)` text — no embedding endpoint required.
 
 #### 7.1.4 Completeness check (mapping output)
 
@@ -851,7 +836,7 @@ candidates this finding applies to, and explain why.
   PR / issue / talk). Includes technique_name, technique_summary,
   target_components, claimed_gains, suggested_changes.
 - `candidates.json` — the full candidate list from Stage 1. Each candidate has
-  file, symbol, line range, rationale, tags.
+  `id`, `file`, `line_start`, `line_end`, `rationale`.
 - the repository (read-only via --add-dir) — open files, read code, verify
   whether the technique actually applies to each candidate's location.
 
@@ -860,8 +845,8 @@ candidates this finding applies to, and explain why.
   code at THIS location. A topic match is not enough — the code shape must fit.
   Example reject: a "fused-attention CUDA kernel" finding mapped to a
   pure-Python bytecode candidate, even if both involve attention.
-- Read the actual code around (file, symbol, line range) before assigning any
-  score above 0.6. Don't extrapolate from the rationale alone.
+- Read the actual code around (`file`, `line_start..line_end`) before assigning
+  any score above 0.6. Don't extrapolate from the rationale alone.
 - Score ∈ [0, 1]:
     0.85+ = high confidence the technique applies as-is
     0.60  = plausible, would need some adaptation
@@ -978,7 +963,6 @@ the repo before proposing anything):
 {for each c in mapped_candidates:}
 - candidate_id:  {c.id}
 - file:          {c.file}
-- symbol:        {c.symbol}
 - line range:    {c.line_start}-{c.line_end}
 - mapping_score: {c.score}
 - mapping_reasoning (from Stage 3a — may be wrong, verify):
@@ -989,7 +973,6 @@ the repo before proposing anything):
   """
   {c.candidate_rationale}
   """
-- tags: {c.tags}
 
 ## Repository access
 You have read-only access to the repo via `--add-dir`. Open the files for each
@@ -1044,7 +1027,7 @@ each (best candidate first) — this helps the maintainer reading the report.
 Match the full schema at @finding_changes.schema.json.
 ````
 
-**Orphan-sweep prompt** (`prompts/stage3b_changegen_orphan_sweep.md`, only used when `--orphan-sweep` is set): same structure but with no `finding`; one orphan candidate per session; the model is told explicitly to apply general performance heuristics for the candidate's `tags` and to mark proposals with `from_finding_id: null` and `evidence_strength: low` unless it can cite a concrete prior art URL. (This pass overlaps in spirit with Stage 3c, but stays per-candidate-single-agent and only runs against orphans; Stage 3c is the broader, dual-agent pass that runs against every candidate.)
+**Orphan-sweep prompt** (`prompts/stage3b_changegen_orphan_sweep.md`, only used when `--orphan-sweep` is set): same structure but with no `finding`; one orphan candidate per session; the model is told explicitly to apply general performance heuristics for the candidate's code location (read the file at `line_start..line_end` and infer the bottleneck type) and to mark proposals with `from_finding_id: null` and `evidence_strength: low` unless it can cite a concrete prior art URL. (This pass overlaps in spirit with Stage 3c, but stays per-candidate-single-agent and only runs against orphans; Stage 3c is the broader, dual-agent pass that runs against every candidate.)
 
 ### 7.4 Novel proposals (Stage 3c) — per-candidate, NOT-in-findings
 
@@ -1053,7 +1036,7 @@ Stage 3b is grounded research: every proposal cites one finding (and runs dual-a
 **Why a separate pass.** Stage 3b is bounded by Stage 2's recall — a technique not surfaced by deep research will never appear in `records[]` no matter how obvious it is from the code. Stage 3c puts the agent's own performance priors back in the loop without contaminating the research-grounded record. Sources of novel ideas typical for this pass: language/runtime micro-optimizations (logging-on-hot-path, redundant `dict.get` chains, `str.format` vs `%s`), framework-version-specific tricks (FSDP vs DDP knobs not in the finding's paper, `torch.compile` modes), repo-specific patterns the agent reads in the surrounding code (an existing helper that's faster, a config flag that's silently expensive). These rarely have publishable papers and are exactly what deep research misses.
 
 **Fan-out shape.** Per candidate, one Claude Code subprocess and one Codex subprocess run in parallel (`--stage3c-mode dual`, default). Each session is fed:
-- the candidate location (`file`, `symbol`, `line_range`, rationale, tags),
+- the candidate (`id`, `file`, `line_start`, `line_end`, `rationale`),
 - the **full** `findings.json` as a **negative list** — explicitly framed as "techniques to NOT propose, because Stage 3b already handles them,"
 - read-only repo access via `--add-dir`.
 
@@ -1114,13 +1097,11 @@ simply did not surface.
 ## Code location
 - candidate_id: {candidate_id}
 - file: {file}
-- symbol: {symbol}
 - line range: {line_start}-{line_end}
 - rationale from candidate discovery:
   """
   {candidate_rationale}
   """
-- tags: {tags}
 - excerpt (read the surrounding code in the repo via --add-dir before proposing):
   ```{lang}
   {code_excerpt}
