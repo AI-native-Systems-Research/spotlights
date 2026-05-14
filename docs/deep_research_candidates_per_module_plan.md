@@ -42,7 +42,7 @@ All four artifacts live under `~/.cache/optquest/<repo_slug>/<run_id>/`. All sch
 
 ### 2.1 `candidates.json` — Stage 1 output
 
-The audited module is identified by its `qualified_name` in the sibling `modules.json` artifact (a `ProjectTree`; see [src/spotlights_engine/schemas/modules.py](../src/spotlights_engine/schemas/modules.py)). Consumers re-resolve the full `Module` record via `ProjectTree.from_json(modules_json).resolve(qualified_name)`; we intentionally do **not** duplicate the record into `candidates.json` to keep `modules.json` the single source of truth. Every candidate's `file` MUST lie within the resolved `module.path`.
+The audited module is identified by its `module_qualified_name` in the sibling `modules.json` artifact (a `ProjectTree`; see [src/spotlights_engine/schemas/modules.py](../src/spotlights_engine/schemas/modules.py)). Consumers re-resolve the full `Module` record via `ProjectTree.from_json(modules_json).resolve(module_qualified_name)`; we intentionally do **not** duplicate the record into `candidates.json` to keep `modules.json` the single source of truth. Every candidate's `file` MUST lie within the resolved `module.path`.
 
 ```json
 {
@@ -67,48 +67,21 @@ Notes:
 
 ### 2.2 `findings.json` — Stage 2 output
 
+Every finding has exactly five fields: `id`, `title`, `url`, `source_type`, `technique_summary`. See §6.10 for the coercion prompt that produces them.
+
 ```json
 {
   "schema_version": "1.0",
-  "query_context": { "module_path": "src/foo/bar", "module_summary": "..." },
+  "module_qualified_name": "foo/bar",
   "findings": [
     {
       "id": "find-0007",
       "title": "PagedAttention: Memory Management for LLM Serving",
       "url": "https://arxiv.org/abs/2309.06180",
       "source_type": "paper",
-      "published": "2023-09-12",
-      "technique_name": "Paged KV-cache with block table indirection",
-      "technique_summary": "Splits KV cache into fixed-size blocks managed by an OS-style page table; eliminates contiguous-allocation fragmentation in batched decoding.",
-      "claimed_gains": [
-        {"metric": "throughput", "magnitude": "2-4x", "baseline": "FasterTransformer/Orca", "conditions": "OPT-13B, A100, batched serving"}
-      ],
-      "target_components": [
-        {
-          "component_hint": "KV cache allocator / block manager",
-          "file_or_symbol_hints": ["cache_manager", "block_table", "kv_cache", "allocator"],
-          "keywords_for_matching": ["kv cache", "paged", "block table", "fragmentation", "prefix caching"]
-        }
-      ],
-      "suggested_changes": [
-        "Introduce fixed-size block allocator backing the KV tensor",
-        "Add block-table indirection in attention kernel"
-      ],
-      "evidence_quality": {
-        "primary": true, "peer_reviewed": true, "has_benchmarks": true,
-        "reproducible": true, "score": 0.92
-      },
-      "raw_snippets": ["..."]
+      "technique_summary": "Splits KV cache into fixed-size blocks managed by an OS-style page table; eliminates contiguous-allocation fragmentation in batched decoding."
     }
-  ],
-  "telemetry": {
-    "provider": "gpt-researcher",
-    "llm_endpoint": "https://ete-litellm.ai-models.vpc-int.res.ibm.com",
-    "llm_model": "<MODEL_NAME>",
-    "retriever": "<tavily|serper|searxng|...>",
-    "tokens_in": 7800, "tokens_out": 14200, "search_calls": 23,
-    "cost_usd": 0.0, "cost_unknown": true, "wallclock_s": 184
-  }
+  ]
 }
 ```
 
@@ -200,7 +173,7 @@ A merged candidate-centric re-pivot (`by_candidate[]`) is materialized alongside
   "records": [
     {
       "finding_id": "find-0011",
-      "technique_name": "Ring-buffer slot pool for per-step allocations",
+      "finding_title": "Ring-buffer slot pool for per-step allocations",
       "url": "https://example.org/paper",
       "mapped_candidates": ["cand-0001", "cand-0003"],
       "candidate_proposals": [
@@ -471,7 +444,7 @@ Large modules need pruning. Strategy stack, tried in order:
 - **SWE-agent / SWE-bench solver families** (https://swe-agent.com) — their ACI primitives (open, search, scroll) inform what *not* to do: we don't replicate the agentic environment; the agent uses the underlying CLI's built-in file tools instead.
 - **OpenHands** (https://github.com/All-Hands-AI/OpenHands) — evaluated as an M5 baseline. Its general "agent does everything in one loop" is exactly what we *don't* want for the cost-disciplined separation of research from coding.
 - **KernelBench's prompting style** (https://scalingintelligence.stanford.edu/blogs/kernelbench/) — for GPU-kernel candidates, their explicit "replace this PyTorch op with a custom kernel" framing carries over: when a candidate's `rationale` flags a kernel launch site or fusion opportunity, the Stage-3b prompt should be augmented with KernelBench-style "rewrite this op" exemplars.
-- **PIE (pie4perf)** and **FasterPy** — both prove that performance-aware retrieval (give the model exemplars of past optimization edits) significantly beats blind prompting. We borrow this by mandating that Stage-2 findings include `suggested_changes[]` in a form the Stage-3b prompt can show as exemplar guidance.
+- **PIE (pie4perf)** and **FasterPy** — both prove that performance-aware retrieval (give the model exemplars of past optimization edits) significantly beats blind prompting. We borrow the *pattern* (Stage 2 retrieves real techniques rather than letting Stage 3b invent them blind) but keep the finding record minimal: just the URL and a one-paragraph `technique_summary`. The Stage-3b agent fetches the source itself when it needs implementation detail.
 
 ### 5.5 Validation per iteration
 
@@ -713,10 +686,12 @@ Avoid: pure marketing posts, tutorials with no benchmarks, social-media speculat
 - Aim for 8-20 findings. Quality > quantity.
 
 Produce a thorough markdown report. Group findings into logical sections. For each finding,
-include: title, URL, source type (paper/PR/issue/blog/talk/docs/codebase), publication date,
-the technique it proposes, the measured or claimed gains (with baseline and conditions),
-the components or symbols it would apply to (use concrete keywords that would appear in
-source code), suggested changes, and your assessment of evidence quality.
+include at minimum: title, URL, source type (paper/PR/issue/blog/talk/docs/codebase), and a
+≤80-word summary of the technique the source proposes. You may include additional context
+(gains, components, suggested changes, evidence assessment) in the prose if helpful for
+the reader, but only the four fields above plus the summary will survive coercion into
+`findings.json` — the downstream Stage-3 agents fetch the source URL themselves when they
+need implementation detail.
 ````
 
 ### 6.10 Stage 2 coercion prompt (drop-in, fed to second LLM call)
@@ -729,23 +704,18 @@ A markdown report on optimization techniques relevant to a code module. The repo
 appended below the `---` separator.
 
 ## Output
-A single JSON object matching the schema at @findings.schema.json. Every finding must
-populate:
-- title, url, source_type ∈ {paper, pr, issue, blog, talk, docs, codebase}
-- technique_name, technique_summary (≤ 80 words)
-- claimed_gains[].(metric|magnitude|baseline|conditions)
-- target_components[].(component_hint|file_or_symbol_hints[]|keywords_for_matching[])
-- suggested_changes[] (≤ 5 bullets, each ≤ 25 words)
-- evidence_quality.(primary|peer_reviewed|has_benchmarks|reproducible|score∈[0,1])
+A single JSON object matching the schema at @findings.schema.json. Every finding has
+exactly five fields — no more:
+- `id` — stable identifier of the form `find-NNNN` (zero-padded, sequential within the report)
+- `title`
+- `url` — a real, fetchable URL present in the report; do NOT invent URLs
+- `source_type` ∈ {paper, pr, issue, blog, talk, docs, codebase}
+- `technique_summary` (≤ 80 words)
 
-The `keywords_for_matching` array is what the downstream mapper will hybrid-search
-against candidate code+rationale. Choose 5-15 specific tokens that would actually
-appear in source code or in a code-review rationale (e.g., "kv_cache", "block_table",
-"chunked_prefill", NOT "AI", "performance", "speedup").
-
-- Only include findings whose URL is present in the report. Do NOT invent URLs.
-- Drop any finding for which you cannot fill the required fields.
+- Only include findings whose URL is present in the report.
+- Drop any finding for which you cannot fill all five fields.
 - Do not emit prose outside the JSON object.
+- Do not emit any field other than the five above.
 
 ---
 
@@ -760,11 +730,11 @@ appear in source code or in a code-review rationale (e.g., "kv_cache", "block_ta
 
 Stage 3a iterates over **findings**, not pairs. For each finding the orchestrator spawns **one** coding-agent subprocess that receives:
 
-- the single finding (technique name, summary, target_components, claimed_gains, suggested_changes)
+- the single finding (`id`, `title`, `url`, `source_type`, `technique_summary` — the full 5-field record)
 - the full `candidates.json` (typical Stage 1 output is 5–50 candidates, well under an agent's context budget)
 - read-only access to the repo via `--add-dir`
 
-…and returns the subset of candidates the finding actually applies to, with a per-edge score and reasoning. Agents alternate Claude Code / Codex by finding index (round-robin: `findings[0]→claude`, `findings[1]→codex`, `findings[2]→claude`, …) to debias single-model failure modes — Stage 3b's dual mode (§7.2) takes this further by running both agents per finding in parallel, but Stage 3a stays alternating to keep the mapping pass cheap.
+…and returns the subset of candidates the finding actually applies to, with a per-edge score and reasoning. Since the finding record itself is minimal, the agent is expected to fetch the `url` directly (or read its training-data memory of the cited work) before scoring — the prompt includes an explicit "read the source before deciding which candidates match" instruction (§7.1.2). Agents alternate Claude Code / Codex by finding index (round-robin: `findings[0]→claude`, `findings[1]→codex`, `findings[2]→claude`, …) to debias single-model failure modes — Stage 3b's dual mode (§7.2) takes this further by running both agents per finding in parallel, but Stage 3a stays alternating to keep the mapping pass cheap.
 
 Once all per-finding subprocesses complete, the orchestrator persists both the raw per-finding edge list (`raw_edges[]`, primary input to Stage 3b) and a candidate-centric inversion (`mappings[]`, top-K findings per candidate, K=5 default, used for reports and ablations).
 
@@ -833,8 +803,9 @@ candidates this finding applies to, and explain why.
 
 ## Inputs
 - the finding (below) — a technique surfaced by deep-research (paper / blog /
-  PR / issue / talk). Includes technique_name, technique_summary,
-  target_components, claimed_gains, suggested_changes.
+  PR / issue / talk). Five fields only: `id`, `title`, `url`, `source_type`,
+  `technique_summary`. If the summary is insufficient to judge applicability,
+  fetch the `url` (or recall the work from training data) before scoring.
 - `candidates.json` — the full candidate list from Stage 1. Each candidate has
   `id`, `file`, `line_start`, `line_end`, `rationale`.
 - the repository (read-only via --add-dir) — open files, read code, verify
@@ -874,7 +845,7 @@ candidates this finding applies to, and explain why.
 
 Per mapped finding, **both** Claude Code and Codex run as separate subprocesses in parallel (`--stage3b-mode dual`, default). Each session is fed:
 
-- the finding (technique, paper URL, claimed gains, `suggested_changes[]`),
+- the finding (the 5-field record: `id`, `title`, `url`, `source_type`, `technique_summary`); the agent is expected to fetch `url` before proposing changes when the summary is insufficient,
 - the **subset of candidates** that finding mapped to with score ≥ `--map-min-score` — pulled directly from `mapping.json.raw_edges[]`, not from the candidate-centric pivot,
 - read-only repo access via `--add-dir`.
 
@@ -944,11 +915,13 @@ v2 patch-writer) can act on.
 - finding_id:   {finding_id}
 - title:        {f.title}
 - url:          {f.url}
-- technique:    {f.technique_name}
+- source_type:  {f.source_type}
 - summary:      {f.technique_summary}
-- claimed_gains: {f.claimed_gains}
-- suggested_changes (from the research source — exemplar guidance, not a spec):
-  {f.suggested_changes}
+
+The 5 fields above are the entire finding record. If the summary is too thin to
+ground concrete proposals, FETCH the `url` (or draw on training-data recall of
+the cited work) before writing anything — do not invent specifics not present in
+the source.
 
 This is the ONLY finding for this session. Every proposal you emit must be a
 direct application of THIS technique — not a generic optimization, not a different
@@ -986,8 +959,9 @@ Produce 0 to 5 ranked proposals. Each proposal must:
 - be implementable as a localized change (single file or small set of files
   near this location); reject ideas that require a full system redesign
 - give an `expected_impact` estimate with an honest `evidence_strength` ∈
-  {high, medium, low} (high requires the finding's claimed_gains to translate
-  plausibly to this codebase, not just to the paper's benchmark)
+  {high, medium, low} (high requires the cited source to report concrete
+  benchmarks AND for those benchmarks to translate plausibly to this codebase —
+  not just to the paper's setup; if you didn't open the URL, cap at medium)
 - list `prerequisites` and `risk` ∈ {low, medium, high}
 - estimate `effort_estimate`: XS (<1h), S (≤1d), M (≤1w), L (>1w)
 
@@ -1074,7 +1048,7 @@ novel_records = dedupe_and_merge(results, findings)              # see "Dedupe" 
 
 **Dedupe (three layers).** The merge step is where Stage 3c earns its keep:
 
-1. **Against findings (mandatory).** Each emitted proposal is scored for overlap with every Stage-2 finding by string-similarity over `(title, description, technique_name)` blob — fast first pass — then any borderline case (similarity 0.3–0.7) is sent to a single LLM-judge call via the LiteLLM proxy: "Does proposal X re-derive technique Y?" Reject the proposal if yes, recording it in `stage3c.dedupe.rejected_overlap_with_findings`. The model also self-reports via `novelty_check.overlaps_finding_ids[]` in its output; the self-report is used as a prefilter but never trusted alone.
+1. **Against findings (mandatory).** Each emitted proposal is scored for overlap with every Stage-2 finding by string-similarity over the `(proposal.title + proposal.description)` blob vs the `(finding.title + finding.technique_summary)` blob — fast first pass — then any borderline case (similarity 0.3–0.7) is sent to a single LLM-judge call via the LiteLLM proxy: "Does proposal X re-derive the technique described in finding Y?" Reject the proposal if yes, recording it in `stage3c.dedupe.rejected_overlap_with_findings`. The model also self-reports via `novelty_check.overlaps_finding_ids[]` in its output; the self-report is used as a prefilter but never trusted alone.
 2. **Cross-agent (dual mode only).** When both Claude Code and Codex produce a proposal for the same `candidate_id` with title similarity ≥ 0.7 (or LLM-judge agreement on borderline), they are kept as **one** proposal with `agreed_with_other_agent: true`. The other is dropped and counted in `stage3c.dedupe.rejected_cross_agent_duplicate`. Agreement is a positive quality signal that survives into the final ranking.
 3. **Against Stage 3b within the same candidate.** Before merging into `by_candidate[]`, run the same overlap check against research-grounded proposals already emitted for that candidate. Reject any novel proposal that overlaps a research-grounded one (the research-grounded one wins because it cites a source).
 
@@ -1115,9 +1089,12 @@ these, emit zero proposals here — that's a valid result.
 
 {for each finding f in findings:}
 - finding_id:   {f.id}
-- technique:    {f.technique_name}
+- title:        {f.title}
+- url:          {f.url}
 - summary:      {f.technique_summary}
-- suggested_changes: {f.suggested_changes}
+
+(If a summary is too thin to judge overlap, fetch the `url` — you must not
+re-derive a technique just because its summary in this list was terse.)
 
 ## What "novel" means here
 - A different abstraction level (e.g., `logger.debug` arg formatting, redundant
@@ -1130,9 +1107,10 @@ these, emit zero proposals here — that's a valid result.
 - A framework- / runtime-version specific trick that the negative-list findings
   don't mention (e.g., `torch.compile(mode="reduce-overhead")`, FSDP `use_orig_params=False`).
 
-A proposal is NOT novel if any negative-list finding's `technique_summary` or
-`suggested_changes` already covers it, even with different wording. When in doubt,
-do not emit. Better zero proposals than a duplicate of a research-grounded one.
+A proposal is NOT novel if any negative-list finding's `technique_summary` (or
+the source it points to via `url`) already covers it, even with different
+wording. When in doubt, do not emit. Better zero proposals than a duplicate of a
+research-grounded one.
 
 ## Task
 Produce 0 to 5 ranked proposals that are novel by the rule above. Each proposal must:
