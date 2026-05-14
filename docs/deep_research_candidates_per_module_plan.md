@@ -1,38 +1,11 @@
 # Implementation Plan: Evidence-Backed Code Optimization Pipeline
 
-> **Pipeline name (placeholder):** `optquest`. Replace freely.
-> **Fast-changing items carry a "last verified: 2026-05-13" tag.** Re-verify CLI flags before implementation if more than ~30 days have passed.
 
 ---
 
 ## 1. Goal
 
-Build a Python pipeline that, given `(repo_url_or_path, module_path)`, produces `changes.json` — a list of optimization proposals tied to concrete code locations in the target module. Each proposal has one of two provenance types: **research-grounded** (backed by exactly one external finding — paper / blog / PR / issue / talk — discovered in Stage 2) or **agent-novel** (proposed by Codex and Claude Code from their own training, *not* mentioned in any Stage-2 finding, on top of a candidate location). Every proposal also carries explicit reasoning emitted by the agent. The pipeline runs Stage 1 (candidate discovery via Claude↔Codex alternating review) and Stage 2 (single GPT Researcher call) in **parallel**, then Stage 3 = 3a (finding↔candidate mapping) + 3b (per-finding research-grounded proposals) + 3c (per-candidate agent-novel proposals) consumes both.
-
-**Acceptance criteria**
-
-- `optquest run --repo <path> --module <subpath>` exits 0 and produces a validated `changes.json` against a published JSON Schema.
-- Every record in `changes.json` has: a code location whose file path **exists in the target repo at the resolved git ref**, ≥1 mapped finding with a fetchable URL, and ≥1 ranked change proposal with a non-empty rationale.
-- Stage 1 and Stage 2 run concurrently; total wall-clock ≤ max(stage1_time, stage2_time) + small mapping/dispatch overhead.
-- Every agent invocation logs `tokens_in`, `tokens_out`, `cost_usd` (where the proxy returns usage data; else 0 with a `cost_unknown: true` flag), `wallclock_s`, `session_id` to a per-run JSONL.
-- Pipeline is **read-only** by default against the target repo: no commits, branches, or worktree mutations escape `~/.cache/optquest/<repo_slug>/<run_id>/`.
-- Generic across repos. vLLM is a reference for the eval set, not a hardcoded assumption anywhere in code or prompts.
-
-**Version pins (initial; revisit at M1):**
-
-| Component | Pin | Why |
-|---|---|---|
-| Claude Code CLI | `>= 2.5.0` (the version emitting `total_cost_usd` in the `result` event) | Telemetry stability |
-| Codex CLI | latest published release with `codex exec --json --output-schema` and `--add-dir` (released summer 2025; flags still current 2026-05-13) | Schema enforcement |
-| Stage 1 / Stage 3a agent models | Whatever Claude Code / Codex CLIs default to; pin explicitly via wrapper config (`--model` for `claude`, `-c model='"…"'` for `codex`) | Decoupled from the rest of the model surface; user controls via their proxy/account |
-| Stage 3b agent models | **Both Codex and Claude Code per mapped finding** by default (`--stage3b-mode dual`); the two agents run in parallel against the same finding (each seeing the finding + its mapped candidates) and their proposals are merged + cross-agent-deduped. Switch to `--stage3b-mode alternating` for half the cost (one agent per finding, round-robin) or `--stage3b-mode claude_code` / `--stage3b-mode codex` to pin one. | Dual debiases the per-finding read — same finding, two independent interpretations of how to apply it to the mapped code, with `agreed_with_other_agent: true` as a quality signal |
-| Stage 3c agent models | **Both Codex and Claude Code per candidate** by default (`--stage3c-mode dual`); the two agents run in parallel against the same candidate and their proposals are merged + deduped. Switch to `--stage3c-mode alternating` for half the cost (one agent per candidate, round-robin). | Dual is the default because Stage 3c is the *novel* proposal pass — its value comes from cross-checking two independent priors; agreement is a quality signal, disagreement is broader coverage |
-| **Stage 2 — GPT Researcher** | `gpt-researcher >= 0.13` (library mode) | Sole Stage-2 provider |
-| **Stage 2 — LLM endpoint** | OpenAI-compatible HTTP endpoint at `OPENAI_BASE_URL=https://ete-litellm.ai-models.vpc-int.res.ibm.com` (LiteLLM proxy). Model name `<MODEL_NAME>` — placeholder, to be filled in | |
-| **Stage 2 — retriever (search backend)** | Default `arxiv` (free, key-less); auto-upgrades to `tavily,arxiv` when `TAVILY_API_KEY` is set. See §6.3. | GPT Researcher requires a retriever **separately** from the LLM endpoint |
-| Embeddings | **Not used by the MVP mapping.** Stage 3a maps per-finding via coding agents reading the code directly (§7.1). Embedding scaffolding (`BAAI/bge-m3` local fallback; proxy `/v1/embeddings` probe at M0) retained for a v2 hybrid-retrieval pre-filter. | |
-| Python | `>= 3.11` (matches GPT Researcher's runtime requirement) | |
-| Key libs | `pydantic >= 2.7`, `rank-bm25 >= 0.2.2`, `openai >= 1.40` (the HTTP client for the LiteLLM proxy), `gpt-researcher >= 0.13`, `httpx >= 0.27`, `anyio >= 4`, `sentence-transformers >= 3` (only for bge-m3 fallback) | |
+Build a Python pipeline that, given `(repo_url_or_path, module_path)`, produces `changes.json` — a list of optimization proposals tied to concrete code locations in the target module. Each proposal has one of two provenance types: **research-grounded** (backed by exactly one external finding — paper / blog / PR / issue / talk — discovered in Stage 2) or **agent-novel** (proposed by Codex and Claude Code from their own training, *not* mentioned in any Stage-2 finding, on top of a candidate location). Every proposal also carries explicit reasoning emitted by the agent. The pipeline runs Stage 1 (candidate discovery via Claude↔Codex alternating review) and Stage 2 (single GPT Researcher call) in **parallel**, then Stage 3 runs in three sequential steps: 3a (finding↔candidate mapping), 3b (per-finding research-grounded proposals), and 3c (per-candidate agent-novel proposals that don't overlap Stage 3b's proposals for the same candidate).
 
 ---
 
@@ -141,73 +114,56 @@ Candidate-centric. Per candidate, two parallel lists of changes:
 
 ## 3. Architecture
 
+The driver takes `(repo, module_qualified_name)`, resolves the `Module` record against [modules.json](modules.json), and fans out into two parallel discovery stages whose outputs converge on a per-finding mapping stage. Stage 3b then generates research-grounded proposals per mapped finding; Stage 3c follows sequentially, generating agent-novel proposals per candidate while reading Stage 3b's already-emitted proposals for that candidate as the "do-not-duplicate" set. A final pivot collects both into the per-candidate `changes.json`. Every artifact is keyed by `module_qualified_name`; `candidate_id` and `finding_id` are the join columns threaded through stages 3a–3c.
+
 ```
-                      ┌─────────────────────────────────────────────┐
-                      │  Driver (Python asyncio + thread pool)      │
-                      │  inputs: repo, module_path, scope, budget   │
-                      └───────────────┬─────────────────────────────┘
-                                      │ fan-out
-              ┌───────────────────────┴───────────────────────┐
-              │                                               │
-              ▼                                               ▼
-   ┌──────────────────────────┐                  ┌──────────────────────────┐
-   │  Stage 1: Candidates     │                  │  Stage 2: Findings       │
-   │  (CORAL-style loop)      │                  │  (single GPT Researcher  │
-   │                          │                  │   call)                  │
-   │  bootstrap: Claude Code  │                  │                          │
-   │   ↓                      │                  │  LLM:       LiteLLM      │
-   │  review #1: Codex        │                  │             proxy        │
-   │   ↓                      │                  │  retriever: <see §6>     │
-   │  review #2: Claude Code  │                  │                          │
-   │   ↓ (until stop cond.)   │                  │  → markdown report       │
-   │                          │                  │  → coercion call         │
-   │  → candidates.json       │                  │  → findings.json         │
-   └─────────────┬────────────┘                  └─────────────┬────────────┘
-                 │                                             │
-                 └─────────────────────┬───────────────────────┘
+                ┌──────────────────────────────────────────┐
+                │  Driver                                  │
+                │  (repo, module_qualified_name) →         │
+                │   Module record via modules.json         │
+                └────────────────────┬─────────────────────┘
+                                     │ fan-out
+              ┌──────────────────────┴──────────────────────┐
+              ▼                                             ▼
+   ┌──────────────────────────┐                ┌──────────────────────────┐
+   │  Stage 1                 │                │  Stage 2                 │
+   │  Candidate discovery     │                │  Literature / blog       │
+   │  (Claude ↔ Codex loop)   │                │  research                │
+   │                          │                │  (GPT Researcher)        │
+   │  → candidates.json       │                │  → findings.json         │
+   └─────────────┬────────────┘                └─────────────┬────────────┘
+                 │                                           │
+                 └─────────────────────┬─────────────────────┘
                                        ▼
-                       ┌──────────────────────────────────┐
-                       │  Stage 3a: Per-finding fan-out   │
-                       │  for each finding (parallel,     │
-                       │  semaphore-bounded):             │
-                       │    finding[i] → Claude or Codex  │
-                       │      (round-robin by index)      │
-                       │      reads finding + candidates  │
-                       │      + repo (--add-dir)          │
-                       │      → edges[{cand_id,conf,why}] │
-                       │  invert to candidate-centric →   │
-                       │  → mapping.json                  │
-                       └─────────────────┬────────────────┘
-                                         ▼
-                       ┌──────────────────────────────────┐
-                       │  Stage 3b: Per-mapped-finding    │
-                       │  change generation (Codex +      │
-                       │  Claude Code in parallel per     │
-                       │  finding; each session reads     │
-                       │  finding + its mapped candidates │
-                       │  from mapping.json; merge+ cross-│
-                       │  agent dedupe)                   │
-                       │  → records[] (research_grounded) │
-                       └─────────────────┬────────────────┘
-                                         │  (3b ∥ 3c)
-                       ┌─────────────────▼────────────────┐
-                       │  Stage 3c: Per-candidate novel   │
-                       │  proposals (Codex + Claude Code  │
-                       │  in parallel per candidate;      │
-                       │  fed candidates + ALL findings   │
-                       │  as a negative list — propose    │
-                       │  ONLY changes NOT covered by     │
-                       │  findings); merge + dedupe       │
-                       │  → novel_records[] (agent_novel) │
-                       └─────────────────┬────────────────┘
-                                         ▼
-                       ┌──────────────────────────────────┐
-                       │  Merge + re-pivot                │
-                       │  → changes.json                  │
-                       │    {records, novel_records,      │
-                       │     by_candidate}                │
-                       └──────────────────────────────────┘
+                       ┌──────────────────────────────┐
+                       │  Stage 3a                    │
+                       │  Map findings → candidates   │
+                       │  (per-finding agent fan-out) │
+                       │  → mapping.json              │
+                       └───────────────┬──────────────┘
+                                       ▼
+                       ┌──────────────────────────────┐
+                       │  Stage 3b                    │
+                       │  Research-grounded proposals │
+                       │  (per mapped finding)        │
+                       │  → from_findings[]           │
+                       └───────────────┬──────────────┘
+                                       ▼
+                       ┌──────────────────────────────┐
+                       │  Stage 3c                    │
+                       │  Agent-novel proposals       │
+                       │  (per candidate; must not    │
+                       │   overlap Stage 3b proposals │
+                       │   for the same candidate)    │
+                       │  → from_agents[]             │
+                       └───────────────┬──────────────┘
+                                       ▼
+                       ┌──────────────────────────────┐
+                       │  Pivot by candidate          │
+                       │  → changes.json              │
+                       └──────────────────────────────┘
 ```
+
 
 ---
 
@@ -883,30 +839,33 @@ Match the full schema at @finding_changes.schema.json.
 
 **Orphan-sweep prompt** (`prompts/stage3b_changegen_orphan_sweep.md`, only used when `--orphan-sweep` is set): same structure but with no `finding`; one orphan candidate per session; the model is told explicitly to apply general performance heuristics for the candidate's code location (read the file at `line_start..line_end` and infer the bottleneck type) and to mark proposals with `from_finding_id: null` and `evidence_strength: low` unless it can cite a concrete prior art URL. (This pass overlaps in spirit with Stage 3c, but stays per-candidate-single-agent and only runs against orphans; Stage 3c is the broader, dual-agent pass that runs against every candidate.)
 
-### 7.4 Novel proposals (Stage 3c) — per-candidate, NOT-in-findings
+### 7.4 Novel proposals (Stage 3c) — per-candidate, runs after Stage 3b
 
-Stage 3b is grounded research: every proposal cites one finding (and runs dual-agent per finding for cross-agent agreement). Stage 3c is the complement — for each candidate, run a coding agent and ask it to propose optimization changes that are **not** already covered by any Stage-2 finding. Findings are passed in as a *negative* list: "do not re-propose anything that overlaps with these techniques."
+Stage 3b is grounded research: every proposal cites one finding (and runs dual-agent per finding for cross-agent agreement). Stage 3c runs **after** Stage 3b finishes: for each candidate, it invokes a coding agent and asks it to propose optimization changes that don't duplicate the proposals Stage 3b already produced for that same candidate. Stage 3b's per-candidate `from_findings[]` proposals are passed in as the "already covered, do not re-propose" set; the agent must read them and produce ideas that sit outside that set.
 
 **Why a separate pass.** Stage 3b is bounded by Stage 2's recall — a technique not surfaced by deep research will never appear in `records[]` no matter how obvious it is from the code. Stage 3c puts the agent's own performance priors back in the loop without contaminating the research-grounded record. Sources of novel ideas typical for this pass: language/runtime micro-optimizations (logging-on-hot-path, redundant `dict.get` chains, `str.format` vs `%s`), framework-version-specific tricks (FSDP vs DDP knobs not in the finding's paper, `torch.compile` modes), repo-specific patterns the agent reads in the surrounding code (an existing helper that's faster, a config flag that's silently expensive). These rarely have publishable papers and are exactly what deep research misses.
 
+**Why the exclusion set is Stage 3b's proposals (not raw findings).** Stage 3b's proposals are the *concrete application* of each finding to this candidate's code — far easier for the agent to compare a new idea against than the abstract `technique_summary` of a finding. It also naturally narrows the exclusion to what was actually emitted for *this* candidate (a 2–10-item list) rather than the full ~20–50 findings, most of which were never mapped here. As a side effect, orphan candidates (no Stage 3b proposals — either no finding mapped, or `--orphan-sweep` produced none) get an empty exclusion set, which is the correct behavior: Stage 3c is free to fill that gap.
+
 **Fan-out shape.** Per candidate, one Claude Code subprocess and one Codex subprocess run in parallel (`--stage3c-mode dual`, default). Each session is fed:
 - the candidate (`id`, `file`, `line_start`, `line_end`, `rationale`),
-- the **full** `findings.json` as a **negative list** — explicitly framed as "techniques to NOT propose, because Stage 3b already handles them,"
+- Stage 3b's `from_findings[]` proposals already emitted for this candidate (title, description, and the originating finding's id + url for context) — framed as "already covered, do not re-propose,"
 - read-only repo access via `--add-dir`.
 
 Optional cheaper mode `--stage3c-mode alternating`: one agent per candidate, round-robin by candidate index; loses the cross-agent agreement signal but halves cost.
 
 ```
-INPUT:  candidates.json, findings.json, repo
+INPUT:  candidates.json, stage3b_proposals_by_candidate, repo
 OUTPUT: novel_records[] (one record per (candidate, agent) pair)
 
 semaphore = asyncio.Semaphore(--max-parallel-agents)             # default 4
 
 async def novel_one(cand, agent_choice):
     async with semaphore:
+        already_covered = stage3b_proposals_by_candidate.get(cand.id, [])
         invoke agent_choice with:
             - --add-dir <repo-path>                              # read-only
-            - stdin: STAGE3C_NOVEL_PROMPT(cand, findings)        # findings = negative list
+            - stdin: STAGE3C_NOVEL_PROMPT(cand, already_covered) # 3b proposals for this candidate
             - timeout: --per-candidate-novel-wallclock-s         # default 150s
         returns: {candidate_id, agent, proposals[]}
 
@@ -917,7 +876,7 @@ agents_cycle = itertools.cycle(["claude_code", "codex"])
 tasks = [novel_one(c, next(agents_cycle)) for c in candidates]
 
 results = await asyncio.gather(*tasks, return_exceptions=True)
-novel_records = dedupe_and_merge(results, findings)              # see "Dedupe" below
+novel_records = dedupe_and_merge(results, stage3b_proposals_by_candidate)  # see "Dedupe" below
 ```
 
 **Budgets.**
@@ -926,13 +885,12 @@ novel_records = dedupe_and_merge(results, findings)              # see "Dedupe" 
 - Parent stage budget: `--stage3c-budget-usd` (default $10 for dual mode at ~12 candidates × 2 agents × $0.30 with headroom; halved automatically for alternating mode).
 - Stall: `--per-candidate-novel-stall-s` (default 75s).
 
-**Dedupe (three layers).** The merge step is where Stage 3c earns its keep:
+**Dedupe (two layers).** The prompt-time exclusion (Stage 3b proposals for this candidate) is the first line of defense; the merge step is the safety net:
 
-1. **Against findings (mandatory).** Each emitted proposal is scored for overlap with every Stage-2 finding by string-similarity over the `(proposal.title + proposal.description)` blob vs the `(finding.title + finding.technique_summary)` blob — fast first pass — then any borderline case (similarity 0.3–0.7) is sent to a single LLM-judge call via the LiteLLM proxy: "Does proposal X re-derive the technique described in finding Y?" Reject the proposal if yes, recording it in `stage3c.dedupe.rejected_overlap_with_findings`. The model also self-reports via `novelty_check.overlaps_finding_ids[]` in its output; the self-report is used as a prefilter but never trusted alone.
+1. **Against Stage 3b proposals for the same candidate (mandatory).** Each emitted novel proposal is scored for overlap with every Stage 3b proposal already emitted for the same `candidate_id` by string-similarity over the `(proposal.title + proposal.description)` blobs — fast first pass — then any borderline case (similarity 0.3–0.7) is sent to a single LLM-judge call via the LiteLLM proxy: "Does novel proposal X re-derive Stage 3b proposal Y for the same candidate?" Reject the proposal if yes, recording it in `stage3c.dedupe.rejected_overlap_with_stage3b` (the research-grounded proposal wins because it cites a source). The model also self-reports via `novelty_check.overlaps_stage3b_proposal_ids[]` in its output; the self-report is used as a prefilter but never trusted alone.
 2. **Cross-agent (dual mode only).** When both Claude Code and Codex produce a proposal for the same `candidate_id` with title similarity ≥ 0.7 (or LLM-judge agreement on borderline), they are kept as **one** proposal with `agreed_with_other_agent: true`. The other is dropped and counted in `stage3c.dedupe.rejected_cross_agent_duplicate`. Agreement is a positive quality signal that survives into the final ranking.
-3. **Against Stage 3b within the same candidate.** Before merging into `by_candidate[]`, run the same overlap check against research-grounded proposals already emitted for that candidate. Reject any novel proposal that overlaps a research-grounded one (the research-grounded one wins because it cites a source).
 
-**Validation.** Parse each session's result with the `novel_changes` pydantic schema. Drop any proposal whose `novelty_check.overlaps_finding_ids[]` self-reports a finding the candidate was mapped to in `mapping.json` *unless* the dedupe LLM-judge disagrees with the self-report. On parse failure: retry once with strict reminder; on second failure record `{candidate_id, agent, proposals: [], error: "schema_invalid"}` and continue.
+**Validation.** Parse each session's result with the `novel_changes` pydantic schema. Drop any proposal whose `novelty_check.overlaps_stage3b_proposal_ids[]` self-reports a Stage 3b proposal for this candidate *unless* the dedupe LLM-judge disagrees with the self-report. On parse failure: retry once with strict reminder; on second failure record `{candidate_id, agent, proposals: [], error: "schema_invalid"}` and continue.
 
 **Why dual is the default.** This is the *novel* pass — proposals are unbacked, so calibration is harder than for Stage 3b. Running two independent agents lets `agreed_with_other_agent: true` serve as a poor-man's evidence_strength bump; without agreement, a single agent's confident-sounding novel suggestion is the prime hallucination target. M3 ablation compares dual vs alternating on proposal accept-rate (LLM-judge or maintainer-rated).
 
@@ -961,20 +919,22 @@ simply did not surface.
   {code_excerpt}
   ```
 
-## Findings — DO NOT RE-PROPOSE THESE (negative list)
-The following research findings are already being applied to this codebase by a
-separate pass. You MUST NOT propose any change that is materially the same as
-one of these techniques. If the most obvious change at this location is one of
-these, emit zero proposals here — that's a valid result.
+## Already-emitted proposals for this candidate — DO NOT RE-PROPOSE
+The previous pipeline stage (Stage 3b) already produced research-grounded
+proposals for this exact code location, each derived from an external finding
+(paper / blog / PR / issue / talk). Your job is to propose changes that are NOT
+materially the same as any of the proposals listed below. If the most obvious
+change at this location is already covered, emit zero proposals here — that's a
+valid result.
 
-{for each finding f in findings:}
-- finding_id:   {f.id}
-- title:        {f.title}
-- url:          {f.url}
-- summary:      {f.technique_summary}
+{for each Stage 3b proposal p emitted for this candidate:}
+- proposal_id:   {p.id}
+- title:         {p.title}
+- description:   {p.description}
+- from_finding:  {p.from_finding_id}  ({p.from_finding_url})
 
-(If a summary is too thin to judge overlap, fetch the `url` — you must not
-re-derive a technique just because its summary in this list was terse.)
+(If a description is too thin to judge overlap, fetch the `from_finding` url —
+you must not re-derive a technique just because its summary in this list was terse.)
 
 ## What "novel" means here
 - A different abstraction level (e.g., `logger.debug` arg formatting, redundant
@@ -984,20 +944,20 @@ re-derive a technique just because its summary in this list was terse.)
 - A repo-specific observation: an existing helper you found in the codebase that
   is faster than the current call site; a config flag that quietly turns on an
   expensive feature; a redundant copy between two layers.
-- A framework- / runtime-version specific trick that the negative-list findings
-  don't mention (e.g., `torch.compile(mode="reduce-overhead")`, FSDP `use_orig_params=False`).
+- A framework- / runtime-version specific trick that the listed proposals don't
+  cover (e.g., `torch.compile(mode="reduce-overhead")`, FSDP `use_orig_params=False`).
 
-A proposal is NOT novel if any negative-list finding's `technique_summary` (or
-the source it points to via `url`) already covers it, even with different
-wording. When in doubt, do not emit. Better zero proposals than a duplicate of a
+A proposal is NOT novel if any of the Stage 3b proposals listed above (or the
+finding source each cites) already covers it, even with different wording. When
+in doubt, do not emit. Better zero proposals than a duplicate of a
 research-grounded one.
 
 ## Task
 Produce 0 to 5 ranked proposals that are novel by the rule above. Each proposal must:
 - be implementable as a localized change at this location
-- name in `novelty_check.overlaps_finding_ids[]` any finding you considered close
-  and explain in `novelty_check.why_distinct` why you still think it's distinct
-  (the merge step will second-guess you with an LLM judge)
+- name in `novelty_check.overlaps_stage3b_proposal_ids[]` any Stage 3b proposal
+  you considered close and explain in `novelty_check.why_distinct` why you still
+  think it's distinct (the merge step will second-guess you with an LLM judge)
 - give `expected_impact` with honest `evidence_strength` ∈ {high, medium, low}.
   Without a citation, `evidence_strength: high` is rarely justified; default to
   `medium` for repo-specific reads you verified in the code, `low` for general
@@ -1011,7 +971,7 @@ Order by (expected_impact_magnitude × evidence_strength / effort).
 {
   "candidate_id": "{candidate_id}",
   "agent": "claude_code | codex",
-  "negative_finding_ids": [/* the finding ids you read as the negative list */],
+  "excluded_stage3b_proposal_ids": [/* the Stage 3b proposal ids you read as already covered */],
   "proposals": [
     {
       "rank": 1,
@@ -1024,8 +984,8 @@ Order by (expected_impact_magnitude × evidence_strength / effort).
       "effort_estimate": "XS|S|M|L",
       "risk": "low|medium|high",
       "novelty_check": {
-        "overlaps_finding_ids": ["find-XXXX"],
-        "why_distinct": "Even though find-XXXX talks about ring buffers in general, my proposal targets the logging fast-path, not the allocator."
+        "overlaps_stage3b_proposal_ids": ["prop-XXXX"],
+        "why_distinct": "Even though prop-XXXX talks about ring buffers in general, my proposal targets the logging fast-path, not the allocator."
       }
     }
   ]
@@ -1096,7 +1056,7 @@ optquest/
 │   │   │   └── prompts/             # stage3b_changegen_per_finding.md, stage3b_changegen_orphan_sweep.md
 │   │   ├── novel/
 │   │   │   ├── per_candidate.py     # per-candidate dual/alternating fan-out (Codex + Claude Code)
-│   │   │   ├── dedupe.py            # 3-layer dedupe: vs findings (LLM-judge), cross-agent, vs 3b
+│   │   │   ├── dedupe.py            # 2-layer dedupe: vs Stage 3b proposals (LLM-judge), cross-agent
 │   │   │   ├── validate.py          # novel_changes schema parse + novelty_check sanity
 │   │   │   └── prompts/stage3c_novel.md
 │   │   └── validate.py
@@ -1225,8 +1185,8 @@ Each milestone is verifiable by a specific command + acceptance check.
   - Stage 3b parent budget `--stage3b-budget-usd $16` not exceeded in dual mode; per-session p95 wallclock ≤ 180s; mean per-session cost ≤ $0.50 (if cost reporting is available; else mean per-session wallclock ≤ 120s).
   - Stage 3c: ≥ 90% of per-(candidate, agent) subprocesses succeed. In `--stage3c-mode dual` (default), every candidate has at least one session per agent — `|sessions_by_agent.claude_code − sessions_by_agent.codex| = 0`.
   - Stage 3c parent budget `--stage3c-budget-usd $10` not exceeded; per-session p95 wallclock ≤ 150s.
-  - Stage 3c dedupe is doing real work: `dedupe.rejected_overlap_with_findings ≥ 1` (at least one model-proposed novel was caught colliding with a finding — if it's zero across a 20-finding run, the LLM-judge is likely broken or being skipped).
-  - Stage 3c novelty: of proposals that survived dedupe, ≤ 15% are flagged by a post-hoc audit (LLM-judge run blind over `(novel_proposal, full findings.json)` pairs) as actually overlapping a finding. False-novel rate above 15% fails the milestone — re-tighten the dedupe LLM-judge threshold and re-run.
+  - Stage 3c dedupe is doing real work: `dedupe.rejected_overlap_with_stage3b ≥ 1` (at least one model-proposed novel was caught colliding with a Stage 3b proposal for the same candidate — if it's zero across a run with ≥10 candidates that have ≥1 Stage 3b proposal each, the LLM-judge is likely broken or being skipped).
+  - Stage 3c novelty: of proposals that survived dedupe, ≤ 15% are flagged by a post-hoc audit (LLM-judge run blind over `(novel_proposal, Stage 3b proposals for the same candidate)` pairs) as actually overlapping. False-novel rate above 15% fails the milestone — re-tighten the dedupe LLM-judge threshold and re-run.
   - Re-pivot integrity: every proposal in `by_candidate[]` carries a `source` discriminator; `source: "research_grounded"` proposals match a `(finding_id, candidate_id)` pair in `records[]`; `source: "agent_novel"` proposals match an `(agent, candidate_id)` pair in `novel_records[]`. Every `agreed_with_other_agent: true` proposal in 3b's merged records traces back to two underlying sessions in `per_agent_sessions[]`.
   - Ablation 1 (mapping agent): run with `--mapping-agent claude_code` and `--mapping-agent codex` on one eval repo; record orphan rate and edge-set Jaccard vs the `alternating` default (resolves §10 Q7 for mapping).
   - Ablation 2 (Stage 3b dual vs single-agent): on the same eval repo, run `--stage3b-mode claude_code` and `--stage3b-mode codex` (single-agent variants). Compare top-3 proposal quality per finding via LLM-judge against the dual-mode merged output. Compare cost. Feeds the decision on whether dual stays the default beyond M3.
