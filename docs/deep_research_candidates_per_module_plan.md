@@ -61,9 +61,7 @@ The audited module is identified by its `module_qualified_name` in the sibling `
 
 Notes:
 - `module_qualified_name` is the `/`-joined preorder path from `ProjectTree.walk()` (e.g. `"v1/engine/core"`), **not** the filesystem path — the latter is `Module.path` and must be obtained by resolving against `modules.json`.
-- The audit is bounded to the resolved node; `Module.submodules` are out of scope (each submodule is audited in its own run).
-- `modules.json` is a hard input to the pipeline: if no upstream produced one, the modules-extractor stage runs first. Consumers MAY therefore assume `resolve(module_qualified_name)` is non-null when validating `candidates.json`.
-- Run-level metadata (git SHA, scope, iteration count, per-call telemetry) is **not** persisted in `candidates.json`. It lives in the per-run JSONL under `~/.cache/optquest/<repo_slug>/<run_id>/` (§1 acceptance criteria), keyed by `run_id` derived from the cache-dir path.
+
 
 ### 2.2 `findings.json` — Stage 2 output
 
@@ -85,48 +83,28 @@ Every finding has exactly five fields: `id`, `title`, `url`, `source_type`, `tec
 }
 ```
 
-> **Telemetry note:** the LiteLLM proxy may or may not surface `usage` blocks in chat completions. If it does, we record token counts and (proxy-provided) cost; if not, the orchestrator records `tokens_*` as best-effort from response payloads and sets `cost_unknown: true`. See §10 Q5.
 
 ### 2.3 `mapping.json` — Stage 3a output (consumed by Stage 3b)
 
 ```json
 {
-  "schema_version": "1.0",
-  "k": 5,
-  "method": "per_finding_agent_fanout",
-  "stage3a": {
-    "findings_total": 24,
-    "findings_succeeded": 23,
-    "findings_failed": 1,
-    "agent_assignment": "alternating",
-    "agents_used": {"claude_code": 12, "codex": 12},
-    "prefilter": "none"
-  },
+  "module_qualified_name": "foo/bar",
   "mappings": [
     {
       "candidate_id": "cand-0001",
-      "ranked_findings": [
+      "findings": [
         {
           "finding_id": "find-0007",
-          "score": 0.86,
-          "reasoning": "scheduler.py touches block allocation for the KV cache; the finding's paged-attention technique applies directly to the loop at line 142",
-          "agent": "claude_code"
+          "confidence": "high",
+          "reasoning": "scheduler.py touches block allocation for the KV cache; the finding's paged-attention technique applies directly to the loop at line 142"
         },
-        {"finding_id": "find-0011", "score": 0.71, "reasoning": "...", "agent": "codex"}
+        {"finding_id": "find-0011", "confidence": "medium", "reasoning": "...", "agent": "codex"}
       ]
     }
-  ],
-  "orphans": [],
-  "raw_edges": [
-    {"finding_id": "find-0007", "candidate_id": "cand-0001", "score": 0.86, "reasoning": "...", "agent": "claude_code"}
-  ],
-  "meta": {
-    "drops": {"unknown_candidate_id": 0, "schema_invalid": 1, "stalled": 0}
-  }
+  ]
 }
 ```
 
-`raw_edges[]` is the un-pivoted per-finding result list — the **primary input** to Stage 3b, which fans out Claude Code + Codex (dual by default) per finding and reads that finding's edges directly. `mappings[]` is a candidate-centric view (top-K per candidate) — kept for human-readable reports, mapping-quality ablations, and the candidate-centric re-pivot of `changes.json`. Both are persisted; both are derivable from the other modulo the `top_k` cap.
 
 ### 2.4 `changes.json` — final artifact
 
@@ -299,7 +277,7 @@ Stage 3b proposals have `source: "research_grounded"` and a non-null `from_findi
                        │      (round-robin by index)      │
                        │      reads finding + candidates  │
                        │      + repo (--add-dir)          │
-                       │      → edges[{cand_id,score,why}]│
+                       │      → edges[{cand_id,conf,why}] │
                        │  invert to candidate-centric →   │
                        │  → mapping.json                  │
                        └─────────────────┬────────────────┘
@@ -310,7 +288,7 @@ Stage 3b proposals have `source: "research_grounded"` and a non-null `from_findi
                        │  Claude Code in parallel per     │
                        │  finding; each session reads     │
                        │  finding + its mapped candidates │
-                       │  from raw_edges; merge + cross-  │
+                       │  from mapping.json; merge+ cross-│
                        │  agent dedupe)                   │
                        │  → records[] (research_grounded) │
                        └─────────────────┬────────────────┘
@@ -734,15 +712,15 @@ Stage 3a iterates over **findings**, not pairs. For each finding the orchestrato
 - the full `candidates.json` (typical Stage 1 output is 5–50 candidates, well under an agent's context budget)
 - read-only access to the repo via `--add-dir`
 
-…and returns the subset of candidates the finding actually applies to, with a per-edge score and reasoning. Since the finding record itself is minimal, the agent is expected to fetch the `url` directly (or read its training-data memory of the cited work) before scoring — the prompt includes an explicit "read the source before deciding which candidates match" instruction (§7.1.2). Agents alternate Claude Code / Codex by finding index (round-robin: `findings[0]→claude`, `findings[1]→codex`, `findings[2]→claude`, …) to debias single-model failure modes — Stage 3b's dual mode (§7.2) takes this further by running both agents per finding in parallel, but Stage 3a stays alternating to keep the mapping pass cheap.
+…and returns the subset of candidates the finding actually applies to, with a per-edge `confidence ∈ {low, medium, high}` and reasoning. Since the finding record itself is minimal, the agent is expected to fetch the `url` directly (or read its training-data memory of the cited work) before deciding — the prompt includes an explicit "read the source before deciding which candidates match" instruction (§7.1.2). Agents alternate Claude Code / Codex by finding index (round-robin: `findings[0]→claude`, `findings[1]→codex`, `findings[2]→claude`, …) to debias single-model failure modes — Stage 3b's dual mode (§7.2) takes this further by running both agents per finding in parallel, but Stage 3a stays alternating to keep the mapping pass cheap.
 
-Once all per-finding subprocesses complete, the orchestrator persists both the raw per-finding edge list (`raw_edges[]`, primary input to Stage 3b) and a candidate-centric inversion (`mappings[]`, top-K findings per candidate, K=5 default, used for reports and ablations).
+Once all per-finding subprocesses complete, the orchestrator groups edges by candidate and persists `mapping.json` — every edge with `confidence ≥ --map-min-confidence`, no top-K truncation — so Stage 3b can pivot back to finding-centric losslessly.
 
 #### 7.1.1 Mechanics
 
 ```
 INPUT:  candidates.json (N candidates), findings.json (M findings), repo
-OUTPUT: mapping.json (candidate-centric, top-K findings per candidate)
+OUTPUT: mapping.json (candidate-centric, all edges with confidence ≥ --map-min-confidence)
 
 semaphore     = asyncio.Semaphore(--max-parallel-agents)        # default 4
 agents_cycle  = itertools.cycle(["claude_code", "codex"])        # alternating
@@ -754,7 +732,7 @@ async def map_one_finding(f, agent_choice):
             - --add-dir <repo-path>                  # read-only repo access
             - stdin: STAGE3A_MAP_PROMPT(f, candidates.json)
             - timeout: --per-finding-wallclock-s     # default 90s
-        returns: {finding_id, edges: [{candidate_id, score ∈ [0,1], reasoning}]}
+        returns: {finding_id, edges: [{candidate_id, confidence ∈ {"low","medium","high"}, reasoning}]}
 
 tasks = [map_one_finding(f, next(agents_cycle)) for f in findings]
 per_finding_results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -762,12 +740,10 @@ per_finding_results = await asyncio.gather(*tasks, return_exceptions=True)
 edges = flatten([r.edges for r in per_finding_results
                  if not isinstance(r, Exception) and r.get("edges")])
 
-# Persist raw_edges (primary input to Stage 3b) AND a candidate-centric inversion
-# (top-K findings per candidate, used for reports / ablations).
-raw_edges = edges
-mapping   = group_by_candidate(edges, top_k=K)                   # K=5 default
-orphans   = [c.id for c in candidates
-             if c.id not in mapping or max_score(mapping[c.id]) < --map-min-score]
+# Persist a candidate-centric grouping of every edge above --map-min-confidence.
+# Confidence ordering: high > medium > low. Stage 3b pivots back to finding-centric in one line (§7.2).
+mapping = group_by_candidate(edges, min_confidence=--map-min-confidence)   # no top-K
+# orphans are not persisted; downstream derives them as {c.id for c in candidates} \ mapping.keys()
 ```
 
 `--mapping-agent {alternating|claude_code|codex}` — default `alternating`. (Stage 3b uses `--stage3b-mode {dual|alternating|claude_code|codex}` instead, default `dual`; see §7.2.)
@@ -779,7 +755,7 @@ orphans   = [c.id for c in candidates
 - **Stage-3a parent budget:** `--stage3a-budget-usd` (default $4 — covers ~20 findings × $0.20).
 - **Schema validation:** parse each per-finding result with the `mapping_edges` pydantic schema. On parse failure, retry once with a strict-mode reminder appended to the prompt. On second failure: record `{finding_id, edges: [], error: "schema_invalid"}` and continue — **do not** fail the stage.
 - **Reference integrity:** drop any edge whose `candidate_id` is not in `candidates.json`; record the drop count in `mapping.json.meta.drops` for diagnostics.
-- **Score sanity:** clamp scores to [0, 1]; require `reasoning` length ≥ 20 chars (else clamp the edge to score 0.45 with a warning).
+- **Confidence sanity:** confidence must be one of `{"low", "medium", "high"}`; coerce unknown / missing values to `"low"` and warn. Require `reasoning` length ≥ 20 chars (else demote the edge to `"low"` with a warning).
 - **Per-finding hang detection:** if a subprocess produces no NDJSON output for `--per-finding-stall-s` (default 60s), kill it and record `{error: "stalled"}` for that finding.
 
 #### 7.1.3 Optional BM25 pre-filter for large candidate sets
@@ -788,9 +764,9 @@ If `len(candidates) > --map-prefilter-threshold` (default 100), each per-finding
 
 #### 7.1.4 Completeness check (mapping output)
 
-Every candidate must have ≥1 edge with score ≥ `--map-min-score` (default 0.45). Otherwise the candidate is recorded in `mapping.json.orphans[]`. Because Stage 3b iterates findings, orphans (candidates with no qualifying finding) get no proposals by default — they are surfaced in the run summary and listed in `changes.json.stage3b.orphan_candidates[]`. Enable `--orphan-sweep` to run one extra Claude Code session per orphan candidate with the general-heuristics fallback prompt (§7.2). Orphan rate is surfaced as a CLI summary warning.
+Every candidate ideally has ≥1 edge with `confidence ≥ --map-min-confidence` (default `low`). Orphans (candidates with no qualifying finding) are not persisted on `mapping.json`; Stage 3b derives the set as `{c.id for c in candidates.json} \ {m.candidate_id for m in mapping.json.mappings}`. Because Stage 3b iterates findings, orphans get no proposals by default — they are surfaced in the run summary and listed in `changes.json.stage3b.orphan_candidates[]`. Enable `--orphan-sweep` to run one extra Claude Code session per orphan candidate with the general-heuristics fallback prompt (§7.2). Orphan rate is surfaced as a CLI summary warning.
 
-**Many-to-many shape preserved.** A finding may map to multiple candidates; a candidate may collect edges from multiple findings. The candidate-centric `mapping.json` is a *view* over the raw per-finding edges (also persisted under `mapping.json.raw_edges[]` for traceability and re-ranking experiments).
+**Many-to-many shape preserved.** A finding may map to multiple candidates; a candidate may collect edges from multiple findings. `mapping.json` is the candidate-centric grouping of every per-finding edge at or above `--map-min-confidence`, with no top-K cap — lossless, so Stage 3b can pivot back to finding-centric without dropping edges.
 
 #### 7.1.5 Concrete Stage-3a prompt (drop-in)
 
@@ -817,12 +793,13 @@ candidates this finding applies to, and explain why.
   Example reject: a "fused-attention CUDA kernel" finding mapped to a
   pure-Python bytecode candidate, even if both involve attention.
 - Read the actual code around (`file`, `line_start..line_end`) before assigning
-  any score above 0.6. Don't extrapolate from the rationale alone.
-- Score ∈ [0, 1]:
-    0.85+ = high confidence the technique applies as-is
-    0.60  = plausible, would need some adaptation
-    0.45  = weak / speculative; lowest score worth emitting
-    <0.45 = do not emit
+  `high` confidence. Don't extrapolate from the rationale alone.
+- Confidence ∈ {"low", "medium", "high"}:
+    high   = you read the code and the technique applies as-is (or with trivial adaptation)
+    medium = plausible — the code shape fits but real adaptation work is needed,
+             or you couldn't fully verify by reading the source
+    low    = weak / speculative; still worth surfacing for a maintainer to judge
+    (if it's weaker than `low`, do not emit at all)
 - Reasoning ≥ 20 chars and grounded in what you read (cite file:line if useful).
 - Emit ONLY candidates the finding actually maps to. Don't enumerate rejections.
 - If NO candidate fits, emit `"edges": []` — that's a valid result.
@@ -834,19 +811,19 @@ candidates this finding applies to, and explain why.
 {
   "finding_id": "{finding_id}",
   "edges": [
-    {"candidate_id": "cand-XXXX", "score": 0.0–1.0, "reasoning": "..."}
+    {"candidate_id": "cand-XXXX", "confidence": "low|medium|high", "reasoning": "..."}
   ]
 }
 ```
 
-**Prior art consulted:** RepoCoder (https://arxiv.org/abs/2303.12570), CodeRAG-Bench (https://arxiv.org/abs/2406.14497), and Agentless (https://arxiv.org/abs/2407.01489) for retrieval and code-to-spec patterns. Stage 3a and Stage 3b share the same per-finding fan-out shape — same semaphore, same NDJSON tailing, same schema-validate-then-retry envelope. They differ in: (a) Stage 3a alternates Claude Code / Codex per finding (one session each), while Stage 3b runs **both** agents in parallel per finding (two sessions each) and cross-agent-dedupes — same dual pattern as Stage 3c, (b) Stage 3a emits scored edges while Stage 3b emits ranked proposals grouped by candidate, and (c) Stage 3b is given the repo + the finding's mapped candidates only (not the full candidate list).
+**Prior art consulted:** RepoCoder (https://arxiv.org/abs/2303.12570), CodeRAG-Bench (https://arxiv.org/abs/2406.14497), and Agentless (https://arxiv.org/abs/2407.01489) for retrieval and code-to-spec patterns. Stage 3a and Stage 3b share the same per-finding fan-out shape — same semaphore, same NDJSON tailing, same schema-validate-then-retry envelope. They differ in: (a) Stage 3a alternates Claude Code / Codex per finding (one session each), while Stage 3b runs **both** agents in parallel per finding (two sessions each) and cross-agent-dedupes — same dual pattern as Stage 3c, (b) Stage 3a emits categorical-confidence edges while Stage 3b emits ranked proposals grouped by candidate, and (c) Stage 3b is given the repo + the finding's mapped candidates only (not the full candidate list).
 
 ### 7.2 Change generation (Stage 3b)
 
 Per mapped finding, **both** Claude Code and Codex run as separate subprocesses in parallel (`--stage3b-mode dual`, default). Each session is fed:
 
 - the finding (the 5-field record: `id`, `title`, `url`, `source_type`, `technique_summary`); the agent is expected to fetch `url` before proposing changes when the summary is insufficient,
-- the **subset of candidates** that finding mapped to with score ≥ `--map-min-score` — pulled directly from `mapping.json.raw_edges[]`, not from the candidate-centric pivot,
+- the **subset of candidates** that finding mapped to with `confidence ≥ --map-min-confidence` — pivoted from `mapping.json.mappings[]` (one-line group-by on `finding_id`, done once at stage start),
 - read-only repo access via `--add-dir`.
 
 Each session returns ranked proposals **grouped by candidate**: for each mapped candidate, 1–5 proposals derived from this one finding's technique. The proposal's supporting finding is implicit (the session's own `finding_id`) — Stage 3b never mixes findings within a session. The two agents' outputs for the same `finding_id` are then merged and cross-agent-deduped into one `records[]` entry.
@@ -855,13 +832,19 @@ Each session returns ranked proposals **grouped by candidate**: for each mapped 
 
 **Fan-out shape.**
 ```
-INPUT:   findings.json, mapping.json (raw_edges[]), repo
+INPUT:   findings.json, mapping.json, repo
 OUTPUT:  records[] (one record per finding, with cross-agent-deduped proposals)
 
 semaphore = asyncio.Semaphore(--max-parallel-agents)             # default 4
 
+# Pivot mapping.json once at stage start.
+edges_by_finding = defaultdict(list)
+for m in mapping.mappings:
+    for e in m.findings:
+        edges_by_finding[e.finding_id].append({"candidate_id": m.candidate_id, **e})
+
 async def changegen_one(f, agent_choice):
-    mapped_candidates = [e for e in raw_edges if e.finding_id == f.id]
+    mapped_candidates = edges_by_finding[f.id]
     async with semaphore:
         invoke agent_choice with:
             - --add-dir <repo-path>                              # read-only
@@ -891,7 +874,7 @@ Other modes via `--stage3b-mode`:
 - Parent stage budget: `--stage3b-budget-usd` (default $16 for dual mode at ~20 findings × 2 agents × $0.50 with headroom; halved automatically for `alternating`, halved again for pinned).
 - Stall detection: kill the subprocess if no NDJSON output for `--per-finding-changegen-stall-s` (default 90s); record `{error: "stalled"}` and continue.
 
-**Validation.** Parse each per-session result with the `finding_changes` pydantic schema. On parse failure, retry once with a strict-mode reminder appended. On second failure: record `{finding_id, agent, candidate_proposals: [], error: "schema_invalid"}` and continue — **do not** fail the stage. Drop any `candidate_id` not in `raw_edges` for that finding (defense against the model inventing candidates). A finding's overall record is `succeeded` if **at least one** of its agent sessions parsed cleanly.
+**Validation.** Parse each per-session result with the `finding_changes` pydantic schema. On parse failure, retry once with a strict-mode reminder appended. On second failure: record `{finding_id, agent, candidate_proposals: [], error: "schema_invalid"}` and continue — **do not** fail the stage. Drop any `candidate_id` not in the pivoted edge list for that finding (defense against the model inventing candidates). A finding's overall record is `succeeded` if **at least one** of its agent sessions parsed cleanly.
 
 **Cross-agent dedupe (dual mode only).** Two layers:
 1. **Same finding × same candidate × same idea.** When both Claude Code and Codex produce a proposal for the same `(finding_id, candidate_id)` with title similarity ≥ 0.7 or LLM-judge agreement on borderline (0.3–0.7), they collapse to **one** proposal with `proposed_by: ["claude_code", "codex"]` and `agreed_with_other_agent: true`. The merged proposal takes the union of `prerequisites`, max-severity `risk`, and median `effort_estimate`. Dropped duplicates are counted in `stage3b.dedupe.rejected_cross_agent_duplicate`.
@@ -930,14 +913,14 @@ of this technique after you read the code, emit zero proposals for it and say so
 in `skip_reason`.
 
 ## Candidates the mapping pass tied to this finding
-For each candidate the mapping stage scored ≥ {map_min_score} (read the code via
-the repo before proposing anything):
+For each candidate the mapping stage rated at confidence ≥ {map_min_confidence}
+(read the code via the repo before proposing anything):
 
 {for each c in mapped_candidates:}
-- candidate_id:  {c.id}
-- file:          {c.file}
-- line range:    {c.line_start}-{c.line_end}
-- mapping_score: {c.score}
+- candidate_id:       {c.id}
+- file:               {c.file}
+- line range:         {c.line_start}-{c.line_end}
+- mapping_confidence: {c.confidence}   # one of "low", "medium", "high"
 - mapping_reasoning (from Stage 3a — may be wrong, verify):
   """
   {c.mapping_reasoning}
@@ -1203,9 +1186,9 @@ optquest/
 │   ├── stage3/
 │   │   ├── mapping/
 │   │   │   ├── per_finding.py       # per-finding subprocess fan-out + semaphore + round-robin
-│   │   │   ├── invert.py            # raw_edges -> candidate-centric top-K mapping
+│   │   │   ├── invert.py            # per-finding edges -> candidate-centric mapping (no top-K)
 │   │   │   ├── prefilter_bm25.py    # optional pre-filter for >100-candidate sets (off by default)
-│   │   │   ├── validate.py          # per-finding schema parse, ref-integrity, score clamp
+│   │   │   ├── validate.py          # per-finding schema parse, ref-integrity, confidence coerce
 │   │   │   └── prompts/stage3a_map.md
 │   │   ├── changegen/
 │   │   │   ├── per_finding.py       # per-finding dual/alternating fan-out (Claude Code + Codex)
