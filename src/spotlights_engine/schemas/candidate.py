@@ -8,10 +8,12 @@ the same validation runs model-side and orchestrator-side.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class Candidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     id: str = Field(pattern=r"^cand-\d{4}$")
     file: str
     line_start: int = Field(ge=1)
@@ -26,6 +28,11 @@ class Candidate(BaseModel):
 
 
 class Candidates(BaseModel):
+    # `extra="forbid"` emits `additionalProperties: false`, which OpenAI's
+    # structured-output (used by codex `--output-schema`) requires on every
+    # object level. Without it codex returns invalid_json_schema (400).
+    model_config = ConfigDict(extra="forbid")
+
     module_qualified_name: str
     candidates: list[Candidate] = Field(min_length=1)
 
