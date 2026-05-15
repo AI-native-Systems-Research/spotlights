@@ -4,7 +4,7 @@
 
 ## Goal
 
-Build a Python pipeline that, given `(repo_url_or_path, module_path)`, produces `changes.json` — a list of optimization proposals tied to concrete code locations in the target module. Each proposal has one of two provenance types: **research-grounded** (backed by exactly one external finding — paper / blog / PR / issue / talk — discovered in Stage 2) or **agent-novel** (proposed by Codex and Claude Code from their own training, *not* mentioned in any Stage-2 finding, on top of a candidate location). Every proposal also carries explicit reasoning emitted by the agent. The pipeline runs Stage 1 (candidate discovery via Claude↔Codex alternating review) and Stage 2 (single GPT Researcher call) in **parallel**, then Stage 3 runs in three sequential steps: 3a (finding↔candidate mapping), 3b (per-finding research-grounded proposals), and 3c (per-candidate agent-novel proposals that don't overlap Stage 3b's proposals for the same candidate).
+Build a Python pipeline that, given `(repo_url_or_path, module_qualified_name)`, produces `changes.json` — a list of optimization proposals tied to concrete code locations in the target module. Each proposal has one of two provenance types: **research-grounded** (backed by exactly one external finding — paper / blog / PR / issue / talk — discovered in Stage 2) or **agent-novel** (proposed by Codex and Claude Code from their own training, *not* mentioned in any Stage-2 finding, on top of a candidate location). Every proposal also carries explicit reasoning emitted by the agent. The pipeline runs Stage 1 (candidate discovery via Claude↔Codex alternating review) and Stage 2 (single GPT Researcher call) in **parallel**, then Stage 3 runs in three sequential steps: 3a (finding↔candidate mapping), 3b (per-finding research-grounded proposals), and 3c (per-candidate agent-novel proposals that don't overlap Stage 3b's proposals for the same candidate).
 
 ---
 
@@ -65,7 +65,7 @@ The driver takes `(repo, module_qualified_name)`, resolves the `Module` record a
 
 ## Output JSONs
 
-All four artifacts live under `~/.cache/optquest/<repo_slug>/<run_id>/`. All schemas are checked with `pydantic >= 2.7` models published in `optquest.schema`, which also exports `model_json_schema()` to disk for external validators.
+All four canonical artifacts live directly under `~/.cache/optquest/<repo_slug>/<run_id>/`. Stage-specific scratch logs and per-agent transcripts may live in subdirectories such as `candidate_discovery/`. All schemas are checked with `pydantic >= 2.7` models published in `spotlights_engine.schemas`; the driver exports each model's `model_json_schema()` to disk for external validators.
 
 ### `candidates.json` — Stage 1 output
 
@@ -165,6 +165,3 @@ Candidate-centric. Per candidate, two parallel lists of changes:
 ```
 
 ---
-
-
-

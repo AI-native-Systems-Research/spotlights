@@ -1,19 +1,20 @@
 # candidate_research_proposer — Stage 1: Candidate Discovery
 
-Stage 1 returns a `Candidates` pydantic model — a list of falsifiable, high-yield optimization candidate locations inside the target module — through a Claude Code bootstrap followed by a fixed number of alternating Claude Code ↔ Codex review iterations. The model is also serialized to `candidates.json` as the on-disk artifact consumed by Stage 3a. The pattern is lifted from [docs/old/modules_plan.md](old/modules_plan.md) and narrowed to a single module: bootstrap drafts, reviewers prune/sharpen/add, run `num_review_iterations` reviews and stop.
+Stage 1 returns a `Candidates` pydantic model — a list of falsifiable, high-yield optimization candidate locations inside the target module — through a Claude Code bootstrap followed by a fixed number of alternating Claude Code ↔ Codex review iterations.
 
 ## 1. Python API
 
-Package: `spotlights_engine.candidates_discovery`. Stage 1 is invoked as a pure function. Input is a resolved `Module` record from [src/spotlights_engine/schemas/modules.py](../src/spotlights_engine/schemas/modules.py); output is a `Candidates` pydantic model that also serializes to the `candidates.json` shown in [candidate_research_proposer_architecture.md](candidate_research_proposer_architecture.md#candidatesjson--stage-1-output). The driver does the `ProjectTree.from_json(modules_json).resolve(qn)` lookup once and passes the `Module` in.
+Package: `spotlights_engine.candidates.discovery`. Stage 1 is invoked as a pure function. Input is the module's `ProjectTree.walk()` qualified name plus the resolved `Module` record from [src/spotlights_engine/schemas/modules.py](../src/spotlights_engine/schemas/modules.py); output is a `Candidates` pydantic model that also serializes to the `candidates.json` shown in [candidate_research_proposer_architecture.md](candidate_research_proposer_architecture.md#candidatesjson--stage-1-output). The driver does the `ProjectTree.from_json(modules_json).resolve(qn)` lookup once and passes both `qn` and `Module` in.
 
 ```python
-from spotlights_engine.candidates_discovery import discover, DiscoveryConfig, DiscoveryResult
+from spotlights_engine.candidates.discovery import discover, DiscoveryConfig, DiscoveryResult
 from spotlights_engine.schemas.modules import Module
 
 result: DiscoveryResult = discover(DiscoveryConfig(
     repo_path=Path("/abs/path/to/repo"),
+    module_qualified_name="v1/engine/core",
     module=Module(...),                  # resolved from modules.json by the driver
-    artifacts_dir=Path(".../<run_id>/"),  # stage writes into <artifacts_dir>/candidate_discovery/
+    artifacts_dir=Path(".../<run_id>/"),  # final artifact lands at <artifacts_dir>/candidates.json
 ))
 ```
 
@@ -22,27 +23,38 @@ result: DiscoveryResult = discover(DiscoveryConfig(
 ```python
 class DiscoveryConfig(BaseModel):
     repo_path: Path                        # local checkout root; must exist
+    module_qualified_name: str             # ProjectTree.walk() key, e.g. "v1/engine/core"
     module: Module                         # resolved Module record (see schemas/modules.py)
-    artifacts_dir: Path                    # shared run dir; stage writes into <artifacts_dir>/candidate_discovery/
+    artifacts_dir: Path                    # shared run dir; final artifact is <artifacts_dir>/candidates.json
 
-    num_review_iterations: int = 3         # fixed; 1 bootstrap + N reviews = N+1 total runs
+    num_review_iterations: int = 3         # bootstrap + N reviews; no convergence / no early stop
+    claude_max_turns: int = 30
+    codex_model: str = "gpt-5.5"
+    codex_reasoning_effort: Literal["minimal", "low", "medium", "high"] = "high"
 ```
 
 ### `Candidates` and `DiscoveryResult` (output)
 
-`Candidates` is the on-disk schema:
+`Candidates` is the on-disk schema. All shape constraints are enforced in pydantic so the exported `model_json_schema()` carries them into both subprocess validators:
 
 ```python
 class Candidate(BaseModel):
-    id: str                                # "cand-0001", minted by the bootstrap agent
-    file: str                              # repo-root-relative; MUST be under module.path
-    line_start: int                        # 1-indexed inclusive
-    line_end: int                          # 1-indexed inclusive, ≥ line_start
-    rationale: str                         # ≤ 240 chars, falsifiable
+    id: str = Field(pattern=r"^cand-\d{4}$")  # minted by bootstrap; monotone across reviews
+    file: str                                 # repo-root-relative; MUST be under module.path
+    line_start: int = Field(ge=1)             # 1-indexed inclusive
+    line_end: int = Field(ge=1)               # 1-indexed inclusive
+    rationale: str = Field(min_length=1, max_length=240)  # falsifiable
+
+    @model_validator(mode="after")
+    def _check_range(self) -> "Candidate":
+        if self.line_end < self.line_start:
+            raise ValueError("line_end must be >= line_start")
+        return self
+
 
 class Candidates(BaseModel):
     module_qualified_name: str
-    candidates: list[Candidate]
+    candidates: list[Candidate] = Field(min_length=1)
 ```
 
 `DiscoveryResult` wraps `Candidates` with the loop telemetry:
@@ -51,18 +63,33 @@ class Candidates(BaseModel):
 class IterationTelemetry(BaseModel):
     n: int                                 # 0 = bootstrap, 1..N = reviews
     agent: Literal["claude_code", "codex"]
+    session_id: str | None = None
     duration_s: float
-    added: list[str]                       # candidate ids added vs prev iter
-    removed: list[str]                     # candidate ids removed vs prev iter
-    modified: list[str]                    # candidate ids whose range/rationale changed
+    cost_usd: float | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    candidate_count: int
+    schema_retries: int = 0
+    dropped_outside_module: int = 0        # candidate.file resolves outside module.path
+    dropped_missing_file: int = 0          # candidate.file does not exist in repo_path
+    dropped_invalid_ranges: int = 0        # line_start/line_end out of file bounds
+    added: list[str]                       # ids new vs prev iter; for n=0, the full bootstrap list
+    removed: list[str]                     # ids in prev iter but not this one; empty for n=0
+    modified: list[str]                    # ids present in both iters with changed line_start, line_end, or rationale; empty for n=0
 
 
 class DiscoveryResult(BaseModel):
     candidates: Candidates
     iterations: list[IterationTelemetry]
+    total_duration_s: float
+    total_cost_usd: float | None = None
 ```
 
-`discover` also persists `candidates.json` (the canonical artifact consumed by Stage 3a) and a per-iteration `iterations.jsonl` telemetry file under `config.artifacts_dir / "candidate_discovery"`; the in-memory result and on-disk artifacts are equivalent. The loop always runs `1 + num_review_iterations` iterations; validation failure inside an iteration raises rather than driving a stop reason (see §6).
+`discover` also persists `<artifacts_dir>/candidates.json` (the canonical artifact consumed by Stage 3a) and a per-iteration `candidate_discovery/iterations.jsonl` telemetry file; the in-memory result and on-disk artifacts are equivalent. The loop always runs `1 + num_review_iterations` iterations and never resumes (a pre-existing `<artifacts_dir>/candidate_discovery/` is a setup error, not a resume point). Failure modes inside an iteration split three ways:
+
+- **schema-parse failure** retries once with a strict-mode reminder appended (§6.1); a second failure raises `DiscoveryValidationError`.
+- **protocol checks** — qualified-name mismatch (§6.2), ID uniqueness/monotonicity (§6.6), target-repo mutation (§6.8) — raise immediately.
+- **content drops** — module containment (§6.3), path existence (§6.4), line-range sanity (§6.5) — drop the offending candidate and increment a counter; the iteration continues.
 
 ## 2. Bootstrap + alternating review loop
 
@@ -75,66 +102,78 @@ i=3: codex      review                 → candidates_v3.json   # for num_review
 
 The bootstrap is always `claude_code`. Review iteration `N` (1-indexed) uses `agents[(N-1) % 2]` with `agents = ["codex", "claude_code"]`, so the bootstrap is reviewed first by the *other* agent. With the default `num_review_iterations=3` the full rotation is `claude_code → codex → claude_code → codex`. Each review reads the prior iteration's full `candidates.json`, prunes false positives, merges duplicates, sharpens rationales, and may add at most 5 new candidates.
 
+Iteration `num_review_iterations` is the downstream-facing result: its post-drop `candidates.json` is copied to `<artifacts_dir>/candidates.json` (§6.7).
+
 ## 3. Run directory layout
 
-Stage 1 receives the shared run dir as `artifacts_dir` — conventionally `~/.cache/optquest/<repo_slug>/<run_id>/` per the architecture doc — and writes everything under its own `candidate_discovery/` subfolder. The driver creates `<run_id>/` and passes it in; the stage mints `<artifacts_dir>/candidate_discovery/` itself.
+Stage 1 receives the shared run dir as `artifacts_dir` — conventionally `~/.cache/optquest/<repo_slug>/<run_id>/` per the architecture doc. The final, Stage-3a-facing artifact is `<artifacts_dir>/candidates.json`; all Stage 1 scratch logs live under `<artifacts_dir>/candidate_discovery/`. The driver creates `<run_id>/` and passes it in; the stage mints `<artifacts_dir>/candidate_discovery/` itself.
 
 ```
 <artifacts_dir>/
+  candidates.json            # final validated candidates from the last iteration
   candidate_discovery/
+    candidates.schema.json   # exported from the pydantic schema for subprocess validation
+    iterations.jsonl
     iter_0_bootstrap/
-      candidates.json        # validated candidates from claude_code
+      candidates.json        # orchestrator-written, post-drop validated JSON for this iteration
+      last_message.json      # exact final-assistant-message JSON string, pre-validation
       prompt.md              # the exact wrapped prompt sent
       raw_stdout.log
       raw_stderr.log
-      cost.json
     iter_1_codex/
       candidates.json
-      diff_from_prev.md      # human-readable structural diff vs iter_0
+      last_message.json
+      diff_from_prev.md      # human-readable structural diff vs the previous iteration (present in every review iter, i >= 1)
       prompt.md
       raw_stdout.log
       raw_stderr.log
-      cost.json
-    iter_2_claude_code/...
+    iter_2_claude_code/      # same files as iter_1_codex
+    iter_3_codex/            # same files as iter_1_codex
 ```
 
 
 ## 4. Subprocess invocation
 
-The orchestrator never inlines the prompt in argv (Linux `MAX_ARG_STRLEN` = 128 KB). Both agents receive the prompt on stdin and write `candidates.json` to their iteration directory.
+The orchestrator never inlines the prompt in argv (Linux `MAX_ARG_STRLEN` = 128 KB). Both agents receive the prompt on stdin and return one JSON object as the final assistant message. In every iteration the orchestrator: (a) captures the final message verbatim to `<iter_dir>/last_message.json`, (b) runs the §6 validation pipeline, (c) writes the post-drop result to `<iter_dir>/candidates.json`, and (d) on the last iteration only, copies that file to `<artifacts_dir>/candidates.json`. Neither subprocess ever writes either of those files itself.
 
 **Claude Code** ([cli-reference](https://code.claude.com/docs/en/cli-reference), [permission-modes](https://code.claude.com/docs/en/permission-modes)):
 
 ```
+SCHEMA_PATH=<artifacts_dir>/candidate_discovery/candidates.schema.json
 claude -p \
   --output-format stream-json --verbose \
-  --input-format stream-json \
+  --json-schema "$(<"$SCHEMA_PATH")" \
   --permission-mode plan \
-  --max-turns 30 \
-  --add-dir <iter_dir> \
+  --max-turns ${claude_max_turns} \
   < prompt.md
 ```
 
-`--permission-mode plan` keeps the agent read-only against the target repo; `--add-dir <iter_dir>` is the single writable root for `candidates.json`. The terminal `{"type":"result",…,"total_cost_usd":…,"session_id":…}` NDJSON event drives `IterationTelemetry`.
+Run Claude with `cwd=<repo_path>`. `--permission-mode plan` keeps the agent read-only against the target repo. The schema is small (a few KB) so inline-via-shell is well under `MAX_ARG_STRLEN`. The terminal `{"type":"result",…,"total_cost_usd":…,"session_id":…}` NDJSON event supplies `session_id`, duration, and cost when available; the orchestrator writes the `result` payload string verbatim to `<iter_dir>/last_message.json` and then runs §6 over it.
 
 **Codex** ([cli reference](https://developers.openai.com/codex/cli/reference), [noninteractive](https://developers.openai.com/codex/noninteractive)):
 
 ```
 codex exec - \
   --json \
-  --output-last-message <iter_dir>/last_message.txt \
-  --output-schema candidates.schema.json \
-  --sandbox workspace-write \
-  -C <iter_dir> \
-  --add-dir <repo_path> \
-  -c model='"gpt-5.5"' \
-  -c model_reasoning_effort='"high"' \
+  --output-last-message <iter_dir>/last_message.json \
+  --output-schema <artifacts_dir>/candidate_discovery/candidates.schema.json \
+  --sandbox read-only \
+  -C <repo_path> \
+  -c model='"${codex_model}"' \
+  -c model_reasoning_effort='"${codex_reasoning_effort}"' \
   < prompt.md
 ```
 
-`codex exec -` reads stdin. `--sandbox read-only` plus `--add-dir` is *not* a supported "read everywhere, write here" combo (per the Codex docs); we make `<iter_dir>` the workspace and add the repo read-only via `--add-dir <repo_path>`. `--output-schema` validates the model's final message against `candidates.schema.json` (exported by `optquest.schema`).
+`codex exec -` reads stdin. `-C <repo_path>` makes repo-root-relative paths natural; `--sandbox read-only` blocks target-repo writes from model-issued commands. The Codex CLI itself writes `--output-last-message` to the absolute `<iter_dir>/last_message.json` (containing the final assistant message). `--output-schema` validates that message against `candidates.schema.json` before the CLI exits, so a malformed shape is caught both by Codex *and* by the orchestrator. Resource asymmetry is intentional: Claude is capped via `--max-turns`; Codex has no equivalent turn cap and is bounded only by `model_reasoning_effort` and wall-clock timeout.
 
-**Env scrubbing.** Both subprocesses run under a CORAL-style `_clean_env`: strip `OPENAI_BASE_URL` (reserved for Stage 2's LiteLLM proxy) and any orchestrator-only telemetry vars before exec. Each agent uses its own credentials.
+`cwd` semantics are asymmetric by CLI design (Claude is run with `cwd=<repo_path>`; Codex with `-C <repo_path>`); both put repo-root-relative paths at the root of each model's working set.
+
+**Env scrubbing.** Both subprocesses run under a CORAL-style `_clean_env` that, in addition to passing through the host PATH and each agent's own credentials, drops:
+
+- `OPENAI_BASE_URL`, `OPENAI_API_BASE` — reserved for Stage 2's LiteLLM proxy; would otherwise reroute Codex.
+- `ANTHROPIC_BASE_URL` — same reasoning for Claude.
+- `OPTQUEST_*`, `SPOTLIGHTS_*` — orchestrator telemetry namespaces that must not leak into agent context.
+- `HTTP_PROXY`, `HTTPS_PROXY`, `ALL_PROXY` — proxies pinned by the orchestrator, not the subprocess.
 
 ## 5. Prompt wrapper contract
 
@@ -144,24 +183,38 @@ The orchestrator wraps every prompt with a fixed preamble pinning the I/O contra
 <preamble>
 You are running as a non-interactive subprocess. Your current working directory
 is the target repository — do NOT modify it; read only.
-- Write valid JSON only (no markdown fence) to: <ITER_DIR>/candidates.json
-- Make your final assistant message exactly "DONE" when the file is written. No commentary.
+- Return exactly one valid JSON object as your final assistant message.
+- Do not write files. The orchestrator writes candidates.json after validation.
+- No markdown fence, no commentary, no "DONE" sentinel.
 </preamble>
 
 <the verbatim bootstrap or review prompt below>
 ```
 
+Before substitution into either prompt, the orchestrator pre-formats the `Module` fields into agent-friendly strings:
+
+- `{main_files}` → bulleted lines, one per `File`: `- src/foo/x.py (entrypoint)`.
+- `{submodule_names}` → comma-joined `m.name for m in module.submodules`, or `"(none)"`.
+- `{depends_on}` → comma-joined `module.depends_on` (each entry is another module's qualified name, **not** a filesystem path), or `"(none)"`.
+
 For review iterations the orchestrator additionally inlines the prior iteration's `candidates.json` content into the review prompt (the `@candidates_prev.json` reference in §9) before wrapping.
 
 ## 6. Validation per iteration
 
-Run after each subprocess exits:
+Run after each subprocess exits, in this order. Steps marked **(raise)** abort the run via `DiscoveryValidationError` / `DiscoveryMutationError` (both in `spotlights_engine.candidates.discovery.errors`); steps marked **(drop)** prune the offending candidate and increment a counter on `IterationTelemetry`.
 
-1. **Schema parse** — `Candidates.model_validate_json()`. On failure, retry once with a strict-mode reminder appended to the prompt; second failure raises `DiscoveryValidationError` and aborts the run.
-2. **Module containment** — every `candidate.file` must lie under `Module.path` (the resolved record's filesystem path). Violators are dropped; count goes to `IterationTelemetry.dropped_invalid_paths`.
-3. **Path existence** — every `candidate.file` must resolve to an existing file in `repo_path`. Same drop-and-count behavior.
-4. **Line range sanity** — `1 ≤ line_start ≤ line_end ≤ file_line_count`. Same drop-and-count, on `dropped_invalid_ranges`.
-5. **Target-repo mutation guard** — diff the repo's `git status --porcelain=v1 -z` (or a lightweight manifest if not a git repo) before and after each subprocess; any change outside `<iter_dir>` is a protocol violation and raises `DiscoveryMutationError`.
+1. **Schema parse** — `Candidates.model_validate_json()` over the captured final assistant message. On failure, retry the iteration once with a strict-mode reminder appended to the prompt; the retry increments `schema_retries`. A second failure **(raises)**.
+2. **Qualified-name check** **(raises)** — `Candidates.module_qualified_name` must equal `config.module_qualified_name`.
+3. **Module containment** **(drop → `dropped_outside_module`)** — every `candidate.file`, normalized via `Path.resolve(strict=False)`, must lie under `config.module.path` (the resolved record's repo-relative filesystem path).
+4. **Path existence** **(drop → `dropped_missing_file`)** — every `candidate.file` must resolve to an existing file in `repo_path`.
+5. **Line range sanity** **(drop → `dropped_invalid_ranges`)** — `1 ≤ line_start ≤ line_end ≤ file_line_count`. (`line_end ≥ line_start` is already enforced by the pydantic validator.)
+6. **ID integrity** **(raises)** — within an iteration, `id` values are unique. Across review iterations (`n ≥ 1`):
+   - any `id` carried over from the previous iteration MUST retain the previous iteration's `file` (rationale and line range may change);
+   - every newly minted `id` MUST be strictly greater than the previous iteration's `max(id)` under lexicographic order on the zero-padded `cand-NNNN` form.
+7. **Persist normalized JSON** **(raises if empty)** — re-validate the surviving list via `Candidates.model_validate(dict(model_qualified_name=..., candidates=survivors))` so the `min_length=1` invariant fires on the *current* iteration if drops emptied it (raises `DiscoveryValidationError`). Then serialize via `model_dump_json(indent=2)` to `<iter_dir>/candidates.json`. On the final iteration (`n == num_review_iterations`), copy that file byte-for-byte to `<artifacts_dir>/candidates.json`.
+8. **Target-repo mutation guard** **(raises `DiscoveryMutationError`)** — diff the repo's `git status --porcelain=v1 -z` (or a lightweight `mtime+size+xattr` manifest if `repo_path` is not a git work tree) before and after each subprocess. Coverage is limited to `repo_path`; the orchestrator does not detect writes outside this subtree, but `--permission-mode plan` and `--sandbox read-only` are the primary defenses there.
+
+After step 7 the orchestrator also computes `IterationTelemetry.added` / `removed` / `modified` by joining on `id` against the previous iteration: `added = ids_n \ ids_{n-1}`, `removed = ids_{n-1} \ ids_n`, `modified = { id in ids_n ∩ ids_{n-1} : (line_start, line_end, rationale.strip()) differs }`. For `n=0`, `added` is the full bootstrap list and the other two are empty.
 
 ## 7. Loop termination
 
@@ -179,12 +232,13 @@ falsifiable rationale.
 
 ## Module under audit
 - module_qualified_name: {module_qualified_name}
-- module.name:           {module.name}
-- module.path:           {module.path}                   # all candidate files MUST lie under this
-- module.description:    {module.description}
-- module.depends_on:     {module.depends_on}
-- module.main_files:     {module.main_files}             # path + role; start here
-- submodules:            {module.submodules names}       # nested modules under this one
+- module.name:           {module_name}
+- module.path:           {module_path}                   # all candidate files MUST lie under this
+- module.description:    {module_description}
+- module.depends_on:     {depends_on}                    # qualified names of sibling modules, NOT filesystem paths
+- module.main_files:                                     # start here, in order
+{main_files}
+- submodules:            {submodule_names}               # nested modules under this one
 
 ## What counts as a "high-yield candidate"
 A code location worth attention if any of the following are visibly true:
@@ -199,30 +253,31 @@ A code location worth attention if any of the following are visibly true:
 ## What to read first
 1. Read every file in `module.main_files` (they are the entry points by design).
 2. Walk `module.path` and read the rest of the module's source.
-3. Cross-reference `depends_on` only to understand call shapes — do NOT propose
-   candidates outside `module.path`.
+3. `depends_on` lists other modules' qualified names (e.g. `v1/engine/scheduler`),
+   not paths. You MAY look them up against the project tree to understand call
+   shapes, but do NOT propose candidates outside `module.path`.
 
 ## Output (REQUIRED — strict JSON, no markdown fence)
-Emit ONE JSON object matching @candidates.schema.json:
+Emit ONE JSON object matching the `Candidates` schema enforced by the wrapper:
 {
   "module_qualified_name": "{module_qualified_name}",
   "candidates": [
     {
       "id": "cand-0001",
-      "file": "<repo-root-relative path under {module.path}>",
+      "file": "<repo-root-relative path under {module_path}>",
       "line_start": <1-indexed inclusive>,
-      "line_end":   <1-indexed inclusive, ≥ line_start>,
-      "rationale":  "<≤240 chars; cite the loop / the alloc / the sync>"
+      "line_end":   <1-indexed inclusive, >= line_start>,
+      "rationale":  "<<=240 chars; cite the loop / the alloc / the sync>"
     }
   ]
 }
 
 Constraints:
 - Aim for 5–40 candidates; quality beats quantity. Do not pad to hit a count.
-- Every `file` MUST be under `{module.path}` and exist in the checkout.
-- `id` values must be unique within this list; use `cand-NNNN` zero-padded.
-- Do NOT explain outside the JSON object. End the assistant message with "DONE"
-  after writing the file.
+- Every `file` MUST be under `{module_path}` and exist in the checkout.
+- `id` values must be unique within this list; use `cand-NNNN` zero-padded,
+  starting at `cand-0001` and increasing monotonically.
+- Do NOT explain outside the JSON object.
 ````
 
 ## 9. Review prompt
@@ -237,7 +292,7 @@ add at most 5 *new* candidates the previous pass missed.
 ## Inputs
 - previous candidates: @candidates_prev.json     # inlined by the orchestrator
 - module_qualified_name: {module_qualified_name}
-- module.path: {module.path}                     # every candidate's `file` MUST live here
+- module.path: {module_path}                     # every candidate's `file` MUST live here
 
 ## Rules
 - DO NOT inflate the list. If the previous pass was good, return it nearly unchanged.
@@ -245,11 +300,14 @@ add at most 5 *new* candidates the previous pass missed.
   `module.path`, or whose `line_start..line_end` is out of range for that file.
 - Merge candidates that point at the same hot path with overlapping line ranges
   (keep one `id`, drop the others).
-- For each kept candidate you MAY tighten `rationale` or adjust `line_start` /
-  `line_end`. Do NOT change `id` for kept candidates.
+- For each KEPT candidate you MAY tighten `rationale` and adjust `line_start` /
+  `line_end`. You MUST NOT change `id` or `file`. If you believe a kept
+  candidate's `file` is wrong, drop the old `id` and mint a new one instead.
 - For each NEW candidate, the rationale must cite a specific code construct
   (function name, loop, alloc call, sync primitive) — not a vague category.
-- Mint new ids continuing from the previous pass's highest `cand-NNNN`.
+- Mint new ids strictly greater than the previous pass's highest `cand-NNNN`,
+  zero-padded to four digits.
+- Add at most 5 new candidates per review pass.
 
 ## Output (REQUIRED — strict JSON, no markdown fence)
 Same schema as the previous pass:
@@ -259,5 +317,5 @@ Same schema as the previous pass:
 }
 
 If you genuinely have no changes, return the previous list unchanged. Do NOT pad.
-End the assistant message with "DONE" after writing the file.
+Do NOT explain outside the JSON object.
 ````
