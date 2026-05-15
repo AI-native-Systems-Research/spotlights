@@ -1,4 +1,4 @@
-# Implementation Plan: Evidence-Backed Code Optimization Pipeline
+# Implementation Plan: candidate_research_proposer
 
 
 ---
