@@ -4,12 +4,12 @@ Stage 1 produces a `Candidates` pydantic model — a list of falsifiable, high-y
 
 ## 1. Python API
 
-Package: `spotlights_engine.candidates.discovery`. Stage 1 is invoked as a pure function. Input is the module's `ProjectTree.walk()` qualified name plus the resolved `Module` record from [src/spotlights_engine/schemas/modules.py](../src/spotlights_engine/schemas/modules.py); output is a `DiscoveryResult` whose `candidates` field also serializes to the `candidates.json` shown in [candidate_research_proposer_architecture.md](candidate_research_proposer_architecture.md#candidatesjson--stage-1-output). The driver does the `ProjectTree.from_json(modules_json).resolve(qn)` lookup once, raises a setup error if it returns `None`, and passes both `qn` and `Module` in.
+Package: `spotlights_engine.candidate_discovery`. Stage 1 is invoked as a pure function. Input is the module's `ProjectTree.walk()` qualified name plus the resolved `Module` record from [src/spotlights_engine/schemas/modules.py](../src/spotlights_engine/schemas/modules.py); output is a `DiscoveryResult` whose `candidates` field also serializes to the `candidates.json` shown in [candidate_research_proposer_architecture.md](candidate_research_proposer_architecture.md#candidatesjson--stage-1-output). The driver does the `ProjectTree.from_json(modules_json).resolve(qn)` lookup once, raises a setup error if it returns `None`, and passes both `qn` and `Module` in.
 
 ```python
 from pathlib import Path
 
-from spotlights_engine.candidates.discovery import discover, DiscoveryConfig, DiscoveryResult
+from spotlights_engine.candidate_discovery import discover, DiscoveryConfig, DiscoveryResult
 from spotlights_engine.schemas.modules import Module
 
 result: DiscoveryResult = discover(DiscoveryConfig(
@@ -137,6 +137,8 @@ Stage 1 receives the shared run dir as `artifacts_dir` — conventionally `~/.ca
 
 ## 4. Subprocess invocation
 
+Before the first iteration the orchestrator exports the `Candidates` pydantic schema via `model_json_schema()` and writes it to `<artifacts_dir>/candidate_discovery/candidates.schema.json`; both subprocesses then receive it (Claude inline via `--json-schema`, Codex by path via `--output-schema`) so the same shape constraints are enforced model-side as well as orchestrator-side.
+
 The orchestrator never inlines the prompt in argv (Linux `MAX_ARG_STRLEN` = 128 KB). Both agents receive the prompt on stdin and return one JSON object as the final assistant message. In every iteration the orchestrator: (a) captures or directs the CLI to capture the final message verbatim to `<iter_dir>/last_message.json`, (b) runs the §6 validation pipeline, (c) writes the post-drop result to `<iter_dir>/candidates.json`, and (d) on the last iteration only, copies that file to `<artifacts_dir>/candidates.json`. The subprocesses never write any `candidates.json`; Codex is the one exception for `last_message.json`, because `--output-last-message` is its supported non-interactive output path.
 
 **Claude Code** ([cli-reference](https://code.claude.com/docs/en/cli-reference), [permission-modes](https://code.claude.com/docs/en/permission-modes)):
@@ -167,7 +169,7 @@ codex exec - \
   < prompt.md
 ```
 
-`codex exec -` reads stdin. `-C <repo_path>` makes repo-root-relative paths natural; `--sandbox read-only` blocks target-repo writes from model-issued commands. The Codex CLI itself writes `--output-last-message` to the absolute `<iter_dir>/last_message.json` (containing the final assistant message). `--output-schema` validates that message against `candidates.schema.json` before the CLI exits, so a malformed shape is caught both by Codex *and* by the orchestrator. Resource asymmetry is intentional: Claude is capped via `--max-turns`; Codex has no equivalent turn cap and is bounded only by `model_reasoning_effort` and `per_iteration_wallclock_s`.
+`codex exec -` reads stdin. `-C <repo_path>` makes repo-root-relative paths natural; `--sandbox read-only` blocks target-repo writes from model-issued commands. The Codex CLI itself writes `--output-last-message` to the absolute `<iter_dir>/last_message.json` (containing the final assistant message). `--output-schema` validates that message against `candidates.schema.json` before the CLI exits, so a malformed shape is caught both by Codex *and* by the orchestrator. Resource asymmetry is intentional: Claude is capped via `--max-turns` while Codex has no equivalent turn cap and relies on `model_reasoning_effort` to bound depth. Both subprocesses share the same wall-clock kill at `per_iteration_wallclock_s`, enforced by the orchestrator (`subprocess.run(..., timeout=…)` with the iteration counted as a schema-parse failure on timeout, then retried once per §6.2).
 
 `cwd` semantics are asymmetric by CLI design (Claude is run with `cwd=<repo_path>`; Codex with `-C <repo_path>`); both put repo-root-relative paths at the root of each model's working set.
 
@@ -204,7 +206,7 @@ For review iterations the orchestrator additionally inlines the prior iteration'
 
 ## 6. Validation per iteration
 
-Run after each subprocess exits, in this order. Steps marked **(raise)** abort the run via `DiscoveryValidationError` / `DiscoveryMutationError` (both in `spotlights_engine.candidates.discovery.errors`); steps marked **(drop)** prune the offending candidate and increment a counter on `IterationTelemetry`.
+Run after each subprocess exits, in this order. Steps marked **(raise)** abort the run via `DiscoveryValidationError` / `DiscoveryMutationError` (both in `spotlights_engine.candidate_discovery.errors`); steps marked **(drop)** prune the offending candidate and increment a counter on `IterationTelemetry`.
 
 1. **Target-repo mutation guard** **(raises `DiscoveryMutationError`)** — diff the repo's `git status --porcelain=v1 -z` (or a lightweight `mtime+size+xattr` manifest if `repo_path` is not a git work tree) before and after each subprocess, before trusting the emitted candidates or retrying the prompt. Coverage is limited to `repo_path`; the orchestrator does not detect writes outside this subtree, but `--permission-mode plan` and `--sandbox read-only` are the primary defenses there.
 2. **Schema parse** — `Candidates.model_validate_json()` over the captured final assistant message. On failure, retry the iteration once with a strict-mode reminder appended to the prompt; the retry increments `schema_retries`. A second failure **(raises)**.
