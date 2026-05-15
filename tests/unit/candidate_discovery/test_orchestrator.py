@@ -278,8 +278,11 @@ def test_mutation_guard_fires(repo_artifacts, monkeypatch):
     _install_runners(monkeypatch, claude, codex)
 
     cfg = _make_config(repo, artifacts, num_reviews=0)
-    with pytest.raises(DiscoveryMutationError):
+    with pytest.raises(DiscoveryMutationError) as exc:
         discover(cfg)
+    # Plan §6: raised iterations carry iteration/agent in context.
+    assert exc.value.context["iteration"] == 0
+    assert exc.value.context["agent"] == "claude_code"
 
 
 def test_qualified_name_mismatch(repo_artifacts, monkeypatch):

@@ -202,18 +202,21 @@ class ClaudeRunner(AgentRunner):
 
     @staticmethod
     def _extract_result_event(stdout: bytes) -> dict | None:
-        last_result: dict | None = None
+        last_event: dict | None = None
         for line in stdout.splitlines():
             line = line.strip()
             if not line:
                 continue
             try:
                 obj = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(obj, dict) and obj.get("type") == "result":
-                last_result = obj
-        return last_result
+            except json.JSONDecodeError as e:
+                raise _SchemaParseError(f"claude stream-json line not JSON: {e}") from e
+            if not isinstance(obj, dict):
+                raise _SchemaParseError("claude stream-json line was not an object")
+            last_event = obj
+        if last_event is None or last_event.get("type") != "result":
+            return None
+        return last_event
 
     @staticmethod
     def _final_message_text(result_event: dict) -> str:

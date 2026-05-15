@@ -31,6 +31,7 @@ from spotlights_engine.candidate_discovery.api import (
     IterationTelemetry,
 )
 from spotlights_engine.candidate_discovery.errors import (
+    DiscoveryMutationError,
     DiscoverySetupError,
     DiscoveryValidationError,
 )
@@ -193,6 +194,14 @@ class Orchestrator:
                     telemetry=telemetry,
                     agent_invocation=inv,
                 )
+            except DiscoveryMutationError as e:
+                # Plan §6: raised iterations carry iteration/agent in context.
+                # RepoGuard raises without that context (it has no notion of n/agent),
+                # so enrich here before letting it propagate. Mutation is fatal
+                # (not retryable), so we don't enter the schema-retry path.
+                e.context.setdefault("iteration", n)
+                e.context.setdefault("agent", agent.name)
+                raise
             except _SchemaParseError as e:
                 last_exc = e
                 if attempt == 1:
@@ -205,7 +214,7 @@ class Orchestrator:
             iteration=n,
             agent=agent.name,
             cause=str(last_exc) if last_exc else None,
-        )
+        ) from last_exc
 
     def _check_qualified_name(self, parsed: Candidates, n: int, agent: str) -> None:
         expected = self._config.module_qualified_name

@@ -265,6 +265,47 @@ def test_claude_parse_last_message_round_trip(tmp_path, monkeypatch):
     assert runner.parse_last_message(iter_dir) == result_payload
 
 
+def test_claude_invoke_requires_terminal_result_event(tmp_path, monkeypatch):
+    _force_present(monkeypatch)
+    cfg = _config(tmp_path)
+    runner = ClaudeRunner(cfg)
+    iter_dir = tmp_path / "iter"
+    iter_dir.mkdir()
+    schema_path = tmp_path / "schema.json"
+    schema_path.write_text("{}")
+
+    stdout_lines = [
+        json.dumps({"type": "result", "result": "{}"}),
+        json.dumps({"type": "assistant", "message": "trailing event"}),
+    ]
+    fake_result = subprocess.CompletedProcess(
+        args=[], returncode=0, stdout=("\n".join(stdout_lines) + "\n").encode(), stderr=b""
+    )
+    with patch("spotlights_engine.candidate_discovery.agents.subprocess.run",
+               return_value=fake_result):
+        with pytest.raises(_SchemaParseError, match="terminal result"):
+            runner.invoke(prompt="hi", iter_dir=iter_dir, schema_path=schema_path)
+    assert (iter_dir / "last_message.json").read_text() == ""
+
+
+def test_claude_invoke_rejects_non_ndjson_stdout(tmp_path, monkeypatch):
+    _force_present(monkeypatch)
+    cfg = _config(tmp_path)
+    runner = ClaudeRunner(cfg)
+    iter_dir = tmp_path / "iter"
+    iter_dir.mkdir()
+    schema_path = tmp_path / "schema.json"
+    schema_path.write_text("{}")
+
+    fake_result = subprocess.CompletedProcess(
+        args=[], returncode=0, stdout=b"not-json\n", stderr=b""
+    )
+    with patch("spotlights_engine.candidate_discovery.agents.subprocess.run",
+               return_value=fake_result):
+        with pytest.raises(_SchemaParseError, match="not JSON"):
+            runner.invoke(prompt="hi", iter_dir=iter_dir, schema_path=schema_path)
+
+
 def test_claude_parse_last_message_missing_raises(tmp_path, monkeypatch):
     _force_present(monkeypatch)
     cfg = _config(tmp_path)
