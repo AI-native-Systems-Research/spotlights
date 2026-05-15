@@ -127,7 +127,19 @@ def _cands(ids_and_files, qn: str = "v1/foo") -> str:
                     "file": f,
                     "line_start": 1,
                     "line_end": 10,
-                    "rationale": f"hot {cid}",
+                    "symbol": f"module.{cid}",
+                    "kind": "function",
+                    "description": f"work for {cid}",
+                    "current_approach": "linear scan",
+                    "evolve_rationale": f"hot {cid}; oracle is test_{cid}.py",
+                    "metrics": [
+                        {
+                            "name": "latency_us",
+                            "direction": "minimize",
+                            "target_or_baseline": None,
+                        }
+                    ],
+                    "estimated_impact": "medium",
                 }
                 for (cid, f) in ids_and_files
             ],

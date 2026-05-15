@@ -7,7 +7,18 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from spotlights_engine.schemas.candidate import Candidate, Candidates
+from spotlights_engine.schemas import Metric as PublicMetric
+from spotlights_engine.schemas.candidate import Candidate, Candidates, Metric
+
+
+def _valid_metric(**overrides):
+    payload = {
+        "name": "decode_step_latency_ms",
+        "direction": "minimize",
+        "target_or_baseline": "200",
+    }
+    payload.update(overrides)
+    return payload
 
 
 def _valid_candidate(**overrides):
@@ -16,7 +27,13 @@ def _valid_candidate(**overrides):
         "file": "src/foo.py",
         "line_start": 1,
         "line_end": 10,
-        "rationale": "Hot loop inside the request handler",
+        "symbol": "module.foo.handle_request",
+        "kind": "function",
+        "description": "Handles inbound requests.",
+        "current_approach": "Linear scan over the request body.",
+        "evolve_rationale": "Hot loop with simple structure; oracle is unit tests in test_foo.py.",
+        "metrics": [_valid_metric()],
+        "estimated_impact": "high",
     }
     payload.update(overrides)
     return payload
@@ -47,18 +64,63 @@ def test_line_start_must_be_ge_1():
         Candidate.model_validate(_valid_candidate(line_start=0, line_end=10))
 
 
-def test_rationale_empty_rejected():
+def test_evolve_rationale_empty_rejected():
     with pytest.raises(ValidationError):
-        Candidate.model_validate(_valid_candidate(rationale=""))
+        Candidate.model_validate(_valid_candidate(evolve_rationale=""))
 
 
-def test_rationale_too_long_rejected():
+def test_description_empty_rejected():
     with pytest.raises(ValidationError):
-        Candidate.model_validate(_valid_candidate(rationale="x" * 241))
+        Candidate.model_validate(_valid_candidate(description=""))
 
 
-def test_rationale_exact_240_chars_accepted():
-    Candidate.model_validate(_valid_candidate(rationale="x" * 240))
+def test_current_approach_empty_rejected():
+    with pytest.raises(ValidationError):
+        Candidate.model_validate(_valid_candidate(current_approach=""))
+
+
+def test_symbol_empty_rejected():
+    with pytest.raises(ValidationError):
+        Candidate.model_validate(_valid_candidate(symbol=""))
+
+
+def test_kind_must_be_enum():
+    with pytest.raises(ValidationError):
+        Candidate.model_validate(_valid_candidate(kind="frobnicate"))
+
+
+def test_estimated_impact_must_be_enum():
+    with pytest.raises(ValidationError):
+        Candidate.model_validate(_valid_candidate(estimated_impact="huge"))
+
+
+def test_metrics_list_must_be_non_empty():
+    with pytest.raises(ValidationError):
+        Candidate.model_validate(_valid_candidate(metrics=[]))
+
+
+def test_metric_direction_must_be_enum():
+    with pytest.raises(ValidationError):
+        Metric.model_validate(_valid_metric(direction="optimize"))
+
+
+def test_metric_is_publicly_reexported():
+    assert PublicMetric is Metric
+
+
+def test_metric_target_or_baseline_allows_none():
+    m = Metric.model_validate(_valid_metric(target_or_baseline=None))
+    assert m.target_or_baseline is None
+
+
+def test_verbose_rationale_fields_are_accepted():
+    Candidate.model_validate(
+        _valid_candidate(
+            description="x" * 600,
+            current_approach="y" * 600,
+            evolve_rationale="z" * 600,
+        )
+    )
 
 
 def test_candidates_list_must_be_non_empty():

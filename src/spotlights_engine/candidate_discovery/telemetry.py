@@ -70,7 +70,29 @@ def _materially_differs(a, b) -> bool:
     return (
         a.line_start != b.line_start
         or a.line_end != b.line_end
-        or a.rationale.strip() != b.rationale.strip()
+        or a.symbol.strip() != b.symbol.strip()
+        or a.kind != b.kind
+        or a.estimated_impact != b.estimated_impact
+        or a.description.strip() != b.description.strip()
+        or a.current_approach.strip() != b.current_approach.strip()
+        or a.evolve_rationale.strip() != b.evolve_rationale.strip()
+        or _metrics_tuple(a) != _metrics_tuple(b)
+    )
+
+
+def _metrics_tuple(c) -> tuple:
+    return tuple(
+        sorted(
+            (
+                m.name.strip(),
+                m.direction,
+                m.target_or_baseline is None,
+                m.target_or_baseline.strip()
+                if isinstance(m.target_or_baseline, str)
+                else "",
+            )
+            for m in c.metrics
+        )
     )
 
 
@@ -82,11 +104,17 @@ def render_diff_markdown(prev: Candidates | None, current: Candidates) -> str:
 
     def _added_line(cid: str) -> str:
         c = current_by_id[cid]
-        return f"- {cid} — {c.file}:{c.line_start}-{c.line_end} — {c.rationale}"
+        return (
+            f"- {cid} — {c.file}:{c.line_start}-{c.line_end} "
+            f"[{c.kind}] {c.symbol} — {c.evolve_rationale}"
+        )
 
     def _removed_line(cid: str) -> str:
         c = prev_by_id[cid]
-        return f"- {cid} — {c.file}:{c.line_start}-{c.line_end} — (was: {c.rationale})"
+        return (
+            f"- {cid} — {c.file}:{c.line_start}-{c.line_end} "
+            f"[{c.kind}] {c.symbol} — (was: {c.evolve_rationale})"
+        )
 
     def _modified_line(cid: str) -> str:
         prev_c = prev_by_id[cid]
@@ -94,7 +122,8 @@ def render_diff_markdown(prev: Candidates | None, current: Candidates) -> str:
         return (
             f"- {cid} — {cur_c.file}:"
             f"{prev_c.line_start}-{prev_c.line_end} → "
-            f"{cur_c.line_start}-{cur_c.line_end} — {cur_c.rationale}"
+            f"{cur_c.line_start}-{cur_c.line_end} "
+            f"[{cur_c.kind}] {cur_c.symbol} — {cur_c.evolve_rationale}"
         )
 
     def _section(title: str, lines: list[str]) -> str:

@@ -8,7 +8,24 @@ the same validation runs model-side and orchestrator-side.
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+
+CandidateKind = Literal[
+    "function", "method", "loop", "region", "kernel", "config_block"
+]
+MetricDirection = Literal["minimize", "maximize"]
+EstimatedImpact = Literal["high", "medium", "low"]
+
+
+class Metric(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=80)
+    direction: MetricDirection
+    target_or_baseline: str | None = None
 
 
 class Candidate(BaseModel):
@@ -18,7 +35,13 @@ class Candidate(BaseModel):
     file: str
     line_start: int = Field(ge=1)
     line_end: int = Field(ge=1)
-    rationale: str = Field(min_length=1, max_length=240)
+    symbol: str = Field(min_length=1, max_length=200)
+    kind: CandidateKind
+    description: str = Field(min_length=1)
+    current_approach: str = Field(min_length=1)
+    evolve_rationale: str = Field(min_length=1)
+    metrics: list[Metric] = Field(min_length=1)
+    estimated_impact: EstimatedImpact
 
     @model_validator(mode="after")
     def _check_range(self) -> Candidate:
@@ -37,4 +60,4 @@ class Candidates(BaseModel):
     candidates: list[Candidate] = Field(min_length=1)
 
 
-__all__ = ["Candidate", "Candidates"]
+__all__ = ["Candidate", "Candidates", "Metric"]

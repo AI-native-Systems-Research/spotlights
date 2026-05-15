@@ -26,7 +26,19 @@ def _cand(**overrides) -> Candidate:
         "file": "src/foo/x.py",
         "line_start": 1,
         "line_end": 10,
-        "rationale": "loop",
+        "symbol": "module.x.run",
+        "kind": "function",
+        "description": "does work",
+        "current_approach": "linear scan",
+        "evolve_rationale": "hot loop; oracle is test_x.py",
+        "metrics": [
+            {
+                "name": "latency_us",
+                "direction": "minimize",
+                "target_or_baseline": None,
+            }
+        ],
+        "estimated_impact": "medium",
     }
     payload.update(overrides)
     return Candidate.model_validate(payload)

@@ -1,6 +1,7 @@
-You are reviewing another agent's candidate list for the same module. Your job
-is adversarial: prune false positives, merge duplicates, sharpen rationales, and
-add at most 5 *new* candidates the previous pass missed.
+You are reviewing another agent's evolve-target candidate list for the same
+module. Your job is adversarial: prune false positives, merge duplicates,
+sharpen rationales / metrics, and add any *new* candidates the previous pass
+missed that clear the same quality bar.
 
 ## Inputs
 - previous candidates:
@@ -13,16 +14,24 @@ add at most 5 *new* candidates the previous pass missed.
 - DO NOT inflate the list. If the previous pass was good, return it nearly unchanged.
 - Remove any candidate whose `file` does not exist, whose `file` is outside
   `module.path`, or whose `line_start..line_end` is out of range for that file.
+- Remove candidates that fail the evolve-target test: no measurable metric,
+  no correctness oracle, no real headroom, or so entangled that the line
+  range doesn't capture the optimization unit.
 - Merge candidates that point at the same hot path with overlapping line ranges
   (keep one `id`, drop the others).
-- For each KEPT candidate you MAY tighten `rationale` and adjust `line_start` /
-  `line_end`. You MUST NOT change `id` or `file`. If you believe a kept
-  candidate's `file` is wrong, drop the old `id` and mint a new one instead.
-- For each NEW candidate, the rationale must cite a specific code construct
-  (function name, loop, alloc call, sync primitive) — not a vague category.
+- For each KEPT candidate you MAY tighten `description`, `current_approach`,
+  `evolve_rationale`, `metrics`, `estimated_impact`, and adjust `line_start` /
+  `line_end` / `symbol` / `kind`. You MUST NOT change `id` or `file`. If you
+  believe a kept candidate's `file` is wrong, drop the old `id` and mint a new
+  one instead.
+- For each NEW candidate, `evolve_rationale` must cite a specific code
+  construct (function name, loop, alloc call, sync primitive) and a concrete
+  correctness oracle; `metrics` must name at least one quantifiable measurement.
 - Mint new ids strictly greater than `{max_seen_candidate_id}`,
   zero-padded to four digits.
-- Add at most 5 new candidates per review pass.
+- Do not cap or truncate. Add a new candidate only if it clears the
+  evolve-target quality bar (self-contained, measurable metric, real headroom,
+  concrete correctness oracle). If nothing genuinely qualifies, add nothing.
 
 ## Output (REQUIRED — strict JSON, no markdown fence)
 Same schema as the previous pass:

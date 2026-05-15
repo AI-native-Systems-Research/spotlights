@@ -82,8 +82,8 @@ def main() -> None:
             ],
         ),
         artifacts_dir=ARTIFACTS_DIR,
-        num_review_iterations=1,
-        claude_max_turns=8,
+        num_review_iterations=2,
+        claude_max_turns=30,
         per_iteration_wallclock_s=600,
     )
 
