@@ -27,13 +27,13 @@ class DiscoveryConfig(BaseModel):
     repo_path: Path                        # local checkout root; must exist
     module_qualified_name: str             # ProjectTree.walk() key, e.g. "v1/engine/core"
     module: Module                         # resolved Module record (see schemas/modules.py)
-    artifacts_dir: Path                    # shared run dir; final artifact is <artifacts_dir>/candidates.json
+    artifacts_dir: Path                    # shared run dir outside repo_path; final artifact is <artifacts_dir>/candidates.json
 
     num_review_iterations: int = Field(default=3, ge=0)  # N review passes after bootstrap; no early stop
     per_iteration_wallclock_s: int = Field(default=900, ge=1)
     claude_max_turns: int = Field(default=30, ge=1)
     codex_model: str = "gpt-5.5"
-    codex_reasoning_effort: Literal["minimal", "low", "medium", "high"] = "high"
+    codex_reasoning_effort: Literal["minimal", "low", "medium", "high", "xhigh"] = "high"
 ```
 
 ### `Candidates` and `DiscoveryResult` (output)
@@ -76,7 +76,7 @@ class IterationTelemetry(BaseModel):
     dropped_outside_module: int = 0        # candidate.file resolves outside module.path
     dropped_missing_file: int = 0          # candidate.file does not exist in repo_path
     dropped_invalid_ranges: int = 0        # line_start/line_end out of file bounds
-    added: list[str]                       # ids new vs prev iter; for n=0, the full bootstrap list
+    added: list[str]                       # ids new vs prev iter; for n=0, all bootstrap ids; sorted
     removed: list[str]                     # ids in prev iter but not this one; empty for n=0
     modified: list[str]                    # ids present in both iters with changed line_start, line_end, or rationale; empty for n=0
 
@@ -88,7 +88,7 @@ class DiscoveryResult(BaseModel):
     total_cost_usd: float | None = None
 ```
 
-`discover` also persists `<artifacts_dir>/candidates.json` (the canonical artifact consumed by Stage 3a) and a per-iteration `candidate_discovery/iterations.jsonl` telemetry file; the in-memory result and on-disk artifacts are equivalent. The loop always runs `1 + num_review_iterations` iterations and never resumes (a pre-existing `<artifacts_dir>/candidate_discovery/` is a setup error, not a resume point). Failure modes inside an iteration split three ways:
+`discover` also persists `<artifacts_dir>/candidates.json` (the canonical artifact consumed by Stage 3a) and a per-iteration `candidate_discovery/iterations.jsonl` telemetry file; the in-memory result and on-disk artifacts are equivalent. The loop always runs `1 + num_review_iterations` iterations and never resumes (a pre-existing `<artifacts_dir>/candidate_discovery/` is a setup error, not a resume point). `artifacts_dir` must resolve outside `repo_path`; otherwise Stage 1's own artifact writes would mutate the target checkout it is supposed to guard. Failure modes inside an iteration split three ways:
 
 - **schema-parse failure** retries once with a strict-mode reminder appended (§6.2); a second failure raises `DiscoveryValidationError`.
 - **protocol checks** — target-repo mutation (§6.1), qualified-name mismatch (§6.3), ID uniqueness/monotonicity (§6.7) — raise immediately.
@@ -109,7 +109,7 @@ Iteration `num_review_iterations` is the downstream-facing result: its post-drop
 
 ## 3. Run directory layout
 
-Stage 1 receives the shared run dir as `artifacts_dir` — conventionally `~/.cache/optquest/<repo_slug>/<run_id>/` per the architecture doc. The final, Stage-3a-facing artifact is `<artifacts_dir>/candidates.json`; all Stage 1 scratch logs live under `<artifacts_dir>/candidate_discovery/`. The driver creates `<run_id>/` and passes it in; the stage mints `<artifacts_dir>/candidate_discovery/` itself.
+Stage 1 receives the shared run dir as `artifacts_dir` — conventionally `~/.cache/optquest/<repo_slug>/<run_id>/` per the architecture doc, and always outside the target checkout. The final, Stage-3a-facing artifact is `<artifacts_dir>/candidates.json`; all Stage 1 scratch logs live under `<artifacts_dir>/candidate_discovery/`. The driver creates `<run_id>/` and passes it in; the stage mints `<artifacts_dir>/candidate_discovery/` itself.
 
 ```
 <artifacts_dir>/
@@ -220,7 +220,7 @@ Run after each subprocess exits, in this order. Steps marked **(raise)** abort t
    - every newly minted `id` MUST be strictly greater than the highest id accepted in any earlier iteration under lexicographic order on the zero-padded `cand-NNNN` form.
 8. **Persist normalized JSON** **(raises if empty)** — re-validate the surviving list via `Candidates.model_validate(dict(module_qualified_name=..., candidates=survivors))` so the `min_length=1` invariant fires on the *current* iteration if drops emptied it (raises `DiscoveryValidationError`). Then serialize via `model_dump_json(indent=2)` to `<iter_dir>/candidates.json`. On the final iteration (`n == num_review_iterations`), copy that file byte-for-byte to `<artifacts_dir>/candidates.json`.
 
-After step 8 the orchestrator also computes `IterationTelemetry.added` / `removed` / `modified` by joining on `id` against the previous iteration: `added = ids_n \ ids_{n-1}`, `removed = ids_{n-1} \ ids_n`, `modified = { id in ids_n ∩ ids_{n-1} : (line_start, line_end, rationale.strip()) differs }`. For `n=0`, `added` is the full bootstrap list and the other two are empty. For review iterations (`n >= 1`), the same structural comparison is written to `<iter_dir>/diff_from_prev.md`.
+After step 8 the orchestrator also computes `IterationTelemetry.added` / `removed` / `modified` by joining on `id` against the previous iteration: `added = ids_n \ ids_{n-1}`, `removed = ids_{n-1} \ ids_n`, `modified = { id in ids_n ∩ ids_{n-1} : (line_start, line_end, rationale.strip()) differs }`. The emitted ID lists are sorted lexicographically for deterministic telemetry. For `n=0`, `added` is the full bootstrap ID list sorted the same way and the other two are empty. For review iterations (`n >= 1`), the same structural comparison is written to `<iter_dir>/diff_from_prev.md`.
 
 ## 7. Loop termination
 

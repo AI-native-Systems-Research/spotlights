@@ -1,6 +1,6 @@
 # candidate_research_proposer — Stage 1: Candidate Discovery — Implementation Plan
 
-Implementation plan for the spec in [candidate_research_proposer_stage1_candidate_discovery.md](candidate_research_proposer_stage1_candidate_discovery.md). The spec is the *contract*; this document is the *build order*. Where the two disagree the spec wins — flag the drift and update the spec.
+Implementation plan for the spec in [candidate_research_proposer_stage1_candidate_discovery.md](candidate_research_proposer_stage1_candidate_discovery.md). The spec is the *contract*; this document is the *build order*. Where the two disagree, the spec wins: flag the drift and update this implementation plan. If the spec itself is wrong, update both documents in the same PR.
 
 The goal of this plan is to take Stage 1 from the current empty stub at [src/spotlights_engine/candidates/](../src/spotlights_engine/candidates/) (only `__init__.py`, which gets deleted) to a working `discover()` entrypoint at [src/spotlights_engine/candidate_discovery/](../src/spotlights_engine/candidate_discovery/) that satisfies every clause of the spec, with a test suite that exercises both the orchestration logic and the §6 validation pipeline without depending on live Claude / Codex CLIs.
 
@@ -10,7 +10,7 @@ The goal of this plan is to take Stage 1 from the current empty stub at [src/spo
 
 All new code lives under [src/spotlights_engine/candidate_discovery/](../src/spotlights_engine/candidate_discovery/). One package, flat namespace, small public API (`discover`, `DiscoveryConfig`, `DiscoveryResult`) re-exported from `candidate_discovery/__init__.py`. The `Candidate` / `Candidates` schemas live in [src/spotlights_engine/schemas/candidate.py](../src/spotlights_engine/schemas/candidate.py) (the existing stub gets replaced) because the architecture doc designates `schemas/` as the only contract surface other repos may import.
 
-Note that this stage introduces a *second* public surface beyond `schemas/` — `spotlights_engine.candidate_discovery.discover` (and its `DiscoveryConfig` / `DiscoveryResult` types). That is intentional per spec §1; flag it in the package README so a future reviewer expecting the architecture-doc "schemas-only" rule doesn't mistake it for a regression.
+Note that this stage introduces a *second* public surface beyond `schemas/` — `spotlights_engine.candidate_discovery.discover` (and its `DiscoveryConfig` / `DiscoveryResult` types). That is intentional per spec §1; document this exception in the `candidate_discovery/__init__.py` module docstring so a future reviewer expecting the `schemas`-only cross-repo contract doesn't mistake it for a regression.
 
 ```
 src/spotlights_engine/
@@ -109,7 +109,7 @@ class DiscoveryMutationError(Exception):    # §6.1 target-repo mutation
 
 Each carries a structured `context: dict` (iteration `n`, agent name, paths involved) so test asserts and Stage-3 callers can branch on cause without parsing the message string.
 
-`DiscoverySetupError` covers setup failures before an iteration starts: invalid `repo_path`, a pre-existing `<artifacts_dir>/candidate_discovery/` directory (§1 "never resumes"), and missing required CLIs (caught in `AgentRunner.__init__` via `shutil.which`).
+`DiscoverySetupError` covers setup failures before an iteration starts: invalid `repo_path`, an `artifacts_dir` that resolves inside `repo_path`, a pre-existing `<artifacts_dir>/candidate_discovery/` directory (§1 "never resumes"), and missing required CLIs (caught in `AgentRunner.__init__` via `shutil.which`).
 
 ---
 
@@ -125,7 +125,7 @@ class DiscoveryConfig(BaseModel):
     per_iteration_wallclock_s: int = Field(default=900, ge=1)
     claude_max_turns: int = Field(default=30, ge=1)
     codex_model: str = Field(default="gpt-5.5", pattern=r"^[\w.\-/]+$")
-    codex_reasoning_effort: Literal["minimal", "low", "medium", "high"] = "high"
+    codex_reasoning_effort: Literal["minimal", "low", "medium", "high", "xhigh"] = "high"
 
 class IterationTelemetry(BaseModel): ...     # exact fields from spec §1
 class DiscoveryResult(BaseModel):
@@ -139,7 +139,7 @@ def discover(config: DiscoveryConfig) -> DiscoveryResult:
 ```
 
 `discover` does three things and delegates everything else:
-1. `DiscoverySetupError` if `repo_path` doesn't exist, isn't a directory, or `<artifacts_dir>/candidate_discovery/` already exists.
+1. `DiscoverySetupError` if `repo_path` doesn't exist, isn't a directory, `artifacts_dir` resolves inside `repo_path`, or `<artifacts_dir>/candidate_discovery/` already exists.
 2. Construct the `Orchestrator`.
 3. Return `Orchestrator.run()`.
 
@@ -176,10 +176,10 @@ class Orchestrator:
 
 ```python
 def run(self) -> DiscoveryResult:
-    self._mint_run_dir()                           # mkdir candidate_discovery/, dump schema
     claude = ClaudeRunner(self.config)
     codex = CodexRunner(self.config)
     agents = [codex, claude]                       # review rotation: agents[(N-1) % 2]
+    self._mint_run_dir()                           # mkdir candidate_discovery/, dump schema
 
     boot = self._run_iteration(n=0, agent=claude, prompt=self._bootstrap_prompt())
     prev = boot.candidates
@@ -196,6 +196,8 @@ def run(self) -> DiscoveryResult:
 ```
 
 `_run_iteration` is the inner loop; it composes agent invocation, validation, persistence, and the §6.2 single retry. See §6 below for its shape.
+
+Construct the runners before `_mint_run_dir()` so a missing `claude` or `codex` executable raises `DiscoverySetupError` without leaving behind a fresh `<artifacts_dir>/candidate_discovery/` directory that would make the next invocation fail as a false "resume" attempt.
 
 ---
 
@@ -249,7 +251,7 @@ Notes:
   1. *Within-iter uniqueness* — `len({c.id for c in parsed.candidates}) == len(parsed.candidates)`. Operates on the raw parsed list.
   2. *Carry-over file unchanged* — for every `id` in `parsed.candidates ∩ self._prev_raw`, the new candidate's `file` equals the prev raw candidate's `file`. Operates on the raw parsed list.
   3. *Newly-minted detection* — `new_ids = {c.id for c in survivors} - self._prev_post_drop_ids`. Operates on the post-drop list.
-  4. *Monotonicity* — every id in `new_ids` is `> self._max_seen_id` under lexicographic comparison on the zero-padded `cand-NNNN` form. For n=0, `self._prev_raw is None`, `self._prev_post_drop_ids` is empty, and `self._max_seen_id == "cand-0000"`, so checks 2 and 3 are no-ops and check 4 reduces to "all ids > cand-0000" (auto-satisfied by the `^cand-\d{4}$` pattern starting at `cand-0001`).
+  4. *Monotonicity* — every id in `new_ids` is `> self._max_seen_id` under lexicographic comparison on the zero-padded `cand-NNNN` form. For n=0, `self._prev_raw is None`, `self._prev_post_drop_ids` is empty, and `self._max_seen_id == "cand-0000"`, so checks 2 and 3 are no-ops and check 4 reduces to "all ids > cand-0000". This intentionally rejects a bootstrap `cand-0000`, which the schema pattern alone would otherwise accept.
 - `_normalize_and_persist` re-validates the survivors via `Candidates(module_qualified_name=..., candidates=survivors)` to enforce §6.8's `min_length=1` invariant on the *current* iteration, then writes `candidates.json` via `model_dump_json(indent=2)`. A pydantic `ValidationError` from the re-validation (drops emptied the list) is caught and re-raised as `DiscoveryValidationError(context={"iteration": n, "agent": agent.name, "reason": "post-drop list empty"})` — it escapes the retry loop because the for-loop only catches `_SchemaParseError`.
 - `_record(out)` appends and flushes telemetry, then advances cross-iteration state in this order: `self._prev_raw = out.raw`, `self._prev_post_drop = out.candidates`, `self._prev_post_drop_ids = {c.id for c in out.candidates.candidates}`, `self._max_seen_id = max(self._max_seen_id, max(c.id for c in out.candidates.candidates))`.
 - Persisted artifacts per iteration: `prompt.md`, `last_message.json`, `raw_stdout.log`, `raw_stderr.log`, `candidates.json`, and for `n >= 1` also `diff_from_prev.md`. A schema-retry iteration produces *one* `prompt.md` (the second-attempt prompt, with the strict-mode reminder concatenated) and `last_message.json` from the second attempt only; the first attempt's stdout/stderr go to `raw_stdout.log` / `raw_stderr.log` followed by a `--- retry separator ---` line and then the second attempt's streams, so both are inspectable without colliding on path.
@@ -481,14 +483,14 @@ class RepoGuard:
 `_snapshot()` picks one of two strategies based on `(repo_path / ".git").is_dir()`:
 
 1. **Git path**: `git -C <repo_path> -c core.quotepath=off status --porcelain=v1 -z`, return the bytes. `core.quotepath=off` avoids locale-driven encoding surprises.
-2. **Non-git path**: walk `repo_path` (skipping `.git`, `__pycache__`, `.venv`), build a dict `{relpath: (st_mtime_ns, st_size)}` and hash it. Spec mentions `xattr` for completeness; xattr lookups are platform-dependent and add complexity for zero benefit on the supported platforms (Linux + Darwin in CI). M1 ships mtime+size only and documents the limitation in code; revisit if a real-world miss is observed.
+2. **Non-git path**: walk `repo_path` (skipping `.git`, `__pycache__`, `.venv`), build a dict `{relpath: (st_mtime_ns, st_size, xattr_digest)}` and hash it. `xattr_digest` is computed from sorted extended-attribute names and values via `os.listxattr` / `os.getxattr` where the platform supports them; if xattrs are unavailable for a path, record a stable sentinel rather than failing the run.
 
 Spec coverage limit: "the orchestrator does not detect writes outside this subtree" — make this explicit in the docstring; `--permission-mode plan` and `--sandbox read-only` are the primary defenses there.
 
 Unit tests in `test_repo_guard.py`:
 - Git mode: clean repo → no raise; create a file → raise.
 - Git mode: stage-but-not-commit also raises.
-- Non-git mode: touch an existing file → raise; rename a file → raise; create a new file → raise.
+- Non-git mode: touch an existing file → raise; rename a file → raise; create a new file → raise; changing an xattr raises on platforms that expose xattr APIs.
 - The `.git` metadata path is excluded from the non-git walk (cover with a repo-like fixture where `.git` is a plain file or the non-git strategy is forced; a real `.git/` directory takes the git-status branch).
 
 ---
@@ -511,7 +513,7 @@ Diff rules (spec §6 final paragraph) are exact:
 - `removed = ids_{n-1} \ ids_n`
 - `modified = { id ∈ ids_n ∩ ids_{n-1} : (line_start, line_end, rationale.strip()) differs }`
 
-For `n=0`, `added = [c.id for c in survivors]`, `removed = []`, `modified = []`.
+Serialize `added`, `removed`, and `modified` in lexicographic `cand-NNNN` order so telemetry JSON and `diff_from_prev.md` are deterministic. For `n=0`, `added` is all survivor ids in that same order, `removed = []`, and `modified = []`.
 
 The orchestrator appends one NDJSON line per iteration to `<artifacts_dir>/candidate_discovery/iterations.jsonl` — `IterationTelemetry.model_dump_json()` plus a newline, flushed immediately. The same in-memory list goes into `DiscoveryResult.iterations`, so the on-disk file and the in-memory result are equivalent (spec §1 invariant).
 
@@ -583,7 +585,8 @@ Test scenarios (each gets its own scripted sequence):
 7. **All candidates dropped** — `DiscoveryValidationError` ("min_length=1") raised on iter 0.
 8. **ID monotonicity violation** — iter 2 mints `cand-0003` after iter 1 had `cand-0005`; `DiscoveryValidationError` raised.
 9. **Pre-existing run dir** — `<artifacts_dir>/candidate_discovery/` exists at call time; `DiscoverySetupError` raised before any subprocess.
-10. **Final artifact copy** — iter `num_review_iterations`'s `candidates.json` is byte-identical to `<artifacts_dir>/candidates.json`.
+10. **Artifacts inside target repo** — `artifacts_dir` resolves under `repo_path`; `DiscoverySetupError` raised before any subprocess or run-dir creation.
+11. **Final artifact copy** — iter `num_review_iterations`'s `candidates.json` is byte-identical to `<artifacts_dir>/candidates.json`.
 
 The fake fixture takes ~1 ms per iteration, so the whole orchestrator suite stays under a second.
 
@@ -612,7 +615,7 @@ Each milestone leaves the repo in a green-tests state and is independently revie
 
 **M4 — agent runners + telemetry.** Add `agents.py` (with `_clean_env`, both runners) and `telemetry.py`. Tests: `test_agents.py` (env scrubbing, argv construction via a `_build_argv` helper, `_SchemaParseError` translation from `subprocess.TimeoutExpired` / nonzero exit), `test_telemetry.py`. No live CLI calls — `subprocess.run` is patched.
 
-**M5 — orchestrator + public API.** Add `orchestrator.py`, `api.py`, wire `discover` through `candidate_discovery/__init__.py`. Tests: `test_orchestrator.py` with the 10 scenarios in §14, and the integration smoke at §15 (gated). *Done when:* `uv run pytest tests/unit/candidate_discovery/` is green and a manual `python -c "from spotlights_engine.candidate_discovery import discover; ..."` against a real fixture repo with the smoke marker produces a valid `DiscoveryResult`.
+**M5 — orchestrator + public API.** Add `orchestrator.py`, `api.py`, wire `discover` through `candidate_discovery/__init__.py`. Tests: `test_orchestrator.py` with the 11 scenarios in §14, and the integration smoke at §15 (gated). *Done when:* `uv run pytest tests/unit/candidate_discovery/` is green and a manual `python -c "from spotlights_engine.candidate_discovery import discover; ..."` against a real fixture repo with the smoke marker produces a valid `DiscoveryResult`.
 
 ---
 
@@ -624,5 +627,6 @@ Each milestone leaves the repo in a green-tests state and is independently revie
 - **No resume.** Spec §1: "never resumes (a pre-existing `<artifacts_dir>/candidate_discovery/` is a setup error)". The check lives in `discover()` before construction so callers can't accidentally race two `discover()` calls into the same run dir.
 - **`gpt-5.5` default.** Spec pins `codex_model="gpt-5.5"`; if the LiteLLM proxy or Codex CLI doesn't surface that exact model id at integration time, the runner emits a clear setup error rather than silently falling back. Adjust the default in the spec, not in code, if it needs to change.
 - **Cwd asymmetry.** `Claude` uses `cwd=repo_path` (CLI design — no flag). `Codex` uses `-C repo_path` *and* `cwd=repo_path` (the flag is authoritative; the cwd is defense in depth against relative-path reads escaping the subtree). The runner abstraction must not paper this over — `test_agents.py` asserts both runners receive `cwd=repo_path` and that only Codex carries the `-C` argv pair.
+- **Artifact directory location.** Reject `artifacts_dir` if it resolves inside `repo_path`. Otherwise the orchestrator's own `prompt.md`, logs, and `candidates.json` writes would look like target-repo mutations to `RepoGuard`, or worse, require the guard to ignore real files inside the checkout.
 
 - **Test scaffolding.** `tests/integration/` currently has only `__init__.py`. Add `tests/integration/candidate_discovery/` and `tests/unit/candidate_discovery/` for the new suites; include `__init__.py` files only if local fixtures use package-relative imports.
