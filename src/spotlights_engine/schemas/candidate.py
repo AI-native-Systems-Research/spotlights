@@ -12,7 +12,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-
 CandidateKind = Literal[
     "function", "method", "loop", "region", "kernel", "config_block"
 ]
@@ -25,7 +24,10 @@ class Metric(BaseModel):
 
     name: str = Field(min_length=1, max_length=80)
     direction: MetricDirection
-    target_or_baseline: str | None = None
+    # Required (not optional) so OpenAI strict structured-outputs accepts the
+    # schema: it demands every property appear in `required`. Nullable still
+    # lets the model emit `null` when no baseline is known.
+    target_or_baseline: str | None = Field(...)
 
 
 class Candidate(BaseModel):
