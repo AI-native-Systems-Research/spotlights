@@ -220,8 +220,15 @@ class ClaudeRunner(AgentRunner):
 
     @staticmethod
     def _final_message_text(result_event: dict) -> str:
-        if "result" in result_event and isinstance(result_event["result"], str):
-            return result_event["result"]
+        # With --json-schema, the CLI parses the model output and places the
+        # validated object on `structured_output`; the `result` string is empty
+        # in that mode. Prefer structured_output when present.
+        structured = result_event.get("structured_output")
+        if isinstance(structured, (dict, list)):
+            return json.dumps(structured)
+        result = result_event.get("result")
+        if isinstance(result, str) and result:
+            return result
         message = result_event.get("message") or {}
         content = message.get("content")
         if isinstance(content, str):

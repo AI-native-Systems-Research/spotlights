@@ -30,3 +30,6 @@ uv.lock
 .vscode/
 .DS_Store
 *.swp
+
+# Local run artifacts
+tmp/

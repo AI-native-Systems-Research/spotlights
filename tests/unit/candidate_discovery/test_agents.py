@@ -265,6 +265,41 @@ def test_claude_parse_last_message_round_trip(tmp_path, monkeypatch):
     assert runner.parse_last_message(iter_dir) == result_payload
 
 
+def test_claude_invoke_uses_structured_output_when_result_empty(tmp_path, monkeypatch):
+    # With --json-schema the CLI returns the parsed object on `structured_output`
+    # and leaves `result` as an empty string. The runner must serialize
+    # structured_output into last_message.json rather than writing the empty result.
+    _force_present(monkeypatch)
+    cfg = _config(tmp_path)
+    runner = ClaudeRunner(cfg)
+    iter_dir = tmp_path / "iter"
+    iter_dir.mkdir()
+    schema_path = tmp_path / "schema.json"
+    schema_path.write_text("{}")
+
+    structured = {"module_qualified_name": "v1/foo", "candidates": [{"id": "cand-0001"}]}
+    stdout_lines = [
+        json.dumps({"type": "system", "subtype": "init"}),
+        json.dumps(
+            {
+                "type": "result",
+                "session_id": "sess-1",
+                "duration_ms": 1234,
+                "result": "",
+                "structured_output": structured,
+            }
+        ),
+    ]
+    fake_stdout = ("\n".join(stdout_lines) + "\n").encode("utf-8")
+    fake_result = subprocess.CompletedProcess(
+        args=[], returncode=0, stdout=fake_stdout, stderr=b""
+    )
+    with patch("spotlights_engine.candidate_discovery.agents.subprocess.run",
+               return_value=fake_result):
+        runner.invoke(prompt="hi", iter_dir=iter_dir, schema_path=schema_path)
+    assert json.loads(runner.parse_last_message(iter_dir)) == structured
+
+
 def test_claude_invoke_requires_terminal_result_event(tmp_path, monkeypatch):
     _force_present(monkeypatch)
     cfg = _config(tmp_path)

@@ -371,6 +371,53 @@ def test_id_monotonicity_violation(repo_artifacts, monkeypatch):
         discover(cfg)
 
 
+def test_within_iter_duplicate_ids_raises(repo_artifacts, monkeypatch):
+    """§6.7 sub-check 1: ids must be unique within a single iteration."""
+    repo, artifacts = repo_artifacts
+    claude = FakeAgentRunner(
+        "claude_code",
+        responses=[
+            _cands(
+                [
+                    ("cand-0001", "src/foo/x.py"),
+                    ("cand-0001", "src/foo/y.py"),
+                ]
+            )
+        ],
+    )
+    codex = FakeAgentRunner("codex", responses=[])
+    _install_runners(monkeypatch, claude, codex)
+
+    cfg = _make_config(repo, artifacts, num_reviews=0)
+    with pytest.raises(DiscoveryValidationError, match="duplicate id"):
+        discover(cfg)
+
+
+def test_carry_over_id_must_retain_file(repo_artifacts, monkeypatch):
+    """§6.7 sub-check 2: an id reused from the previous raw iter MUST keep its file."""
+    repo, artifacts = repo_artifacts
+    claude = FakeAgentRunner(
+        "claude_code",
+        responses=[
+            _cands([("cand-0001", "src/foo/x.py")]),
+        ],
+    )
+    codex = FakeAgentRunner(
+        "codex",
+        responses=[
+            _cands([("cand-0001", "src/foo/y.py")]),  # same id, different file → raise
+        ],
+    )
+    _install_runners(monkeypatch, claude, codex)
+
+    cfg = _make_config(repo, artifacts, num_reviews=1)
+    with pytest.raises(DiscoveryValidationError, match="carry-over") as exc:
+        discover(cfg)
+    assert exc.value.context["id"] == "cand-0001"
+    assert exc.value.context["prev_file"] == "src/foo/x.py"
+    assert exc.value.context["new_file"] == "src/foo/y.py"
+
+
 def test_pre_existing_run_dir_raises(repo_artifacts, monkeypatch):
     repo, artifacts = repo_artifacts
     (artifacts / "candidate_discovery").mkdir()
