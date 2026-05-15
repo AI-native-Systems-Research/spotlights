@@ -482,7 +482,11 @@ class RepoGuard:
 
 `_snapshot()` picks one of two strategies based on `(repo_path / ".git").is_dir()`:
 
-1. **Git path**: `git -C <repo_path> -c core.quotepath=off status --porcelain=v1 -z`, return the bytes. `core.quotepath=off` avoids locale-driven encoding surprises.
+1. **Git path**: capture `git -C <repo_path> -c core.quotepath=off status --porcelain=v1 -z`
+   *and* the lightweight manifest described below, excluding `.git`. The status bytes give useful
+   git/index context; the manifest closes the dirty-repo blind spot where an already-modified
+   tracked file or an already-untracked file can change while `git status` remains byte-identical.
+   `core.quotepath=off` avoids locale-driven encoding surprises.
 2. **Non-git path**: walk `repo_path` (skipping `.git`, `__pycache__`, `.venv`), build a dict `{relpath: (st_mtime_ns, st_size, xattr_digest)}` and hash it. `xattr_digest` is computed from sorted extended-attribute names and values via `os.listxattr` / `os.getxattr` where the platform supports them; if xattrs are unavailable for a path, record a stable sentinel rather than failing the run.
 
 Spec coverage limit: "the orchestrator does not detect writes outside this subtree" — make this explicit in the docstring; `--permission-mode plan` and `--sandbox read-only` are the primary defenses there.
@@ -490,6 +494,7 @@ Spec coverage limit: "the orchestrator does not detect writes outside this subtr
 Unit tests in `test_repo_guard.py`:
 - Git mode: clean repo → no raise; create a file → raise.
 - Git mode: stage-but-not-commit also raises.
+- Git mode: changing an already-dirty tracked file or an already-untracked file also raises.
 - Non-git mode: touch an existing file → raise; rename a file → raise; create a new file → raise; changing an xattr raises on platforms that expose xattr APIs.
 - The `.git` metadata path is excluded from the non-git walk (cover with a repo-like fixture where `.git` is a plain file or the non-git strategy is forced; a real `.git/` directory takes the git-status branch).
 

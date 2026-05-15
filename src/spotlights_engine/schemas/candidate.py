@@ -1,18 +1,33 @@
-"""The Candidate schema.
+"""The `Candidate` and `Candidates` schemas.
 
-Stub. Field definitions are to be drawn verbatim from `discovery_engine_proposal.md` §4.1.
+Stage 1 of the candidate research proposer emits a `Candidates` JSON object as
+its final artifact. The shape constraints captured here are the contract: they
+are exported via `model_json_schema()` and handed to both subprocess agents so
+the same validation runs model-side and orchestrator-side.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from pydantic import BaseModel, Field, model_validator
 
 
-@dataclass(frozen=True)
-class Candidate:
-    """A proposed change-to-be-tried, as defined in the proposal §4.1.
+class Candidate(BaseModel):
+    id: str = Field(pattern=r"^cand-\d{4}$")
+    file: str
+    line_start: int = Field(ge=1)
+    line_end: int = Field(ge=1)
+    rationale: str = Field(min_length=1, max_length=240)
 
-    TODO: populate fields from `discovery_engine_proposal.md` §4.1.
-    """
+    @model_validator(mode="after")
+    def _check_range(self) -> Candidate:
+        if self.line_end < self.line_start:
+            raise ValueError("line_end must be >= line_start")
+        return self
 
-    id: str
+
+class Candidates(BaseModel):
+    module_qualified_name: str
+    candidates: list[Candidate] = Field(min_length=1)
+
+
+__all__ = ["Candidate", "Candidates"]
