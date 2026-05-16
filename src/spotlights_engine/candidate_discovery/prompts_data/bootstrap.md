@@ -30,17 +30,50 @@ winners) can plausibly find a better implementation. Good candidates have
    score, or a domain metric. Must be quantifiable from an existing or
    easily-written harness.
 3. **Real headroom.** Hot paths, heuristics with magic numbers, hand-rolled
-   schedules, batch/tile/block sizing, kernel launch params, prefetch/eviction
-   policies, scheduling/admission control, numerical kernels,
-   parsing/serialization inner loops, retry/backoff strategies.
+   schedules, batch/tile/block sizing, kernel launch params, per-device
+   tuning tables, prefetch/eviction policies, scheduling/admission control,
+   numerical kernels,
+   parsing/serialization inner loops, retry/backoff strategies,
+   scoring/aggregation/blending formulas (linear weighted sum vs. softmax /
+   geometric mean / lexicographic; per-input normalization shape — linear,
+   sigmoid, log, piecewise with knee), routing/filtering gate, partition,
+   short-circuit, and fallback rules, selection / tie-breaking strategies
+   (random vs. power-of-two-choices, consistent / rendezvous hashing,
+   ε-greedy, UCB), adaptive sampling / polling cadence and smoothing
+   (uniform interval vs. event-driven, EWMA / Kalman, hysteresis),
+   worker / thread / connection pool sizing and request-batching policies,
+   GPU stream / workspace / pipeline-stage scheduling between owned ops,
+   kernel fusion (collapsing successive passes — e.g. norm+quant,
+   penalty+temperature — into one), vectorization width / memory access
+   patterns (alignment, vector load/store width, swizzling, async copy /
+   TMA / DMA exploitation, in-place vs out-of-place layout), host↔device
+   (CPU↔GPU) synchronization elimination and transfer-prep reduction
+   (replacing blocking `.item()` / `synchronize()` / `cudaMemcpy` calls with
+   async/pipeline-friendly forms, coalescing H2D/D2H copies, staging pinned
+   tensor packing, sync-free kernel contracts), algorithm replacement at
+   fixed contract
+   (full sort → quickselect / partial-sort / top-k-specific, naive scan →
+   suffix automaton / rolling hash, exact softmax → online / blockwise),
+   native-compilation transitions for hot CPU paths (pure Python /
+   interpreted → Numba / Cython / torch.compile / native extension), and
+   per-token operations that can be batched/vectorized (hash construction,
+   mask building, scatter/gather inner loops).
 4. **Bounded blast radius.** Correctness can be checked with existing tests,
    golden outputs, property tests, or a small custom oracle — not "audit the
    whole system."
 
 Skip locations that are:
-- pure glue, logging, config plumbing, type definitions, dataclasses — unless
-  the glue/config line is the concrete registration site for a qualifying
-  `plugin_seam`
+- pure glue, logging, passive config plumbing, type definitions, dataclasses —
+  unless the glue/config line is the concrete registration site for a
+  qualifying `plugin_seam`, or a `config_block` whose defaults, constants,
+  weights, thresholds, TTLs, capacities, polling intervals, pool sizes,
+  tile/block sizes, launch params, vector widths, warp/stage counts,
+  stream/workspace choices, or per-device tuning-table entries directly
+  define a qualifying runtime heuristic
+- thin wrappers around external library calls or registrations where the
+  runtime cost is dominated by code outside this repository — unless the
+  owned wrapper contains a measurable dispatch, scheduling, fusion, stream,
+  workspace, or config-selection policy with an in-repo oracle
 - already optimal/trivial (one-liners, direct library calls)
 - correctness-critical with no oracle (security checks, auth, consensus)
 - so entangled that the function or seam boundary doesn't capture the
