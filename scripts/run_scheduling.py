@@ -1,7 +1,7 @@
-"""Run candidate_discovery against vllm's kv_offload module.
+"""Run candidate_discovery against llm-d-inference-scheduler's scheduling module.
 
 Usage:
-    uv run python scripts/run_kv_offload.py
+    uv run python scripts/run_scheduling.py
 """
 
 from __future__ import annotations
@@ -37,8 +37,8 @@ _stub_observability_if_missing()
 from spotlights_engine.candidate_discovery import DiscoveryConfig, discover  # noqa: E402
 from spotlights_engine.schemas.modules import File, Module  # noqa: E402
 
-REPO_PATH = Path("/Users/ophir/PycharmProjects/vllm")
-ARTIFACTS_DIR = Path(__file__).resolve().parent.parent / "tmp" / "kv_offload"
+REPO_PATH = Path("/Users/ophir/GoProjects/llm-d-inference-scheduler-main")
+ARTIFACTS_DIR = Path(__file__).resolve().parent.parent / "tmp" / "scheduling"
 
 
 def main() -> None:
@@ -49,35 +49,35 @@ def main() -> None:
 
     cfg = DiscoveryConfig(
         repo_path=REPO_PATH,
-        module_qualified_name="v1/kv_offload",
+        module_qualified_name="epp/scheduling",
         module=Module(
-            name="kv_offload",
-            path="vllm/v1/kv_offload",
+            name="scheduling",
+            path="pkg/epp/scheduling",
             description=(
-                "KV-cache offload framework with CPU offload manager, reuse "
-                "tracking, worker hooks, and offload policies."
+                "Profile-based scheduler that combines filter/scorer/picker "
+                "plugins to choose endpoints; supports weighted scorer "
+                "composition."
             ),
-            depends_on=["config", "distributed", "utils"],
+            depends_on=[],
             main_files=[
                 File(
-                    path="vllm/v1/kv_offload/base.py",
-                    role="Abstract offload manager interface",
+                    path="pkg/epp/scheduling/scheduler.go",
+                    role=(
+                        "Scheduler entry point: runs configured profiles and "
+                        "aggregates results"
+                    ),
                 ),
                 File(
-                    path="vllm/v1/kv_offload/factory.py",
-                    role="Offload manager factory",
+                    path="pkg/epp/scheduling/scheduler_profile.go",
+                    role="Single-profile execution: filter -> score -> pick",
                 ),
                 File(
-                    path="vllm/v1/kv_offload/reuse_manager.py",
-                    role="Cross-request block-reuse tracking",
+                    path="pkg/epp/scheduling/weighted_scorer.go",
+                    role="Weighted aggregation of multiple scorer outputs",
                 ),
                 File(
-                    path="vllm/v1/kv_offload/cpu/manager.py",
-                    role="CPU offload implementation",
-                ),
-                File(
-                    path="vllm/v1/kv_offload/worker/worker.py",
-                    role="Worker-side offload integration",
+                    path="pkg/epp/scheduling/scheduler_config.go",
+                    role="Scheduler configuration model and validation",
                 ),
             ],
         ),
