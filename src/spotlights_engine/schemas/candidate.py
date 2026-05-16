@@ -13,7 +13,13 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 CandidateKind = Literal[
-    "function", "method", "loop", "region", "kernel", "config_block"
+    "function",
+    "method",
+    "loop",
+    "region",
+    "kernel",
+    "config_block",
+    "plugin_seam",
 ]
 MetricDirection = Literal["minimize", "maximize"]
 EstimatedImpact = Literal["high", "medium", "low"]

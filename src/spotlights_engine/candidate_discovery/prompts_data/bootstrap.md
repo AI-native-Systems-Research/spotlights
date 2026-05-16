@@ -38,10 +38,58 @@ winners) can plausibly find a better implementation. Good candidates have
    whole system."
 
 Skip locations that are:
-- pure glue, logging, config plumbing, type definitions, dataclasses
+- pure glue, logging, config plumbing, type definitions, dataclasses — unless
+  the glue/config line is the concrete registration site for a qualifying
+  `plugin_seam`
 - already optimal/trivial (one-liners, direct library calls)
 - correctness-critical with no oracle (security checks, auth, consensus)
-- so entangled that the function boundary doesn't capture the optimization unit
+- so entangled that the function or seam boundary doesn't capture the
+  optimization unit
+
+## Plugin seams (`kind: "plugin_seam"`)
+
+A separate, language-neutral category of target: not "edit lines L1–L2 of one
+function" but "add a new implementation behind a stable interface, register
+it at a known site." The interface and the registry already exist; the
+optimization unit is a *new* sibling implementation plus one registry edit.
+
+This pattern shows up across languages as:
+
+- a map / dictionary / table whose values are interchangeable implementations
+  of a common interface — e.g. Python `dict[str, type[X]]`, Go
+  `map[string]Factory`, Rust `HashMap<&str, fn() -> Box<dyn Trait>>`, C++
+  factory map, TS `Record<string, () => Impl>`
+- a service-discovery / plugin mechanism — Java `ServiceLoader` +
+  `META-INF/services/...`, Python entry points, .NET DI container, Go
+  `init()` self-registration, Rust feature flags / `cfg`-gated modules
+- a `switch` / `match` / `if`-chain dispatching on a config-driven tag
+- a vtable / function-pointer table populated at startup
+
+Emit `kind: "plugin_seam"` only when, in addition to the four criteria above:
+- the interface contract is small and stable (a handful of methods/functions
+  with documented invariants), and
+- the selector is data-driven (config value, env var, build flag, manifest
+  file) — not a hard-coded branch with no external surface.
+
+For seam candidates, anchor the candidate at the **registration site**, not
+the interface:
+
+- `file` + `line_start` / `line_end` → the single most concrete edit a new
+  implementation requires (the map entry, the service-manifest line, the
+  factory registration call, the match arm). NOT the interface declaration.
+- `symbol` → the registry / table / dispatch identifier.
+- `current_approach` → one sentence naming the interface (with its file
+  path), the existing reference implementations (with their file paths),
+  and the runtime selector that picks one (config key, env var, build flag,
+  manifest filename).
+- `evolve_rationale` → the oracle is the interface's existing test suite
+  and/or documented invariants; cite where they live.
+- `metrics` → the workload-level signal a better implementation would move
+  (hit rate, latency, throughput, footprint, quality score).
+
+The evolution unit is "a new implementation file + one registry edit." The
+proposer only needs to anchor the registry; the harness can follow the
+chain registry → values → interface → reference implementations.
 
 ## Process
 
@@ -75,7 +123,7 @@ Emit ONE JSON object matching the `Candidates` schema enforced by the wrapper:
       "line_start": <1-indexed inclusive>,
       "line_end":   <1-indexed inclusive, >= line_start>,
       "symbol": "<fully-qualified function/class/method or 'region'>",
-      "kind": "function | method | loop | region | kernel | config_block",
+      "kind": "function | method | loop | region | kernel | config_block | plugin_seam",
       "description": "What this code does today, in one or two sentences.",
       "current_approach": "Brief summary of the existing implementation/heuristic.",
       "evolve_rationale": "Why this is a good evolutionary target — where the headroom is.",
