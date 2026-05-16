@@ -17,6 +17,10 @@ def schema_path(artifacts_dir: Path) -> Path:
     return candidate_discovery_root(artifacts_dir) / "candidates.schema.json"
 
 
+def repo_context_path(artifacts_dir: Path) -> Path:
+    return candidate_discovery_root(artifacts_dir) / "repo_context.md"
+
+
 def iter_dir(artifacts_dir: Path, n: int, agent: str) -> Path:
     tag = "bootstrap" if n == 0 else agent
     return candidate_discovery_root(artifacts_dir) / f"iter_{n}_{tag}"
@@ -35,5 +39,6 @@ __all__ = [
     "final_artifact",
     "iter_dir",
     "iterations_jsonl",
+    "repo_context_path",
     "schema_path",
 ]

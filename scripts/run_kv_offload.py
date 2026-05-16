@@ -47,6 +47,11 @@ def main() -> None:
         shutil.rmtree(run_dir)
     ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 
+    _ctx_path = REPO_PATH / "docs" / "repo_context.md"
+    _repo_context = (
+        _ctx_path.read_text(encoding="utf-8") if _ctx_path.is_file() else None
+    )
+
     cfg = DiscoveryConfig(
         repo_path=REPO_PATH,
         module_qualified_name="v1/kv_offload",
@@ -82,6 +87,7 @@ def main() -> None:
             ],
         ),
         artifacts_dir=ARTIFACTS_DIR,
+        repo_context_markdown=_repo_context,
         num_review_iterations=1,
         claude_max_turns=30,
         per_iteration_wallclock_s=600,

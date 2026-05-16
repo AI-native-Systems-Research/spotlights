@@ -19,6 +19,9 @@ class DiscoveryConfig(BaseModel):
     module_qualified_name: str
     module: Module
     artifacts_dir: Path
+    repo_context_markdown: str | None = Field(
+        default=None, min_length=1, max_length=20_000
+    )
     num_review_iterations: int = Field(default=3, ge=0)
     per_iteration_wallclock_s: int = Field(default=900, ge=1)
     claude_max_turns: int = Field(default=30, ge=1)

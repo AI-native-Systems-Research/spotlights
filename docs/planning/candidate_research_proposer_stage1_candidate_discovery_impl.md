@@ -58,17 +58,41 @@ tests/integration/candidate_discovery/
 
 ## 2. Schemas — `spotlights_engine.schemas.candidate`
 
-Replace the dataclass stub at [src/spotlights_engine/schemas/candidate.py](../src/spotlights_engine/schemas/candidate.py) with the pydantic models in spec §1. Carry the field constraints from the spec verbatim:
+Replace the dataclass stub at [src/spotlights_engine/schemas/candidate.py](../src/spotlights_engine/schemas/candidate.py) with the pydantic models in spec §1. Carry the field constraints from the spec verbatim, including `extra="forbid"` on every object so the exported `model_json_schema()` is acceptable to OpenAI strict structured outputs (Codex `--output-schema`):
 
 ```python
-from pydantic import BaseModel, Field, model_validator
+from typing import Literal
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+CandidateKind = Literal[
+    "function", "method", "loop", "region", "kernel", "config_block", "plugin_seam",
+]
+MetricDirection = Literal["minimize", "maximize"]
+EstimatedImpact = Literal["high", "medium", "low"]
+
+
+class Metric(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=80)
+    direction: MetricDirection
+    target_or_baseline: str | None = Field(...)
+
 
 class Candidate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     id: str = Field(pattern=r"^cand-\d{4}$")
     file: str
     line_start: int = Field(ge=1)
     line_end: int = Field(ge=1)
-    rationale: str = Field(min_length=1, max_length=240)
+    symbol: str = Field(min_length=1, max_length=200)
+    kind: CandidateKind
+    description: str = Field(min_length=1)
+    current_approach: str = Field(min_length=1)
+    evolve_rationale: str = Field(min_length=1)
+    metrics: list[Metric] = Field(min_length=1)
+    estimated_impact: EstimatedImpact
 
     @model_validator(mode="after")
     def _check_range(self) -> "Candidate":
@@ -77,6 +101,8 @@ class Candidate(BaseModel):
         return self
 
 class Candidates(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     module_qualified_name: str
     candidates: list[Candidate] = Field(min_length=1)
 ```
@@ -86,8 +112,11 @@ Re-export both names from [src/spotlights_engine/schemas/__init__.py](../src/spo
 Unit tests in `test_schema_candidate.py`:
 - `cand-0001` accepted; `cand-1`, `cand-00001`, `candidate-0001` rejected.
 - `line_end < line_start` rejected with the validator's message.
-- `rationale=""` and `rationale="x"*241` rejected.
-- `candidates=[]` rejected (the `min_length=1` invariant).
+- Each required string field rejects the empty string; `symbol` rejects a >200-char value; `Metric.name` rejects a >80-char value.
+- `metrics=[]` rejected (the `min_length=1` invariant on `Candidate.metrics`).
+- `candidates=[]` rejected (the `min_length=1` invariant on `Candidates.candidates`).
+- An unknown `kind` / `direction` / `estimated_impact` value is rejected by the `Literal` constraint.
+- An extra top-level field is rejected (`extra="forbid"`).
 - `Candidates.model_json_schema()` round-trips through `json.dumps` (used by `--json-schema` and `--output-schema`).
 
 ---
@@ -121,6 +150,7 @@ class DiscoveryConfig(BaseModel):
     module_qualified_name: str
     module: Module
     artifacts_dir: Path
+    repo_context_markdown: str | None = Field(default=None, min_length=1, max_length=20_000)
     num_review_iterations: int = Field(default=3, ge=0)
     per_iteration_wallclock_s: int = Field(default=900, ge=1)
     claude_max_turns: int = Field(default=30, ge=1)
@@ -377,16 +407,26 @@ Public functions:
 def wrap(prompt: str) -> str:
     """Prepend the §5 preamble."""
 
-def render_bootstrap(module_qualified_name: str, module: Module) -> str: ...
+def render_bootstrap(
+    module_qualified_name: str,
+    module: Module,
+    *,
+    repo_context_markdown: str | None = None,
+) -> str: ...
+
 def render_review(
     module_qualified_name: str,
     module: Module,
     prev_candidates_json: str,
     max_seen_candidate_id: str,
+    *,
+    repo_context_markdown: str | None = None,
 ) -> str: ...
 ```
 
-Three private formatter helpers preformat the Module fields per spec §5:
+The new `repo_context_markdown` parameter on both renderers is keyword-only — both for forward compatibility against further positional additions and so call sites are self-documenting. The `None` default preserves backward compatibility for tests that exercise the renderers without the new field.
+
+Three private formatter helpers preformat the Module fields per spec §5, plus one new helper for the repo-context section:
 
 ```python
 def _format_main_files(files: list[File]) -> str:
@@ -395,16 +435,27 @@ def _format_submodule_names(submodules: list[Module]) -> str:
     return ", ".join(m.name for m in submodules) or "(none)"
 def _format_depends_on(deps: list[str]) -> str:
     return ", ".join(deps) or "(none)"
+
+_REPO_CONTEXT_DEFAULT = "_(none provided)_"
+
+def _format_repo_context(md: str | None) -> str:
+    return _REPO_CONTEXT_DEFAULT if md is None else md  # verbatim; no trim, no reflow
 ```
+
+Both `bootstrap.md` and `review.md` carry a single dedicated block — `## Repository context\n\n{repo_context}` — placed after the module/inputs block and before the rules / quality-bar block (see spec §8 / §9 for the exact insertion points). Because `_substitute` raises on unknown placeholders, both renderers MUST pass `{repo_context}` into the values dict on every call; the `None` default routes through `_format_repo_context`.
 
 Unit tests in `test_prompts.py`:
 - Bootstrap with no submodules / no deps renders `(none)`.
-- After substitution, no unsubstituted `{word}` placeholder remains in either prompt (regex assertion on the output).
+- After substitution, no unsubstituted `{word}` placeholder remains in either prompt (regex assertion on the output). Run this with a brace-free `repo_context_markdown` (or the default `None`) so the regression-locked scan can run safely against the whole rendered output.
 - The literal JSON-object braces in the templates appear unchanged in the output, byte-for-byte.
 - An unknown placeholder in a template (test-only fixture) raises `KeyError` rather than passing through.
 - The review prompt includes the full `prev_candidates_json` text and the literal `max_seen_candidate_id`.
 - The wrapped prompt always begins with the preamble; the second half is byte-identical to the unwrapped prompt.
 - `STRICT_RETRY_REMINDER` loads at import and is non-empty.
+- **Repo context: default branch.** `repo_context_markdown=None` substitutes `_(none provided)_`; the `## Repository context` header is present in both rendered templates.
+- **Repo context: round-trip.** A small payload (e.g. ``"## Tests\n\n`pytest -q`\n"``) appears byte-for-byte in the rendered output (no escaping, no reflow).
+- **Repo context: literal braces preserved.** A payload containing a `{json}`-shaped substring round-trips intact. Conceptually: `re.sub` does not rescan replacement text, so the placeholder scan runs once against the *template*, never against substituted values — user-supplied markdown cannot trigger spurious substitutions or `KeyError`s. Test this separately from the "no placeholders remain" assertion.
+- **Repo context: schema bounds.** `DiscoveryConfig(repo_context_markdown="")` and `DiscoveryConfig(repo_context_markdown="x" * 20_001)` both raise `ValidationError`; `None` is accepted and routes through `_(none provided)_`.
 
 ---
 
@@ -516,7 +567,7 @@ def render_diff_markdown(prev: Candidates, current: Candidates) -> str:
 Diff rules (spec §6 final paragraph) are exact:
 - `added = ids_n \ ids_{n-1}`
 - `removed = ids_{n-1} \ ids_n`
-- `modified = { id ∈ ids_n ∩ ids_{n-1} : (line_start, line_end, rationale.strip()) differs }`
+- `modified = { id ∈ ids_n ∩ ids_{n-1} : any of (line_start, line_end, kind, estimated_impact, symbol.strip(), description.strip(), current_approach.strip(), evolve_rationale.strip(), normalized metrics tuple) differs }` — the per-field strip rule preserves the historical "whitespace-only edits are not material" intent across all text fields, and the metrics tuple is `sorted((name.strip(), direction, target_or_baseline is None, target_or_baseline.strip() if str else ""))` so reorderings and equivalent-value rewordings do not register as drift.
 
 Serialize `added`, `removed`, and `modified` in lexicographic `cand-NNNN` order so telemetry JSON and `diff_from_prev.md` are deterministic. For `n=0`, `added` is all survivor ids in that same order, `removed = []`, and `modified = []`.
 
@@ -524,24 +575,24 @@ The orchestrator appends one NDJSON line per iteration to `<artifacts_dir>/candi
 
 `DiscoveryResult.total_duration_s` is `time.monotonic()` end-to-end over `Orchestrator.run()` (includes orchestrator overhead, not just the sum of agent calls). `DiscoveryResult.total_cost_usd` is `sum(t.cost_usd for t in iterations if t.cost_usd is not None)` if at least one iteration reported a cost, else `None` — i.e., partial visibility is preserved, but a fully-unreported run surfaces as `None` rather than `0.0` so downstream cost dashboards don't confuse "free" with "unknown".
 
-`render_diff_markdown(prev, current)` emits three fixed sections; an empty section is rendered as `_(none)_` so the file shape is stable across iterations:
+`render_diff_markdown(prev, current)` emits three fixed sections; an empty section is rendered as `_(none)_` so the file shape is stable across iterations. Each line carries the candidate id, file, line range, `[kind]`, `symbol`, and `evolve_rationale` so a reviewer can scan one iteration's drift without opening the underlying JSON:
 
 ```markdown
 ## Added
-- cand-0007 — src/foo/x.py:142-211 — Hoist allocator out of inner loop
+- cand-0007 — src/foo/x.py:142-211 [region] hot_loop — Hoist allocator out of inner loop
 
 ## Removed
-- cand-0003 — src/foo/y.py:88-94 — (was: redundant tensor.cpu() on hot path)
+- cand-0003 — src/foo/y.py:88-94 [function] cpu_copy — (was: redundant tensor.cpu() on hot path)
 
 ## Modified
-- cand-0001 — src/foo/scheduler.py:142-211 → 142-203 — rationale tightened
+- cand-0001 — src/foo/scheduler.py:142-211 → 142-203 [function] schedule — evolve_rationale tightened
 ```
 
 For `n=0`, every survivor is "Added" and the other two sections are `_(none)_`.
 
 Unit tests in `test_telemetry.py`:
 - Round-trip a few `IterationTelemetry` instances through `model_dump_json` ↔ `model_validate_json` and assert equality.
-- Diff: rename → (removed, added); change of `line_end` → modified; whitespace-only change of `rationale` → not modified (the `.strip()` rule).
+- Diff: rename → (removed, added); change of `line_end` → modified; whitespace-only change of `evolve_rationale` (or any other text field covered by `.strip()`) → not modified.
 
 ---
 
@@ -556,6 +607,9 @@ def candidate_discovery_root(artifacts_dir: Path) -> Path:
 def schema_path(artifacts_dir: Path) -> Path:
     return candidate_discovery_root(artifacts_dir) / "candidates.schema.json"
 
+def repo_context_path(artifacts_dir: Path) -> Path:
+    return candidate_discovery_root(artifacts_dir) / "repo_context.md"
+
 def iter_dir(artifacts_dir: Path, n: int, agent: str) -> Path:
     tag = "bootstrap" if n == 0 else agent       # iter_0_bootstrap, iter_1_codex, ...
     return candidate_discovery_root(artifacts_dir) / f"iter_{n}_{tag}"
@@ -567,7 +621,7 @@ def final_artifact(artifacts_dir: Path) -> Path:
     return artifacts_dir / "candidates.json"
 ```
 
-Spec §3 directory tree is the authoritative reference; this module is the one place that knows the layout.
+Spec §3 directory tree is the authoritative reference; this module is the one place that knows the layout. `repo_context_path` is the single source of truth for the persisted run-time copy of `config.repo_context_markdown` (see §5 orchestrator wiring); the file is written only when the caller supplied repo context.
 
 ---
 
@@ -592,6 +646,9 @@ Test scenarios (each gets its own scripted sequence):
 9. **Pre-existing run dir** — `<artifacts_dir>/candidate_discovery/` exists at call time; `DiscoverySetupError` raised before any subprocess.
 10. **Artifacts inside target repo** — `artifacts_dir` resolves under `repo_path`; `DiscoverySetupError` raised before any subprocess or run-dir creation.
 11. **Final artifact copy** — iter `num_review_iterations`'s `candidates.json` is byte-identical to `<artifacts_dir>/candidates.json`.
+12. **Repo context persisted when supplied** — with `repo_context_markdown="## X\n"`, after `run()` returns, `layout.repo_context_path(artifacts_dir)` exists and its bytes equal the supplied string. The orchestrator writes it once in `_mint_run_dir`.
+13. **No repo-context file when `None`** — with `repo_context_markdown=None`, `layout.repo_context_path(artifacts_dir)` does **not** exist after `run()` returns. Absence is itself informative ("this run had no repo context").
+14. **Repo context reaches every iteration prompt** — `FakeAgentRunner` already lets the orchestrator write `(iter_dir / "prompt.md").write_text(attempt_prompt, ...)`. Assert that every iteration's `prompt.md` contains the supplied markdown verbatim (proves it threaded through bootstrap *and* each review).
 
 The fake fixture takes ~1 ms per iteration, so the whole orchestrator suite stays under a second.
 

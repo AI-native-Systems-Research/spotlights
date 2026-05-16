@@ -16,6 +16,10 @@ correctness oracle.
 {main_files}
 - submodules:            {submodule_names}               # nested modules under this one
 
+## Repository context
+
+{repo_context}
+
 ## What counts as a good evolve target
 
 Pick locations where an evolutionary loop (mutate code → run benchmark → keep

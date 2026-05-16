@@ -10,6 +10,10 @@ missed that clear the same quality bar.
 - module.path: {module_path}                     # every candidate's `file` MUST live here
 - highest id accepted so far: {max_seen_candidate_id}
 
+## Repository context
+
+{repo_context}
+
 ## Rules
 - DO NOT inflate the list. If the previous pass was good, return it nearly unchanged.
 - Remove any candidate whose `file` does not exist, whose `file` is outside

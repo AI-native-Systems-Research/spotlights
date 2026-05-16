@@ -37,6 +37,8 @@ _BOOTSTRAP = _load("bootstrap.md")
 _REVIEW = _load("review.md")
 STRICT_RETRY_REMINDER: str = _load("strict_retry.md").rstrip("\n")
 
+_REPO_CONTEXT_DEFAULT = "_(none provided)_"
+
 
 def _substitute(template: str, values: dict[str, str]) -> str:
     def repl(m: re.Match[str]) -> str:
@@ -62,12 +64,23 @@ def _format_depends_on(deps: list[str]) -> str:
     return ", ".join(deps) or "(none)"
 
 
+def _format_repo_context(md: str | None) -> str:
+    if md is None:
+        return _REPO_CONTEXT_DEFAULT
+    return md
+
+
 def wrap(prompt: str) -> str:
     """Prepend the §5 preamble to a substituted prompt body."""
     return _PREAMBLE + "\n" + prompt
 
 
-def render_bootstrap(module_qualified_name: str, module: Module) -> str:
+def render_bootstrap(
+    module_qualified_name: str,
+    module: Module,
+    *,
+    repo_context_markdown: str | None = None,
+) -> str:
     values = {
         "module_qualified_name": module_qualified_name,
         "module_name": module.name,
@@ -76,6 +89,7 @@ def render_bootstrap(module_qualified_name: str, module: Module) -> str:
         "depends_on": _format_depends_on(module.depends_on),
         "main_files": _format_main_files(module.main_files),
         "submodule_names": _format_submodule_names(module.submodules),
+        "repo_context": _format_repo_context(repo_context_markdown),
     }
     return wrap(_substitute(_BOOTSTRAP, values))
 
@@ -85,12 +99,15 @@ def render_review(
     module: Module,
     prev_candidates_json: str,
     max_seen_candidate_id: str,
+    *,
+    repo_context_markdown: str | None = None,
 ) -> str:
     values = {
         "module_qualified_name": module_qualified_name,
         "module_path": module.path,
         "prev_candidates_json": prev_candidates_json,
         "max_seen_candidate_id": max_seen_candidate_id,
+        "repo_context": _format_repo_context(repo_context_markdown),
     }
     return wrap(_substitute(_REVIEW, values))
 

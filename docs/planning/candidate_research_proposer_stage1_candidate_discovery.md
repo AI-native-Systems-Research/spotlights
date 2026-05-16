@@ -28,6 +28,7 @@ class DiscoveryConfig(BaseModel):
     module_qualified_name: str             # ProjectTree.walk() key, e.g. "v1/engine/core"
     module: Module                         # resolved Module record (see schemas/modules.py)
     artifacts_dir: Path                    # shared run dir outside repo_path; final artifact is <artifacts_dir>/candidates.json
+    repo_context_markdown: str | None = Field(default=None, min_length=1, max_length=20_000)
 
     num_review_iterations: int = Field(default=3, ge=0)  # N review passes after bootstrap; no early stop
     per_iteration_wallclock_s: int = Field(default=900, ge=1)
@@ -36,17 +37,42 @@ class DiscoveryConfig(BaseModel):
     codex_reasoning_effort: Literal["minimal", "low", "medium", "high", "xhigh"] = "high"
 ```
 
+`repo_context_markdown` is optional repo-level markdown context (test commands, benchmark harnesses, metric conventions, hard constraints) that the orchestrator inlines into every iteration's prompt so the agent does not have to rediscover that surface each run. Sourcing is the caller's problem; the recommended authoring prompt is at [repo_context.txt](repo_context.txt). When supplied, the orchestrator persists the markdown verbatim to `<artifacts_dir>/candidate_discovery/repo_context.md` for run reproducibility. When `None`, the corresponding prompt section renders `_(none provided)_` and no file is written.
+
 ### `Candidates` and `DiscoveryResult` (output)
 
 `Candidates` is the on-disk schema. The schema classes live in `spotlights_engine.schemas.candidate`; the discovery package imports them rather than defining a private copy. All shape constraints are enforced in pydantic so the exported `model_json_schema()` carries them into both subprocess validators:
 
 ```python
+CandidateKind = Literal[
+    "function", "method", "loop", "region", "kernel", "config_block", "plugin_seam",
+]
+MetricDirection = Literal["minimize", "maximize"]
+EstimatedImpact = Literal["high", "medium", "low"]
+
+
+class Metric(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=80)
+    direction: MetricDirection
+    target_or_baseline: str | None = Field(...)   # required-but-nullable for OpenAI strict structured outputs
+
+
 class Candidate(BaseModel):
-    id: str = Field(pattern=r"^cand-\d{4}$")  # minted by bootstrap; monotone across reviews
-    file: str                                 # repo-root-relative, non-absolute; MUST resolve under module.path
-    line_start: int = Field(ge=1)             # 1-indexed inclusive
-    line_end: int = Field(ge=1)               # 1-indexed inclusive
-    rationale: str = Field(min_length=1, max_length=240)  # falsifiable
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=r"^cand-\d{4}$")    # minted by bootstrap; monotone across reviews
+    file: str                                   # repo-root-relative, non-absolute; MUST resolve under module.path
+    line_start: int = Field(ge=1)               # 1-indexed inclusive
+    line_end: int = Field(ge=1)                 # 1-indexed inclusive
+    symbol: str = Field(min_length=1, max_length=200)
+    kind: CandidateKind
+    description: str = Field(min_length=1)
+    current_approach: str = Field(min_length=1)
+    evolve_rationale: str = Field(min_length=1)
+    metrics: list[Metric] = Field(min_length=1)
+    estimated_impact: EstimatedImpact
 
     @model_validator(mode="after")
     def _check_range(self) -> "Candidate":
@@ -56,6 +82,8 @@ class Candidate(BaseModel):
 
 
 class Candidates(BaseModel):
+    model_config = ConfigDict(extra="forbid")    # emits `additionalProperties: false` for codex --output-schema
+
     module_qualified_name: str
     candidates: list[Candidate] = Field(min_length=1)
 ```
@@ -78,7 +106,7 @@ class IterationTelemetry(BaseModel):
     dropped_invalid_ranges: int = 0        # line_start/line_end out of file bounds
     added: list[str]                       # ids new vs prev iter; for n=0, all bootstrap ids; sorted
     removed: list[str]                     # ids in prev iter but not this one; empty for n=0
-    modified: list[str]                    # ids present in both iters with changed line_start, line_end, or rationale; empty for n=0
+    modified: list[str]                    # ids present in both iters whose structural content changed (see §6); empty for n=0
 
 
 class DiscoveryResult(BaseModel):
@@ -103,7 +131,7 @@ i=2: claude_code review                → candidates_v2.json
 i=3: codex      review                 → candidates_v3.json   # for num_review_iterations=3
 ```
 
-The bootstrap is always `claude_code`. Review iteration `N` (1-indexed) uses `agents[(N-1) % 2]` with `agents = ["codex", "claude_code"]`, so the bootstrap is reviewed first by the *other* agent. With the default `num_review_iterations=3` the full rotation is `claude_code → codex → claude_code → codex`. Each review reads the prior iteration's full `candidates.json`, prunes false positives, merges duplicates, sharpens rationales, and may add at most 5 new candidates.
+The bootstrap is always `claude_code`. Review iteration `N` (1-indexed) uses `agents[(N-1) % 2]` with `agents = ["codex", "claude_code"]`, so the bootstrap is reviewed first by the *other* agent. With the default `num_review_iterations=3` the full rotation is `claude_code → codex → claude_code → codex`. Each review reads the prior iteration's full `candidates.json`, prunes false positives, merges duplicates, sharpens rationales / metrics, and adds any further candidates that clear the same evolve-target quality bar. No cap on the number of additions — quality remains the only gate.
 
 Iteration `num_review_iterations` is the downstream-facing result: its post-drop `candidates.json` is copied to `<artifacts_dir>/candidates.json` (§6.8).
 
@@ -116,6 +144,7 @@ Stage 1 receives the shared run dir as `artifacts_dir` — conventionally `~/.ca
   candidates.json            # final validated candidates from the last iteration
   candidate_discovery/
     candidates.schema.json   # exported from the pydantic schema for subprocess validation
+    repo_context.md          # verbatim copy of config.repo_context_markdown; present only when supplied
     iterations.jsonl
     iter_0_bootstrap/
       candidates.json        # orchestrator-written, post-drop validated JSON for this iteration
@@ -204,6 +233,8 @@ Before substitution into either prompt, the orchestrator pre-formats the `Module
 
 For review iterations the orchestrator additionally inlines the prior iteration's `candidates.json` content into the review prompt (the `@candidates_prev.json` reference in §9) before wrapping and substitutes `{max_seen_candidate_id}` with the highest candidate id accepted in any earlier iteration.
 
+Both the bootstrap and the review template carry a dedicated `## Repository context` section with a single `{repo_context}` placeholder. The orchestrator substitutes `config.repo_context_markdown` verbatim (no trim, no reflow) when supplied, and the literal string `_(none provided)_` when it is `None`. The section header is always present so the rendered template shape is stable across runs.
+
 ## 6. Validation per iteration
 
 Run after each subprocess exits, in this order. Steps marked **(raise)** abort the run via `DiscoveryValidationError` / `DiscoveryMutationError` (both in `spotlights_engine.candidate_discovery.errors`); steps marked **(drop)** prune the offending candidate and increment a counter on `IterationTelemetry`.
@@ -215,12 +246,12 @@ Run after each subprocess exits, in this order. Steps marked **(raise)** abort t
 5. **Path existence** **(drop → `dropped_missing_file`)** — every surviving `candidate.file` must resolve to an existing file in `repo_path`.
 6. **Line range sanity** **(drop → `dropped_invalid_ranges`)** — `1 ≤ line_start ≤ line_end ≤ file_line_count`. (`line_end ≥ line_start` is already enforced by the pydantic validator.)
 7. **ID integrity** **(raises)** — within the raw parsed iteration, `id` values are unique. Across review iterations (`n ≥ 1`):
-   - on the raw parsed list, any `id` carried over from the previous iteration MUST retain the previous iteration's `file` (rationale and line range may change);
+   - on the raw parsed list, any `id` carried over from the previous iteration MUST retain the previous iteration's `file` (other fields — line range, `symbol`, `kind`, `description`, `current_approach`, `evolve_rationale`, `metrics`, `estimated_impact` — may change);
    - on the post-drop list, an `id` absent from the previous iteration is treated as newly minted, even if it appeared in an older iteration;
    - every newly minted `id` MUST be strictly greater than the highest id accepted in any earlier iteration under lexicographic order on the zero-padded `cand-NNNN` form.
 8. **Persist normalized JSON** **(raises if empty)** — re-validate the surviving list via `Candidates.model_validate(dict(module_qualified_name=..., candidates=survivors))` so the `min_length=1` invariant fires on the *current* iteration if drops emptied it (raises `DiscoveryValidationError`). Then serialize via `model_dump_json(indent=2)` to `<iter_dir>/candidates.json`. On the final iteration (`n == num_review_iterations`), copy that file byte-for-byte to `<artifacts_dir>/candidates.json`.
 
-After step 8 the orchestrator also computes `IterationTelemetry.added` / `removed` / `modified` by joining on `id` against the previous iteration: `added = ids_n \ ids_{n-1}`, `removed = ids_{n-1} \ ids_n`, `modified = { id in ids_n ∩ ids_{n-1} : (line_start, line_end, rationale.strip()) differs }`. The emitted ID lists are sorted lexicographically for deterministic telemetry. For `n=0`, `added` is the full bootstrap ID list sorted the same way and the other two are empty. For review iterations (`n >= 1`), the same structural comparison is written to `<iter_dir>/diff_from_prev.md`.
+After step 8 the orchestrator also computes `IterationTelemetry.added` / `removed` / `modified` by joining on `id` against the previous iteration: `added = ids_n \ ids_{n-1}`, `removed = ids_{n-1} \ ids_n`, and `modified = { id in ids_n ∩ ids_{n-1} : any of (line_start, line_end, kind, estimated_impact, symbol.strip(), description.strip(), current_approach.strip(), evolve_rationale.strip(), normalized metrics tuple) differs }`. The emitted ID lists are sorted lexicographically for deterministic telemetry. For `n=0`, `added` is the full bootstrap ID list sorted the same way and the other two are empty. For review iterations (`n >= 1`), the same structural comparison is written to `<iter_dir>/diff_from_prev.md`.
 
 ## 7. Loop termination
 
@@ -228,101 +259,25 @@ The loop runs exactly `1 + num_review_iterations` iterations (bootstrap at `i=0`
 
 ## 8. Bootstrap prompt
 
-`prompts/bootstrap.md`:
+The bootstrap template lives at [src/spotlights_engine/candidate_discovery/prompts_data/bootstrap.md](../src/spotlights_engine/candidate_discovery/prompts_data/bootstrap.md) and is the source of truth. It instructs the agent to audit one module for **evolve-optimizable** code locations (OpenEvolve / AlphaEvolve style), enumerating candidates that each name a self-contained behavior, a measurable metric, an oracle for correctness, and real headroom. The emitted `Candidate` shape matches the pydantic schema above (`id`, `file`, `line_start`, `line_end`, `symbol`, `kind`, `description`, `current_approach`, `evolve_rationale`, `metrics[]`, `estimated_impact`); the prompt also documents the `plugin_seam` kind as a separate, language-neutral target category anchored at the registration site.
 
-````
-You are a senior performance engineer auditing ONE module of a (likely Python,
-possibly with C++/CUDA) codebase for *high-yield optimization opportunities*.
-You do NOT write fixes. You enumerate candidate locations, each with a
-falsifiable rationale.
+The supported placeholder set is:
 
-## Module under audit
-- module_qualified_name: {module_qualified_name}
-- module.name:           {module_name}
-- module.path:           {module_path}                   # all candidate files MUST lie under this
-- module.description:    {module_description}
-- module.depends_on:     {depends_on}                    # qualified names of sibling modules, NOT filesystem paths
-- module.main_files:                                     # start here, in order
-{main_files}
-- submodules:            {submodule_names}               # nested modules under this one
+- `{module_qualified_name}`, `{module_name}`, `{module_path}`, `{module_description}`
+- `{depends_on}`, `{main_files}`, `{submodule_names}` — pre-formatted by the orchestrator per §5
+- `{repo_context}` — `## Repository context` section body; `config.repo_context_markdown` verbatim or `_(none provided)_`
 
-## What counts as a "high-yield candidate"
-A code location worth attention if any of the following are visibly true:
-- hot loop or inner kernel (called per token / per batch / per request)
-- kernel launch site, allocator-heavy path, or Python ⇄ C boundary
-- sync/lock point, GIL-blocking section, or unnecessary thread serialization
-- batched-op opportunity (currently per-item) or vectorization-amenable shape
-- serialization boundary (pickle, json.dumps, tensor.cpu()) on a hot path
-- cache-unfriendly access pattern, redundant recomputation, or O(N) inside O(N)
-- memory-bound op that could be fused, paged, or recomputed
-
-## What to read first
-1. Read every file in `module.main_files` (they are the entry points by design).
-2. Walk `module.path` and read the rest of the module's source.
-3. `depends_on` lists other modules' qualified names (e.g. `v1/engine/scheduler`),
-   not paths. Use them only as call-shape context; do NOT guess dependency paths
-   and do NOT propose candidates outside `module.path`.
-
-## Output (REQUIRED — strict JSON, no markdown fence)
-Emit ONE JSON object matching the `Candidates` schema enforced by the wrapper:
-{
-  "module_qualified_name": "{module_qualified_name}",
-  "candidates": [
-    {
-      "id": "cand-0001",
-      "file": "<repo-root-relative path under {module_path}>",
-      "line_start": <1-indexed inclusive>,
-      "line_end":   <1-indexed inclusive, >= line_start>,
-      "rationale":  "<<=240 chars; cite the loop / the alloc / the sync>"
-    }
-  ]
-}
-
-Constraints:
-- Aim for 5–40 candidates; quality beats quantity. Do not pad to hit a count.
-- Every `file` MUST be under `{module_path}` and exist in the checkout.
-- `id` values must be unique within this list; use `cand-NNNN` zero-padded,
-  starting at `cand-0001` and increasing monotonically.
-- Do NOT explain outside the JSON object.
-````
+The `## Repository context` section sits between `## Module under audit` and `## What counts as a good evolve target` so module-scoped information is presented first; in particular, `module.path` ("all candidate files MUST lie under this") is established before the repo-level context, so a conflicting repo-context entry cannot expand the candidate surface.
 
 ## 9. Review prompt
 
-`prompts/review.md`:
+The review template lives at [src/spotlights_engine/candidate_discovery/prompts_data/review.md](../src/spotlights_engine/candidate_discovery/prompts_data/review.md) and is the source of truth. It is adversarial: prune false positives, merge duplicates, sharpen rationales / metrics, and add any further candidates that clear the same evolve-target quality bar (no fixed cap). For each kept candidate the agent MAY tighten `description`, `current_approach`, `evolve_rationale`, `metrics`, `estimated_impact`, `symbol`, `kind`, and adjust `line_start` / `line_end`; it MUST NOT change `id` or `file`.
 
-````
-You are reviewing another agent's candidate list for the same module. Your job
-is adversarial: prune false positives, merge duplicates, sharpen rationales, and
-add at most 5 *new* candidates the previous pass missed.
+The supported placeholder set is:
 
-## Inputs
-- previous candidates: @candidates_prev.json     # inlined by the orchestrator
-- module_qualified_name: {module_qualified_name}
-- module.path: {module_path}                     # every candidate's `file` MUST live here
-- highest id accepted so far: {max_seen_candidate_id}
+- `{prev_candidates_json}` — the prior iteration's `candidates.json` inlined by the orchestrator (replaces the `@candidates_prev.json` Claude-file-attach convention, which is not available in non-interactive subprocess mode)
+- `{module_qualified_name}`, `{module_path}`
+- `{max_seen_candidate_id}` — the highest id accepted in any earlier iteration; new ids MUST be strictly greater (lex order on the zero-padded `cand-NNNN` form)
+- `{repo_context}` — `## Repository context` section body; same substitution rules as the bootstrap
 
-## Rules
-- DO NOT inflate the list. If the previous pass was good, return it nearly unchanged.
-- Remove any candidate whose `file` does not exist, whose `file` is outside
-  `module.path`, or whose `line_start..line_end` is out of range for that file.
-- Merge candidates that point at the same hot path with overlapping line ranges
-  (keep one `id`, drop the others).
-- For each KEPT candidate you MAY tighten `rationale` and adjust `line_start` /
-  `line_end`. You MUST NOT change `id` or `file`. If you believe a kept
-  candidate's `file` is wrong, drop the old `id` and mint a new one instead.
-- For each NEW candidate, the rationale must cite a specific code construct
-  (function name, loop, alloc call, sync primitive) — not a vague category.
-- Mint new ids strictly greater than `{max_seen_candidate_id}`,
-  zero-padded to four digits.
-- Add at most 5 new candidates per review pass.
-
-## Output (REQUIRED — strict JSON, no markdown fence)
-Same schema as the previous pass:
-{
-  "module_qualified_name": "{module_qualified_name}",
-  "candidates": [ ... ]
-}
-
-If you genuinely have no changes, return the previous list unchanged. Do NOT pad.
-Do NOT explain outside the JSON object.
-````
+The `## Repository context` section sits between `## Inputs` and `## Rules`, again preserving module-scoping precedence.

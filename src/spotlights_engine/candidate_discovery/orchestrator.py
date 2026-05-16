@@ -90,7 +90,9 @@ class Orchestrator:
         try:
             with self._open_iterations_jsonl():
                 boot_prompt = prompts.render_bootstrap(
-                    self._config.module_qualified_name, self._config.module
+                    self._config.module_qualified_name,
+                    self._config.module,
+                    repo_context_markdown=self._config.repo_context_markdown,
                 )
                 boot = self._run_iteration(n=0, agent=claude, prompt=boot_prompt)
                 self._record(boot)
@@ -103,6 +105,7 @@ class Orchestrator:
                         self._config.module,
                         prev_json,
                         self._max_seen_id,
+                        repo_context_markdown=self._config.repo_context_markdown,
                     )
                     out = self._run_iteration(n=n, agent=agent, prompt=review_prompt)
                     self._record(out)
@@ -128,6 +131,10 @@ class Orchestrator:
         layout.schema_path(self._config.artifacts_dir).write_text(
             schema_text, encoding="utf-8"
         )
+        if self._config.repo_context_markdown is not None:
+            layout.repo_context_path(self._config.artifacts_dir).write_text(
+                self._config.repo_context_markdown, encoding="utf-8"
+            )
 
     def _open_iterations_jsonl(self):
         path = layout.iterations_jsonl(self._config.artifacts_dir)

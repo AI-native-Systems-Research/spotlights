@@ -536,3 +536,87 @@ def test_total_duration_starts_at_run_entry(repo_artifacts, monkeypatch):
 
     assert result.iterations[0].duration_s == 1.0
     assert result.total_duration_s == 9.0
+
+
+# ----- §7 repo_context orchestration tests --------------------------------
+
+
+def _make_config_with_context(
+    repo: Path,
+    artifacts: Path,
+    repo_context_markdown: str | None,
+    num_reviews: int = 1,
+) -> DiscoveryConfig:
+    return DiscoveryConfig(
+        repo_path=repo,
+        module_qualified_name="v1/foo",
+        module=_module(),
+        artifacts_dir=artifacts,
+        repo_context_markdown=repo_context_markdown,
+        num_review_iterations=num_reviews,
+    )
+
+
+def test_repo_context_persisted_when_supplied(repo_artifacts, monkeypatch):
+    repo, artifacts = repo_artifacts
+    claude = FakeAgentRunner(
+        "claude_code",
+        responses=[_cands([("cand-0001", "src/foo/x.py")])],
+    )
+    codex = FakeAgentRunner("codex", responses=[])
+    _install_runners(monkeypatch, claude, codex)
+
+    ctx = "## Tests\n\n`pytest -q`\n"
+    discover(_make_config_with_context(repo, artifacts, ctx, num_reviews=0))
+
+    saved = artifacts / "candidate_discovery" / "repo_context.md"
+    assert saved.is_file()
+    assert saved.read_text(encoding="utf-8") == ctx
+
+
+def test_repo_context_not_persisted_when_none(repo_artifacts, monkeypatch):
+    repo, artifacts = repo_artifacts
+    claude = FakeAgentRunner(
+        "claude_code",
+        responses=[_cands([("cand-0001", "src/foo/x.py")])],
+    )
+    codex = FakeAgentRunner("codex", responses=[])
+    _install_runners(monkeypatch, claude, codex)
+
+    discover(_make_config_with_context(repo, artifacts, None, num_reviews=0))
+
+    saved = artifacts / "candidate_discovery" / "repo_context.md"
+    assert not saved.exists()
+
+
+def test_repo_context_reaches_every_iteration_prompt(repo_artifacts, monkeypatch):
+    """The repo-context markdown must thread through bootstrap *and* every
+    review iteration. The orchestrator persists the attempt prompt to
+    `<iter_dir>/prompt.md`; check that every such file contains the marker.
+    """
+    repo, artifacts = repo_artifacts
+    claude = FakeAgentRunner(
+        "claude_code",
+        responses=[
+            _cands([("cand-0001", "src/foo/x.py")]),
+            _cands([("cand-0001", "src/foo/x.py"), ("cand-0003", "src/foo/z.py")]),
+        ],
+    )
+    codex = FakeAgentRunner(
+        "codex",
+        responses=[
+            _cands([("cand-0001", "src/foo/x.py"), ("cand-0002", "src/foo/y.py")]),
+        ],
+    )
+    _install_runners(monkeypatch, claude, codex)
+
+    ctx = "## Test commands\n\n`pytest -q tests/foo/`\n\n## Bench\n\n`make bench`\n"
+    discover(_make_config_with_context(repo, artifacts, ctx, num_reviews=2))
+
+    prompt_files = sorted(
+        (artifacts / "candidate_discovery").glob("iter_*/prompt.md")
+    )
+    assert len(prompt_files) == 3  # bootstrap + 2 reviews
+    for pf in prompt_files:
+        body = pf.read_text(encoding="utf-8")
+        assert ctx in body, f"missing verbatim repo context in {pf}"
