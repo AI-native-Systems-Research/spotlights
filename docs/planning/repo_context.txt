@@ -1,14 +1,28 @@
 # Generate `repo_context.md` for Stage-1 Candidate Discovery
 
-You are running inside a target repository. Your job is to produce ONE markdown
-file, `docs/repo_context.md`, that gives a downstream LLM agent the
-**repo-level** context it needs to identify good evolutionary code-optimization
-candidates inside any module of this repo.
+You are a deep-research agent operating over the web. Your task is to produce
+the contents of ONE markdown document, `docs/repo_context.md`, for the
+**target GitHub repository specified by the caller** (URL or `owner/repo`).
+That document gives a downstream LLM agent the **repo-level** context it
+needs to identify good evolutionary code-optimization candidates inside any
+module of that repo.
+
+You do not have a local checkout. Do your work by reading the target repo
+directly on GitHub:
+
+- Resolve the default branch and tip SHA via the GitHub API (e.g.
+  `GET /repos/{owner}/{repo}`, then
+  `GET /repos/{owner}/{repo}/commits/<branch>`).
+- Read files via the Contents API or `raw.githubusercontent.com` at that
+  resolved SHA.
+- Search for symbols, commands, and file references via GitHub code search
+  scoped to the repo. Treat code-search hits as leads, not as proof — always
+  reopen the cited file at the resolved SHA before writing the claim down.
 
 The downstream consumer is the Stage-1 discovery agent in `spotlight-engine`:
-it runs as a non-interactive subprocess inside a checkout of *this* repo, is
-already given a single `Module` to audit (path, description, dependencies, main
-files), and is asked to emit candidates that each name:
+it runs as a non-interactive subprocess inside a checkout of the target repo,
+is already given a single `Module` to audit (path, description, dependencies,
+main files), and is asked to emit candidates that each name:
 
 1. a metric (e.g. `decode_step_latency_ms`),
 2. a way to measure it (a script, harness, or test that produces the number),
@@ -20,24 +34,43 @@ rediscover on every iteration of every module.
 
 ## Strict output rules
 
-- Write exactly one file: `docs/repo_context.md`. Do not create anything else.
-- Do not modify any source file.
-- Keep the file under ~5 KB. Concision matters; this text is inlined into
+- Emit exactly ONE markdown document as your final answer, wrapped in a single
+  fenced code block with the language tag `markdown` (i.e. opened by three
+  backticks followed by `markdown` and closed by three backticks on their own
+  line). The block's contents are the literal file body for
+  `docs/repo_context.md`; the caller saves it. Emit no other prose, preamble,
+  or trailing commentary outside the block.
+- Inside the document, use **inline code only** (single backticks) for paths,
+  commands, and identifiers. Do NOT use triple-backtick code fences anywhere
+  inside the body — they would collide with the outer fence the caller's
+  tooling expects, and would also break inlining into the Stage-1 prompt. If
+  a command genuinely needs multiple lines, join it onto one line or describe
+  it in prose.
+- Keep the document under ~5 KB. Concision matters; this text is inlined into
   every Stage-1 prompt.
-- Begin the file with a single provenance line of the form
-  `<!-- Generated YYYY-MM-DD from <git short SHA or "uncommitted"> -->`,
-  using the current date. Use `git status --porcelain` to decide whether the
-  checkout is dirty; if it is clean, use `git rev-parse --short HEAD`; if it
-  is dirty or not a git checkout, use the literal `uncommitted`. This makes
-  stale context detectable on inspection. This provenance line is the only
-  allowed HTML.
+- Begin the document with a single provenance line of the form
+  `<!-- Generated YYYY-MM-DD from <short SHA> (<branch>) -->`, e.g.
+  `<!-- Generated 2026-05-16 from a1b2c3d (main) -->`. Resolve the values
+  this way:
+  1. `YYYY-MM-DD` is today's date in UTC.
+  2. `<branch>` is the repo's default branch, read from `.default_branch` in
+     `GET /repos/{owner}/{repo}`.
+  3. `<short SHA>` is the first 7 hex chars of that branch's tip, read from
+     `.sha` in `GET /repos/{owner}/{repo}/commits/<branch>`.
+  Treat the snapshot as clean — do not emit `uncommitted`. This provenance
+  line is the only allowed HTML.
 - Every concrete claim (paths, commands, file names) must be **verified by
-  reading the actual repo** — open the files, run `rg`, check that the paths
-  exist. Do not invent benchmark scripts or test directories that don't exist.
+  reading the actual repo on GitHub** — open the relevant file at the resolved
+  SHA, or confirm path existence via the Contents or Git Trees API at that
+  SHA. Do not invent benchmark scripts, test directories, or CI commands that
+  aren't actually present.
+  If a CI command appears in a README but no corresponding workflow / Makefile
+  target / script exists, treat it as unverified and omit it.
 - For every required section below, always emit the section header. If you
-  have no honest answer, the section body is the single line
-  `_(none found in this repo)_`. Empty is better than invented. (Section 9
-  is the one exception — it is opt-in and may be omitted entirely.)
+  have no honest answer, use the exact fallback line specified for that
+  section; if the section has no specific fallback, use the single line
+  `_(none found in this repo)_`. Empty is better than invented. (Section 9 is
+  optional and may be omitted entirely.)
 - No marketing language, no philosophy, no aspirations. Only what is true now
   and useful for picking optimization candidates.
 - Markdown only after the required provenance comment; no other HTML, no emoji.
@@ -147,11 +180,13 @@ would mislead the agent if missed:
 - In-flight work, refactor plans, deprecations. These decay fast and would
   silently mislead future runs. Treat this file as a snapshot of stable state.
 - Implementation details inside any one module.
-- Anything you cannot verify from the current checkout.
+- Anything you cannot verify by reading the repo on GitHub at the resolved
+  SHA.
 
 ## Final check
 
-Before saving, re-read your draft and ask: "If I were an LLM agent that just
-landed in this repo and had to propose a falsifiable, measurable optimization
-candidate inside an arbitrary module, which lines of this file would I
-actually use?" Delete the rest.
+Before emitting the code block, re-read your draft and ask: "If I were an LLM
+agent that just landed in this repo and had to propose a falsifiable,
+measurable optimization candidate inside an arbitrary module, which lines of
+this file would I actually use?" Delete the rest. Then emit the single
+fenced `markdown` code block — nothing before it, nothing after it — and stop.
