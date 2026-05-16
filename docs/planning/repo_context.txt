@@ -1,0 +1,157 @@
+# Generate `repo_context.md` for Stage-1 Candidate Discovery
+
+You are running inside a target repository. Your job is to produce ONE markdown
+file, `docs/repo_context.md`, that gives a downstream LLM agent the
+**repo-level** context it needs to identify good evolutionary code-optimization
+candidates inside any module of this repo.
+
+The downstream consumer is the Stage-1 discovery agent in `spotlight-engine`:
+it runs as a non-interactive subprocess inside a checkout of *this* repo, is
+already given a single `Module` to audit (path, description, dependencies, main
+files), and is asked to emit candidates that each name:
+
+1. a metric (e.g. `decode_step_latency_ms`),
+2. a way to measure it (a script, harness, or test that produces the number),
+3. a correctness oracle (a test, golden, property, or invariant).
+
+The Module-level context is supplied separately. Your output must cover what is
+**true of the repo as a whole** — the things the agent would otherwise have to
+rediscover on every iteration of every module.
+
+## Strict output rules
+
+- Write exactly one file: `docs/repo_context.md`. Do not create anything else.
+- Do not modify any source file.
+- Keep the file under ~5 KB. Concision matters; this text is inlined into
+  every Stage-1 prompt.
+- Begin the file with a single provenance line of the form
+  `<!-- Generated YYYY-MM-DD from <git short SHA or "uncommitted"> -->`,
+  using the current date. Use `git status --porcelain` to decide whether the
+  checkout is dirty; if it is clean, use `git rev-parse --short HEAD`; if it
+  is dirty or not a git checkout, use the literal `uncommitted`. This makes
+  stale context detectable on inspection. This provenance line is the only
+  allowed HTML.
+- Every concrete claim (paths, commands, file names) must be **verified by
+  reading the actual repo** — open the files, run `rg`, check that the paths
+  exist. Do not invent benchmark scripts or test directories that don't exist.
+- For every required section below, always emit the section header. If you
+  have no honest answer, the section body is the single line
+  `_(none found in this repo)_`. Empty is better than invented. (Section 9
+  is the one exception — it is opt-in and may be omitted entirely.)
+- No marketing language, no philosophy, no aspirations. Only what is true now
+  and useful for picking optimization candidates.
+- Markdown only after the required provenance comment; no other HTML, no emoji.
+
+## Required sections (in this order)
+
+### 1. Purpose
+
+One short paragraph (2–4 sentences): what this repository is, what runs in
+production, who runs it. The point is to let the agent judge "real headroom"
+claims — a research notebook and a serving binary have very different
+optimization surfaces.
+
+### 2. Languages, runtimes, hard constraints
+
+Bulleted list of the **load-bearing** ones:
+- Primary language(s) and version pins (e.g. `Python >= 3.11`, `Go 1.22`,
+  `CUDA 12.4`).
+- Hardware assumptions baked into the code (e.g. "requires NVIDIA GPU, Hopper
+  or later", "x86_64 only", "assumes AVX-512").
+- Anything that constrains an evolved variant (e.g. "must remain
+  pure-Python-importable", "no new C-extension dependencies").
+
+### 3. Repository layout
+
+State the layout convention the agent will be navigating. Stage 1 candidates
+are repo-root-relative paths that must resolve under `module.path`; getting
+the layout wrong invalidates every candidate.
+- Source root (e.g. `src/` for src-layout, or `./` for flat).
+- Test root and whether it mirrors the source tree.
+- Any generated/derived directories the agent must avoid editing the output
+  of (e.g. `gen/`, `_pb2.py`, `*.generated.go`).
+
+### 4. How tests are run
+
+Cover only what an evolved variant must satisfy:
+- The single command a CI run uses to execute the unit-test suite (e.g.
+  `uv run pytest tests/unit`).
+- Integration-test command if there is one, and whether it is gated (markers,
+  env vars).
+- Test-framework conventions worth knowing (e.g. fixtures in `conftest.py`,
+  marker meanings).
+- Coverage / quality gates that must stay green on a PR.
+
+### 5. Benchmarks and performance harnesses
+
+This is the most important section for Stage 1. List the *actual* scripts and
+fixtures the agent can cite in a candidate's `metrics` field:
+
+For each harness, one bullet:
+- Path (e.g. `benchmarks/decode.py`).
+- What it measures, in one phrase (e.g. "decode-step latency at batch size 32").
+- How to invoke it (the exact command, including required flags).
+- The metric name and unit it emits (e.g. `decode_step_latency_ms`).
+
+If no perf harness exists, follow the global "none" convention. Stage 1
+candidates in this repo will then need to *propose* a harness, and that
+should be obvious to the agent up front.
+
+### 6. Metric naming and units
+
+Short conventions (e.g. "latencies are suffixed `_ms` or `_us`; throughput is
+`_per_s`; memory is `_bytes`"). If the repo has no convention, write
+`_(none — agent should encode units in the metric name)_`.
+
+### 7. CI gates an evolved variant must pass
+
+Bullet list of the checks a PR has to clear before merge (lint, type, format,
+security scan, license check). Name the tool and the command if it differs
+from defaults (e.g. `uv run ruff check`, `uv run mypy src/`,
+`uv run pyright`). Skip CI infrastructure detail — only the gates that
+constrain code.
+
+### 8. External dependencies that dominate the runtime
+
+Short bullet list of the libraries whose calls are likely to *dominate*
+hot-path time (e.g. `torch`, `numpy`, `tokenizers`, `tree-sitter`, `protobuf`).
+Only include a dependency when its hot-path role is visible from verified
+code, tests, benchmark scripts, or project metadata; do not infer dominance
+from a dependency appearing in a lockfile alone.
+Mark each with one of:
+- `cost-in-deps`: the cost is inside the dep; evolving the wrapper usually
+  won't help.
+- `cost-at-boundary`: the dep is fast but the way *this* repo calls it
+  (batching, dtype, layout, sync) is the headroom.
+
+This helps the agent skip thin wrappers and focus on dispatch / batching /
+fusion / sync-elimination patterns the bootstrap prompt already enumerates.
+
+### 9. Repo-wide patterns worth knowing (optional)
+
+Opt-in. Omit the section entirely if nothing here applies. Only include what
+would mislead the agent if missed:
+- Plugin / registry conventions used across modules (e.g. "all dispatchers
+  live in `*/registry.py` and look like `REGISTRY: dict[str, Factory] = {...}`").
+- Code-generation steps that mean some files are derived (so candidates should
+  target the generator, not the generated file).
+- Config-driven runtime knobs that span modules (e.g. a central `tuning.toml`
+  whose entries are the natural candidates).
+
+## What to leave OUT
+
+- Per-module detail. The agent is given `Module.description`, `main_files`,
+  and `depends_on` separately on every run. Don't repeat them here.
+- Architecture / design philosophy. The agent doesn't need to know "why" the
+  repo is laid out the way it is, only what to measure and how to verify.
+- In-flight work, refactor plans, deprecations. These decay fast and would
+  silently mislead future runs. Treat this file as a snapshot of stable state.
+- Implementation details inside any one module.
+- Anything you cannot verify from the current checkout.
+
+## Final check
+
+Before saving, re-read your draft and ask: "If I were an LLM agent that just
+landed in this repo and had to propose a falsifiable, measurable optimization
+candidate inside an arbitrary module, which lines of this file would I
+actually use?" Delete the rest.
