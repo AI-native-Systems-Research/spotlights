@@ -118,22 +118,76 @@ Cover only what an evolved variant must satisfy:
 ### 5. Benchmarks and performance harnesses
 
 This is the most important section for Stage 1. List the *actual* scripts and
-fixtures the agent can cite in a candidate's `metrics` field:
+fixtures the agent can cite in a candidate's `metrics` field. Harnesses come
+in two flavors — **in-repo** and **external** — and you must cover both.
 
-For each harness, one bullet:
+#### 5a. In-repo harnesses
+
+Scripts and fixtures that live inside the target repo itself. For each, one
+bullet:
 - Path (e.g. `benchmarks/decode.py`).
 - What it measures, in one phrase (e.g. "decode-step latency at batch size 32").
 - How to invoke it (the exact command, including required flags).
 - The metric name and unit it emits (e.g. `decode_step_latency_ms`).
 
-If no perf harness exists, follow the global "none" convention. Stage 1
-candidates in this repo will then need to *propose* a harness, and that
-should be obvious to the agent up front.
+If none, use the global "none" fallback under this subheader.
+
+#### 5b. External harnesses
+
+Many projects keep performance harnesses in a *separate* repository (a
+companion bench repo, an upstream framework's perf suite, a sibling repo under
+the same org, a third-party benchmark suite that targets this project). These
+are first-class citations for Stage 1 — list them so the agent can cite them
+in `metrics` instead of inventing a local harness.
+
+How to find them — try all of these and stop only when you've exhausted the
+leads, not on first hit:
+- The target repo's README, `CONTRIBUTING.md`, `docs/`, and any
+  `benchmarks/README*` for outbound links to a bench repo.
+- Same-org siblings whose name suggests benchmarking (e.g. `<repo>-bench`,
+  `<repo>-perf`, `<org>/benchmarks`). Verify by reading their README at HEAD.
+- CI workflows (`.github/workflows/*.yml`) that `git clone` or
+  `actions/checkout` another repo for perf jobs — that repo is an external
+  harness.
+- Pinned references in `pyproject.toml` / `requirements*.txt` / `go.mod` /
+  `Cargo.toml` to a repo that is itself a benchmark suite.
+- GitHub code search for the target repo's import path or package name inside
+  files named like `bench_*`, `*_bench.*`, `benchmarks/*` across GitHub; treat
+  hits as leads and verify each by opening the file.
+
+For each external harness, one bullet using this shape:
+- Repo (e.g. `owner/repo-bench`) and path inside it (e.g.
+  `suites/decode.py`). Pin to a commit SHA or tag if the README/CI does;
+  otherwise say `@HEAD`.
+- What it measures, in one phrase.
+- How to invoke it end-to-end, including the clone/setup step (e.g.
+  `git clone https://github.com/owner/repo-bench && cd repo-bench && uv run python suites/decode.py --target <target-repo-path>`).
+  If it needs a checkout of the target repo passed in, say so explicitly.
+- The metric name and unit it emits.
+- One short note on the *relationship* to the target repo: "official companion
+  bench", "upstream framework suite", "third-party — community-maintained".
+  This lets the agent weight citations appropriately.
+
+If no external harness exists, write `_(none found)_` under this subheader.
+
+If both 5a and 5b are empty, Stage 1 candidates in this repo will need to
+*propose* a harness, and that should be obvious to the agent up front.
 
 ### 6. Metric naming and units
 
-Short conventions (e.g. "latencies are suffixed `_ms` or `_us`; throughput is
-`_per_s`; memory is `_bytes`"). If the repo has no convention, write
+Enumerate the metric vocabulary Stage-1 candidates should reuse verbatim. Pull
+from two sources:
+1. The metric names and units actually emitted by the harnesses you listed in
+   section 5 — both 5a (in-repo) and 5b (external). Include any distributional
+   suffixes the harnesses report (mean, median, percentile). If an external
+   harness uses a different naming convention than the target repo's own
+   conventions, list both and note which to prefer.
+2. Any unit/suffix conventions documented in the repo itself (CONTRIBUTING,
+   style guides, metric-naming docs).
+
+If a harness reports a value in a non-preferred unit, say so and tell the
+agent which unit to normalize to. If section 5 is empty AND no documented
+convention exists, write
 `_(none — agent should encode units in the metric name)_`.
 
 ### 7. CI gates an evolved variant must pass
