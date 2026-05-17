@@ -59,8 +59,20 @@ def main() -> None:
             name="kv_offload",
             path="vllm/v1/kv_offload",
             description=(
-                "KV-cache offload framework with CPU offload manager, reuse "
-                "tracking, worker hooks, and offload policies."
+                "KV-cache offload framework that mediates between GPU "
+                "KV-cache blocks and CPU host memory in vLLM's V1 stack: "
+                "routes block lookup, eviction, and cross-request reuse.\n"
+                "Role in flow: sits behind the V1 KV-cache manager; worker "
+                "hooks fire on forward-pass steps where blocks need "
+                "migration between GPU and host.\n"
+                "Call frequency: per-block during prefill cache fills and "
+                "evictions; reuse-manager consulted on each block lookup.\n"
+                "Headroom signals: offload policy choice, transfer "
+                "batching, pinned host-buffer reuse, lookup-table layout, "
+                "factory dispatch.\n"
+                "Entry points: base.py (abstract manager interface), "
+                "factory.py (backend selection), worker/worker.py "
+                "(per-step hook integration)."
             ),
             depends_on=["config", "distributed", "utils"],
             main_files=[

@@ -59,9 +59,21 @@ def main() -> None:
             name="scheduling",
             path="pkg/epp/scheduling",
             description=(
-                "Profile-based scheduler that combines filter/scorer/picker "
-                "plugins to choose endpoints; supports weighted scorer "
-                "composition."
+                "Profile-based EPP scheduler that picks a model-server pod "
+                "for each inference request by composing filter/scorer/"
+                "picker plugins; supports weighted scorer aggregation.\n"
+                "Role in flow: invoked once per ext-proc request from "
+                "requestcontrol/director.go; runs each configured profile's "
+                "filter -> score -> pick chain to select an endpoint.\n"
+                "Call frequency: once per inference request on the EPP hot "
+                "path; scorers loop over candidate pods, so per-call cost "
+                "scales with pod count and active scorer set.\n"
+                "Headroom signals: profile/scorer composition, scorer "
+                "weight tables, filter ordering and short-circuiting, "
+                "weighted-aggregation formula, per-pod scoring inner loop.\n"
+                "Entry points: scheduler.go (entry), scheduler_profile.go "
+                "(single-profile execution), weighted_scorer.go (score "
+                "aggregation)."
             ),
             depends_on=[],
             main_files=[

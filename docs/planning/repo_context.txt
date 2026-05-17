@@ -218,6 +218,14 @@ fusion / sync-elimination patterns the bootstrap prompt already enumerates.
 
 Opt-in. Omit the section entirely if nothing here applies. Only include what
 would mislead the agent if missed:
+- Main hot-path flows: 1-3 named end-to-end paths through modules, each one
+  line (e.g. "prefill: tokenizer -> scheduler -> model_executor -> attention
+  -> sampler"; "request: ext-proc handler -> director -> scheduling ->
+  response"). Include only flows that actually run in production; the point
+  is to let the agent judge which modules sit on a hot path and how often
+  each step is reached. Cite a verifying source per flow (an entry-point
+  file, a top-level handler, or a `main()` function read at the resolved
+  SHA); flows must be derivable from the code, not inferred from the README.
 - Plugin / registry conventions used across modules (e.g. "all dispatchers
   live in `*/registry.py` and look like `REGISTRY: dict[str, Factory] = {...}`").
 - Code-generation steps that mean some files are derived (so candidates should

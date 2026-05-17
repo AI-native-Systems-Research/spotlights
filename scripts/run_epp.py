@@ -59,11 +59,29 @@ def main() -> None:
             name="epp",
             path="pkg/epp",
             description=(
-                "Heart of the project: implements the Endpoint Picker (EPP) "
-                "— an ext-proc gRPC server that ingests inference requests, "
-                "applies flow control, schedules them across `InferencePool` "
-                "pods using a plugin pipeline (filters, scorers, pickers), "
-                "and tracks per-pod metrics via a data layer."
+                "Heart of the project: implements the Endpoint Picker "
+                "(EPP), an ext-proc gRPC server that ingests inference "
+                "requests from Envoy, applies flow control, schedules them "
+                "across InferencePool pods using a plugin pipeline "
+                "(filters, scorers, pickers), and tracks per-pod metrics "
+                "via a datalayer.\n"
+                "Role in flow: every inference request enters "
+                "handlers/server.go (Envoy ext-proc stream), flows through "
+                "requestcontrol/director.go (admission, routing, "
+                "reporting), invokes scheduling/ to pick a pod, and "
+                "returns over the same gRPC stream.\n"
+                "Call frequency: once per inference request end-to-end; "
+                "each request involves multiple bidirectional gRPC message "
+                "exchanges (headers, body chunks) on the streaming "
+                "connection.\n"
+                "Headroom signals: request-streaming buffering and copies, "
+                "director state machine, plugin pipeline composition, "
+                "datalayer cache refresh cadence, telemetry/metrics "
+                "sampling.\n"
+                "Entry points: server/runserver.go (server assembly + "
+                "controller-manager wiring), handlers/server.go (gRPC "
+                "streaming handlers), requestcontrol/director.go "
+                "(per-request orchestration)."
             ),
             depends_on=[
                 "apix",

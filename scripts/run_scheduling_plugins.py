@@ -59,13 +59,27 @@ def main() -> None:
             name="scheduling_plugins",
             path="pkg/epp/framework/plugins/scheduling",
             description=(
-                "Built-in scheduling plugins: filters (by-label, prefix-cache "
-                "affinity, SLO headroom), pickers (max-score, random, "
-                "weighted-random), profile handlers (single, disagg P/D, "
-                "data-parallel), and a large suite of scorers (KV-cache "
-                "utilization, prefix, latency, load-aware, LoRA affinity, "
-                "session affinity, queue depth, active-request, token-load, "
-                "etc.)."
+                "Built-in plugin implementations selected at runtime by the "
+                "EPP scheduler: filters (by-label, prefix-cache affinity, "
+                "SLO headroom), scorers (KV-cache utilization, prefix, "
+                "latency, load-aware, LoRA/session affinity, queue depth, "
+                "active-request, token-load), pickers (max-score, random, "
+                "weighted-random), and profile handlers (single, disagg "
+                "P/D, data-parallel).\n"
+                "Role in flow: each enabled plugin runs inside the "
+                "scheduler's per-request hot path; scorers loop over "
+                "candidate pods and the picker chooses among them.\n"
+                "Call frequency: once per request per active plugin, with "
+                "scorers further looping over pods; prefix-cache and "
+                "KV-cache scorers query llm-d-kv-cache on every scored "
+                "request.\n"
+                "Headroom signals: per-pod scoring inner loops, scoring "
+                "formula and normalization, pod-set short-circuiting, "
+                "cache lookup batching, dispatch between plugin variants, "
+                "weight tables.\n"
+                "Entry points: each plugin directory carries a *Factory "
+                "constructor; plugin selection and registration lives in "
+                "pkg/epp/framework/plugins/register.go."
             ),
             depends_on=[],
             main_files=[
