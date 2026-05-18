@@ -5,10 +5,10 @@ every iteration. Today the agent gets module-level context only (description,
 `main_files`, `depends_on`); it has to rediscover the repo's test and
 benchmark infrastructure each run, even though the bootstrap prompt at
 [prompts_data/bootstrap.md](../../src/spotlights_engine/candidate_discovery/prompts_data/bootstrap.md)
-explicitly demands every candidate name a metric, a measurement, and a
-correctness oracle. Pre-loading the repo's test commands, benchmark harnesses,
-metric conventions, and hard constraints should produce sharper, more
-grounded candidates.
+explicitly demands every candidate name a correctness oracle and an impact
+explanation grounded in workload-level signals. Pre-loading the repo's test
+commands, benchmark harnesses, metric conventions, and hard constraints should
+produce sharper, more grounded candidates.
 
 The companion authoring prompt for generating `repo_context.md` per target
 repo lives at [repo_context.txt](repo_context.txt).
@@ -22,10 +22,11 @@ Both must be updated alongside the code change.
 
 Review note from this checkout: the live Stage-1 schema and prompt templates
 have already moved beyond the older spec snippets (`Candidate` now has
-`description`, `current_approach`, `evolve_rationale`, `metrics`, and
-`estimated_impact`; the review prompt no longer has the old "add at most 5"
-cap). Treat the live code/templates as the behavior to preserve, and reconcile
-the spec + impl-plan drift as part of this change.
+`description`, `current_approach`, `evolve_rationale`,
+`estimated_impact`, and `estimated_impact_explanation`; the review prompt no
+longer has the old "add at most 5" cap). Treat the live code/templates as the
+behavior to preserve, and reconcile the spec + impl-plan drift as part of this
+change.
 
 ---
 

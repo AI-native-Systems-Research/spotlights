@@ -31,14 +31,8 @@ def _cand(**overrides) -> Candidate:
         "description": "does work",
         "current_approach": "linear scan",
         "evolve_rationale": "hot loop; oracle is test_x.py",
-        "metrics": [
-            {
-                "name": "latency_us",
-                "direction": "minimize",
-                "target_or_baseline": None,
-            }
-        ],
         "estimated_impact": "medium",
+        "estimated_impact_explanation": "cuts request_latency_us; loop dominates the profile",
     }
     payload.update(overrides)
     return Candidate.model_validate(payload)

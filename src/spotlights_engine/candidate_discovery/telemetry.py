@@ -76,23 +76,8 @@ def _materially_differs(a, b) -> bool:
         or a.description.strip() != b.description.strip()
         or a.current_approach.strip() != b.current_approach.strip()
         or a.evolve_rationale.strip() != b.evolve_rationale.strip()
-        or _metrics_tuple(a) != _metrics_tuple(b)
-    )
-
-
-def _metrics_tuple(c) -> tuple:
-    return tuple(
-        sorted(
-            (
-                m.name.strip(),
-                m.direction,
-                m.target_or_baseline is None,
-                m.target_or_baseline.strip()
-                if isinstance(m.target_or_baseline, str)
-                else "",
-            )
-            for m in c.metrics
-        )
+        or a.estimated_impact_explanation.strip()
+        != b.estimated_impact_explanation.strip()
     )
 
 

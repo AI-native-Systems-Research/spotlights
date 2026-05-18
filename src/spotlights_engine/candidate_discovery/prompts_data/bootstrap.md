@@ -3,8 +3,9 @@
 You are auditing ONE module of a repository to identify code locations that
 are good candidates for **evolutionary code optimization** (in the style of
 OpenEvolve / AlphaEvolve). You do NOT write fixes. You enumerate candidate
-locations, each with a falsifiable rationale, a measurable metric, and a
-correctness oracle.
+locations, each with a falsifiable rationale and a correctness oracle. Each
+candidate also carries an `estimated_impact` rating (high / medium / low)
+with a short prose justification under `estimated_impact_explanation`.
 
 ## Module under audit
 - module_qualified_name: {module_qualified_name}
@@ -29,10 +30,11 @@ winners) can plausibly find a better implementation. Good candidates have
 1. **Self-contained behavior.** A function, kernel, loop nest, or small region
    whose contract (inputs → outputs / side effects) is stable and testable in
    isolation.
-2. **A measurable metric.** Wall-clock latency, throughput (tokens/s, req/s),
-   memory footprint, cache miss rate, FLOPs, allocation count, a quality
-   score, or a domain metric. Must be quantifiable from an existing or
-   easily-written harness.
+2. **A clear improvement story.** Wall-clock latency, throughput (tokens/s,
+   req/s), memory footprint, cache miss rate, FLOPs, allocation count, a
+   quality score, or a domain metric — some signal a better implementation
+   would plausibly move. Reason about which one applies, even if you don't
+   encode it as a structured field.
 3. **Real headroom.** Hot paths, heuristics with magic numbers, hand-rolled
    schedules, batch/tile/block sizing, kernel launch params, per-device
    tuning tables, prefetch/eviction policies, scheduling/admission control,
@@ -121,8 +123,9 @@ the interface:
   manifest filename).
 - `evolve_rationale` → the oracle is the interface's existing test suite
   and/or documented invariants; cite where they live.
-- `metrics` → the workload-level signal a better implementation would move
-  (hit rate, latency, throughput, footprint, quality score).
+- `estimated_impact_explanation` → name the workload-level signal a better
+  implementation would move (hit rate, latency, throughput, footprint,
+  quality score) and why.
 
 The evolution unit is "a new implementation file + one registry edit." The
 proposer only needs to anchor the registry; the harness can follow the
@@ -141,9 +144,10 @@ chain registry → values → interface → reference implementations.
    accurate (1-indexed, inclusive). If the optimization unit is a contiguous
    region inside a longer function, give the region's lines, not the whole
    function's.
-4. **Validate** that for each candidate you can name (a) a metric, (b) a way
-   to measure it, and (c) the correctness invariant. If any of the three is
-   missing, drop the candidate.
+4. **Validate** that for each candidate you can name (a) a correctness
+   oracle and (b) a believable improvement direction explained in prose
+   under `estimated_impact_explanation`. If either is missing, drop the
+   candidate.
 5. `depends_on` lists other modules' qualified names (e.g.
    `v1/engine/scheduler`), not paths. Use them only as call-shape context; do
    NOT guess dependency paths and do NOT propose candidates outside
@@ -164,14 +168,8 @@ Emit ONE JSON object matching the `Candidates` schema enforced by the wrapper:
       "description": "What this code does today, in one or two sentences.",
       "current_approach": "Brief summary of the existing implementation/heuristic.",
       "evolve_rationale": "Why this is a good evolutionary target — where the headroom is.",
-      "metrics": [
-        {
-          "name": "e.g. h2d_copy_latency_us (encode the unit in the name)",
-          "direction": "minimize | maximize",
-          "target_or_baseline": "<current observed value if known, else null>"
-        }
-      ],
-      "estimated_impact": "high | medium | low"
+      "estimated_impact": "high | medium | low",
+      "estimated_impact_explanation": "<one or two sentences explaining the rating: which signal you'd expect to move and why this site has headroom>"
     }
   ]
 }
@@ -183,8 +181,9 @@ Emit ONE JSON object matching the `Candidates` schema enforced by the wrapper:
   invented files or symbols.
 - `id` values must be unique within this list; use `cand-NNNN` zero-padded,
   starting at `cand-0001` and increasing monotonically.
-- **Be specific in `metrics`.** "Make it faster" is not a metric;
-  `decode_step_latency_ms` measured by `benchmarks/decode.py --batch=32` is.
+- **Be specific in `estimated_impact_explanation`.** "Make it faster" is not
+  an explanation; "reduces decode_step_latency_ms because the inner loop
+  re-allocates per token" is.
 - **Don't hand-wave correctness.** Every candidate's `evolve_rationale` must
   name a concrete oracle (existing test, golden output, property check, or
   invariant).

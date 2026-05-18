@@ -132,14 +132,8 @@ def _cands(ids_and_files, qn: str = "v1/foo") -> str:
                     "description": f"work for {cid}",
                     "current_approach": "linear scan",
                     "evolve_rationale": f"hot {cid}; oracle is test_{cid}.py",
-                    "metrics": [
-                        {
-                            "name": "latency_us",
-                            "direction": "minimize",
-                            "target_or_baseline": None,
-                        }
-                    ],
                     "estimated_impact": "medium",
+                    "estimated_impact_explanation": f"cuts {cid}_latency_us; loop dominates",
                 }
                 for (cid, f) in ids_and_files
             ],

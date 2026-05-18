@@ -1,7 +1,7 @@
 You are reviewing another agent's evolve-target candidate list for the same
 module. Your job is adversarial: prune false positives, merge duplicates,
-sharpen rationales / metrics, and add any *new* candidates the previous pass
-missed that clear the same quality bar.
+sharpen rationales and impact explanations, and add any *new* candidates the
+previous pass missed that clear the same quality bar.
 
 ## Inputs
 - previous candidates:
@@ -18,9 +18,9 @@ missed that clear the same quality bar.
 - DO NOT inflate the list. If the previous pass was good, return it nearly unchanged.
 - Remove any candidate whose `file` does not exist, whose `file` is outside
   `module.path`, or whose `line_start..line_end` is out of range for that file.
-- Remove candidates that fail the evolve-target test: no measurable metric,
-  no correctness oracle, no real headroom, or so entangled that the line
-  range doesn't capture the optimization unit. Treat passive config parsing as
+- Remove candidates that fail the evolve-target test: no correctness oracle,
+  no real headroom, or so entangled that the line range doesn't capture the
+  optimization unit. Treat passive config parsing as
   non-candidates, but keep `config_block` candidates when the named defaults,
   constants, weights, thresholds, TTLs, capacities, polling intervals, or pool
   sizes, tile/block sizes, launch params, vector widths, warp/stage counts,
@@ -34,16 +34,17 @@ missed that clear the same quality bar.
 - Merge candidates that point at the same hot path with overlapping line ranges
   (keep one `id`, drop the others).
 - For each KEPT candidate you MAY tighten `description`, `current_approach`,
-  `evolve_rationale`, `metrics`, `estimated_impact`, and adjust `line_start` /
-  `line_end` / `symbol` / `kind`. You MUST NOT change `id` or `file`. If you
-  believe a kept candidate's `file` is wrong, drop the old `id` and mint a new
-  one instead.
+  `evolve_rationale`, `estimated_impact`, `estimated_impact_explanation`, and
+  adjust `line_start` / `line_end` / `symbol` / `kind`. You MUST NOT change
+  `id` or `file`. If you believe a kept candidate's `file` is wrong, drop the
+  old `id` and mint a new one instead.
 - For each NEW candidate, `evolve_rationale` must cite a specific code
   construct (function name, loop, alloc call, sync primitive, policy default /
   constant / config table / tuning-table entry, registry entry, factory
   registration, match arm, manifest line, dispatch/vtable assignment) and a
-  concrete correctness oracle; `metrics` must name at least one quantifiable
-  measurement.
+  concrete correctness oracle. `estimated_impact_explanation` must explain
+  *why* the rating is high / medium / low, naming the workload-level signal
+  it would move.
 - For `kind == "plugin_seam"`: verify the line range points at the actual
   registration site (map/dict entry, factory `register(...)` call, match
   arm, manifest line, vtable assignment) — NOT the interface declaration or
@@ -56,8 +57,8 @@ missed that clear the same quality bar.
 - Mint new ids strictly greater than `{max_seen_candidate_id}`,
   zero-padded to four digits.
 - Do not cap or truncate. Add a new candidate only if it clears the
-  evolve-target quality bar: self-contained, measurable metric, concrete
-  correctness oracle, and real headroom of the same kinds the bootstrap pass
+  evolve-target quality bar: self-contained, concrete correctness oracle,
+  and real headroom of the same kinds the bootstrap pass
   was asked to look for — hot paths, magic-number heuristics, hand-rolled
   schedules, batch/tile/block sizing, prefetch/eviction policies,
   kernel launch params, per-device tuning tables, scheduling/admission

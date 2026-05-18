@@ -7,18 +7,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from spotlights_engine.schemas import Metric as PublicMetric
-from spotlights_engine.schemas.candidate import Candidate, Candidates, Metric
-
-
-def _valid_metric(**overrides):
-    payload = {
-        "name": "decode_step_latency_ms",
-        "direction": "minimize",
-        "target_or_baseline": "200",
-    }
-    payload.update(overrides)
-    return payload
+from spotlights_engine.schemas.candidate import Candidate, Candidates
 
 
 def _valid_candidate(**overrides):
@@ -32,8 +21,8 @@ def _valid_candidate(**overrides):
         "description": "Handles inbound requests.",
         "current_approach": "Linear scan over the request body.",
         "evolve_rationale": "Hot loop with simple structure; oracle is unit tests in test_foo.py.",
-        "metrics": [_valid_metric()],
         "estimated_impact": "high",
+        "estimated_impact_explanation": "Reduces request_latency_ms; the loop dominates the profile and re-allocates per item.",
     }
     payload.update(overrides)
     return payload
@@ -94,23 +83,31 @@ def test_estimated_impact_must_be_enum():
         Candidate.model_validate(_valid_candidate(estimated_impact="huge"))
 
 
-def test_metrics_list_must_be_non_empty():
+def test_estimated_impact_explanation_required():
+    payload = _valid_candidate()
+    payload.pop("estimated_impact_explanation")
     with pytest.raises(ValidationError):
-        Candidate.model_validate(_valid_candidate(metrics=[]))
+        Candidate.model_validate(payload)
 
 
-def test_metric_direction_must_be_enum():
+def test_estimated_impact_explanation_empty_rejected():
     with pytest.raises(ValidationError):
-        Metric.model_validate(_valid_metric(direction="optimize"))
+        Candidate.model_validate(_valid_candidate(estimated_impact_explanation=""))
 
 
-def test_metric_is_publicly_reexported():
-    assert PublicMetric is Metric
+def test_estimated_impact_explanation_accepts_freeform_prose():
+    text = (
+        "High because cache_hit_rate would jump: the current LRU evicts hot keys "
+        "under bursty access patterns; switching to TinyLFU keeps the working set."
+    )
+    c = Candidate.model_validate(_valid_candidate(estimated_impact_explanation=text))
+    assert c.estimated_impact_explanation == text
 
 
-def test_metric_target_or_baseline_allows_none():
-    m = Metric.model_validate(_valid_metric(target_or_baseline=None))
-    assert m.target_or_baseline is None
+def test_estimated_impact_explanation_in_json_schema():
+    cand_schema = Candidate.model_json_schema()
+    assert "estimated_impact_explanation" in cand_schema["properties"]
+    assert "estimated_impact_explanation" in cand_schema["required"]
 
 
 def test_verbose_rationale_fields_are_accepted():

@@ -47,16 +47,7 @@ class DiscoveryConfig(BaseModel):
 CandidateKind = Literal[
     "function", "method", "loop", "region", "kernel", "config_block", "plugin_seam",
 ]
-MetricDirection = Literal["minimize", "maximize"]
 EstimatedImpact = Literal["high", "medium", "low"]
-
-
-class Metric(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: str = Field(min_length=1, max_length=80)
-    direction: MetricDirection
-    target_or_baseline: str | None = Field(...)   # required-but-nullable for OpenAI strict structured outputs
 
 
 class Candidate(BaseModel):
@@ -71,8 +62,8 @@ class Candidate(BaseModel):
     description: str = Field(min_length=1)
     current_approach: str = Field(min_length=1)
     evolve_rationale: str = Field(min_length=1)
-    metrics: list[Metric] = Field(min_length=1)
     estimated_impact: EstimatedImpact
+    estimated_impact_explanation: str = Field(min_length=1)
 
     @model_validator(mode="after")
     def _check_range(self) -> "Candidate":
@@ -131,7 +122,7 @@ i=2: claude_code review                → candidates_v2.json
 i=3: codex      review                 → candidates_v3.json   # for num_review_iterations=3
 ```
 
-The bootstrap is always `claude_code`. Review iteration `N` (1-indexed) uses `agents[(N-1) % 2]` with `agents = ["codex", "claude_code"]`, so the bootstrap is reviewed first by the *other* agent. With the default `num_review_iterations=3` the full rotation is `claude_code → codex → claude_code → codex`. Each review reads the prior iteration's full `candidates.json`, prunes false positives, merges duplicates, sharpens rationales / metrics, and adds any further candidates that clear the same evolve-target quality bar. No cap on the number of additions — quality remains the only gate.
+The bootstrap is always `claude_code`. Review iteration `N` (1-indexed) uses `agents[(N-1) % 2]` with `agents = ["codex", "claude_code"]`, so the bootstrap is reviewed first by the *other* agent. With the default `num_review_iterations=3` the full rotation is `claude_code → codex → claude_code → codex`. Each review reads the prior iteration's full `candidates.json`, prunes false positives, merges duplicates, sharpens rationales and impact explanations, and adds any further candidates that clear the same evolve-target quality bar. No cap on the number of additions — quality remains the only gate.
 
 Iteration `num_review_iterations` is the downstream-facing result: its post-drop `candidates.json` is copied to `<artifacts_dir>/candidates.json` (§6.8).
 
@@ -246,12 +237,12 @@ Run after each subprocess exits, in this order. Steps marked **(raise)** abort t
 5. **Path existence** **(drop → `dropped_missing_file`)** — every surviving `candidate.file` must resolve to an existing file in `repo_path`.
 6. **Line range sanity** **(drop → `dropped_invalid_ranges`)** — `1 ≤ line_start ≤ line_end ≤ file_line_count`. (`line_end ≥ line_start` is already enforced by the pydantic validator.)
 7. **ID integrity** **(raises)** — within the raw parsed iteration, `id` values are unique. Across review iterations (`n ≥ 1`):
-   - on the raw parsed list, any `id` carried over from the previous iteration MUST retain the previous iteration's `file` (other fields — line range, `symbol`, `kind`, `description`, `current_approach`, `evolve_rationale`, `metrics`, `estimated_impact` — may change);
+   - on the raw parsed list, any `id` carried over from the previous iteration MUST retain the previous iteration's `file` (other fields — line range, `symbol`, `kind`, `description`, `current_approach`, `evolve_rationale`, `estimated_impact`, `estimated_impact_explanation` — may change);
    - on the post-drop list, an `id` absent from the previous iteration is treated as newly minted, even if it appeared in an older iteration;
    - every newly minted `id` MUST be strictly greater than the highest id accepted in any earlier iteration under lexicographic order on the zero-padded `cand-NNNN` form.
 8. **Persist normalized JSON** **(raises if empty)** — re-validate the surviving list via `Candidates.model_validate(dict(module_qualified_name=..., candidates=survivors))` so the `min_length=1` invariant fires on the *current* iteration if drops emptied it (raises `DiscoveryValidationError`). Then serialize via `model_dump_json(indent=2)` to `<iter_dir>/candidates.json`. On the final iteration (`n == num_review_iterations`), copy that file byte-for-byte to `<artifacts_dir>/candidates.json`.
 
-After step 8 the orchestrator also computes `IterationTelemetry.added` / `removed` / `modified` by joining on `id` against the previous iteration: `added = ids_n \ ids_{n-1}`, `removed = ids_{n-1} \ ids_n`, and `modified = { id in ids_n ∩ ids_{n-1} : any of (line_start, line_end, kind, estimated_impact, symbol.strip(), description.strip(), current_approach.strip(), evolve_rationale.strip(), normalized metrics tuple) differs }`. The emitted ID lists are sorted lexicographically for deterministic telemetry. For `n=0`, `added` is the full bootstrap ID list sorted the same way and the other two are empty. For review iterations (`n >= 1`), the same structural comparison is written to `<iter_dir>/diff_from_prev.md`.
+After step 8 the orchestrator also computes `IterationTelemetry.added` / `removed` / `modified` by joining on `id` against the previous iteration: `added = ids_n \ ids_{n-1}`, `removed = ids_{n-1} \ ids_n`, and `modified = { id in ids_n ∩ ids_{n-1} : any of (line_start, line_end, kind, estimated_impact, symbol.strip(), description.strip(), current_approach.strip(), evolve_rationale.strip(), estimated_impact_explanation.strip()) differs }`. The emitted ID lists are sorted lexicographically for deterministic telemetry. For `n=0`, `added` is the full bootstrap ID list sorted the same way and the other two are empty. For review iterations (`n >= 1`), the same structural comparison is written to `<iter_dir>/diff_from_prev.md`.
 
 ## 7. Loop termination
 
@@ -259,7 +250,7 @@ The loop runs exactly `1 + num_review_iterations` iterations (bootstrap at `i=0`
 
 ## 8. Bootstrap prompt
 
-The bootstrap template lives at [src/spotlights_engine/candidate_discovery/prompts_data/bootstrap.md](../src/spotlights_engine/candidate_discovery/prompts_data/bootstrap.md) and is the source of truth. It instructs the agent to audit one module for **evolve-optimizable** code locations (OpenEvolve / AlphaEvolve style), enumerating candidates that each name a self-contained behavior, a measurable metric, an oracle for correctness, and real headroom. The emitted `Candidate` shape matches the pydantic schema above (`id`, `file`, `line_start`, `line_end`, `symbol`, `kind`, `description`, `current_approach`, `evolve_rationale`, `metrics[]`, `estimated_impact`); the prompt also documents the `plugin_seam` kind as a separate, language-neutral target category anchored at the registration site.
+The bootstrap template lives at [src/spotlights_engine/candidate_discovery/prompts_data/bootstrap.md](../src/spotlights_engine/candidate_discovery/prompts_data/bootstrap.md) and is the source of truth. It instructs the agent to audit one module for **evolve-optimizable** code locations (OpenEvolve / AlphaEvolve style), enumerating candidates that each name a self-contained behavior, a falsifiable rationale, a correctness oracle, and real headroom. The emitted `Candidate` shape matches the pydantic schema above (`id`, `file`, `line_start`, `line_end`, `symbol`, `kind`, `description`, `current_approach`, `evolve_rationale`, `estimated_impact`, `estimated_impact_explanation`); the prompt also documents the `plugin_seam` kind as a separate, language-neutral target category anchored at the registration site.
 
 The supported placeholder set is:
 
@@ -271,7 +262,7 @@ The `## Repository context` section sits between `## Module under audit` and `##
 
 ## 9. Review prompt
 
-The review template lives at [src/spotlights_engine/candidate_discovery/prompts_data/review.md](../src/spotlights_engine/candidate_discovery/prompts_data/review.md) and is the source of truth. It is adversarial: prune false positives, merge duplicates, sharpen rationales / metrics, and add any further candidates that clear the same evolve-target quality bar (no fixed cap). For each kept candidate the agent MAY tighten `description`, `current_approach`, `evolve_rationale`, `metrics`, `estimated_impact`, `symbol`, `kind`, and adjust `line_start` / `line_end`; it MUST NOT change `id` or `file`.
+The review template lives at [src/spotlights_engine/candidate_discovery/prompts_data/review.md](../src/spotlights_engine/candidate_discovery/prompts_data/review.md) and is the source of truth. It is adversarial: prune false positives, merge duplicates, sharpen rationales and impact explanations, and add any further candidates that clear the same evolve-target quality bar (no fixed cap). For each kept candidate the agent MAY tighten `description`, `current_approach`, `evolve_rationale`, `estimated_impact`, `estimated_impact_explanation`, `symbol`, `kind`, and adjust `line_start` / `line_end`; it MUST NOT change `id` or `file`.
 
 The supported placeholder set is:
 

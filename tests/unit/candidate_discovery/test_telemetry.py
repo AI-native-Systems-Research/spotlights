@@ -22,10 +22,7 @@ def _c(
     description: str = "does work",
     current_approach: str = "linear scan",
     estimated_impact: str = "medium",
-    metric_name: str = "latency_us",
-    metric_direction: str = "minimize",
-    metric_target: str | None = None,
-    metrics: list[dict[str, str | None]] | None = None,
+    estimated_impact_explanation: str = "cuts latency_us; loop dominates the profile",
 ) -> Candidate:
     return Candidate.model_validate(
         {
@@ -38,15 +35,8 @@ def _c(
             "description": description,
             "current_approach": current_approach,
             "evolve_rationale": rat,
-            "metrics": metrics
-            or [
-                {
-                    "name": metric_name,
-                    "direction": metric_direction,
-                    "target_or_baseline": metric_target,
-                }
-            ],
             "estimated_impact": estimated_impact,
+            "estimated_impact_explanation": estimated_impact_explanation,
         }
     )
 
@@ -119,14 +109,25 @@ def test_diff_whitespace_only_rationale_not_modified():
     assert modified == []
 
 
-def test_diff_metrics_change_is_modified():
-    prev = _cs(_c("cand-0001", "a.py", 1, 5, "r", metric_name="latency_us"))
-    current = _cs(_c("cand-0001", "a.py", 1, 5, "r", metric_name="throughput_tokens"))
+def test_diff_estimated_impact_explanation_change_is_modified():
+    prev = _cs(
+        _c("cand-0001", "a.py", 1, 5, "r", estimated_impact_explanation="cuts latency_us")
+    )
+    current = _cs(
+        _c(
+            "cand-0001",
+            "a.py",
+            1,
+            5,
+            "r",
+            estimated_impact_explanation="raises throughput_tokens_per_s",
+        )
+    )
     _, _, modified = _compute_diff(prev, current)
     assert modified == ["cand-0001"]
 
 
-def test_diff_metric_reorder_is_not_modified():
+def test_diff_whitespace_only_estimated_impact_explanation_not_modified():
     prev = _cs(
         _c(
             "cand-0001",
@@ -134,10 +135,7 @@ def test_diff_metric_reorder_is_not_modified():
             1,
             5,
             "r",
-            metrics=[
-                {"name": "latency_us", "direction": "minimize", "target_or_baseline": None},
-                {"name": "throughput", "direction": "maximize", "target_or_baseline": None},
-            ],
+            estimated_impact_explanation="  cuts latency_us  ",
         )
     )
     current = _cs(
@@ -147,41 +145,7 @@ def test_diff_metric_reorder_is_not_modified():
             1,
             5,
             "r",
-            metrics=[
-                {"name": "throughput", "direction": "maximize", "target_or_baseline": None},
-                {"name": " latency_us ", "direction": "minimize", "target_or_baseline": None},
-            ],
-        )
-    )
-    _, _, modified = _compute_diff(prev, current)
-    assert modified == []
-
-
-def test_diff_metric_duplicate_names_with_mixed_targets_are_comparable():
-    prev = _cs(
-        _c(
-            "cand-0001",
-            "a.py",
-            1,
-            5,
-            "r",
-            metrics=[
-                {"name": "latency_us", "direction": "minimize", "target_or_baseline": None},
-                {"name": "latency_us", "direction": "minimize", "target_or_baseline": "12"},
-            ],
-        )
-    )
-    current = _cs(
-        _c(
-            "cand-0001",
-            "a.py",
-            1,
-            5,
-            "r",
-            metrics=[
-                {"name": " latency_us ", "direction": "minimize", "target_or_baseline": "12"},
-                {"name": "latency_us", "direction": "minimize", "target_or_baseline": None},
-            ],
+            estimated_impact_explanation="cuts latency_us",
         )
     )
     _, _, modified = _compute_diff(prev, current)

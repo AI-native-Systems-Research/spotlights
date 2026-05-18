@@ -67,16 +67,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 CandidateKind = Literal[
     "function", "method", "loop", "region", "kernel", "config_block", "plugin_seam",
 ]
-MetricDirection = Literal["minimize", "maximize"]
 EstimatedImpact = Literal["high", "medium", "low"]
-
-
-class Metric(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    name: str = Field(min_length=1, max_length=80)
-    direction: MetricDirection
-    target_or_baseline: str | None = Field(...)
 
 
 class Candidate(BaseModel):
@@ -91,8 +82,8 @@ class Candidate(BaseModel):
     description: str = Field(min_length=1)
     current_approach: str = Field(min_length=1)
     evolve_rationale: str = Field(min_length=1)
-    metrics: list[Metric] = Field(min_length=1)
     estimated_impact: EstimatedImpact
+    estimated_impact_explanation: str = Field(min_length=1)
 
     @model_validator(mode="after")
     def _check_range(self) -> "Candidate":
@@ -112,10 +103,10 @@ Re-export both names from [src/spotlights_engine/schemas/__init__.py](../src/spo
 Unit tests in `test_schema_candidate.py`:
 - `cand-0001` accepted; `cand-1`, `cand-00001`, `candidate-0001` rejected.
 - `line_end < line_start` rejected with the validator's message.
-- Each required string field rejects the empty string; `symbol` rejects a >200-char value; `Metric.name` rejects a >80-char value.
-- `metrics=[]` rejected (the `min_length=1` invariant on `Candidate.metrics`).
+- Each required string field rejects the empty string; `symbol` rejects a >200-char value.
+- `estimated_impact_explanation` is required, rejects the empty string, accepts free-form prose, and appears in the dumped JSON schema.
 - `candidates=[]` rejected (the `min_length=1` invariant on `Candidates.candidates`).
-- An unknown `kind` / `direction` / `estimated_impact` value is rejected by the `Literal` constraint.
+- An unknown `kind` / `estimated_impact` value is rejected by the `Literal` constraint.
 - An extra top-level field is rejected (`extra="forbid"`).
 - `Candidates.model_json_schema()` round-trips through `json.dumps` (used by `--json-schema` and `--output-schema`).
 
@@ -567,7 +558,7 @@ def render_diff_markdown(prev: Candidates, current: Candidates) -> str:
 Diff rules (spec §6 final paragraph) are exact:
 - `added = ids_n \ ids_{n-1}`
 - `removed = ids_{n-1} \ ids_n`
-- `modified = { id ∈ ids_n ∩ ids_{n-1} : any of (line_start, line_end, kind, estimated_impact, symbol.strip(), description.strip(), current_approach.strip(), evolve_rationale.strip(), normalized metrics tuple) differs }` — the per-field strip rule preserves the historical "whitespace-only edits are not material" intent across all text fields, and the metrics tuple is `sorted((name.strip(), direction, target_or_baseline is None, target_or_baseline.strip() if str else ""))` so reorderings and equivalent-value rewordings do not register as drift.
+- `modified = { id ∈ ids_n ∩ ids_{n-1} : any of (line_start, line_end, kind, estimated_impact, symbol.strip(), description.strip(), current_approach.strip(), evolve_rationale.strip(), estimated_impact_explanation.strip()) differs }` — the per-field strip rule preserves the historical "whitespace-only edits are not material" intent across all text fields.
 
 Serialize `added`, `removed`, and `modified` in lexicographic `cand-NNNN` order so telemetry JSON and `diff_from_prev.md` are deterministic. For `n=0`, `added` is all survivor ids in that same order, `removed = []`, and `modified = []`.
 

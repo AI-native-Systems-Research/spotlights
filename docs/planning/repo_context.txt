@@ -24,9 +24,10 @@ it runs as a non-interactive subprocess inside a checkout of the target repo,
 is already given a single `Module` to audit (path, description, dependencies,
 main files), and is asked to emit candidates that each name:
 
-1. a metric (e.g. `decode_step_latency_ms`),
-2. a way to measure it (a script, harness, or test that produces the number),
-3. a correctness oracle (a test, golden, property, or invariant).
+1. a correctness oracle (a test, golden, property, or invariant),
+2. an `estimated_impact` rating (`high`, `medium`, or `low`),
+3. an `estimated_impact_explanation` that names the workload-level signal a
+   better implementation would move and why the code has headroom.
 
 The Module-level context is supplied separately. Your output must cover what is
 **true of the repo as a whole** — the things the agent would otherwise have to
@@ -118,8 +119,9 @@ Cover only what an evolved variant must satisfy:
 ### 5. Benchmarks and performance harnesses
 
 This is the most important section for Stage 1. List the *actual* scripts and
-fixtures the agent can cite in a candidate's `metrics` field. Harnesses come
-in two flavors — **in-repo** and **external** — and you must cover both.
+fixtures the agent can cite in a candidate's impact explanation and
+correctness rationale. Harnesses come in two flavors — **in-repo** and
+**external** — and you must cover both.
 
 #### 5a. In-repo harnesses
 
@@ -138,7 +140,8 @@ Many projects keep performance harnesses in a *separate* repository (a
 companion bench repo, an upstream framework's perf suite, a sibling repo under
 the same org, a third-party benchmark suite that targets this project). These
 are first-class citations for Stage 1 — list them so the agent can cite them
-in `metrics` instead of inventing a local harness.
+in impact explanations and measurement recipes instead of inventing a local
+harness.
 
 How to find them — try all of these and stop only when you've exhausted the
 leads, not on first hit:
