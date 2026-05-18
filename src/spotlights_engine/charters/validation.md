@@ -78,6 +78,7 @@ TestHarnessMap {
   target_version:    commit SHA or tag of the target repo when scanned
   entries: [
     {
+      id:            unique identifier for this entry
       name:          human-readable label (e.g., "unit tests — scheduler")
       kind:          unit | integration | benchmark | correctness | stress
       path:          repo-relative path to the script or test directory
@@ -115,10 +116,17 @@ ValidationWorkloadMatrix {
 ValidationResult {
   change_ref:           reference to the Change under test
   verdict:              pass | fail | conditional
+  verdict_reasoning:    summary of why this verdict was reached (references key
+                        metrics, test failures, or threshold breaches)
+  conditions:           list[str] — if verdict is conditional, what conditions
+                        must be met (e.g., "retest under long-context workload",
+                        "acceptable only if memory regression is transient").
+                        Empty when verdict is pass or fail.
   intent_aligned:       bool — did the change achieve its declared expected_effect?
 
   test_results: [
     {
+      harness_id:       TestHarnessMap entry id
       script:           TestHarnessMap entry name (e.g., "unit tests — scheduler")
       kind:             unit | integration | correctness
       passed:           int
@@ -145,6 +153,9 @@ ValidationResult {
         },
         ...
       ]
+      optimization_target:  computed score representing the overall optimization
+                            objective, derived from the individual metrics above
+                            (e.g., weighted combination of latency and throughput)
     },
     ...
   ]
@@ -161,8 +172,8 @@ ValidationResult {
 ```
 
 **Success criteria for Stage 1.**
-- Test harness discovery runs on the target repo and produces a `TestHarnessMap` with at least 3 entries covering distinct components and kinds.
-- Given a `Change`, Bundle E automatically selects the relevant subset of discovered scripts (not the full suite).
+- Test harness discovery runs on the target repo and produces a `TestHarnessMap` with at least 3 entries covering distinct components and kinds. For the demo, the entries should include: (1) unit tests targeting the specific component a change touches, (2) integration/correctness tests verifying the component works within the broader system, and (3) a benchmark measuring performance delta (e.g., throughput/latency under a representative workload).
+- Given a `Change`, Bundle E automatically selects the relevant subset of discovered scripts that is feasible to run (not the full suite — constrained by available resources, time budget, and configuration possibilities).
 - Validation workload matrix contains at least 2 distinct workload classes discovered or curated from the target.
 - Can validate at least one change end-to-end: receive `Change` + `ExecutionResult`, run selected target test and benchmark scripts across multiple workloads from module E's matrix, produce a `ValidationResult` with a measured performance delta.
 - Correctness checks use the target's own test suites (not a Bundle E-maintained suite).
@@ -185,3 +196,4 @@ ValidationResult {
 - How to handle target scripts with custom output formats that don't map cleanly to pass/fail/metrics. Adapter strategy vs. requiring a standard output contract.
 - How often to re-run harness discovery and workload matrix refresh (on every target commit, on version bumps only, manually triggered).
 - Workload matrix completeness: what's the minimum coverage bar? Must every known workload class be represented, or is "components affected by the change" a sufficient selection filter?
+- Validation error handling: how to handle cases where a test or benchmark could not be launched due to environmental issues (e.g., missing dependencies, unavailable hardware, timeout before execution starts). Should these be reported as inconclusive, trigger a retry, or fail the validation run?
