@@ -48,10 +48,24 @@ Input:
 it fill the candidates with a proposal from each findings.
 it can decide that a finding doesn't contain info from create a proposal.
 
-add to candiate field called deep_research_proposals
+add to candiate field called deep_research_proposals array of deep_research_proposal
 
-The fields in proposal are:
+The fields in deep_research_proposal are:
 - title 
 - detailed_description
 - finding_id
+
+6. agent_proposals
+
+Input:
+- candidates (output from proposal_from_finding_creator)
  
+
+add to candidate field called agent_proposals array of agent_proposal
+
+The fields in deep_research_proposal are:
+- title 
+- detailed_description
+- agent_name
+
+fill proposals not covered in deep_research_proposals
