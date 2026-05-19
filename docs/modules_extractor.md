@@ -80,6 +80,15 @@ A module's *qualified name* is the `/`-joined chain of `name`s from a top-level 
 | `main_files` | Key entry-point files that best represent the module's purpose. |
 | `submodules` | Nested modules, same shape, sorted by `name`. |
 
+#### `depends_on` vs `submodules`
+
+These describe two different relationships:
+
+- **`submodules`** — *containment* (structural). The modules that live **inside** this one in the tree. Forms the hierarchy used by qualified names (`v1/engine/attention`), and each submodule's `path` is nested under the parent's `path` on disk. Every module appears in exactly one place in the tree.
+- **`depends_on`** — *usage* (graph edges). The modules or external packages this one **uses/calls/imports**, regardless of where they sit in the tree. Edges may cross the hierarchy freely (a sibling subtree, an ancestor, or an external package), and the same target may appear in many modules' `depends_on` lists.
+
+For a module `v1/engine/attention`: `submodules` answers *"what lives inside attention?"* (e.g., `flash_backend`); `depends_on` answers *"what does attention need to do its job?"* (e.g., `v1/engine/kv_cache`, `torch`).
+
 ### `File`
 
 | Field | Description |
