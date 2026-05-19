@@ -1,0 +1,114 @@
+<svg viewBox="0 0 900 1040" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Inter, system-ui, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4a4a4a"/>
+    </marker>
+    <style>
+      .title  { font-weight:600; font-size:15px; fill:#1a1a1a; }
+      .body   { font-weight:400; font-size:12px; fill:#4a4a4a; }
+      .mono   { font-family: ui-monospace, Menlo, monospace; font-weight:500; font-size:13px; fill:#1a1a1a; }
+      .line   { stroke:#4a4a4a; stroke-width:1.6; fill:none; }
+      .panel  { fill:#fff; stroke:#1a1a1a; stroke-width:1.4; }
+      .mgr    { fill:#fffbe6; stroke:#a16207; stroke-width:1.6; stroke-dasharray:6 4; }
+      .s0     { fill:#f5f5f5; stroke:#525252; stroke-width:1.6; }
+      .s1     { fill:#fff7e6; stroke:#d97706; stroke-width:1.6; }
+      .s2     { fill:#f3edff; stroke:#7c3aed; stroke-width:1.6; }
+      .s3     { fill:#eef6ff; stroke:#2563eb; stroke-width:1.6; }
+      .s4     { fill:#fef2f2; stroke:#dc2626; stroke-width:1.6; }
+      .s5     { fill:#fff1f7; stroke:#be185d; stroke-width:1.6; }
+      .out    { fill:#ecfdf5; stroke:#059669; stroke-width:1.6; }
+      .label  { font-weight:600; font-size:11px; fill:#666; letter-spacing:0.08em; }
+      .loop   { fill:none; stroke:#1a1a1a; stroke-width:1.2; stroke-dasharray:5 5; }
+    </style>
+  </defs>
+
+  <rect width="900" height="1040" fill="#fafafa"/>
+
+  <!-- INPUT -->
+  <g transform="translate(330,20)">
+    <rect width="240" height="44" rx="8" class="panel"/>
+    <text x="120" y="28" text-anchor="middle" class="mono">repo</text>
+  </g>
+  <path class="line" marker-end="url(#arr)" d="M450 64 V 90"/>
+
+  <!-- SpotlightsManager wrapper -->
+  <g transform="translate(30,90)">
+    <rect width="840" height="900" rx="12" class="mgr"/>
+    <text x="20" y="26" class="label">ORCHESTRATOR</text>
+    <text x="20" y="50" class="title">SpotlightsManager</text>
+    <text x="20" y="70" class="body">Calls ModulesExtractor once, then runs steps 2-6 per module.</text>
+  </g>
+
+  <!-- Step 1: ModulesExtractor -->
+  <g transform="translate(280,200)">
+    <rect width="340" height="80" rx="10" class="s0"/>
+    <text x="20" y="28" class="label">STEP 1</text>
+    <text x="20" y="52" class="title">ModulesExtractor</text>
+    <text x="20" y="70" class="body">repo -&gt; ProjectTree (modules)</text>
+  </g>
+  <path class="line" marker-end="url(#arr)" d="M450 280 V 320"/>
+  <text x="460" y="308" class="label">FOR EACH MODULE</text>
+
+  <!-- per-module loop frame -->
+  <rect x="60" y="320" width="780" height="640" rx="12" class="loop"/>
+
+  <!-- Step 2 + Step 3 in parallel -->
+  <g transform="translate(85,355)">
+    <rect width="350" height="120" rx="10" class="s1"/>
+    <text x="20" y="28" class="label">STEP 2</text>
+    <text x="20" y="52" class="title">candidate_discovery</text>
+    <text x="20" y="74" class="body">Claude / Codex review of the module.</text>
+    <text x="20" y="92" class="body">In: repo + module</text>
+    <text x="20" y="110" class="body">Out: Candidates</text>
+  </g>
+
+  <g transform="translate(465,355)">
+    <rect width="350" height="120" rx="10" class="s2"/>
+    <text x="20" y="28" class="label">STEP 3</text>
+    <text x="20" y="52" class="title">module_deep_research</text>
+    <text x="20" y="74" class="body">Web / lit survey for this module.</text>
+    <text x="20" y="92" class="body">In: prompt, max_output_results</text>
+    <text x="20" y="110" class="body">Out: list[Finding]</text>
+  </g>
+
+  <!-- join into Step 4 -->
+  <path class="line" d="M260 475 V 510 H 450"/>
+  <path class="line" d="M640 475 V 510 H 450"/>
+  <path class="line" marker-end="url(#arr)" d="M450 510 V 540"/>
+
+  <!-- Step 4 -->
+  <g transform="translate(170,540)">
+    <rect width="560" height="100" rx="10" class="s3"/>
+    <text x="20" y="28" class="label">STEP 4</text>
+    <text x="20" y="52" class="title">finding_to_candidates_mapper</text>
+    <text x="20" y="74" class="body">Per finding: select candidates it applies to; invert to candidate-centric.</text>
+    <text x="20" y="92" class="body">In: findings + candidates  ->  Out: candidates with findings attached</text>
+  </g>
+  <path class="line" marker-end="url(#arr)" d="M450 640 V 680"/>
+
+  <!-- Step 5 -->
+  <g transform="translate(170,680)">
+    <rect width="560" height="100" rx="10" class="s4"/>
+    <text x="20" y="28" class="label">STEP 5</text>
+    <text x="20" y="52" class="title">proposal_from_finding_creator</text>
+    <text x="20" y="74" class="body">For each (candidate, finding): write a proposal, or skip.</text>
+    <text x="20" y="92" class="body">In: candidates+findings  ->  Out: candidate.deep_research_proposals[]</text>
+  </g>
+  <path class="line" marker-end="url(#arr)" d="M450 780 V 820"/>
+
+  <!-- Step 6 -->
+  <g transform="translate(170,820)">
+    <rect width="560" height="100" rx="10" class="s5"/>
+    <text x="20" y="28" class="label">STEP 6</text>
+    <text x="20" y="52" class="title">agent_proposals</text>
+    <text x="20" y="74" class="body">Agent-proposed changes NOT covered by deep_research_proposals.</text>
+    <text x="20" y="92" class="body">In: candidates  ->  Out: candidate.agent_proposals[]</text>
+  </g>
+
+  <!-- OUTPUT -->
+  <path class="line" marker-end="url(#arr)" d="M450 990 V 1010"/>
+  <g transform="translate(330,1000)">
+    <rect width="240" height="40" rx="8" class="out"/>
+    <text x="120" y="26" text-anchor="middle" class="mono">candidates per module</text>
+  </g>
+</svg>
