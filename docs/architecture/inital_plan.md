@@ -1,5 +1,19 @@
 Need you to prepare architecture markdown called spotlights_architecture.md in ./docs/architecture.
 
+The markdown should be short.
+
+First there is short decription of the project.
+After that diagram (do an image in the smae style/layout as you do in html) with block diagram. SpotlightsManager manges the other block, first call ModulesExtractor and then for each module all the rest.
+
+Then I need the each module:
+1. Short desciption 
+2. Input
+3. Output
+
+
+
+SpotlightsManager first calls ModulesExtractor then for each module it does steps 2 to 6
+
 
 Following are the blocks:
 
