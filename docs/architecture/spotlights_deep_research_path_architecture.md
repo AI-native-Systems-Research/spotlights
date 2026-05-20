@@ -89,6 +89,16 @@ class Candidates(BaseModel):
     candidates: list[Candidate]
 ```
 
+A **module qualified name** is the dot-joined chain of `Module.name` values from
+a top-level entry in `ProjectTree.modules` down through nested `submodules` to
+the target module. It uniquely identifies a module within a `ProjectTree` and is
+used as the key in `candidates_by_module` and as the module selector passed into
+steps 2–6.
+
+For example, given a tree with a top-level module `inference` that contains a
+submodule `attention` with a submodule `paged_kv`, the qualified name of the
+deepest module is `inference.attention.paged_kv`.
+
 ## Modules
 
 ### 0. SpotlightsManager
