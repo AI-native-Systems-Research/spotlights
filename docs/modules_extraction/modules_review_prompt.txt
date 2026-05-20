@@ -1,0 +1,130 @@
+You are auditing a JSON architectural map of this repository against the actual code. The JSON was produced by another tool and may contain errors at two levels:
+
+- **Local errors**: hallucinated files, wrong paths, inaccurate descriptions, fabricated dependencies.
+- **Structural errors**: the entire decomposition may be wrong — e.g. grouping by file type (`controllers/`, `models/`, `utils/`) when the code is actually organized by feature, treating a framework-imposed layout as the architecture when the real architecture is orthogonal to it, or flattening a layered system into a flat list.
+
+Your job is to verify every claim against the filesystem AND evaluate whether the overall decomposition reflects how the code is actually organized. Fix both.
+
+## Input
+
+The JSON to audit:
+
+<json_to_audit>
+PASTE_JSON_HERE
+</json_to_audit>
+
+Schema:
+
+{
+  "repository": { "name", "type", "stack", "summary" },
+  "modules": [
+    {
+      "name", "path", "description", "depends_on": [],
+      "main_files": [ { "path", "role" } ],
+      "submodules": [ <LEAF or PARENT>, ... ]
+    }
+  ]
+}
+
+A submodule has exactly two shapes:
+- LEAF: { name, path, description, main_files }                          // no `submodules` key
+- PARENT: { name, path, description, main_files, submodules: [≥2] }      // `submodules` always has 2+ entries
+
+Top-level modules always carry `depends_on`; submodules do not.
+
+## Audit procedure
+
+### Phase 1 — Decomposition review (do this FIRST, before any local fixes)
+
+Before checking individual entries, evaluate whether the top-level module breakdown is right. Look at the repo holistically:
+
+1. **Read the manifest, README, and source root listing.** Note the stated or implied organizing principle.
+2. **Sample imports across 5–10 files from different parts of the codebase.** Imports reveal the real seams — modules that import heavily from each other belong together; modules that share nothing are genuinely separate.
+3. **Compare what you see to the JSON's decomposition.** Ask:
+   - Does the JSON group by **file type / technical layer** (controllers, models, services, utils) when the code is actually organized by **feature / domain** (billing, auth, inventory)? Or vice versa?
+   - Does it treat a **framework convention** (Next.js `app/`, Rails `app/controllers/`) as the architecture when the meaningful architecture lives elsewhere (e.g. in `lib/` or in feature folders)?
+   - Does it **flatten** a clearly layered system (e.g. domain / application / infrastructure / interface) into peers?
+   - Does it **over-split** — making modules out of every directory when several are really one logical unit?
+   - Does it **under-split** — lumping multiple distinct responsibilities into one "core" or "lib" module?
+   - Are **monorepo packages** treated as modules of a single project when each is its own project?
+
+If the decomposition is wrong, **propose a new one before rewriting**. In the `<changes>` block, write a `RESTRUCTURE` section that states:
+- The organizing principle the JSON used.
+- The organizing principle the code actually follows, with evidence (specific directories, specific imports).
+- The new top-level module list you'll produce.
+
+Then build the corrected JSON around the new decomposition. Do not preserve the old shape just because it was there.
+
+If the decomposition is fundamentally sound, say so explicitly in the changes block (`RESTRUCTURE: none — existing decomposition matches code organization`) and proceed to Phase 2.
+
+### Phase 2 — Local audit
+
+Whether you restructured or not, verify every entry in the (possibly new) tree:
+
+1. **Path existence** — Every `path` must exist. Fix typos/casing, strip leading `./` or `/`, reclassify files-as-modules or directories-as-files. Remove entries pointing to nothing.
+
+2. **Module coverage** — List top-level directories under the source root(s). Add real ones that are missing; remove generated, vendored, or trivial ones (`dist/`, `node_modules/`, empty scaffolding).
+
+3. **Description accuracy** — Open 2–4 main files per module. Rewrite descriptions that are vague, wrong, or speculative. 1–2 sentences, grounded in observable code. If genuinely ambiguous, write "unclear" rather than guessing.
+
+4. **Main files** — Should be true entry points or central files (index/main, route definitions, primary class, most-imported file). Replace peripheral helpers with real entry points; correct wrong `role` text; add obvious missing entry points. Cap at 5 per module.
+
+5. **Dependencies** — Grep imports in each module's files. `depends_on` lists peer top-level modules in this repo only — never external packages. Remove what isn't imported, add what is. Note unintended-looking circular dependencies in the description.
+
+6. **Submodule structure** — Recurse and re-apply checks 1–5. Then audit every (sub)module against the rules below. For each candidate directory, pick exactly one of three outcomes — FOLD, LEAF, or SPLIT — by applying the tests in order.
+
+   **Step A — FOLD?** Don't emit the directory as a submodule at all; cite its key files in the parent's `main_files`. Fold if ANY holds:
+   - *Single file* — the directory has one source file.
+   - *Organizational-only* — `types/`, `constants/`, `utils/`, `helpers/` and similar that exist only to keep the parent tidy, with no independent responsibility.
+
+   Otherwise emit it as a submodule. Continue to Step B for its shape.
+
+   **Step B — SPLIT or LEAF?** Default is LEAF (one cohesive submodule). SPLIT only if a SPLIT test fires AND no LEAF override applies.
+
+   SPLIT tests — fire if ANY is true:
+   1. *Description test* — the description needs " and " / "," / "also" to join two distinct responsibilities ("parses queries AND executes them" → parser + executor).
+   2. *main_files overflow* — you cannot pick 1–5 files that meaningfully represent the unit. More than 5 needed → probably 2+ jobs.
+   3. *Import-graph test* — files cluster: subset A imports mostly from A, subset B mostly from B, with only a thin bridge. The bridge is the seam.
+   4. *External API test* — outside callers import from the directory in two clearly different ways. Each import cluster is a sub-submodule.
+
+   LEAF overrides — keep as one submodule even if a SPLIT test fires, if ANY holds:
+   - *One concept, multiple files* — data class + builder + validator for one entity is one unit even if 6 files. Pick the 3–5 that matter for `main_files`.
+   - *Strategy/plugin implementations of one interface* — `backends/postgres.py`, `backends/sqlite.py`, etc. are one submodule, not one-per-file.
+
+   If you SPLIT, choose the seam from directory boundaries, import clusters, and external API usage, then recurse into each child starting from Step A. If you LEAF, stop.
+
+   Concrete fixes the audit must apply:
+   - Collapse `"submodules": []` (LEAF should omit the key entirely) and `"submodules": [<single entry>]` (merge the lone child into its parent).
+   - Promote single-file submodules to entries in the parent's `main_files`.
+   - Split a submodule whose description requires two distinct responsibilities, unless one of A–D applies; produce 2+ children grounded in directories, imports, or external API usage.
+   - Merge sibling submodules that are really one concept (rule A) or organizational noise (rule B).
+   - Strip `depends_on` from any submodule (only top-level modules carry it).
+
+7. **Repository metadata** — `name` from the manifest, `type` and `stack` from manifests + actual imports (don't list libraries that aren't dependencies), `summary` reflecting the architecture you actually observed. If you restructured in Phase 1, the summary almost certainly needs rewriting.
+
+## Output
+
+Return TWO things, in this order:
+
+1. A `<changes>` block with these sections, in order:
+RESTRUCTURE:
+<either "none — existing decomposition matches code organization"
+or a description of the wrong principle, the right principle with evidence,
+and the new top-level module list>
+FIXES:
+[FIX|ADD|REMOVE] <path or field> — <reason grounded in what you found>
+[FIX|ADD|REMOVE] ...
+
+One line per fix. Be specific: "removed src/auth/legacy.ts from auth main_files (file does not exist)" not "fixed auth module". If a section has no entries, say so.
+
+2. The corrected JSON in a ```json fenced block, matching the schema exactly. Valid JSON, no trailing commas, no comments, all paths repo-relative.
+
+## Rules
+
+- Ground truth is the code. If the JSON and the code disagree, the code wins.
+- A restructure is justified when the JSON's organizing principle differs from the code's. It is NOT justified just because you'd personally organize it differently — preserve the code's actual seams, not your aesthetic preferences.
+- When you restructure, every module in the new tree must still correspond to real directories or real groupings of files. Don't invent virtual modules that don't exist on disk unless they reflect a genuine logical grouping evident from imports (and if you do, give them a `path` array or omit `path` and explain in the description).
+- Don't invent modules to make the map look complete. If the repo is small, the output is small.
+- Don't delete a module just because you can't immediately tell what it does — read the code first.
+- Preserve original module names where accurate; rename only when misleading.
+- If `PASTE_JSON_HERE` was not replaced with real JSON, stop and say so instead of fabricating an audit.

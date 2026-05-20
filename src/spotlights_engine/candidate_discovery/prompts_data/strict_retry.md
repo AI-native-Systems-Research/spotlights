@@ -1,0 +1,1 @@
+Your previous reply did not parse as JSON matching the candidates schema. Reply with exactly one JSON object — no markdown fence, no commentary, no leading or trailing prose. The orchestrator will reject anything else.

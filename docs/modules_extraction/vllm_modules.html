@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>vLLM Modules Diagram</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #0f1419;
+    color: #d6deeb;
+    padding: 20px;
+  }
+  header {
+    display: flex;
+    align-items: baseline;
+    gap: 16px;
+    margin-bottom: 16px;
+  }
+  h1 { margin: 0; font-size: 18px; }
+  .meta { color: #8b9bb1; font-size: 12px; }
+  .legend {
+    margin-left: auto;
+    display: flex;
+    gap: 14px;
+    font-size: 12px;
+    color: #8b9bb1;
+  }
+  .legend span::before {
+    content: '';
+    display: inline-block;
+    width: 10px; height: 10px;
+    margin-right: 6px;
+    vertical-align: middle;
+    border-radius: 2px;
+  }
+  .legend .top::before { background: #2a3a52; border: 1px solid #82aaff; }
+  .legend .sub::before { background: #3a2a52; border: 1px solid #c792ea; }
+  .diagram {
+    background: #1a2028;
+    border: 1px solid #2d3744;
+    border-radius: 8px;
+    padding: 20px;
+    overflow: auto;
+  }
+  .mermaid { background: transparent; }
+</style>
+</head>
+<body>
+<header>
+  <h1>vLLM Modules Diagram</h1>
+  <span class="meta">Top-level modules with their submodules</span>
+  <div class="legend">
+    <span class="top">Top-level module</span>
+    <span class="sub">Submodule</span>
+  </div>
+</header>
+<div class="diagram">
+<pre class="mermaid">
+flowchart LR
+
+  classDef top fill:#2a3a52,stroke:#82aaff,stroke-width:2px,color:#d6deeb,font-weight:600;
+  classDef sub fill:#3a2a52,stroke:#c792ea,stroke-width:1px,color:#d6deeb;
+
+  subgraph CORE [core]
+  end
+  class CORE top
+
+  subgraph CONFIG [config]
+  end
+  class CONFIG top
+
+  subgraph PLATFORMS [platforms]
+  end
+  class PLATFORMS top
+
+  subgraph UTILS [utils]
+  end
+  class UTILS top
+
+  subgraph TOKENIZERS [tokenizers]
+  end
+  class TOKENIZERS top
+
+  subgraph TRANSFORMERS_UTILS [transformers_utils]
+  end
+  class TRANSFORMERS_UTILS top
+
+  subgraph TOOL_PARSERS [tool_parsers]
+  end
+  class TOOL_PARSERS top
+
+  subgraph REASONING [reasoning]
+  end
+  class REASONING top
+
+  subgraph INPUTS [inputs]
+  end
+  class INPUTS top
+
+  subgraph ENGINE [engine]
+  end
+  class ENGINE top
+
+  subgraph COMPILATION [compilation]
+    COMPILATION_passes[passes]:::sub
+  end
+  class COMPILATION top
+
+  subgraph MULTIMODAL [multimodal]
+    MULTIMODAL_media[media]:::sub
+    MULTIMODAL_processing[processing]:::sub
+  end
+  class MULTIMODAL top
+
+  subgraph DISTRIBUTED [distributed]
+    DISTRIBUTED_device_communicators[device_communicators]:::sub
+    DISTRIBUTED_kv_transfer[kv_transfer]:::sub
+    DISTRIBUTED_ec_transfer[ec_transfer]:::sub
+    DISTRIBUTED_weight_transfer[weight_transfer]:::sub
+    DISTRIBUTED_eplb[eplb]:::sub
+    DISTRIBUTED_elastic_ep[elastic_ep]:::sub
+  end
+  class DISTRIBUTED top
+
+  subgraph LORA [lora]
+    LORA_layers[layers]:::sub
+    LORA_punica_wrapper[punica_wrapper]:::sub
+    LORA_ops[ops]:::sub
+  end
+  class LORA top
+
+  subgraph MODEL_EXECUTOR [model_executor]
+    MODEL_EXECUTOR_models[models]:::sub
+    MODEL_EXECUTOR_layers[layers]:::sub
+    MODEL_EXECUTOR_model_loader[model_loader]:::sub
+    MODEL_EXECUTOR_offloader[offloader]:::sub
+    MODEL_EXECUTOR_warmup[warmup]:::sub
+  end
+  class MODEL_EXECUTOR top
+
+  subgraph V1 [v1]
+    V1_engine[engine]:::sub
+    V1_core[core]:::sub
+    V1_executor[executor]:::sub
+    V1_worker[worker]:::sub
+    V1_attention[attention]:::sub
+    V1_sample[sample]:::sub
+    V1_spec_decode[spec_decode]:::sub
+    V1_structured_output[structured_output]:::sub
+    V1_kv_offload[kv_offload]:::sub
+    V1_metrics[metrics]:::sub
+    V1_pool[pool]:::sub
+    V1_simple_kv_offload[simple_kv_offload]:::sub
+  end
+  class V1 top
+
+  subgraph ENTRYPOINTS [entrypoints]
+    ENTRYPOINTS_cli[cli]:::sub
+    ENTRYPOINTS_openai[openai]:::sub
+    ENTRYPOINTS_serve[serve]:::sub
+    ENTRYPOINTS_anthropic[anthropic]:::sub
+    ENTRYPOINTS_mcp[mcp]:::sub
+    ENTRYPOINTS_pooling[pooling]:::sub
+    ENTRYPOINTS_sagemaker[sagemaker]:::sub
+  end
+  class ENTRYPOINTS top
+</pre>
+</div>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'dark',
+    flowchart: { curve: 'basis', nodeSpacing: 30, rankSpacing: 50, padding: 12 },
+    securityLevel: 'loose'
+  });
+</script>
+</body>
+</html>

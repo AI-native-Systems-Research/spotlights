@@ -1,0 +1,60 @@
+"""Opt-in smoke test: runs `discover()` against real Claude / Codex CLIs.
+
+Skipped unless `STAGE1_NEEDS_CLIS=1` and both `claude` and `codex` are on
+PATH. The goal isn't to validate model outputs (they are non-deterministic)
+— it's to confirm the argv lines actually launch each CLI and both runners
+produce a `last_message.json` the orchestrator can parse.
+"""
+
+from __future__ import annotations
+
+import os
+import shutil
+from pathlib import Path
+
+import pytest
+
+needs_clis = pytest.mark.skipif(
+    os.environ.get("STAGE1_NEEDS_CLIS") != "1"
+    or shutil.which("claude") is None
+    or shutil.which("codex") is None,
+    reason="set STAGE1_NEEDS_CLIS=1 and install `claude` + `codex` to run",
+)
+
+
+@needs_clis
+def test_discover_against_real_clis(tmp_path: Path) -> None:
+    from spotlights_engine.candidate_discovery import (
+        DiscoveryConfig,
+        DiscoveryResult,
+        discover,
+    )
+    from spotlights_engine.schemas.modules import File, Module
+
+    repo = tmp_path / "repo"
+    (repo / "src" / "foo").mkdir(parents=True)
+    (repo / "src" / "foo" / "core.py").write_text(
+        "def hot_loop():\n    total = 0\n"
+        + "".join(f"    total += {i}\n" for i in range(1, 75))
+        + "    return total\n"
+    )
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+
+    cfg = DiscoveryConfig(
+        repo_path=repo,
+        module_qualified_name="v1/foo",
+        module=Module(
+            name="foo",
+            path="src/foo",
+            description="single-file hot loop fixture.",
+            main_files=[File(path="src/foo/core.py", role="entry")],
+        ),
+        artifacts_dir=artifacts,
+        num_review_iterations=1,
+        claude_max_turns=4,
+        per_iteration_wallclock_s=180,
+    )
+    result = discover(cfg)
+    assert isinstance(result, DiscoveryResult)
+    assert (artifacts / "candidates.json").exists()
