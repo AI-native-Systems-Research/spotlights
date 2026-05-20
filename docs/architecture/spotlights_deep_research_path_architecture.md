@@ -112,13 +112,13 @@ class Candidate(BaseModel):
     estimated_impact: EstimatedImpact
     estimated_impact_explanation: str
     state: CandidateState = "DISCOVERED"
-    finding_matches: list[FindingMatch]  # filled by step 4
-    deep_research_proposals: list[DeepResearchProposal]  # step 5
-    agent_proposals: list[AgentProposal]  # step 6
+    finding_matches: list[FindingMatch] = []        # filled by step 4
+    deep_research_proposals: list[DeepResearchProposal] = []  # step 5
+    agent_proposals: list[AgentProposal] = []       # step 6
 
 class Candidates(BaseModel):
     module_qualified_name: str
-    candidates: list[Candidate] 
+    candidates: list[Candidate] = []
 
 class StepIssue(BaseModel):
     step: PipelineStep
@@ -130,7 +130,7 @@ class ModuleRun(BaseModel):
     module_qualified_name: str
     status: ModuleRunStatus
     candidates: Candidates | None = None   # None only when the module failed before discovery
-    issues: list[StepIssue]
+    issues: list[StepIssue] = []
 ```
 
 A **module qualified name** is the dot-joined chain of `Module.name` values from
@@ -261,8 +261,8 @@ class ModuleDeepResearchInput(BaseModel):
 
 ```python
 class ModuleDeepResearchOutput(BaseModel):
-    findings: list[Finding]  # most relevant findings
-    issues: list[StepIssue]
+    findings: list[Finding] = []  # most relevant findings
+    issues: list[StepIssue] = []
 ```
 
 ### 4. finding_to_candidates_mapper
@@ -284,8 +284,15 @@ class FindingToCandidatesMapperInput(BaseModel):
     candidates: Candidates             # from candidate_discovery
 ```
 
-**Output** — `Candidates` with `Candidate.finding_matches` populated and
-candidate state advanced to `FINDINGS_MAPPED`. Empty `finding_matches` is valid.
+**Output**
+
+```python
+class FindingToCandidatesMapperOutput(BaseModel):
+    candidates: Candidates             # finding_matches populated; state -> FINDINGS_MAPPED
+    issues: list[StepIssue] = []
+```
+
+Empty `finding_matches` on a candidate is valid.
 
 ### 5. proposal_from_finding_creator
 
@@ -300,9 +307,16 @@ class ProposalFromFindingCreatorInput(BaseModel):
     candidates: Candidates             # with finding_matches, from step 4
 ```
 
-**Output** — `Candidates` with `Candidate.deep_research_proposals` populated
-and candidate state advanced to `FINDING_PROPOSALS_CREATED`. Empty
-`deep_research_proposals` is valid.
+**Output**
+
+```python
+class ProposalFromFindingCreatorOutput(BaseModel):
+    candidates: Candidates             # deep_research_proposals populated;
+                                       # state -> FINDING_PROPOSALS_CREATED
+    issues: list[StepIssue] = []
+```
+
+Empty `deep_research_proposals` on a candidate is valid.
 
 ### 6. agent_proposals
 
@@ -318,6 +332,13 @@ class AgentProposalsInput(BaseModel):
     candidates: Candidates             # from step 5
 ```
 
-**Output** — `Candidates` with `Candidate.agent_proposals` populated and
-candidate state advanced to `AGENT_PROPOSALS_CREATED`. Empty `agent_proposals`
-is valid.
+**Output**
+
+```python
+class AgentProposalsOutput(BaseModel):
+    candidates: Candidates             # agent_proposals populated;
+                                       # state -> AGENT_PROPOSALS_CREATED
+    issues: list[StepIssue] = []
+```
+
+Empty `agent_proposals` on a candidate is valid.
