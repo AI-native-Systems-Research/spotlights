@@ -3,6 +3,9 @@
     <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#4a4a4a"/>
     </marker>
+    <marker id="arr-bus" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#7c3aed"/>
+    </marker>
     <style>
       .title  { font-weight:600; font-size:15px; fill:#1a1a1a; }
       .body   { font-weight:400; font-size:12px; fill:#4a4a4a; }
@@ -20,17 +23,26 @@
       .out    { fill:#ecfdf5; stroke:#059669; stroke-width:1.6; }
       .label  { font-weight:600; font-size:11px; fill:#666; letter-spacing:0.08em; }
       .loop   { fill:none; stroke:#1a1a1a; stroke-width:1.2; stroke-dasharray:5 5; }
+      .bus       { stroke:#7c3aed; stroke-width:1.2; stroke-dasharray:3 3; fill:none; }
+      .bus-tap   { stroke:#7c3aed; stroke-width:1.2; fill:none; }
+      .bus-label { font-weight:600; font-size:11px; fill:#7c3aed; letter-spacing:0.08em; }
+      .note      { font-style:italic; font-size:11px; fill:#666; }
     </style>
   </defs>
 
   <rect width="900" height="1140" fill="#fafafa"/>
 
-  <!-- INPUT -->
-  <g transform="translate(330,20)">
-    <rect width="240" height="44" rx="8" class="panel"/>
-    <text x="120" y="28" text-anchor="middle" class="mono">repo</text>
+  <!-- INPUTS -->
+  <g transform="translate(220,20)">
+    <rect width="200" height="44" rx="8" class="panel"/>
+    <text x="100" y="28" text-anchor="middle" class="mono">repo</text>
   </g>
-  <path class="line" marker-end="url(#arr)" d="M450 64 V 90"/>
+  <g transform="translate(440,20)">
+    <rect width="240" height="44" rx="8" class="panel"/>
+    <text x="120" y="28" text-anchor="middle" class="mono">SpotlightContext</text>
+  </g>
+  <path class="line" marker-end="url(#arr)" d="M320 64 V 90"/>
+  <path class="line" marker-end="url(#arr)" d="M560 64 V 90"/>
 
   <!-- SpotlightsManager wrapper -->
   <g transform="translate(30,90)">
@@ -47,6 +59,7 @@
     <text x="20" y="52" class="title">ModulesExtractor</text>
     <text x="20" y="70" class="body">repo -&gt; ProjectModules (Repository + module tree)</text>
   </g>
+  <text x="630" y="248" class="note">context not used</text>
   <path class="line" marker-end="url(#arr)" d="M450 280 V 320"/>
   <text x="460" y="308" class="label">FOR EACH TARGET MODULE</text>
 
@@ -59,7 +72,7 @@
     <text x="20" y="28" class="label">STEP 2</text>
     <text x="20" y="52" class="title">candidate_discovery</text>
     <text x="20" y="74" class="body">Claude &lt;-&gt; Codex alternating review of one module.</text>
-    <text x="20" y="92" class="body">In: project_tree + module_qualified_name</text>
+    <text x="20" y="92" class="body">In: project_tree + module_qualified_name + context</text>
     <text x="20" y="108" class="body">Out: Candidates</text>
   </g>
 
@@ -80,7 +93,7 @@
     <text x="20" y="28" class="label">STEP 3</text>
     <text x="20" y="52" class="title">module_deep_research</text>
     <text x="20" y="74" class="body">Per-module web / lit survey. Builds its own prompt from Repository + Module.</text>
-    <text x="20" y="92" class="body">In: project_tree + module_qualified_name + max_findings_per_module</text>
+    <text x="20" y="92" class="body">In: project_tree + module_qualified_name + context + max_findings_per_module</text>
     <text x="20" y="110" class="body">Out: list[Finding] (may be empty) + issues</text>
   </g>
   <path class="line" marker-end="url(#arr)" d="M450 625 V 665"/>
@@ -91,7 +104,7 @@
     <text x="20" y="28" class="label">STEP 4</text>
     <text x="20" y="52" class="title">finding_to_candidates_mapper</text>
     <text x="20" y="74" class="body">Per finding: select candidates it applies to; invert to candidate-centric.</text>
-    <text x="20" y="92" class="body">In: findings + candidates  -&gt;  Out: Candidates with finding_matches[]</text>
+    <text x="20" y="92" class="body">In: findings + candidates + context  -&gt;  Out: Candidates with finding_matches[]</text>
   </g>
   <path class="line" marker-end="url(#arr)" d="M450 765 V 805"/>
 
@@ -101,7 +114,7 @@
     <text x="20" y="28" class="label">STEP 5</text>
     <text x="20" y="52" class="title">proposal_from_finding_creator</text>
     <text x="20" y="74" class="body">For each (candidate, finding-match): draft a DeepResearchProposal, or skip.</text>
-    <text x="20" y="92" class="body">In: candidates  -&gt;  Out: candidate.deep_research_proposals[]</text>
+    <text x="20" y="92" class="body">In: candidates + context  -&gt;  Out: candidate.deep_research_proposals[]</text>
   </g>
   <path class="line" marker-end="url(#arr)" d="M450 905 V 945"/>
 
@@ -111,7 +124,7 @@
     <text x="20" y="28" class="label">STEP 6</text>
     <text x="20" y="52" class="title">agent_proposals</text>
     <text x="20" y="74" class="body">Agent-knowledge proposals NOT covered by deep_research_proposals.</text>
-    <text x="20" y="92" class="body">In: candidates  -&gt;  Out: candidate.agent_proposals[]</text>
+    <text x="20" y="92" class="body">In: project_tree + candidates + context  -&gt;  Out: candidate.agent_proposals[]</text>
   </g>
 
   <!-- OUTPUT -->
@@ -120,4 +133,5 @@
     <rect width="300" height="40" rx="8" class="out"/>
     <text x="150" y="26" text-anchor="middle" class="mono">SpotlightsResult (module_runs)</text>
   </g>
+
 </svg>
