@@ -34,6 +34,12 @@ request = ModuleDeepResearchInput(
 `objective` and `workload_hints` to filter sources toward the run goal. It does
 not mutate the context and does not pass context to module extraction.
 
+The research prompt also applies a local relevance gate: sources should survive
+only when they can be tied to a concrete target-module file, symbol, policy,
+handler, or contract. Broad background sources and techniques already present in
+the local code are filtered out unless they support a specific local gap or
+variant.
+
 ## Output
 
 `research_module()` returns the architecture contract object

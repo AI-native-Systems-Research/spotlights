@@ -46,3 +46,7 @@ def test_prompt_is_built_from_repository_module_and_context() -> None:
     assert "at most 3 findings" in prompt
     assert "ModuleDeepResearchOutput JSON schema" in prompt
     assert "Empty findings are valid" in prompt
+    assert "Local relevance gate" in prompt
+    assert "First inspect the target module files" in prompt
+    assert "must name the local" in prompt
+    assert "not merely background, prior art" in prompt

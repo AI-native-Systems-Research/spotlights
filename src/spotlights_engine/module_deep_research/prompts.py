@@ -76,7 +76,24 @@ Output rules:
 - Add StepIssue entries only for warnings or errors encountered during the survey.
 - Use source_type values only from: paper, blog, docs, issue, pr, talk, codebase, other.
 - Keep supporting_evidence brief: a short excerpt, paraphrase, or source note.
-- Filter out findings that are clearly off-objective.
+
+Local relevance gate:
+- First inspect the target module files and nearby files under the target module path.
+- Keep a finding only when it passes all of these checks:
+  1. It is about an owned responsibility of the target module, not just the
+     repository or broad technology area.
+  2. It suggests a concrete implementation, policy, data-layout, scheduling,
+     API, or validation idea that could plausibly change one of the target
+     module files or main-file contracts.
+  3. It is aligned with the caller objective and workload hints.
+  4. It is not merely background, prior art, or a technique already present in
+     the local code unless the source supports a specific local gap or variant.
+- Each finding's technique_summary or supporting_evidence must name the local
+  file, symbol, policy, handler, or contract it applies to.
+- Prefer narrow, actionable findings over general surveys. Foundational sources
+  are valid only when they directly justify a specific local change.
+- Filter out findings that are merely adjacent to KV caches, inference serving,
+  GPU systems, or caching but do not pass the local relevance gate.
 
 ModuleDeepResearchOutput JSON schema:
 {schema_json}
