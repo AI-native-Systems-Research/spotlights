@@ -14,13 +14,22 @@ supportable for that candidate.
 `SpotlightsManager` orchestrates the flow: it calls `ModulesExtractor` once
 per repo, then runs steps 2–6 once per module from the extracted tree.
 
+Callers also supply a `SpotlightContext` (objective, workload hints, validation
+plan) alongside the repo path. The context is threaded into the discovery,
+deep research, mapping, and proposal steps so they can bias their judgments
+toward the caller's goal. It is intentionally withheld from extraction so the
+structural map stays objective-agnostic and reusable across runs.
+
 ## Block diagram
 
 ![Spotlights deep-research path block diagram](spotlights_deep_research_path.png)
 
 ## Shared schemas
 
-These types are reused across module signatures below.
+These types are reused across module signatures below. Most are produced and
+consumed across pipeline steps; `SpotlightContext` is the exception — it is a
+**caller input** that only flows downward into a subset of steps and is never
+mutated by the pipeline.
 
 ```python
 
@@ -44,6 +53,11 @@ class Repository(BaseModel):
 class ProjectModules(BaseModel):
     repository: Repository
     modules: list[Module] = []
+
+class SpotlightContext(BaseModel):
+    objective: str
+    workload_hints: list[str] = []
+    validation_plan: list[str] = []
 
 CandidateKind = Literal[
     "function", "method", "loop", "region",
@@ -133,6 +147,48 @@ class ModuleRun(BaseModel):
     issues: list[StepIssue] = []
 ```
 
+### SpotlightContext semantics
+
+`SpotlightContext` carries the caller's intent for a run:
+
+- `objective` — the high-level goal of this run (e.g. "reduce decode latency
+  for long-context serving"). Anchors what counts as a worthwhile candidate
+  or proposal. Required: a run without an objective is a smell, and the field
+  is cheap to provide.
+- `workload_hints` — free-form workload / deployment notes (batch sizes,
+  traffic shape, hardware) that bias relevance judgments downstream.
+- `validation_plan` — how a proposed change should be validated in this
+  environment; lets proposal and mapping steps prefer changes whose evidence
+  is testable here.
+
+The `list[str]` shape for `workload_hints` and `validation_plan` is a
+deliberate v1 trade-off: it pushes structure into prose so consuming steps
+can read it as natural language. Revisit if a downstream step ever needs to
+filter or branch on a specific hint kind — at that point, promote the
+relevant entries to typed fields.
+
+`SpotlightContext` is **caller-supplied**. The pipeline does not derive,
+mutate, or persist it onto candidates. `Candidate`, `Finding`, `ModuleRun`,
+and `Candidates` are unchanged by its introduction; the only existing schema
+that records context is `SpotlightsResult`, which echoes it back so a result
+is self-describing for audit and repro.
+
+Example:
+
+```python
+SpotlightContext(
+    objective="reduce decode latency for long-context serving",
+    workload_hints=[
+        "batch size 1–8, prompts up to 32k tokens",
+        "single-node 8xH100, NVLink",
+    ],
+    validation_plan=[
+        "compare tokens/sec on the existing vLLM benchmark harness",
+        "verify generations match reference within tolerance",
+    ],
+)
+```
+
 A **module qualified name** is the dot-joined chain of `Module.name` values from
 a top-level entry in `ProjectModules.modules` down through nested `submodules` to
 the target module. It uniquely identifies a module within a `ProjectModules`
@@ -191,15 +247,20 @@ is marked `DEGRADED`; a module with an unrecoverable issue is marked `FAILED`.
 ```python
 class SpotlightsManagerInput(BaseModel):
     repo_path: Path
+    context: SpotlightContext
     max_findings_per_module: int = 10
     continue_on_module_failure: bool = True
 ```
+
+The manager forwards `context` unchanged into steps 2, 3, 4, 5, and 6, and
+copies it onto `SpotlightsResult`. It is intentionally not passed to step 1.
 
 **Output**
 
 ```python
 class SpotlightsResult(BaseModel):
     project_tree: ProjectModules
+    context: SpotlightContext
     module_runs: dict[str, ModuleRun]   # keyed by module qualified name
 ```
 
@@ -209,6 +270,10 @@ Produces a structured map of the repo's modules: top-level `Repository`
 metadata plus a tree of `Module` nodes (name, path, description, `depends_on`,
 `main_files`, nested `submodules`). Synchronous and deterministic for a given
 input.
+
+`SpotlightContext` is intentionally not passed in: the structural map must not
+be biased by objective so its output is reusable across runs with different
+objectives.
 
 **Input**
 
@@ -225,12 +290,16 @@ Already implemented. Claude ⇄ Codex alternating review of one module emits
 candidate code locations worth optimizing, each with a rationale and an impact
 rating. Read-only over the module.
 
+Uses `context.objective` and `context.workload_hints` to rank candidate kinds
+and filter out low-leverage locations that are off-objective.
+
 **Input**
 
 ```python
 class CandidateDiscoveryInput(BaseModel):
     project_tree: ProjectModules
     module_qualified_name: str
+    context: SpotlightContext
 ```
 
 **Output** — `Candidates` (see *Shared schemas*). At this stage
@@ -244,6 +313,10 @@ from the repo info (`Repository`) and the target `Module` fields (name, path,
 description, `main_files`, `depends_on`), keeping prompt construction out of
 the orchestrator.
 
+Uses `context.objective` and `context.workload_hints` to bias the survey
+toward sources relevant to the caller's goal and deployment shape, and to
+filter out findings that are clearly off-objective.
+
 An empty `findings` list is valid. It means no relevant source survived the
 survey and filtering pass; it only marks the module `DEGRADED` when accompanied
 by a recoverable `StepIssue`.
@@ -254,6 +327,7 @@ by a recoverable `StepIssue`.
 class ModuleDeepResearchInput(BaseModel):
     project_tree: ProjectModules
     module_qualified_name: str
+    context: SpotlightContext
     max_findings_per_module: int = 10
 ```
 
@@ -276,12 +350,17 @@ each candidate is filled with its related matches on
 The match edge is explicit because applicability is a judgment, not just a
 foreign-key join. Each edge carries confidence, rationale, and mapper identity.
 
+Uses `context.objective` to score finding↔candidate confidence and to filter
+matches that are clearly off-objective. The target module is read off
+`candidates.module_qualified_name`; no parallel argument is added.
+
 **Input**
 
 ```python
 class FindingToCandidatesMapperInput(BaseModel):
     findings: list[Finding]            # from module_deep_research
     candidates: Candidates             # from candidate_discovery
+    context: SpotlightContext
 ```
 
 **Output**
@@ -300,11 +379,16 @@ For every candidate/finding-match pair the candidate carries, drafts one
 `DeepResearchProposal`. The module may decide a finding does not contain enough
 information to support a proposal and skip it.
 
+Uses `context.validation_plan` to bias toward proposals whose claims can be
+tested in the caller's environment, and `context.objective` to keep the
+proposal aligned with the run's goal.
+
 **Input**
 
 ```python
 class ProposalFromFindingCreatorInput(BaseModel):
     candidates: Candidates             # with finding_matches, from step 4
+    context: SpotlightContext
 ```
 
 **Output**
@@ -325,11 +409,19 @@ covered by `deep_research_proposals`. This pass still runs for candidates with
 no research-backed proposals, because those candidates may have useful
 agent-knowledge ideas.
 
+Uses `context.objective` and `context.validation_plan` to keep agent-knowledge
+proposals aligned with the run's goal and verifiable in the caller's
+environment. Receives `project_tree` so proposals can situate the candidate
+within sibling and parent modules rather than reasoning from the candidate
+site alone.
+
 **Input**
 
 ```python
 class AgentProposalsInput(BaseModel):
+    project_tree: ProjectModules
     candidates: Candidates             # from step 5
+    context: SpotlightContext
 ```
 
 **Output**
