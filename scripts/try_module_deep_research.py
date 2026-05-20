@@ -126,7 +126,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-findings",
         type=int,
-        default=20,
+        default=10,
         help="Cap on findings the agent is allowed to return.",
     )
     parser.add_argument(

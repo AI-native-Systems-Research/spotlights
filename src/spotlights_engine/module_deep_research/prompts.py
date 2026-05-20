@@ -75,6 +75,8 @@ Output rules:
 - Empty findings are valid when no relevant source survives filtering.
 - Add StepIssue entries only for warnings or errors encountered during the survey.
 - Use source_type values only from: paper, blog, docs, issue, pr, talk, codebase, other.
+- title must be the exact title of the cited source (paper, blog post, doc page,
+  issue, PR, talk, etc.). Put the proposed local change in technique_summary.
 - Keep supporting_evidence brief: a short excerpt, paraphrase, or source note.
 
 Local relevance gate:
