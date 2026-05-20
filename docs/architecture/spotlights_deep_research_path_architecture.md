@@ -254,7 +254,7 @@ by a recoverable `StepIssue`.
 class ModuleDeepResearchInput(BaseModel):
     project_tree: ProjectModules
     module_qualified_name: str
-    max_output_results: int = 10
+    max_findings_per_module: int = 10
 ```
 
 **Output**
