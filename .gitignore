@@ -33,3 +33,5 @@ uv.lock
 
 # Local run artifacts
 tmp/
+
+.omx/
