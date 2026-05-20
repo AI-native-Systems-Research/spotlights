@@ -30,6 +30,7 @@ def test_prompt_is_built_from_repository_module_and_context() -> None:
         context=SpotlightContext(
             objective="reduce decode latency for long-context serving",
             workload_hints=["single-node 8xH100"],
+            validation_plan=["compare tokens/sec on existing benchmark"],
         ),
         max_findings_per_module=3,
     )
@@ -43,10 +44,16 @@ def test_prompt_is_built_from_repository_module_and_context() -> None:
     assert "cpu/manager.py: CPU offload manager" in prompt
     assert "reduce decode latency for long-context serving" in prompt
     assert "single-node 8xH100" in prompt
+    assert "compare tokens/sec on existing benchmark" in prompt
     assert "at most 3 findings" in prompt
     assert "ModuleDeepResearchOutput JSON schema" in prompt
     assert "Empty findings are valid" in prompt
+    assert "Where:" in prompt
+    assert "Change:" in prompt
+    assert "Validate:" in prompt
     assert "Local relevance gate" in prompt
     assert "First inspect the target module files" in prompt
-    assert "must name the local" in prompt
+    assert "start a patch from technique_summary alone" in prompt
+    assert "technique_summary must name the local" in prompt
     assert "not merely background, prior art" in prompt
+    assert "Source quality" in prompt

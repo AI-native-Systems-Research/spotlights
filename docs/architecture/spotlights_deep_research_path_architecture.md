@@ -313,9 +313,10 @@ from the repo info (`Repository`) and the target `Module` fields (name, path,
 description, `main_files`, `depends_on`), keeping prompt construction out of
 the orchestrator.
 
-Uses `context.objective` and `context.workload_hints` to bias the survey
-toward sources relevant to the caller's goal and deployment shape, and to
-filter out findings that are clearly off-objective.
+Uses `context.objective`, `context.workload_hints`, and
+`context.validation_plan` to bias the survey toward sources relevant to the
+caller's goal, deployment shape, and available validation path, and to filter
+out findings that are clearly off-objective.
 
 An empty `findings` list is valid. It means no relevant source survived the
 survey and filtering pass; it only marks the module `DEGRADED` when accompanied
