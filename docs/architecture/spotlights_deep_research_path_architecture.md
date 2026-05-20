@@ -30,7 +30,7 @@ class Module(BaseModel):
     description: str = ""
     depends_on: list[str] = []
     main_files: list[File] = []
-    submodules: list["Module"] = []
+    submodules: list[Module] = []
 
 class Repository(BaseModel):
     name: str
@@ -46,6 +46,10 @@ CandidateKind = Literal[
     "kernel", "config_block", "plugin_seam",
 ]
 EstimatedImpact = Literal["high", "medium", "low"]
+
+CandidateState = Literal[
+    "DISCOVERED", "FINDINGS", "FINDING_PROPOSALS", "AGENT_PROPOSALS",
+]
 
 class Finding(BaseModel):
     finding_id: str
@@ -75,6 +79,7 @@ class Candidate(BaseModel):
     evolve_rationale: str
     estimated_impact: EstimatedImpact
     estimated_impact_explanation: str
+    state: CandidateState = "DISCOVERED"                   # advanced by steps 4–6
     findings: list[Finding] = []                          # filled by step 4
     deep_research_proposals: list[DeepResearchProposal] = []  # filled by step 5
     agent_proposals: list[AgentProposal] = []             # filled by step 6
