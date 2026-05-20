@@ -1,5 +1,7 @@
 # `signal_discovery_flow.md` — Alignment Audit (Second Pass)
 
+> **Status:** point-in-time audit, 2026-05-20. Quotes reflect source files at that date and may be stale. **Not a current reference** — see [`README.md`](README.md). Outstanding punch-list items at the bottom of this file are deferred, not applied.
+
 *Re-audit of the rewritten flow doc against `proposal/discovery_engine_proposal.md`, `contracts/signal_interface_spec.md`, `plans/bundle_charters.md`, `plans/repo_scaffolding_plan.md`, and `README.md`. Supersedes the first-pass findings.*
 
 ## Summary
