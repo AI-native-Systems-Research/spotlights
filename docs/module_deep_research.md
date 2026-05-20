@@ -36,14 +36,39 @@ not mutate the context and does not pass context to module extraction.
 
 ## Output
 
+`research_module()` returns the architecture contract object
+`ModuleDeepResearchOutput`. Callers should treat that object, not an artifact
+folder or free-form text, as the step output.
+
 ```python
 from spotlights_engine.module_deep_research import research_module
+from spotlights_engine.schemas import ModuleDeepResearchOutput
 
 output = research_module(request)
+assert isinstance(output, ModuleDeepResearchOutput)
+
 for finding in output.findings:
     print(finding.finding_id, finding.title, finding.source_type, finding.url)
 for issue in output.issues:
     print(issue.severity, issue.message)
+```
+
+The returned object has this shape:
+
+```python
+ModuleDeepResearchOutput(
+    findings=[
+        Finding(
+            finding_id="find-0001",
+            title="Source-backed optimization technique",
+            url="https://example.com/source",
+            source_type="paper",
+            technique_summary="Short summary of the technique and why it applies.",
+            supporting_evidence="Brief excerpt, paraphrase, or source note.",
+        )
+    ],
+    issues=[],
+)
 ```
 
 `ModuleDeepResearchOutput.findings` may be empty. Empty findings means the step
