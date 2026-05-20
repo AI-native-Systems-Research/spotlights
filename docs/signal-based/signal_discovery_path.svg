@@ -93,14 +93,13 @@
   <path class="line" marker-end="url(#arr)" d="M230 402 V 455"/>
   <path class="line" marker-end="url(#arr)" d="M670 402 V 455"/>
 
-  <!-- Knowledge retrieval (deferred) -->
-  <g transform="translate(40,440)">
-    <rect width="200" height="60" rx="8" class="deferred"/>
-    <text x="14" y="22" class="label">DEFERRED · POST-MVP</text>
-    <text x="14" y="42" class="title" fill="#6b7280">Knowledge retrieval</text>
-    <text x="14" y="56" class="small">a.k.a. Bundle B · literature / web</text>
+  <!-- Knowledge retrieval (deferred) — tucked between artifact row and Stage 2 -->
+  <g transform="translate(330,408)">
+    <rect width="240" height="42" rx="8" class="deferred"/>
+    <text x="12" y="16" class="label">DEFERRED · POST-MVP</text>
+    <text x="12" y="34" class="title" fill="#6b7280" font-size="13">Knowledge retrieval (Bundle B)</text>
   </g>
-  <path class="line" marker-end="url(#arr)" stroke-dasharray="4 3" d="M240 470 H 295 V 510"/>
+  <path class="line" stroke-dasharray="4 3" marker-end="url(#arr)" d="M450 450 V 455"/>
 
   <!-- STAGE 2: Candidate generation -->
   <g transform="translate(180,455)">
