@@ -2,6 +2,24 @@
 
 *Concrete inputs, outputs, and interactions for each module in the MVP signal-discovery pipeline. Companion to `plans/signal_discovery_flow.md` (visual + sequential view) and `contracts/signal_interface_spec.md` (the locked Bundle A → Bundle C contract).*
 
+## TL;DR — pipeline I/O at a glance
+
+End-to-end:
+- **Inputs:** raw telemetry + repo root.
+- **Outputs:** list of `(Change spec, ExecutionResult)` pairs.
+
+Per module (full schemas below):
+
+| Module | Input | Output |
+|---|---|---|
+| **Signal extraction** (Bundle A) | `RawTelemetry` | `WorkloadProfile`, `TraceSummary[]`, `Anomaly[]` |
+| **ProjectTree extractor** | repo root path | `ProjectTree` (modules, files, deps, descriptions) |
+| **Candidate generation** (Bundle C) | signals + `ProjectTree` + source access | `Candidate[]` |
+| **Change generation + handoff** (Bundle D) | `Candidate` | `Change` spec → `ExecutionResult` |
+| **Execution backend** | `Change` spec | `ExecutionResult` (file edits + rationale) |
+
+---
+
 This document covers MVP scope. Bundle B (retrieval), Bundle E (validation), and Bundle F (orchestration) are deferred; their charters are in `plans/bundle_charters.md`. Schemas marked **locked** are pinned by other docs and reproduced here for convenience; schemas marked **proposed** are this doc's contribution and need the bundle owner's review.
 
 ---
