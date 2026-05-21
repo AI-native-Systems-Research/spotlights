@@ -53,6 +53,7 @@ def _request(module_qualified_name: str = "inference.attention") -> ModuleDeepRe
         project_tree=_tree(),
         module_qualified_name=module_qualified_name,
         context=SpotlightContext(objective="reduce latency"),
+        repo_path=Path("/tmp/example-repo"),
         max_findings_per_module=5,
     )
 

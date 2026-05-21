@@ -322,6 +322,10 @@ An empty `findings` list is valid. It means no relevant source survived the
 survey and filtering pass; it only marks the module `DEGRADED` when accompanied
 by a recoverable `StepIssue`.
 
+The codex agent driving the survey runs with its working directory set to
+`repo_path`, so it can open target-module and adjacent files directly via
+their repo-relative paths when grounding findings in current code.
+
 **Input**
 
 ```python
@@ -329,6 +333,7 @@ class ModuleDeepResearchInput(BaseModel):
     project_tree: ProjectModules
     module_qualified_name: str
     context: SpotlightContext
+    repo_path: Path
     max_findings_per_module: int = 10
 ```
 

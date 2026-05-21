@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -47,10 +48,12 @@ def test_module_deep_research_input_accepts_project_tree_and_context() -> None:
             workload_hints=["batch size 1-8"],
             validation_plan=["compare tokens/sec"],
         ),
+        repo_path=Path("/tmp/example-repo"),
     )
 
     assert request.project_tree.repository.name == "demo"
     assert request.max_findings_per_module == 10
+    assert request.repo_path == Path("/tmp/example-repo")
 
 
 def test_project_modules_alias_reuses_project_tree_contract() -> None:

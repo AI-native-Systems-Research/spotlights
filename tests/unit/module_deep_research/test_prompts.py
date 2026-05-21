@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from spotlights_engine.module_deep_research.prompts import render_module_deep_research_prompt
 from spotlights_engine.schemas.deep_research import ModuleDeepResearchInput, SpotlightContext
 from spotlights_engine.schemas.modules import File, Module, ProjectTree, Repository
@@ -24,6 +26,7 @@ def test_prompt_is_built_from_repository_module_and_context() -> None:
             )
         ],
     )
+    repo_path = Path("/tmp/example-repo")
     request = ModuleDeepResearchInput(
         project_tree=tree,
         module_qualified_name="kv_offload",
@@ -32,6 +35,7 @@ def test_prompt_is_built_from_repository_module_and_context() -> None:
             workload_hints=["single-node 8xH100"],
             validation_plan=["compare tokens/sec on existing benchmark"],
         ),
+        repo_path=repo_path,
         max_findings_per_module=3,
     )
 
@@ -48,12 +52,10 @@ def test_prompt_is_built_from_repository_module_and_context() -> None:
     assert "at most 3 findings" in prompt
     assert "ModuleDeepResearchOutput JSON schema" in prompt
     assert "Empty findings are valid" in prompt
-    assert "Where:" in prompt
-    assert "Change:" in prompt
-    assert "Validate:" in prompt
-    assert "Local relevance gate" in prompt
-    assert "First inspect the target module files" in prompt
-    assert "start a patch from technique_summary alone" in prompt
-    assert "technique_summary must name the local" in prompt
-    assert "not merely background, prior art" in prompt
+    assert "Workflow:" in prompt
+    assert "First understand the target module before searching" in prompt
+    assert "Module relevance gate" in prompt
+    assert "not merely background or prior art" in prompt
     assert "Source quality" in prompt
+    assert str(repo_path) in prompt
+    assert "Repository working directory" in prompt

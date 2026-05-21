@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Protocol
 
 from spotlights_engine.module_deep_research.codex_exec import (
@@ -68,7 +67,11 @@ def research_module(
         )
 
     prompt = render_module_deep_research_prompt(request, module)
-    active_runner = runner or CodexExecClient(codex_options or CodexExecOptions(cwd=Path.cwd()))
+    if runner is not None:
+        active_runner = runner
+    else:
+        options = codex_options or CodexExecOptions(cwd=request.repo_path)
+        active_runner = CodexExecClient(options)
 
     try:
         result = active_runner.run(prompt, check=check)

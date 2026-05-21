@@ -158,6 +158,7 @@ def main() -> None:
                 "high request concurrency with shared prefixes",
             ],
         ),
+        repo_path=args.cwd,
         max_findings_per_module=args.max_findings,
     )
 

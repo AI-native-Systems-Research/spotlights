@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -75,6 +76,7 @@ class ModuleDeepResearchInput(BaseModel):
     project_tree: ProjectTree
     module_qualified_name: str = Field(min_length=1)
     context: SpotlightContext
+    repo_path: Path
     max_findings_per_module: int = Field(default=10, ge=0)
 
 
