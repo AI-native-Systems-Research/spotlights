@@ -18,6 +18,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from spotlights_engine.candidate_discovery import layout, prompts
+from spotlights_engine.candidate_discovery.agent_schema import AgentCandidates
 from spotlights_engine.candidate_discovery.agents import (
     AgentInvocation,
     AgentRunner,
@@ -42,6 +43,8 @@ from spotlights_engine.candidate_discovery.telemetry import (
 )
 from spotlights_engine.candidate_discovery.validation import Validator
 from spotlights_engine.schemas.candidate import Candidate, Candidates
+from spotlights_engine.schemas.pipeline import CandidateDiscoveryInput
+from spotlights_engine.schemas.project import Module
 
 
 _MIN_SEEN_ID = "cand-0000"
@@ -63,9 +66,19 @@ class _IterOutcome:
 
 
 class Orchestrator:
-    def __init__(self, config: DiscoveryConfig) -> None:
+    def __init__(
+        self,
+        *,
+        input: CandidateDiscoveryInput,
+        config: DiscoveryConfig,
+        module: Module,
+    ) -> None:
+        self._input = input
         self._config = config
-        self._validator = Validator(config)
+        self._module = module
+        self._validator = Validator(
+            repo_path=config.repo_path, module_path=module.path
+        )
         self._repo_guard = RepoGuard(config.repo_path)
         self._telemetry_builder = TelemetryBuilder()
 
@@ -90,9 +103,10 @@ class Orchestrator:
         try:
             with self._open_iterations_jsonl():
                 boot_prompt = prompts.render_bootstrap(
-                    self._config.module_qualified_name,
-                    self._config.module,
+                    self._input.module_qualified_name,
+                    self._module,
                     repo_context_markdown=self._config.repo_context_markdown,
+                    spotlight_context=self._input.context,
                 )
                 boot = self._run_iteration(n=0, agent=claude, prompt=boot_prompt)
                 self._record(boot)
@@ -101,11 +115,12 @@ class Orchestrator:
                     agent = review_agents[(n - 1) % 2]
                     prev_json = self._prev_post_drop.model_dump_json(indent=2)  # type: ignore[union-attr]
                     review_prompt = prompts.render_review(
-                        self._config.module_qualified_name,
-                        self._config.module,
+                        self._input.module_qualified_name,
+                        self._module,
                         prev_json,
                         self._max_seen_id,
                         repo_context_markdown=self._config.repo_context_markdown,
+                        spotlight_context=self._input.context,
                     )
                     out = self._run_iteration(n=n, agent=agent, prompt=review_prompt)
                     self._record(out)
@@ -117,7 +132,11 @@ class Orchestrator:
         return self._finalize(total_duration_s=duration)
 
     def _mint_run_dir(self) -> None:
-        schema_text = json.dumps(Candidates.model_json_schema(), indent=2)
+        # Hand the agents the discovery-only schema (no `state`,
+        # `finding_matches`, etc.) so codex's strict structured-output stays
+        # valid. The orchestrator promotes parsed payloads to full `Candidate`
+        # objects via `AgentCandidates.to_candidates()`.
+        schema_text = json.dumps(AgentCandidates.model_json_schema(), indent=2)
         schema_bytes = len(schema_text.encode("utf-8"))
         if schema_bytes >= _MAX_SCHEMA_BYTES:
             raise DiscoverySetupError(
@@ -166,9 +185,10 @@ class Orchestrator:
                     )
                 payload_json = agent.parse_last_message(iter_dir)
                 try:
-                    parsed = Candidates.model_validate_json(payload_json)
+                    agent_parsed = AgentCandidates.model_validate_json(payload_json)
                 except ValidationError as e:
                     raise _SchemaParseError(f"schema validation failed: {e}") from e
+                parsed = agent_parsed.to_candidates()
 
                 self._check_qualified_name(parsed, n=n, agent=agent.name)
                 survivors, drops = self._validator.run(parsed)
@@ -224,7 +244,7 @@ class Orchestrator:
         ) from last_exc
 
     def _check_qualified_name(self, parsed: Candidates, n: int, agent: str) -> None:
-        expected = self._config.module_qualified_name
+        expected = self._input.module_qualified_name
         if parsed.module_qualified_name != expected:
             raise DiscoveryValidationError(
                 "qualified-name mismatch",
@@ -282,18 +302,12 @@ class Orchestrator:
         survivors: list[Candidate],
         iter_dir: Path,
     ) -> Candidates:
-        try:
-            normalized = Candidates(
-                module_qualified_name=self._config.module_qualified_name,
-                candidates=survivors,
-            )
-        except ValidationError as e:
-            raise DiscoveryValidationError(
-                "post-drop list empty",
-                iteration=n,
-                agent=agent,
-                cause=str(e),
-            ) from e
+        # An empty `survivors` is valid per the architecture: the manager will
+        # mark the module run `SKIPPED` if discovery returns zero candidates.
+        normalized = Candidates(
+            module_qualified_name=self._input.module_qualified_name,
+            candidates=survivors,
+        )
 
         (iter_dir / "candidates.json").write_text(
             normalized.model_dump_json(indent=2), encoding="utf-8"

@@ -6,8 +6,9 @@ from pathlib import Path
 
 from spotlights_engine.module_deep_research.api import research_module, resolve_target_module
 from spotlights_engine.module_deep_research.codex_exec import CodexExecResult
-from spotlights_engine.schemas.deep_research import ModuleDeepResearchInput, SpotlightContext
-from spotlights_engine.schemas.modules import Module, ProjectTree, Repository
+from spotlights_engine.schemas.common import SpotlightContext
+from spotlights_engine.schemas.pipeline import ModuleDeepResearchInput
+from spotlights_engine.schemas.project import Module, ProjectTree, Repository
 
 
 class FakeRunner:
@@ -53,6 +54,7 @@ def _request(module_qualified_name: str = "inference.attention") -> ModuleDeepRe
         project_tree=_tree(),
         module_qualified_name=module_qualified_name,
         context=SpotlightContext(objective="reduce latency"),
+        repo_path=Path("/tmp/example-repo"),
         max_findings_per_module=5,
     )
 

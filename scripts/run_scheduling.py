@@ -35,10 +35,82 @@ def _stub_observability_if_missing() -> None:
 _stub_observability_if_missing()
 
 from spotlights_engine.candidate_discovery import DiscoveryConfig, discover  # noqa: E402
-from spotlights_engine.schemas.modules import File, Module  # noqa: E402
+from spotlights_engine.schemas.common import SpotlightContext  # noqa: E402
+from spotlights_engine.schemas.pipeline import CandidateDiscoveryInput  # noqa: E402
+from spotlights_engine.schemas.project import (  # noqa: E402
+    File,
+    Module,
+    ProjectTree,
+    Repository,
+)
 
 REPO_PATH = Path("/Users/ophir/GoProjects/llm-d-inference-scheduler-main")
 ARTIFACTS_DIR = Path(__file__).resolve().parent.parent / "tmp" / "scheduling"
+MODULE_QUALIFIED_NAME = "epp.scheduling"
+
+
+def build_project_tree() -> ProjectTree:
+    scheduling = Module(
+        name="scheduling",
+        path="pkg/epp/scheduling",
+        description=(
+            "Profile-based EPP scheduler that picks a model-server pod "
+            "for each inference request by composing filter/scorer/"
+            "picker plugins; supports weighted scorer aggregation.\n"
+            "Role in flow: invoked once per ext-proc request from "
+            "requestcontrol/director.go; runs each configured profile's "
+            "filter -> score -> pick chain to select an endpoint.\n"
+            "Call frequency: once per inference request on the EPP hot "
+            "path; scorers loop over candidate pods, so per-call cost "
+            "scales with pod count and active scorer set.\n"
+            "Headroom signals: profile/scorer composition, scorer "
+            "weight tables, filter ordering and short-circuiting, "
+            "weighted-aggregation formula, per-pod scoring inner loop.\n"
+            "Entry points: scheduler.go (entry), scheduler_profile.go "
+            "(single-profile execution), weighted_scorer.go (score "
+            "aggregation)."
+        ),
+        depends_on=[],
+        main_files=[
+            File(
+                path="pkg/epp/scheduling/scheduler.go",
+                role=(
+                    "Scheduler entry point: runs configured profiles and "
+                    "aggregates results"
+                ),
+            ),
+            File(
+                path="pkg/epp/scheduling/scheduler_profile.go",
+                role="Single-profile execution: filter -> score -> pick",
+            ),
+            File(
+                path="pkg/epp/scheduling/weighted_scorer.go",
+                role="Weighted aggregation of multiple scorer outputs",
+            ),
+            File(
+                path="pkg/epp/scheduling/scheduler_config.go",
+                role="Scheduler configuration model and validation",
+            ),
+        ],
+    )
+    return ProjectTree(
+        repository=Repository(
+            name="llm-d-inference-scheduler",
+            summary=(
+                "Envoy ext-proc inference scheduler that routes LLM "
+                "requests across InferencePool pods via a plugin "
+                "pipeline."
+            ),
+        ),
+        modules=[
+            Module(
+                name="epp",
+                path="pkg/epp",
+                description="Endpoint Picker namespace.",
+                submodules=[scheduling],
+            ),
+        ],
+    )
 
 
 def main() -> None:
@@ -52,52 +124,18 @@ def main() -> None:
         _ctx_path.read_text(encoding="utf-8") if _ctx_path.is_file() else None
     )
 
+    inp = CandidateDiscoveryInput(
+        project_tree=build_project_tree(),
+        module_qualified_name=MODULE_QUALIFIED_NAME,
+        context=SpotlightContext(
+            objective=(
+                "reduce scheduling-pass cost on the EPP hot path while "
+                "preserving picker quality"
+            ),
+        ),
+    )
     cfg = DiscoveryConfig(
         repo_path=REPO_PATH,
-        module_qualified_name="epp/scheduling",
-        module=Module(
-            name="scheduling",
-            path="pkg/epp/scheduling",
-            description=(
-                "Profile-based EPP scheduler that picks a model-server pod "
-                "for each inference request by composing filter/scorer/"
-                "picker plugins; supports weighted scorer aggregation.\n"
-                "Role in flow: invoked once per ext-proc request from "
-                "requestcontrol/director.go; runs each configured profile's "
-                "filter -> score -> pick chain to select an endpoint.\n"
-                "Call frequency: once per inference request on the EPP hot "
-                "path; scorers loop over candidate pods, so per-call cost "
-                "scales with pod count and active scorer set.\n"
-                "Headroom signals: profile/scorer composition, scorer "
-                "weight tables, filter ordering and short-circuiting, "
-                "weighted-aggregation formula, per-pod scoring inner loop.\n"
-                "Entry points: scheduler.go (entry), scheduler_profile.go "
-                "(single-profile execution), weighted_scorer.go (score "
-                "aggregation)."
-            ),
-            depends_on=[],
-            main_files=[
-                File(
-                    path="pkg/epp/scheduling/scheduler.go",
-                    role=(
-                        "Scheduler entry point: runs configured profiles and "
-                        "aggregates results"
-                    ),
-                ),
-                File(
-                    path="pkg/epp/scheduling/scheduler_profile.go",
-                    role="Single-profile execution: filter -> score -> pick",
-                ),
-                File(
-                    path="pkg/epp/scheduling/weighted_scorer.go",
-                    role="Weighted aggregation of multiple scorer outputs",
-                ),
-                File(
-                    path="pkg/epp/scheduling/scheduler_config.go",
-                    role="Scheduler configuration model and validation",
-                ),
-            ],
-        ),
         artifacts_dir=ARTIFACTS_DIR,
         repo_context_markdown=_repo_context,
         num_review_iterations=1,
@@ -105,7 +143,7 @@ def main() -> None:
         per_iteration_wallclock_s=600,
     )
 
-    result = discover(cfg)
+    result = discover(inp, config=cfg)
 
     print(f"candidates: {len(result.candidates.candidates)}")
     print(f"total_duration_s: {result.total_duration_s:.1f}")

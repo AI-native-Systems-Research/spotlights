@@ -1,9 +1,12 @@
 """The `Candidate` and `Candidates` schemas.
 
-Stage 1 of the candidate research proposer emits a `Candidates` JSON object as
-its final artifact. The shape constraints captured here are the contract: they
-are exported via `model_json_schema()` and handed to both subprocess agents so
-the same validation runs model-side and orchestrator-side.
+Stage 1 (candidate_discovery) emits a `Candidates` object whose entries are at
+state `DISCOVERED` with empty match/proposal lists. Steps 4–6 progressively
+populate `finding_matches` (see `schemas.finding.FindingMatch`),
+`deep_research_proposals` (see `schemas.proposals.DeepResearchProposal`), and
+`agent_proposals` (see `schemas.proposals.AgentProposal`) and advance `state`.
+The shape constraints captured here are the contract: they are exported via
+`model_json_schema()` and consumed by downstream agents.
 """
 
 from __future__ import annotations
@@ -11,6 +14,9 @@ from __future__ import annotations
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from spotlights_engine.schemas.finding import FindingMatch
+from spotlights_engine.schemas.proposals import AgentProposal, DeepResearchProposal
 
 CandidateKind = Literal[
     "function",
@@ -22,6 +28,12 @@ CandidateKind = Literal[
     "plugin_seam",
 ]
 EstimatedImpact = Literal["high", "medium", "low"]
+CandidateState = Literal[
+    "DISCOVERED",
+    "FINDINGS_MAPPED",
+    "FINDING_PROPOSALS_CREATED",
+    "AGENT_PROPOSALS_CREATED",
+]
 
 
 class Candidate(BaseModel):
@@ -38,6 +50,10 @@ class Candidate(BaseModel):
     evolve_rationale: str = Field(min_length=1)
     estimated_impact: EstimatedImpact
     estimated_impact_explanation: str = Field(min_length=1)
+    state: CandidateState = "DISCOVERED"
+    finding_matches: list[FindingMatch] = Field(default_factory=list)
+    deep_research_proposals: list[DeepResearchProposal] = Field(default_factory=list)
+    agent_proposals: list[AgentProposal] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def _check_range(self) -> Candidate:
@@ -53,7 +69,13 @@ class Candidates(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     module_qualified_name: str
-    candidates: list[Candidate] = Field(min_length=1)
+    candidates: list[Candidate] = Field(default_factory=list)
 
 
-__all__ = ["Candidate", "Candidates"]
+__all__ = [
+    "Candidate",
+    "CandidateKind",
+    "CandidateState",
+    "Candidates",
+    "EstimatedImpact",
+]

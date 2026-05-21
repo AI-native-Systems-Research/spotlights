@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 import tempfile
+import threading
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import IO
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -30,6 +33,7 @@ class CodexExecOptions(BaseModel):
     output_last_message: Path | str | None = None
     extra_args: Sequence[str] = Field(default_factory=tuple)
     env: Mapping[str, str] | None = None
+    stream_logs: bool = False
 
 
 class CodexExecResult(BaseModel):
@@ -103,37 +107,88 @@ class CodexExecClient:
         return cmd, output_last_message
 
     def run(self, prompt: str, *, check: bool = True) -> CodexExecResult:
-        """Run `codex exec` with `prompt` on stdin."""
+        """Run `codex exec` with `prompt` on stdin, streaming output live."""
         cmd, last_path = self.build_command("-")
         env = os.environ.copy()
         if self.options.env:
             env.update(dict(self.options.env))
 
-        proc = subprocess.run(
+        proc = subprocess.Popen(
             cmd,
-            input=prompt,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            capture_output=True,
             cwd=str(Path(self.options.cwd).expanduser().resolve()),
-            timeout=self.options.timeout_seconds,
             env=env,
-            check=False,
+            bufsize=1,
         )
+        assert proc.stdin is not None
+        assert proc.stdout is not None
+        assert proc.stderr is not None
+
+        stdout_chunks: list[str] = []
+        stderr_chunks: list[str] = []
+        stdout_sink = sys.stdout if self.options.stream_logs else None
+        stderr_sink = sys.stderr if self.options.stream_logs else None
+
+        stdout_thread = threading.Thread(
+            target=_tee_stream,
+            args=(proc.stdout, stdout_sink, stdout_chunks),
+            daemon=True,
+        )
+        stderr_thread = threading.Thread(
+            target=_tee_stream,
+            args=(proc.stderr, stderr_sink, stderr_chunks),
+            daemon=True,
+        )
+        stdout_thread.start()
+        stderr_thread.start()
+
+        try:
+            proc.stdin.write(prompt)
+        finally:
+            proc.stdin.close()
+
+        try:
+            returncode = proc.wait(timeout=self.options.timeout_seconds)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            stdout_thread.join()
+            stderr_thread.join()
+            raise
+
+        stdout_thread.join()
+        stderr_thread.join()
+
         final_message = None
         if last_path and last_path.exists():
             final_message = last_path.read_text(encoding="utf-8", errors="replace")
 
         result = CodexExecResult(
             command=cmd,
-            returncode=proc.returncode,
-            stdout=proc.stdout,
-            stderr=proc.stderr,
+            returncode=returncode,
+            stdout="".join(stdout_chunks),
+            stderr="".join(stderr_chunks),
             final_message=final_message,
             output_last_message=last_path,
         )
         if check:
             result.raise_for_status()
         return result
+
+
+def _tee_stream(source: IO[str], sink: IO[str] | None, buffer: list[str]) -> None:
+    for line in source:
+        buffer.append(line)
+        if sink is None:
+            continue
+        try:
+            sink.write(line)
+            sink.flush()
+        except Exception:
+            pass
 
 
 __all__ = ["CodexExecClient", "CodexExecOptions", "CodexExecResult"]

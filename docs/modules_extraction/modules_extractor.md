@@ -9,7 +9,7 @@ from pathlib import Path
 from spotlights_engine.modules_extractor import extract
 from spotlights_engine.schemas.modules import ProjectTree
 
-tree: ProjectTree = extract(root=Path("/path/to/repo"))
+tree: ProjectTree = extract(repo_path=Path("/path/to/repo"))
 tree.to_json(Path("docs/modules.json"))
 ```
 

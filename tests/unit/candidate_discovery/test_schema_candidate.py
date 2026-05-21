@@ -120,9 +120,38 @@ def test_verbose_rationale_fields_are_accepted():
     )
 
 
-def test_candidates_list_must_be_non_empty():
+def test_candidates_list_can_be_empty():
+    """Per architecture: an empty candidate list is valid output. The manager
+    marks such a module run `SKIPPED` and does not call downstream steps."""
+    obj = Candidates.model_validate({"module_qualified_name": "v1/foo", "candidates": []})
+    assert obj.candidates == []
+    assert obj.module_qualified_name == "v1/foo"
+
+
+def test_candidate_default_state_and_empty_attachments():
+    """Per architecture, a freshly discovered candidate is at `DISCOVERED`
+    with empty match/proposal lists; later steps populate these fields."""
+    c = Candidate.model_validate(_valid_candidate())
+    assert c.state == "DISCOVERED"
+    assert c.finding_matches == []
+    assert c.deep_research_proposals == []
+    assert c.agent_proposals == []
+
+
+def test_candidate_state_accepts_pipeline_progression():
+    for state in (
+        "DISCOVERED",
+        "FINDINGS_MAPPED",
+        "FINDING_PROPOSALS_CREATED",
+        "AGENT_PROPOSALS_CREATED",
+    ):
+        c = Candidate.model_validate(_valid_candidate(state=state))
+        assert c.state == state
+
+
+def test_candidate_rejects_unknown_state():
     with pytest.raises(ValidationError):
-        Candidates.model_validate({"module_qualified_name": "v1/foo", "candidates": []})
+        Candidate.model_validate(_valid_candidate(state="MAPPED"))
 
 
 def test_candidates_model_json_schema_round_trips_through_json_dumps():

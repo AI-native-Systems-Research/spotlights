@@ -21,6 +21,10 @@ with a short prose justification under `estimated_impact_explanation`.
 
 {repo_context}
 
+## Spotlight context
+
+{spotlight_context}
+
 ## What counts as a good evolve target
 
 Pick locations where an evolutionary loop (mutate code → run benchmark → keep

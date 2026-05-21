@@ -4,20 +4,14 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
-
-import pytest
 
 from spotlights_engine.candidate_discovery.validation import Validator
 from spotlights_engine.schemas.candidate import Candidate, Candidates
 
 
-def _config(repo_path: Path, module_path: str) -> SimpleNamespace:
-    return SimpleNamespace(
-        repo_path=repo_path,
-        module=SimpleNamespace(path=module_path),
-    )
+def _validator(repo_path: Path, module_path: str) -> Validator:
+    return Validator(repo_path=repo_path, module_path=module_path)
 
 
 def _cand(**overrides) -> Candidate:
@@ -48,7 +42,7 @@ def _make_file(root: Path, rel: str, lines: int = 50) -> Path:
 def test_drops_candidate_outside_module(tmp_path):
     _make_file(tmp_path, "src/foo/x.py")
     _make_file(tmp_path, "src/bar/y.py")
-    cfg = _config(tmp_path, "src/foo")
+    v = _validator(tmp_path, "src/foo")
     parsed = Candidates(
         module_qualified_name="m",
         candidates=[
@@ -56,14 +50,14 @@ def test_drops_candidate_outside_module(tmp_path):
             _cand(id="cand-0002", file="src/bar/y.py"),
         ],
     )
-    survivors, counters = Validator(cfg).run(parsed)
+    survivors, counters = v.run(parsed)
     assert [c.id for c in survivors] == ["cand-0001"]
     assert counters.dropped_outside_module == 1
 
 
 def test_drops_absolute_path(tmp_path):
     _make_file(tmp_path, "src/foo/x.py")
-    cfg = _config(tmp_path, "src/foo")
+    v = _validator(tmp_path, "src/foo")
     parsed = Candidates(
         module_qualified_name="m",
         candidates=[
@@ -71,7 +65,7 @@ def test_drops_absolute_path(tmp_path):
             _cand(id="cand-0002", file="/etc/passwd"),
         ],
     )
-    survivors, counters = Validator(cfg).run(parsed)
+    survivors, counters = v.run(parsed)
     assert [c.id for c in survivors] == ["cand-0001"]
     assert counters.dropped_outside_module == 1
 
@@ -83,19 +77,19 @@ def test_drops_symlink_escape(tmp_path):
     sym = tmp_path / "src" / "foo" / "linked.py"
     os.symlink(outside, sym)
 
-    cfg = _config(tmp_path, "src/foo")
+    v = _validator(tmp_path, "src/foo")
     parsed = Candidates(
         module_qualified_name="m",
         candidates=[_cand(file="src/foo/linked.py")],
     )
-    survivors, counters = Validator(cfg).run(parsed)
+    survivors, counters = v.run(parsed)
     assert survivors == []
     assert counters.dropped_outside_module == 1
 
 
 def test_drops_missing_file(tmp_path):
     _make_file(tmp_path, "src/foo/x.py")
-    cfg = _config(tmp_path, "src/foo")
+    v = _validator(tmp_path, "src/foo")
     parsed = Candidates(
         module_qualified_name="m",
         candidates=[
@@ -103,14 +97,14 @@ def test_drops_missing_file(tmp_path):
             _cand(id="cand-0002", file="src/foo/missing.py"),
         ],
     )
-    survivors, counters = Validator(cfg).run(parsed)
+    survivors, counters = v.run(parsed)
     assert [c.id for c in survivors] == ["cand-0001"]
     assert counters.dropped_missing_file == 1
 
 
 def test_drops_line_end_past_file_end(tmp_path):
     _make_file(tmp_path, "src/foo/x.py", lines=10)
-    cfg = _config(tmp_path, "src/foo")
+    v = _validator(tmp_path, "src/foo")
     parsed = Candidates(
         module_qualified_name="m",
         candidates=[
@@ -118,14 +112,14 @@ def test_drops_line_end_past_file_end(tmp_path):
             _cand(id="cand-0002", file="src/foo/x.py", line_start=1, line_end=11),
         ],
     )
-    survivors, counters = Validator(cfg).run(parsed)
+    survivors, counters = v.run(parsed)
     assert [c.id for c in survivors] == ["cand-0001"]
     assert counters.dropped_invalid_ranges == 1
 
 
 def test_same_file_read_once(tmp_path):
     target = _make_file(tmp_path, "src/foo/x.py", lines=20)
-    cfg = _config(tmp_path, "src/foo")
+    v = _validator(tmp_path, "src/foo")
     parsed = Candidates(
         module_qualified_name="m",
         candidates=[
@@ -142,14 +136,14 @@ def test_same_file_read_once(tmp_path):
         return real_open(self, *args, **kwargs)
 
     with patch.object(Path, "open", counting_open):
-        survivors, _ = Validator(cfg).run(parsed)
+        survivors, _ = v.run(parsed)
     assert len(survivors) == 2
     assert open_calls["count"] == 1
 
 
 def test_counters_independent(tmp_path):
     _make_file(tmp_path, "src/foo/x.py", lines=5)
-    cfg = _config(tmp_path, "src/foo")
+    v = _validator(tmp_path, "src/foo")
     parsed = Candidates(
         module_qualified_name="m",
         candidates=[
@@ -158,7 +152,7 @@ def test_counters_independent(tmp_path):
             _cand(id="cand-0003", file="src/foo/x.py", line_end=99, line_start=1),
         ],
     )
-    survivors, counters = Validator(cfg).run(parsed)
+    survivors, counters = v.run(parsed)
     assert survivors == []
     assert counters.dropped_outside_module == 1
     assert counters.dropped_missing_file == 1
@@ -167,12 +161,12 @@ def test_counters_independent(tmp_path):
 
 def test_keeps_valid_candidate(tmp_path):
     _make_file(tmp_path, "src/foo/x.py", lines=50)
-    cfg = _config(tmp_path, "src/foo")
+    v = _validator(tmp_path, "src/foo")
     parsed = Candidates(
         module_qualified_name="m",
         candidates=[_cand(file="src/foo/x.py", line_start=10, line_end=20)],
     )
-    survivors, counters = Validator(cfg).run(parsed)
+    survivors, counters = v.run(parsed)
     assert len(survivors) == 1
     assert counters.dropped_outside_module == 0
     assert counters.dropped_missing_file == 0

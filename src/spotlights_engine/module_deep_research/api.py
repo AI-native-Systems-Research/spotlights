@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Protocol
 
 from spotlights_engine.module_deep_research.codex_exec import (
@@ -12,12 +11,12 @@ from spotlights_engine.module_deep_research.codex_exec import (
 )
 from spotlights_engine.module_deep_research.prompts import render_module_deep_research_prompt
 from spotlights_engine.module_deep_research.validation import parse_module_deep_research_output
-from spotlights_engine.schemas.deep_research import (
+from spotlights_engine.schemas.common import StepIssue
+from spotlights_engine.schemas.pipeline import (
     ModuleDeepResearchInput,
     ModuleDeepResearchOutput,
-    StepIssue,
 )
-from spotlights_engine.schemas.modules import Module, ProjectTree
+from spotlights_engine.schemas.project import Module, ProjectTree
 
 
 class ModuleResearchRunner(Protocol):
@@ -68,7 +67,11 @@ def research_module(
         )
 
     prompt = render_module_deep_research_prompt(request, module)
-    active_runner = runner or CodexExecClient(codex_options or CodexExecOptions(cwd=Path.cwd()))
+    if runner is not None:
+        active_runner = runner
+    else:
+        options = codex_options or CodexExecOptions(cwd=request.repo_path)
+        active_runner = CodexExecClient(options)
 
     try:
         result = active_runner.run(prompt, check=check)

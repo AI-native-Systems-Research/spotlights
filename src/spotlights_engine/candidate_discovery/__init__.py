@@ -3,8 +3,12 @@
 This package is the *second* public surface of `spotlights_engine` beyond
 `schemas/` — the architecture doc otherwise designates `schemas/` as the only
 contract surface other repos may import. The exception is intentional per
-spec §1: `discover` (and its `DiscoveryConfig` / `DiscoveryResult` types) is
-the canonical Stage-1 entrypoint and must be importable cross-repo.
+spec §1: both `discover_candidates(input, config=...)` (the architecture-
+shaped entrypoint matching
+`docs/architecture/spotlights_deep_research_path_architecture.md` step 2 —
+takes a `CandidateDiscoveryInput`, returns the contract `Candidates`) and
+`discover(input, config=...)` (the runtime-rich variant returning telemetry
+and per-iteration cost) must be importable cross-repo.
 
 A future reviewer expecting the schemas-only cross-repo contract should not
 mistake this re-export for a regression.
@@ -17,6 +21,7 @@ from spotlights_engine.candidate_discovery.api import (
     DiscoveryResult,
     IterationTelemetry,
     discover,
+    discover_candidates,
 )
 from spotlights_engine.candidate_discovery.errors import (
     DiscoveryMutationError,
@@ -32,4 +37,5 @@ __all__ = [
     "DiscoveryValidationError",
     "IterationTelemetry",
     "discover",
+    "discover_candidates",
 ]

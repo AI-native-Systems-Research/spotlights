@@ -1,4 +1,16 @@
-"""Public types and `discover()` entrypoint for Stage 1."""
+"""Public types and entrypoints for step 2 of the deep-research pipeline.
+
+The architecture (`docs/architecture/spotlights_deep_research_path_architecture.md`)
+defines step 2 as `discover_candidates(CandidateDiscoveryInput) -> Candidates`.
+The `input` carries the architectural triplet (`project_tree`,
+`module_qualified_name`, `context`); the `config` carries infra-only knobs
+(`repo_path`, `artifacts_dir`, agent budgets, model identifiers) that have no
+place on the public per-step contract.
+
+`discover_candidates(input, config=...)` returns the contract `Candidates`.
+`discover(input, config=...)` is the runtime-rich variant that additionally
+returns telemetry and per-iteration cost.
+"""
 
 from __future__ import annotations
 
@@ -9,15 +21,21 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from spotlights_engine.candidate_discovery.errors import DiscoverySetupError
 from spotlights_engine.schemas.candidate import Candidates
-from spotlights_engine.schemas.modules import Module
+from spotlights_engine.schemas.pipeline import CandidateDiscoveryInput
+from spotlights_engine.schemas.project import Module
 
 
 class DiscoveryConfig(BaseModel):
+    """Runtime/infra config for candidate discovery.
+
+    Holds only fields outside the architectural `CandidateDiscoveryInput`
+    contract: filesystem layout (`repo_path`, `artifacts_dir`), agent budgets,
+    and model identifiers.
+    """
+
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     repo_path: Path
-    module_qualified_name: str
-    module: Module
     artifacts_dir: Path
     repo_context_markdown: str | None = Field(
         default=None, min_length=1, max_length=20_000
@@ -54,8 +72,27 @@ class DiscoveryResult(BaseModel):
     total_cost_usd: float | None = None
 
 
-def discover(config: DiscoveryConfig) -> DiscoveryResult:
-    """Thin wrapper around `Orchestrator.run()` — the sole public entrypoint.
+def resolve_target_module(input: CandidateDiscoveryInput) -> Module:
+    """Look up the target `Module` inside `input.project_tree`.
+
+    Accepts both architecture dot-form (`a.b.c`) and `ProjectTree.walk`
+    slash-form (`a/b/c`).
+    """
+    qn = input.module_qualified_name
+    resolved = input.project_tree.resolve(qn)
+    if resolved is None and "." in qn:
+        resolved = input.project_tree.resolve(qn.replace(".", "/"))
+    if resolved is None:
+        raise ValueError(
+            f"module_qualified_name {qn!r} not found in project_tree"
+        )
+    return resolved
+
+
+def discover(
+    input: CandidateDiscoveryInput, *, config: DiscoveryConfig
+) -> DiscoveryResult:
+    """Runtime-rich variant of step 2: returns telemetry alongside `Candidates`.
 
     Pre-construction setup checks live here so a missing CLI or a bad
     `artifacts_dir` fails before the run dir is minted.
@@ -89,9 +126,23 @@ def discover(config: DiscoveryConfig) -> DiscoveryResult:
             run_dir=str(run_dir),
         )
 
+    module = resolve_target_module(input)
+
     from spotlights_engine.candidate_discovery.orchestrator import Orchestrator
 
-    return Orchestrator(config).run()
+    return Orchestrator(input=input, config=config, module=module).run()
+
+
+def discover_candidates(
+    input: CandidateDiscoveryInput, *, config: DiscoveryConfig
+) -> Candidates:
+    """Architecture-shaped entrypoint for step 2.
+
+    Mirrors the per-step contract: input is `CandidateDiscoveryInput`, output
+    is `Candidates`. Telemetry and per-iteration cost flow through `discover()`
+    for callers that want them.
+    """
+    return discover(input, config=config).candidates
 
 
 __all__ = [
@@ -99,4 +150,6 @@ __all__ = [
     "DiscoveryResult",
     "IterationTelemetry",
     "discover",
+    "discover_candidates",
+    "resolve_target_module",
 ]
