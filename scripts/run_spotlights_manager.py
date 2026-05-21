@@ -20,7 +20,7 @@ from spotlights_engine.spotlights_manager import (
     run_with_telemetry,
 )
 
-REPO_PATH = Path("/Users/ophir/PycharmProjects/vllm/vllm")
+REPO_PATH = Path("/Users/ophir/PycharmProjects/vllm")
 ARTIFACTS_DIR = Path(__file__).resolve().parent.parent / "tmp" / "spotlights_manager"
 
 
