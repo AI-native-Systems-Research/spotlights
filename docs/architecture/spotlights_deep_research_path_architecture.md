@@ -144,8 +144,16 @@ class ModuleRun(BaseModel):
     module_qualified_name: str
     status: ModuleRunStatus
     candidates: Candidates | None = None   # None only when the module failed before discovery
+    findings: list[Finding] = []           # populated by step 3 (module_deep_research)
     issues: list[StepIssue] = []
 ```
+
+`findings` carries the step-3 output for that module. It is populated even
+though step 4 also consumes findings as an input — keeping them on the
+`ModuleRun` makes the per-module record self-describing for audit, lets a
+run that stops before step 4 (partial pipeline, slice rollout, or skipped
+mapping) still surface what step 3 produced, and matches the lifecycle
+already used for `candidates`.
 
 ### SpotlightContext semantics
 
@@ -241,6 +249,17 @@ target modules, then starts the per-module pipeline with candidate discovery.
 Steps 3–6 run only when candidates exist. A module with no discovered
 candidates is marked `SKIPPED`. A module that finishes with recoverable issues
 is marked `DEGRADED`; a module with an unrecoverable issue is marked `FAILED`.
+
+The manager owns persistence and resume for the run. After every step it
+checkpoints that step's output to an `artifacts_dir` so a crash mid-run can
+be recovered without redoing completed work; per-module pipelines write
+into per-module subdirectories so they don't contend on shared files. The
+manager also bounds in-flight work with a `max_parallel_sessions` gate
+across per-module pipelines. Persistence layout, atomicity rules, and
+resume semantics are deliberately left out of the architectural contract
+— they live with the manager implementation
+([spotlights_persist_impl_plan.md](spotlights_persist_impl_plan.md)) so
+the per-step contracts remain pure data shapes.
 
 **Input**
 

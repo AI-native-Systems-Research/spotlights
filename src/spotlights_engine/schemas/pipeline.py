@@ -139,6 +139,7 @@ class ModuleRun(BaseModel):
     module_qualified_name: str = Field(min_length=1)
     status: ModuleRunStatus
     candidates: Candidates | None = None
+    findings: list[Finding] = Field(default_factory=list)
     issues: list[StepIssue] = Field(default_factory=list)
 
 
