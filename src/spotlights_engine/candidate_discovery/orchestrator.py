@@ -43,6 +43,8 @@ from spotlights_engine.candidate_discovery.telemetry import (
 )
 from spotlights_engine.candidate_discovery.validation import Validator
 from spotlights_engine.schemas.candidate import Candidate, Candidates
+from spotlights_engine.schemas.pipeline import CandidateDiscoveryInput
+from spotlights_engine.schemas.project import Module
 
 
 _MIN_SEEN_ID = "cand-0000"
@@ -64,9 +66,19 @@ class _IterOutcome:
 
 
 class Orchestrator:
-    def __init__(self, config: DiscoveryConfig) -> None:
+    def __init__(
+        self,
+        *,
+        input: CandidateDiscoveryInput,
+        config: DiscoveryConfig,
+        module: Module,
+    ) -> None:
+        self._input = input
         self._config = config
-        self._validator = Validator(config)
+        self._module = module
+        self._validator = Validator(
+            repo_path=config.repo_path, module_path=module.path
+        )
         self._repo_guard = RepoGuard(config.repo_path)
         self._telemetry_builder = TelemetryBuilder()
 
@@ -91,10 +103,10 @@ class Orchestrator:
         try:
             with self._open_iterations_jsonl():
                 boot_prompt = prompts.render_bootstrap(
-                    self._config.module_qualified_name,
-                    self._config.module,
+                    self._input.module_qualified_name,
+                    self._module,
                     repo_context_markdown=self._config.repo_context_markdown,
-                    spotlight_context=self._config.context,
+                    spotlight_context=self._input.context,
                 )
                 boot = self._run_iteration(n=0, agent=claude, prompt=boot_prompt)
                 self._record(boot)
@@ -103,12 +115,12 @@ class Orchestrator:
                     agent = review_agents[(n - 1) % 2]
                     prev_json = self._prev_post_drop.model_dump_json(indent=2)  # type: ignore[union-attr]
                     review_prompt = prompts.render_review(
-                        self._config.module_qualified_name,
-                        self._config.module,
+                        self._input.module_qualified_name,
+                        self._module,
                         prev_json,
                         self._max_seen_id,
                         repo_context_markdown=self._config.repo_context_markdown,
-                        spotlight_context=self._config.context,
+                        spotlight_context=self._input.context,
                     )
                     out = self._run_iteration(n=n, agent=agent, prompt=review_prompt)
                     self._record(out)
@@ -232,7 +244,7 @@ class Orchestrator:
         ) from last_exc
 
     def _check_qualified_name(self, parsed: Candidates, n: int, agent: str) -> None:
-        expected = self._config.module_qualified_name
+        expected = self._input.module_qualified_name
         if parsed.module_qualified_name != expected:
             raise DiscoveryValidationError(
                 "qualified-name mismatch",
@@ -293,7 +305,7 @@ class Orchestrator:
         # An empty `survivors` is valid per the architecture: the manager will
         # mark the module run `SKIPPED` if discovery returns zero candidates.
         normalized = Candidates(
-            module_qualified_name=self._config.module_qualified_name,
+            module_qualified_name=self._input.module_qualified_name,
             candidates=survivors,
         )
 

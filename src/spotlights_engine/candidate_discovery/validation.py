@@ -10,12 +10,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from spotlights_engine.schemas.candidate import Candidate, Candidates
-
-if TYPE_CHECKING:  # pragma: no cover
-    from spotlights_engine.candidate_discovery.api import DiscoveryConfig
 
 
 @dataclass
@@ -51,9 +47,9 @@ class _LineCountCache:
 class Validator:
     """§6.4 → §6.5 → §6.6 in order. Returns survivors plus drop counters."""
 
-    def __init__(self, config: DiscoveryConfig) -> None:
-        self._repo_path = config.repo_path
-        self._module_path = config.module.path
+    def __init__(self, *, repo_path: Path, module_path: str) -> None:
+        self._repo_path = repo_path
+        self._module_path = module_path
 
     def run(self, parsed: Candidates) -> tuple[list[Candidate], DropCounters]:
         counters = DropCounters()

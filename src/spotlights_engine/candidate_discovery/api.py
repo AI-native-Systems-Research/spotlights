@@ -1,14 +1,15 @@
 """Public types and entrypoints for step 2 of the deep-research pipeline.
 
-`discover_candidates(input)` is the architecture-shaped entrypoint: it takes
-a `CandidateDiscoveryInput` (project tree + module qualified name + spotlight
-context) and returns a `Candidates` whose entries are at state `DISCOVERED`
-with empty match / proposal lists. Step 4–6 modules later populate those.
+The architecture (`docs/architecture/spotlights_deep_research_path_architecture.md`)
+defines step 2 as `discover_candidates(CandidateDiscoveryInput) -> Candidates`.
+The `input` carries the architectural triplet (`project_tree`,
+`module_qualified_name`, `context`); the `config` carries infra-only knobs
+(`repo_path`, `artifacts_dir`, agent budgets, model identifiers) that have no
+place on the public per-step contract.
 
-`discover(config)` is the runtime-rich entrypoint that the orchestrator
-itself drives. It takes the architectural inputs *plus* infra knobs
-(`artifacts_dir`, agent timeouts, model identifiers, etc.) that have no place
-on the public per-step contract.
+`discover_candidates(input, config=...)` returns the contract `Candidates`.
+`discover(input, config=...)` is the runtime-rich variant that additionally
+returns telemetry and per-iteration cost.
 """
 
 from __future__ import annotations
@@ -16,36 +17,26 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from spotlights_engine.candidate_discovery.errors import DiscoverySetupError
 from spotlights_engine.schemas.candidate import Candidates
-from spotlights_engine.schemas.common import SpotlightContext
 from spotlights_engine.schemas.pipeline import CandidateDiscoveryInput
-from spotlights_engine.schemas.project import Module, ProjectTree
+from spotlights_engine.schemas.project import Module
 
 
 class DiscoveryConfig(BaseModel):
-    """Runtime config for the orchestrator.
+    """Runtime/infra config for candidate discovery.
 
-    Extends the architectural `CandidateDiscoveryInput` (`project_tree`,
-    `module_qualified_name`, `context`) with infra-only knobs that don't
-    belong on the public step contract: filesystem layout (`repo_path`,
-    `artifacts_dir`), agent budgets, and model identifiers.
-
-    `module: Module` is accepted directly for backward compatibility with
-    existing call sites; when omitted the module is resolved from
-    `project_tree` (if provided).
+    Holds only fields outside the architectural `CandidateDiscoveryInput`
+    contract: filesystem layout (`repo_path`, `artifacts_dir`), agent budgets,
+    and model identifiers.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     repo_path: Path
-    module_qualified_name: str
     artifacts_dir: Path
-    project_tree: ProjectTree | None = None
-    module: Module | None = None
-    context: SpotlightContext | None = None
     repo_context_markdown: str | None = Field(
         default=None, min_length=1, max_length=20_000
     )
@@ -54,27 +45,6 @@ class DiscoveryConfig(BaseModel):
     claude_max_turns: int = Field(default=30, ge=1)
     codex_model: str = Field(default="gpt-5.5", pattern=r"^[\w.\-/]+$")
     codex_reasoning_effort: Literal["minimal", "low", "medium", "high", "xhigh"] = "high"
-
-    @model_validator(mode="after")
-    def _resolve_module(self) -> DiscoveryConfig:
-        if self.module is None:
-            if self.project_tree is None:
-                raise ValueError(
-                    "DiscoveryConfig requires either `module` or `project_tree`"
-                )
-            resolved = self.project_tree.resolve(self.module_qualified_name)
-            if resolved is None and "." in self.module_qualified_name:
-                # Architecture spec (dot-joined) ↔ ProjectTree.walk (slash-joined).
-                resolved = self.project_tree.resolve(
-                    self.module_qualified_name.replace(".", "/")
-                )
-            if resolved is None:
-                raise ValueError(
-                    "module_qualified_name "
-                    f"{self.module_qualified_name!r} not found in project_tree"
-                )
-            self.module = resolved
-        return self
 
 
 class IterationTelemetry(BaseModel):
@@ -102,8 +72,27 @@ class DiscoveryResult(BaseModel):
     total_cost_usd: float | None = None
 
 
-def discover(config: DiscoveryConfig) -> DiscoveryResult:
-    """Thin wrapper around `Orchestrator.run()` — the runtime-rich entrypoint.
+def resolve_target_module(input: CandidateDiscoveryInput) -> Module:
+    """Look up the target `Module` inside `input.project_tree`.
+
+    Accepts both architecture dot-form (`a.b.c`) and `ProjectTree.walk`
+    slash-form (`a/b/c`).
+    """
+    qn = input.module_qualified_name
+    resolved = input.project_tree.resolve(qn)
+    if resolved is None and "." in qn:
+        resolved = input.project_tree.resolve(qn.replace(".", "/"))
+    if resolved is None:
+        raise ValueError(
+            f"module_qualified_name {qn!r} not found in project_tree"
+        )
+    return resolved
+
+
+def discover(
+    input: CandidateDiscoveryInput, *, config: DiscoveryConfig
+) -> DiscoveryResult:
+    """Runtime-rich variant of step 2: returns telemetry alongside `Candidates`.
 
     Pre-construction setup checks live here so a missing CLI or a bad
     `artifacts_dir` fails before the run dir is minted.
@@ -137,44 +126,23 @@ def discover(config: DiscoveryConfig) -> DiscoveryResult:
             run_dir=str(run_dir),
         )
 
+    module = resolve_target_module(input)
+
     from spotlights_engine.candidate_discovery.orchestrator import Orchestrator
 
-    return Orchestrator(config).run()
+    return Orchestrator(input=input, config=config, module=module).run()
 
 
 def discover_candidates(
-    input: CandidateDiscoveryInput,
-    *,
-    repo_path: Path,
-    artifacts_dir: Path,
-    repo_context_markdown: str | None = None,
-    num_review_iterations: int = 3,
-    per_iteration_wallclock_s: int = 900,
-    claude_max_turns: int = 30,
-    codex_model: str = "gpt-5.5",
-    codex_reasoning_effort: Literal[
-        "minimal", "low", "medium", "high", "xhigh"
-    ] = "high",
+    input: CandidateDiscoveryInput, *, config: DiscoveryConfig
 ) -> Candidates:
     """Architecture-shaped entrypoint for step 2.
 
-    Returns the `Candidates` object the per-step contract specifies. Telemetry
-    and per-iteration cost go through `discover()` for callers that want them.
+    Mirrors the per-step contract: input is `CandidateDiscoveryInput`, output
+    is `Candidates`. Telemetry and per-iteration cost flow through `discover()`
+    for callers that want them.
     """
-    config = DiscoveryConfig(
-        repo_path=repo_path,
-        artifacts_dir=artifacts_dir,
-        project_tree=input.project_tree,
-        module_qualified_name=input.module_qualified_name,
-        context=input.context,
-        repo_context_markdown=repo_context_markdown,
-        num_review_iterations=num_review_iterations,
-        per_iteration_wallclock_s=per_iteration_wallclock_s,
-        claude_max_turns=claude_max_turns,
-        codex_model=codex_model,
-        codex_reasoning_effort=codex_reasoning_effort,
-    )
-    return discover(config).candidates
+    return discover(input, config=config).candidates
 
 
 __all__ = [
@@ -183,4 +151,5 @@ __all__ = [
     "IterationTelemetry",
     "discover",
     "discover_candidates",
+    "resolve_target_module",
 ]

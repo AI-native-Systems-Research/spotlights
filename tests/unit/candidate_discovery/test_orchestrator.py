@@ -25,7 +25,9 @@ from spotlights_engine.candidate_discovery.errors import (
     DiscoveryValidationError,
 )
 from spotlights_engine.schemas.candidate import Candidates
-from spotlights_engine.schemas.project import File, Module
+from spotlights_engine.schemas.common import SpotlightContext
+from spotlights_engine.schemas.pipeline import CandidateDiscoveryInput
+from spotlights_engine.schemas.project import File, Module, ProjectTree, Repository
 
 
 # ----- Test scaffolding -----------------------------------------------------
@@ -99,6 +101,26 @@ def _module(path: str = "src/foo") -> Module:
     )
 
 
+def _project_tree() -> ProjectTree:
+    """Tree shaped so that qualified name `v1/foo` resolves to a `foo` leaf.
+
+    The architecture's `module_qualified_name` is the dot/slash-joined chain
+    of `Module.name` values. Tests assert against the slash form `v1/foo`,
+    so build a parent `v1` containing the leaf `foo`.
+    """
+    return ProjectTree(
+        repository=Repository(name="demo", summary="demo repo"),
+        modules=[
+            Module(
+                name="v1",
+                path="src/v1",
+                description="v1 namespace",
+                submodules=[_module()],
+            )
+        ],
+    )
+
+
 def _seed_module_files(repo: Path) -> None:
     (repo / "src" / "foo").mkdir(parents=True, exist_ok=True)
     for name in ("x.py", "y.py", "z.py"):
@@ -107,14 +129,24 @@ def _seed_module_files(repo: Path) -> None:
         )
 
 
+def _make_input() -> CandidateDiscoveryInput:
+    return CandidateDiscoveryInput(
+        project_tree=_project_tree(),
+        module_qualified_name="v1/foo",
+        context=SpotlightContext(objective="reduce latency"),
+    )
+
+
 def _make_config(repo: Path, artifacts: Path, num_reviews: int = 3) -> DiscoveryConfig:
     return DiscoveryConfig(
         repo_path=repo,
-        module_qualified_name="v1/foo",
-        module=_module(),
         artifacts_dir=artifacts,
         num_review_iterations=num_reviews,
     )
+
+
+def _run(repo: Path, artifacts: Path, num_reviews: int = 3) -> DiscoveryResult:
+    return discover(_make_input(), config=_make_config(repo, artifacts, num_reviews))
 
 
 def _cands(ids_and_files, qn: str = "v1/foo") -> str:
@@ -193,8 +225,7 @@ def test_happy_path_four_iterations(repo_artifacts, monkeypatch):
     )
     _install_runners(monkeypatch, claude, codex)
 
-    cfg = _make_config(repo, artifacts, num_reviews=3)
-    result = discover(cfg)
+    result = _run(repo, artifacts, num_reviews=3)
 
     assert isinstance(result, DiscoveryResult)
     assert len(result.iterations) == 4
@@ -243,8 +274,7 @@ def test_schema_parse_retry_succeeds(repo_artifacts, monkeypatch):
     )
     _install_runners(monkeypatch, claude, codex)
 
-    cfg = _make_config(repo, artifacts, num_reviews=1)
-    result = discover(cfg)
+    result = _run(repo, artifacts, num_reviews=1)
 
     assert result.iterations[1].schema_retries == 1
 
@@ -265,7 +295,7 @@ def test_schema_parse_retry_fails_twice(repo_artifacts, monkeypatch):
 
     cfg = _make_config(repo, artifacts, num_reviews=2)
     with pytest.raises(DiscoveryValidationError) as exc:
-        discover(cfg)
+        discover(_make_input(), config=cfg)
     assert exc.value.context["iteration"] == 1
 
 
@@ -285,7 +315,7 @@ def test_mutation_guard_fires(repo_artifacts, monkeypatch):
 
     cfg = _make_config(repo, artifacts, num_reviews=0)
     with pytest.raises(DiscoveryMutationError) as exc:
-        discover(cfg)
+        discover(_make_input(), config=cfg)
     # Plan §6: raised iterations carry iteration/agent in context.
     assert exc.value.context["iteration"] == 0
     assert exc.value.context["agent"] == "claude_code"
@@ -302,7 +332,7 @@ def test_qualified_name_mismatch(repo_artifacts, monkeypatch):
 
     cfg = _make_config(repo, artifacts, num_reviews=0)
     with pytest.raises(DiscoveryValidationError, match="qualified-name"):
-        discover(cfg)
+        discover(_make_input(), config=cfg)
 
 
 def test_containment_drop(repo_artifacts, monkeypatch):
@@ -324,8 +354,7 @@ def test_containment_drop(repo_artifacts, monkeypatch):
     codex = FakeAgentRunner("codex", responses=[])
     _install_runners(monkeypatch, claude, codex)
 
-    cfg = _make_config(repo, artifacts, num_reviews=0)
-    result = discover(cfg)
+    result = _run(repo, artifacts, num_reviews=0)
     assert result.iterations[0].dropped_outside_module == 1
     assert [c.id for c in result.candidates.candidates] == ["cand-0001"]
 
@@ -342,8 +371,7 @@ def test_all_candidates_dropped(repo_artifacts, monkeypatch):
     codex = FakeAgentRunner("codex", responses=[])
     _install_runners(monkeypatch, claude, codex)
 
-    cfg = _make_config(repo, artifacts, num_reviews=0)
-    result = discover(cfg)
+    result = _run(repo, artifacts, num_reviews=0)
     assert result.candidates.candidates == []
     assert result.candidates.module_qualified_name == "v1/foo"
 
@@ -378,7 +406,7 @@ def test_id_monotonicity_violation(repo_artifacts, monkeypatch):
 
     cfg = _make_config(repo, artifacts, num_reviews=2)
     with pytest.raises(DiscoveryValidationError, match="strictly greater"):
-        discover(cfg)
+        discover(_make_input(), config=cfg)
 
 
 def test_within_iter_duplicate_ids_raises(repo_artifacts, monkeypatch):
@@ -400,7 +428,7 @@ def test_within_iter_duplicate_ids_raises(repo_artifacts, monkeypatch):
 
     cfg = _make_config(repo, artifacts, num_reviews=0)
     with pytest.raises(DiscoveryValidationError, match="duplicate id"):
-        discover(cfg)
+        discover(_make_input(), config=cfg)
 
 
 def test_carry_over_id_must_retain_file(repo_artifacts, monkeypatch):
@@ -422,7 +450,7 @@ def test_carry_over_id_must_retain_file(repo_artifacts, monkeypatch):
 
     cfg = _make_config(repo, artifacts, num_reviews=1)
     with pytest.raises(DiscoveryValidationError, match="carry-over") as exc:
-        discover(cfg)
+        discover(_make_input(), config=cfg)
     assert exc.value.context["id"] == "cand-0001"
     assert exc.value.context["prev_file"] == "src/foo/x.py"
     assert exc.value.context["new_file"] == "src/foo/y.py"
@@ -437,7 +465,7 @@ def test_pre_existing_run_dir_raises(repo_artifacts, monkeypatch):
 
     cfg = _make_config(repo, artifacts, num_reviews=0)
     with pytest.raises(DiscoverySetupError, match="pre-existing"):
-        discover(cfg)
+        discover(_make_input(), config=cfg)
 
 
 def test_artifacts_dir_inside_repo_raises(repo_artifacts, monkeypatch):
@@ -450,7 +478,7 @@ def test_artifacts_dir_inside_repo_raises(repo_artifacts, monkeypatch):
 
     cfg = _make_config(repo, inside, num_reviews=0)
     with pytest.raises(DiscoverySetupError, match="inside repo_path"):
-        discover(cfg)
+        discover(_make_input(), config=cfg)
 
 
 def test_schema_size_ceiling_raises_setup_error(repo_artifacts, monkeypatch):
@@ -464,7 +492,7 @@ def test_schema_size_ceiling_raises_setup_error(repo_artifacts, monkeypatch):
 
     cfg = _make_config(repo, artifacts, num_reviews=0)
     with pytest.raises(DiscoverySetupError, match="--json-schema argv"):
-        discover(cfg)
+        discover(_make_input(), config=cfg)
     # The check fires *before* the run dir is minted, so a retry is safe.
     assert not (artifacts / "candidate_discovery").exists()
 
@@ -486,7 +514,7 @@ def test_final_artifact_copy_byte_identical(repo_artifacts, monkeypatch):
     _install_runners(monkeypatch, claude, codex)
 
     cfg = _make_config(repo, artifacts, num_reviews=1)
-    discover(cfg)
+    discover(_make_input(), config=cfg)
 
     final = (artifacts / "candidates.json").read_bytes()
     iter_final = (
@@ -530,7 +558,7 @@ def test_total_duration_starts_at_run_entry(repo_artifacts, monkeypatch):
         make_codex,
     )
 
-    result = discover(_make_config(repo, artifacts, num_reviews=0))
+    result = discover(_make_input(), config=_make_config(repo, artifacts, num_reviews=0))
 
     assert result.iterations[0].duration_s == 1.0
     assert result.total_duration_s == 9.0
@@ -547,8 +575,6 @@ def _make_config_with_context(
 ) -> DiscoveryConfig:
     return DiscoveryConfig(
         repo_path=repo,
-        module_qualified_name="v1/foo",
-        module=_module(),
         artifacts_dir=artifacts,
         repo_context_markdown=repo_context_markdown,
         num_review_iterations=num_reviews,
@@ -565,7 +591,7 @@ def test_repo_context_persisted_when_supplied(repo_artifacts, monkeypatch):
     _install_runners(monkeypatch, claude, codex)
 
     ctx = "## Tests\n\n`pytest -q`\n"
-    discover(_make_config_with_context(repo, artifacts, ctx, num_reviews=0))
+    discover(_make_input(), config=_make_config_with_context(repo, artifacts, ctx, num_reviews=0))
 
     saved = artifacts / "candidate_discovery" / "repo_context.md"
     assert saved.is_file()
@@ -581,7 +607,7 @@ def test_repo_context_not_persisted_when_none(repo_artifacts, monkeypatch):
     codex = FakeAgentRunner("codex", responses=[])
     _install_runners(monkeypatch, claude, codex)
 
-    discover(_make_config_with_context(repo, artifacts, None, num_reviews=0))
+    discover(_make_input(), config=_make_config_with_context(repo, artifacts, None, num_reviews=0))
 
     saved = artifacts / "candidate_discovery" / "repo_context.md"
     assert not saved.exists()
@@ -609,7 +635,7 @@ def test_repo_context_reaches_every_iteration_prompt(repo_artifacts, monkeypatch
     _install_runners(monkeypatch, claude, codex)
 
     ctx = "## Test commands\n\n`pytest -q tests/foo/`\n\n## Bench\n\n`make bench`\n"
-    discover(_make_config_with_context(repo, artifacts, ctx, num_reviews=2))
+    discover(_make_input(), config=_make_config_with_context(repo, artifacts, ctx, num_reviews=2))
 
     prompt_files = sorted(
         (artifacts / "candidate_discovery").glob("iter_*/prompt.md")

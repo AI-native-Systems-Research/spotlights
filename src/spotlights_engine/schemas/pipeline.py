@@ -24,6 +24,18 @@ from spotlights_engine.schemas.finding import Finding
 from spotlights_engine.schemas.project import ProjectTree
 
 
+class ModulesExtractorInput(BaseModel):
+    """Input contract for step 1 (`modules_extractor`).
+
+    `SpotlightContext` is intentionally omitted: the structural map must not
+    be biased by objective so its output is reusable across runs.
+    """
+
+    model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
+
+    repo_path: Path
+
+
 class CandidateDiscoveryInput(BaseModel):
     """Input contract for step 2 (`candidate_discovery`)."""
 
@@ -164,6 +176,7 @@ __all__ = [
     "ModuleDeepResearchInput",
     "ModuleDeepResearchOutput",
     "ModuleRun",
+    "ModulesExtractorInput",
     "ProposalFromFindingCreatorInput",
     "ProposalFromFindingCreatorOutput",
     "SpotlightsManagerInput",

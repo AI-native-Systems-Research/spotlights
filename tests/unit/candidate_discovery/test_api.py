@@ -5,10 +5,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
 
-from spotlights_engine.candidate_discovery.api import DiscoveryConfig
+from spotlights_engine.candidate_discovery.api import (
+    DiscoveryConfig,
+    resolve_target_module,
+)
 from spotlights_engine.schemas.common import SpotlightContext
+from spotlights_engine.schemas.pipeline import CandidateDiscoveryInput
 from spotlights_engine.schemas.project import File, Module, ProjectTree, Repository
 
 
@@ -29,45 +32,31 @@ def _ctx() -> SpotlightContext:
     return SpotlightContext(objective="reduce latency")
 
 
-def test_discovery_config_resolves_module_from_project_tree(tmp_path: Path):
+def test_discovery_config_holds_only_infra(tmp_path: Path) -> None:
+    """`DiscoveryConfig` is the infra-only sibling of `CandidateDiscoveryInput`."""
     cfg = DiscoveryConfig(
         repo_path=tmp_path,
         artifacts_dir=tmp_path / "artifacts",
+    )
+    assert cfg.repo_path == tmp_path
+    assert cfg.artifacts_dir == tmp_path / "artifacts"
+    assert cfg.num_review_iterations == 3
+
+
+def test_resolve_target_module_slash_form() -> None:
+    inp = CandidateDiscoveryInput(
         project_tree=_tree(),
         module_qualified_name="foo",
         context=_ctx(),
     )
-    assert cfg.module is not None
-    assert cfg.module.name == "foo"
-    assert cfg.module.path == "src/foo"
+    m = resolve_target_module(inp)
+    assert m.name == "foo"
+    assert m.path == "src/foo"
 
 
-def test_discovery_config_accepts_explicit_module_legacy_shape(tmp_path: Path):
-    """Pre-existing call sites pass `module=Module(...)` directly without a
-    `project_tree`. That path must keep working."""
-    m = Module(name="foo", path="src/foo")
-    cfg = DiscoveryConfig(
-        repo_path=tmp_path,
-        artifacts_dir=tmp_path / "artifacts",
-        module_qualified_name="v1/foo",
-        module=m,
-    )
-    assert cfg.module is m
-    assert cfg.context is None
-
-
-def test_discovery_config_requires_module_or_project_tree(tmp_path: Path):
-    with pytest.raises(ValidationError, match="module"):
-        DiscoveryConfig(
-            repo_path=tmp_path,
-            artifacts_dir=tmp_path / "artifacts",
-            module_qualified_name="v1/foo",
-        )
-
-
-def test_discovery_config_resolves_dot_qualified_name(tmp_path: Path):
-    """The architecture spec uses dot-joined qualified names; ProjectTree.walk
-    yields slash-joined names. The config must accept both."""
+def test_resolve_target_module_dot_form() -> None:
+    """Architecture spec uses dot-joined qualified names; ProjectTree.walk
+    yields slash-joined names. The resolver must accept both."""
     tree = ProjectTree(
         repository=Repository(name="demo", summary="d"),
         modules=[
@@ -80,22 +69,20 @@ def test_discovery_config_resolves_dot_qualified_name(tmp_path: Path):
             )
         ],
     )
-    cfg = DiscoveryConfig(
-        repo_path=tmp_path,
-        artifacts_dir=tmp_path / "artifacts",
+    inp = CandidateDiscoveryInput(
         project_tree=tree,
         module_qualified_name="inference.attention",
         context=_ctx(),
     )
-    assert cfg.module.name == "attention"
+    m = resolve_target_module(inp)
+    assert m.name == "attention"
 
 
-def test_discovery_config_rejects_unknown_qualified_name(tmp_path: Path):
-    with pytest.raises(ValidationError, match="not found"):
-        DiscoveryConfig(
-            repo_path=tmp_path,
-            artifacts_dir=tmp_path / "artifacts",
-            project_tree=_tree(),
-            module_qualified_name="nope",
-            context=_ctx(),
-        )
+def test_resolve_target_module_unknown_raises() -> None:
+    inp = CandidateDiscoveryInput(
+        project_tree=_tree(),
+        module_qualified_name="nope",
+        context=_ctx(),
+    )
+    with pytest.raises(ValueError, match="not found"):
+        resolve_target_module(inp)

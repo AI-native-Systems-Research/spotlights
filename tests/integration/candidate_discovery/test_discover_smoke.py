@@ -29,7 +29,14 @@ def test_discover_against_real_clis(tmp_path: Path) -> None:
         DiscoveryResult,
         discover,
     )
-    from spotlights_engine.schemas.project import File, Module
+    from spotlights_engine.schemas.common import SpotlightContext
+    from spotlights_engine.schemas.pipeline import CandidateDiscoveryInput
+    from spotlights_engine.schemas.project import (
+        File,
+        Module,
+        ProjectTree,
+        Repository,
+    )
 
     repo = tmp_path / "repo"
     (repo / "src" / "foo").mkdir(parents=True)
@@ -41,20 +48,36 @@ def test_discover_against_real_clis(tmp_path: Path) -> None:
     artifacts = tmp_path / "artifacts"
     artifacts.mkdir()
 
+    project_tree = ProjectTree(
+        repository=Repository(name="demo", summary="single-file hot-loop demo"),
+        modules=[
+            Module(
+                name="v1",
+                path="src/v1",
+                description="v1 namespace",
+                submodules=[
+                    Module(
+                        name="foo",
+                        path="src/foo",
+                        description="single-file hot loop fixture.",
+                        main_files=[File(path="src/foo/core.py", role="entry")],
+                    ),
+                ],
+            )
+        ],
+    )
+    inp = CandidateDiscoveryInput(
+        project_tree=project_tree,
+        module_qualified_name="v1/foo",
+        context=SpotlightContext(objective="reduce hot-loop latency"),
+    )
     cfg = DiscoveryConfig(
         repo_path=repo,
-        module_qualified_name="v1/foo",
-        module=Module(
-            name="foo",
-            path="src/foo",
-            description="single-file hot loop fixture.",
-            main_files=[File(path="src/foo/core.py", role="entry")],
-        ),
         artifacts_dir=artifacts,
         num_review_iterations=1,
         claude_max_turns=4,
         per_iteration_wallclock_s=180,
     )
-    result = discover(cfg)
+    result = discover(inp, config=cfg)
     assert isinstance(result, DiscoveryResult)
     assert (artifacts / "candidates.json").exists()
