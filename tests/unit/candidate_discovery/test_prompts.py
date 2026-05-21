@@ -15,14 +15,17 @@ from spotlights_engine.candidate_discovery.prompts import (
     _format_depends_on,
     _format_main_files,
     _format_repo_context,
+    _format_spotlight_context,
     _format_submodule_names,
     _REPO_CONTEXT_DEFAULT,
+    _SPOTLIGHT_CONTEXT_DEFAULT,
     _substitute,
     render_bootstrap,
     render_review,
     wrap,
 )
-from spotlights_engine.schemas.modules import File, Module
+from spotlights_engine.schemas.common import SpotlightContext
+from spotlights_engine.schemas.project import File, Module
 
 _PLACEHOLDER = re.compile(r"\{(\w+)\}")
 
@@ -249,3 +252,64 @@ def test_discovery_config_accepts_none_repo_context(tmp_path):
 def test_discovery_config_default_repo_context_is_none(tmp_path):
     cfg = DiscoveryConfig(**_base_config_kwargs(tmp_path))
     assert cfg.repo_context_markdown is None
+
+
+# ----- Spotlight context plumbing tests ------------------------------------
+
+
+def test_format_spotlight_context_default_when_none():
+    assert _format_spotlight_context(None) == _SPOTLIGHT_CONTEXT_DEFAULT == "_(none provided)_"
+
+
+def test_format_spotlight_context_renders_objective_and_lists():
+    ctx = SpotlightContext(
+        objective="reduce decode latency",
+        workload_hints=["bs=1-8"],
+        validation_plan=["bench tokens/sec"],
+    )
+    out = _format_spotlight_context(ctx)
+    assert "reduce decode latency" in out
+    assert "bs=1-8" in out
+    assert "bench tokens/sec" in out
+
+
+def test_bootstrap_includes_spotlight_context_section():
+    m = _module()
+    out = render_bootstrap(
+        "v1/engine/core",
+        m,
+        spotlight_context=SpotlightContext(
+            objective="reduce decode latency",
+            workload_hints=["bs=1-8"],
+        ),
+    )
+    assert "## Spotlight context" in out
+    assert "reduce decode latency" in out
+    assert "bs=1-8" in out
+
+
+def test_review_includes_spotlight_context_section():
+    m = _module()
+    out = render_review(
+        "v1/engine/core",
+        m,
+        '{"module_qualified_name": "v1/engine/core", "candidates": []}',
+        "cand-0007",
+        spotlight_context=SpotlightContext(objective="reduce decode latency"),
+    )
+    assert "## Spotlight context" in out
+    assert "reduce decode latency" in out
+
+
+def test_bootstrap_spotlight_context_default_when_none():
+    m = _module()
+    out = render_bootstrap("v1/engine/core", m)
+    assert "## Spotlight context" in out
+    assert _SPOTLIGHT_CONTEXT_DEFAULT in out
+
+
+def test_review_spotlight_context_default_when_none():
+    m = _module()
+    out = render_review("v1/engine/core", m, "{}", "cand-0001")
+    assert "## Spotlight context" in out
+    assert _SPOTLIGHT_CONTEXT_DEFAULT in out

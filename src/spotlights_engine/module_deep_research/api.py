@@ -11,12 +11,12 @@ from spotlights_engine.module_deep_research.codex_exec import (
 )
 from spotlights_engine.module_deep_research.prompts import render_module_deep_research_prompt
 from spotlights_engine.module_deep_research.validation import parse_module_deep_research_output
-from spotlights_engine.schemas.deep_research import (
+from spotlights_engine.schemas.common import StepIssue
+from spotlights_engine.schemas.pipeline import (
     ModuleDeepResearchInput,
     ModuleDeepResearchOutput,
-    StepIssue,
 )
-from spotlights_engine.schemas.modules import Module, ProjectTree
+from spotlights_engine.schemas.project import Module, ProjectTree
 
 
 class ModuleResearchRunner(Protocol):

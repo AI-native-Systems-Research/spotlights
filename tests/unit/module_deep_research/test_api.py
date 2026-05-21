@@ -6,8 +6,9 @@ from pathlib import Path
 
 from spotlights_engine.module_deep_research.api import research_module, resolve_target_module
 from spotlights_engine.module_deep_research.codex_exec import CodexExecResult
-from spotlights_engine.schemas.deep_research import ModuleDeepResearchInput, SpotlightContext
-from spotlights_engine.schemas.modules import Module, ProjectTree, Repository
+from spotlights_engine.schemas.common import SpotlightContext
+from spotlights_engine.schemas.pipeline import ModuleDeepResearchInput
+from spotlights_engine.schemas.project import Module, ProjectTree, Repository
 
 
 class FakeRunner:

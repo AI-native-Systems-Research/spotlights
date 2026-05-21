@@ -35,7 +35,7 @@ def _stub_observability_if_missing() -> None:
 _stub_observability_if_missing()
 
 from spotlights_engine.candidate_discovery import DiscoveryConfig, discover  # noqa: E402
-from spotlights_engine.schemas.modules import File, Module  # noqa: E402
+from spotlights_engine.schemas.project import File, Module  # noqa: E402
 
 REPO_PATH = Path("/Users/ophir/PycharmProjects/vllm")
 ARTIFACTS_DIR = Path(__file__).resolve().parent.parent / "tmp" / "kv_offload"

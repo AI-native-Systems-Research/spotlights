@@ -29,7 +29,7 @@ def test_discover_against_real_clis(tmp_path: Path) -> None:
         DiscoveryResult,
         discover,
     )
-    from spotlights_engine.schemas.modules import File, Module
+    from spotlights_engine.schemas.project import File, Module
 
     repo = tmp_path / "repo"
     (repo / "src" / "foo").mkdir(parents=True)

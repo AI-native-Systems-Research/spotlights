@@ -25,7 +25,7 @@ from spotlights_engine.candidate_discovery.errors import (
     DiscoveryValidationError,
 )
 from spotlights_engine.schemas.candidate import Candidates
-from spotlights_engine.schemas.modules import File, Module
+from spotlights_engine.schemas.project import File, Module
 
 
 # ----- Test scaffolding -----------------------------------------------------
@@ -331,6 +331,9 @@ def test_containment_drop(repo_artifacts, monkeypatch):
 
 
 def test_all_candidates_dropped(repo_artifacts, monkeypatch):
+    """Per architecture, a discovery pass that ends with zero surviving
+    candidates returns an empty `Candidates` (the manager will mark the
+    module run `SKIPPED`); it is no longer fatal."""
     repo, artifacts = repo_artifacts
     claude = FakeAgentRunner(
         "claude_code",
@@ -340,8 +343,9 @@ def test_all_candidates_dropped(repo_artifacts, monkeypatch):
     _install_runners(monkeypatch, claude, codex)
 
     cfg = _make_config(repo, artifacts, num_reviews=0)
-    with pytest.raises(DiscoveryValidationError, match="post-drop"):
-        discover(cfg)
+    result = discover(cfg)
+    assert result.candidates.candidates == []
+    assert result.candidates.module_qualified_name == "v1/foo"
 
 
 def test_id_monotonicity_violation(repo_artifacts, monkeypatch):

@@ -19,7 +19,8 @@ from __future__ import annotations
 import re
 from importlib import resources
 
-from spotlights_engine.schemas.modules import File, Module
+from spotlights_engine.schemas.common import SpotlightContext
+from spotlights_engine.schemas.project import File, Module
 
 _PLACEHOLDER = re.compile(r"\{(\w+)\}")
 
@@ -38,6 +39,7 @@ _REVIEW = _load("review.md")
 STRICT_RETRY_REMINDER: str = _load("strict_retry.md").rstrip("\n")
 
 _REPO_CONTEXT_DEFAULT = "_(none provided)_"
+_SPOTLIGHT_CONTEXT_DEFAULT = "_(none provided)_"
 
 
 def _substitute(template: str, values: dict[str, str]) -> str:
@@ -70,6 +72,33 @@ def _format_repo_context(md: str | None) -> str:
     return md
 
 
+def _format_bullet_list(items: list[str]) -> str:
+    if not items:
+        return "(none)"
+    return "\n".join(f"- {item}" for item in items)
+
+
+def _format_spotlight_context(context: SpotlightContext | None) -> str:
+    """Render the run's `SpotlightContext` into a markdown block.
+
+    Steps 2/3/4/5/6 in the architecture all consume `SpotlightContext`. For
+    candidate discovery the agent uses `objective` + `workload_hints` to bias
+    candidate selection; `validation_plan` is shown for completeness so the
+    agent can prefer locations whose evidence is testable here.
+    """
+    if context is None:
+        return _SPOTLIGHT_CONTEXT_DEFAULT
+    return (
+        f"- **objective:** {context.objective}\n"
+        f"- **workload_hints:**\n{_indent(_format_bullet_list(context.workload_hints))}\n"
+        f"- **validation_plan:**\n{_indent(_format_bullet_list(context.validation_plan))}"
+    )
+
+
+def _indent(text: str, prefix: str = "  ") -> str:
+    return "\n".join(prefix + line if line else line for line in text.split("\n"))
+
+
 def wrap(prompt: str) -> str:
     """Prepend the §5 preamble to a substituted prompt body."""
     return _PREAMBLE + "\n" + prompt
@@ -80,6 +109,7 @@ def render_bootstrap(
     module: Module,
     *,
     repo_context_markdown: str | None = None,
+    spotlight_context: SpotlightContext | None = None,
 ) -> str:
     values = {
         "module_qualified_name": module_qualified_name,
@@ -90,6 +120,7 @@ def render_bootstrap(
         "main_files": _format_main_files(module.main_files),
         "submodule_names": _format_submodule_names(module.submodules),
         "repo_context": _format_repo_context(repo_context_markdown),
+        "spotlight_context": _format_spotlight_context(spotlight_context),
     }
     return wrap(_substitute(_BOOTSTRAP, values))
 
@@ -101,6 +132,7 @@ def render_review(
     max_seen_candidate_id: str,
     *,
     repo_context_markdown: str | None = None,
+    spotlight_context: SpotlightContext | None = None,
 ) -> str:
     values = {
         "module_qualified_name": module_qualified_name,
@@ -108,6 +140,7 @@ def render_review(
         "prev_candidates_json": prev_candidates_json,
         "max_seen_candidate_id": max_seen_candidate_id,
         "repo_context": _format_repo_context(repo_context_markdown),
+        "spotlight_context": _format_spotlight_context(spotlight_context),
     }
     return wrap(_substitute(_REVIEW, values))
 

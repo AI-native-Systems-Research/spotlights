@@ -14,6 +14,10 @@ previous pass missed that clear the same quality bar.
 
 {repo_context}
 
+## Spotlight context
+
+{spotlight_context}
+
 ## Rules
 - DO NOT inflate the list. If the previous pass was good, return it nearly unchanged.
 - Remove any candidate whose `file` does not exist, whose `file` is outside

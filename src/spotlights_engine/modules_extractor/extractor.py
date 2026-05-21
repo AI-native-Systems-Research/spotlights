@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from spotlights_engine.schemas.modules import ProjectTree, Repository
+from spotlights_engine.schemas.project import ProjectTree, Repository
 
 
 def extract(root: Path) -> ProjectTree:

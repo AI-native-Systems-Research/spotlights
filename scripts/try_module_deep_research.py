@@ -13,11 +13,9 @@ from spotlights_engine.module_deep_research import (
     CodexExecOptions,
     research_module,
 )
-from spotlights_engine.schemas.deep_research import (
-    ModuleDeepResearchInput,
-    SpotlightContext,
-)
-from spotlights_engine.schemas.modules import File, Module, ProjectTree, Repository
+from spotlights_engine.schemas.common import SpotlightContext
+from spotlights_engine.schemas.pipeline import ModuleDeepResearchInput
+from spotlights_engine.schemas.project import File, Module, ProjectTree, Repository
 
 REPO_PATH = Path("/Users/ophir/PycharmProjects/vllm")
 MODULE_QUALIFIED_NAME = "v1/kv_offload"
