@@ -147,14 +147,15 @@ def run_pair(
         )
 
     structured = result_event.get("structured_output")
-    if isinstance(structured, list):
+    unwrapped = _unwrap_proposals(structured)
+    if unwrapped is not None:
         return PairRunResult(
             pair_key=pair_key,
             duration_s=duration,
-            structured_output=structured,
+            structured_output=unwrapped,
         )
 
-    # Fallback: older CLI versions may put the JSON-encoded array on `result`.
+    # Fallback: older CLI versions may put the JSON-encoded payload on `result`.
     fallback = result_event.get("result")
     if isinstance(fallback, str) and fallback.strip():
         try:
@@ -167,11 +168,12 @@ def run_pair(
                 stdout=completed.stdout or b"",
                 stderr=completed.stderr or b"",
             )
-        if isinstance(parsed, list):
+        unwrapped = _unwrap_proposals(parsed)
+        if unwrapped is not None:
             return PairRunResult(
                 pair_key=pair_key,
                 duration_s=duration,
-                structured_output=parsed,
+                structured_output=unwrapped,
             )
 
     return PairRunResult(
@@ -181,6 +183,26 @@ def run_pair(
         stdout=completed.stdout or b"",
         stderr=completed.stderr or b"",
     )
+
+
+def _unwrap_proposals(payload: object) -> list | None:
+    """Return the `proposals` array from the schema's wrapper object.
+
+    The per-pair JSON schema (see `agent_schema.build_per_pair_schema_text`)
+    is a top-level object — `{"proposals": [...]}` — because the Anthropic
+    tool API requires `input_schema.type == "object"`. The rest of step 4
+    works on the inner list, so unwrap here. A bare list is also accepted
+    so a future schema change or alternative agent can keep working without
+    touching the parser.
+    """
+    if isinstance(payload, dict):
+        proposals = payload.get("proposals")
+        if isinstance(proposals, list):
+            return proposals
+        return None
+    if isinstance(payload, list):
+        return payload
+    return None
 
 
 class _ResultEventError(Exception):
