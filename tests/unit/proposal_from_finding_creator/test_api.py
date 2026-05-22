@@ -11,6 +11,7 @@ from spotlights_engine.proposal_from_finding_creator import (
     create_proposals,
     create_proposals_with_telemetry,
 )
+from spotlights_engine.proposal_from_finding_creator.claude_exec import PairRunResult
 from tests.unit.proposal_from_finding_creator._fakes import (
     fake_runner_factory,
     make_input,
@@ -103,6 +104,39 @@ def test_runner_failure_becomes_recoverable_issue(
         and "find-0001" in iss.message
         for iss in out.issues
     )
+
+
+def test_runner_exception_becomes_recoverable_issue_and_siblings_continue(
+    repo: Path, artifacts: Path
+) -> None:
+    inp = make_input(n_candidates=1, n_findings=2)
+
+    def _runner(
+        *, pair_key, prompt, schema_text, repo_path, max_turns, wallclock_s
+    ) -> PairRunResult:
+        if pair_key == "cand-0001__find-0001":
+            raise RuntimeError("transient runner crash")
+        return PairRunResult(
+            pair_key=pair_key,
+            duration_s=0.001,
+            structured_output=make_proposal_payload(finding_id="find-0002"),
+        )
+
+    cfg = ProposalFromFindingConfig(repo_path=repo, artifacts_dir=artifacts)
+    result = create_proposals_with_telemetry(inp, config=cfg, runner=_runner)
+
+    c = result.output.candidates.candidates[0]
+    assert c.state == "FINDING_PROPOSALS_CREATED"
+    assert [p.finding_id for p in c.deep_research_proposals] == ["find-0002"]
+    assert any(
+        iss.recoverable
+        and "RuntimeError: transient runner crash" in iss.message
+        and "cand-0001" in iss.message
+        and "find-0001" in iss.message
+        for iss in result.output.issues
+    )
+    assert "cand-0001__find-0001" in result.per_pair_durations_s
+    assert "cand-0001__find-0002" in result.per_pair_durations_s
 
 
 def test_zero_findings_returns_advanced_candidates_with_no_issues(

@@ -177,7 +177,7 @@ def _persist_pair_debug(
                 json.dumps(run_result.structured_output, indent=2),
                 encoding="utf-8",
             )
-        except OSError:
+        except (OSError, TypeError, ValueError):
             pass
 
     if run_result.error is not None:
@@ -217,15 +217,32 @@ async def _run_one_pair(
 
     async with semaphore:
         assert config.repo_path is not None  # guarded in _validate_setup
-        run_result = await asyncio.to_thread(
-            runner,
-            pair_key=pair_key,
-            prompt=prompt,
-            schema_text=schema_text,
-            repo_path=config.repo_path,
-            max_turns=config.claude_max_turns,
-            wallclock_s=config.per_pair_wallclock_s,
-        )
+        run_start = time.monotonic()
+        try:
+            run_result = await asyncio.to_thread(
+                runner,
+                pair_key=pair_key,
+                prompt=prompt,
+                schema_text=schema_text,
+                repo_path=config.repo_path,
+                max_turns=config.claude_max_turns,
+                wallclock_s=config.per_pair_wallclock_s,
+            )
+        except Exception as exc:
+            duration = time.monotonic() - run_start
+            return (
+                pair_key,
+                [],
+                [
+                    _issue(
+                        f"agent failure (candidate_id={candidate.id}, "
+                        f"finding_id={finding.finding_id}): "
+                        f"{type(exc).__name__}: {exc}",
+                        recoverable=True,
+                    )
+                ],
+                duration,
+            )
 
     _persist_pair_debug(config=config, pair_key=pair_key, run_result=run_result)
 
