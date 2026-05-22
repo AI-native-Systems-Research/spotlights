@@ -12,6 +12,9 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from spotlights_engine.proposal_from_finding_creator import (
+    ProposalFromFindingConfig,
+)
 from spotlights_engine.schemas.common import SpotlightContext
 from spotlights_engine.schemas.pipeline import SpotlightsManagerInput
 from spotlights_engine.spotlights_manager import (
@@ -46,6 +49,24 @@ def _build_argparser() -> argparse.ArgumentParser:
     )
     p.add_argument("--max-parallel", type=int, default=1)
     p.add_argument(
+        "--max-parallel-pairs",
+        type=int,
+        default=None,
+        help=(
+            "Within-step parallelism for step 4 (proposal_from_finding_creator). "
+            "Defaults to ProposalFromFindingConfig's default (5)."
+        ),
+    )
+    p.add_argument(
+        "--debug-first-n-pairs",
+        type=int,
+        default=10,
+        help=(
+            "Debug-only: cap step 4 to the first N (candidate, finding) pairs. "
+            "Use only for local iteration."
+        ),
+    )
+    p.add_argument(
         "--objective",
         default="reduce hot-path latency on common workloads",
         help="Spotlight objective handed to candidate_discovery + module_deep_research.",
@@ -66,10 +87,20 @@ def main() -> None:
         repo_path=args.repo,
         context=SpotlightContext(objective=args.objective),
     )
+    proposal_cfg: ProposalFromFindingConfig | None = None
+    if args.max_parallel_pairs is not None or args.debug_first_n_pairs is not None:
+        proposal_kwargs: dict = {}
+        if args.max_parallel_pairs is not None:
+            proposal_kwargs["max_parallel_pairs"] = args.max_parallel_pairs
+        if args.debug_first_n_pairs is not None:
+            proposal_kwargs["debug_first_n_pairs"] = args.debug_first_n_pairs
+        proposal_cfg = ProposalFromFindingConfig(**proposal_kwargs)
+
     cfg = SpotlightsManagerConfig(
         artifacts_dir=args.artifacts_dir,
         max_parallel_sessions=args.max_parallel,
         module_filter=ModuleFilter(include=list(args.include)) if args.include else None,
+        proposal_from_finding=proposal_cfg,
         resume=args.resume,
     )
 
@@ -80,9 +111,15 @@ def main() -> None:
     for qn, mr in result.module_runs.items():
         n_cands = len(mr.candidates.candidates) if mr.candidates else 0
         n_findings = len(mr.findings)
+        n_proposals = (
+            sum(len(c.deep_research_proposals) for c in mr.candidates.candidates)
+            if mr.candidates
+            else 0
+        )
         print(
             f"  {qn}: status={mr.status} "
             f"candidates={n_cands} findings={n_findings} "
+            f"proposals={n_proposals} "
             f"issues={len(mr.issues)}"
         )
     inv = result.extractor_invocation

@@ -1,5 +1,12 @@
 """Spotlight Engine: spine for schemas, orchestration, and integration."""
 
+from spotlights_engine.proposal_from_finding_creator import (
+    ProposalFromFindingConfig,
+    ProposalFromFindingSetupError,
+    ProposalFromFindingValidationError,
+    create_proposals,
+    create_proposals_with_telemetry,
+)
 from spotlights_engine.spotlights_manager import (
     ManagerSetupError,
     ModuleFilter,
@@ -17,9 +24,14 @@ __all__ = [
     "ManagerSetupError",
     "ModuleFilter",
     "ModuleTelemetry",
+    "ProposalFromFindingConfig",
+    "ProposalFromFindingSetupError",
+    "ProposalFromFindingValidationError",
     "ResumeMismatchError",
     "SpotlightsManagerConfig",
     "SpotlightsManagerResult",
+    "create_proposals",
+    "create_proposals_with_telemetry",
     "run",
     "run_with_telemetry",
 ]

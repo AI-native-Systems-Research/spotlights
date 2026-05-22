@@ -21,6 +21,7 @@ from tests.unit.spotlights_manager._fakes import (
     make_input,
     make_research_output,
     make_tree,
+    patch_proposal_from_finding,
 )
 
 
@@ -55,6 +56,7 @@ def _wire_step_doubles(monkeypatch, *, tree, discover_calls, research_calls) -> 
 
     monkeypatch.setattr(orch, "discover", _discover)
     monkeypatch.setattr(orch, "research_module", _research)
+    patch_proposal_from_finding(monkeypatch, orch)
 
 
 def test_resume_skips_completed_module(monkeypatch, repo: Path, artifacts: Path) -> None:
@@ -181,6 +183,7 @@ def test_redoing_step2_clears_stale_research_output(
 
     monkeypatch.setattr(orch, "discover", _discover)
     monkeypatch.setattr(orch, "research_module", _research)
+    patch_proposal_from_finding(monkeypatch, orch)
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
@@ -245,3 +248,160 @@ def test_resume_mismatch_on_changed_input(
     inp2 = make_input(repo).model_copy(update={"max_findings_per_module": 99})
     with pytest.raises(ResumeMismatchError):
         run_with_telemetry(inp2, config=cfg)
+
+
+def test_resume_reruns_only_step4_when_proposal_artifact_missing(
+    monkeypatch, repo: Path, artifacts: Path
+) -> None:
+    tree = make_tree()
+    discover_calls: list[str] = []
+    research_calls: list[str] = []
+    pf_calls: list[str] = []
+    _wire_step_doubles(
+        monkeypatch,
+        tree=tree,
+        discover_calls=discover_calls,
+        research_calls=research_calls,
+    )
+
+    # Track step-4 calls in addition to the default no-op patch.
+    from tests.unit.spotlights_manager._fakes import (
+        make_proposal_from_finding_result,
+    )
+
+    def _capture(inp, *, config, runner=None):
+        pf_calls.append(inp.candidates.module_qualified_name)
+        return make_proposal_from_finding_result(
+            inp.candidates.module_qualified_name,
+            n_candidates=len(inp.candidates.candidates),
+        )
+
+    monkeypatch.setattr(orch, "create_proposals_with_telemetry", _capture)
+
+    cfg = SpotlightsManagerConfig(
+        artifacts_dir=artifacts,
+        module_filter=ModuleFilter(include=["v1.kv_offload"]),
+    )
+    run_with_telemetry(make_input(repo), config=cfg)
+    assert pf_calls == ["v1.kv_offload"]
+
+    # Delete only the step-4 sidecar and downgrade checkpoint to DEEP_RESEARCHED.
+    paths = P.ManagerPaths(artifacts)
+    mp = paths.for_module("v1.kv_offload")
+    mp.proposal_from_finding_path.unlink()
+    cp = P.ModuleCheckpoint.model_validate_json(
+        mp.status_path.read_text(encoding="utf-8")
+    )
+    cp = cp.model_copy(update={"status": "DEEP_RESEARCHED", "issues": []})
+    mp.status_path.write_text(cp.model_dump_json(indent=2), encoding="utf-8")
+
+    discover_calls.clear()
+    research_calls.clear()
+    pf_calls.clear()
+    run_with_telemetry(make_input(repo), config=cfg)
+    assert discover_calls == []
+    assert research_calls == []
+    assert pf_calls == ["v1.kv_offload"]
+
+
+def test_resume_skips_step4_when_finding_proposals_created_intact(
+    monkeypatch, repo: Path, artifacts: Path
+) -> None:
+    tree = make_tree()
+    discover_calls: list[str] = []
+    research_calls: list[str] = []
+    pf_calls: list[str] = []
+    _wire_step_doubles(
+        monkeypatch,
+        tree=tree,
+        discover_calls=discover_calls,
+        research_calls=research_calls,
+    )
+
+    from tests.unit.spotlights_manager._fakes import (
+        make_proposal_from_finding_result,
+    )
+
+    def _capture(inp, *, config, runner=None):
+        pf_calls.append(inp.candidates.module_qualified_name)
+        return make_proposal_from_finding_result(
+            inp.candidates.module_qualified_name,
+            n_candidates=len(inp.candidates.candidates),
+        )
+
+    monkeypatch.setattr(orch, "create_proposals_with_telemetry", _capture)
+
+    cfg = SpotlightsManagerConfig(
+        artifacts_dir=artifacts,
+        module_filter=ModuleFilter(include=["v1.kv_offload"]),
+    )
+    run_with_telemetry(make_input(repo), config=cfg)
+    assert pf_calls == ["v1.kv_offload"]
+
+    # Re-run: everything cached, no further work.
+    discover_calls.clear()
+    research_calls.clear()
+    pf_calls.clear()
+    run_with_telemetry(make_input(repo), config=cfg)
+    assert discover_calls == []
+    assert research_calls == []
+    assert pf_calls == []
+
+
+def test_resume_redoes_step4_only_when_failed_step_is_step4(
+    monkeypatch, repo: Path, artifacts: Path
+) -> None:
+    tree = make_tree()
+    discover_calls: list[str] = []
+    research_calls: list[str] = []
+    pf_calls: list[str] = []
+    _wire_step_doubles(
+        monkeypatch,
+        tree=tree,
+        discover_calls=discover_calls,
+        research_calls=research_calls,
+    )
+
+    from tests.unit.spotlights_manager._fakes import (
+        make_proposal_from_finding_result,
+    )
+
+    def _capture(inp, *, config, runner=None):
+        pf_calls.append(inp.candidates.module_qualified_name)
+        return make_proposal_from_finding_result(
+            inp.candidates.module_qualified_name,
+            n_candidates=len(inp.candidates.candidates),
+        )
+
+    monkeypatch.setattr(orch, "create_proposals_with_telemetry", _capture)
+
+    cfg = SpotlightsManagerConfig(
+        artifacts_dir=artifacts,
+        module_filter=ModuleFilter(include=["v1.kv_offload"]),
+    )
+    run_with_telemetry(make_input(repo), config=cfg)
+
+    # Edit the checkpoint to FAILED+retryable on step 4. Sidecar still on disk.
+    paths = P.ManagerPaths(artifacts)
+    mp = paths.for_module("v1.kv_offload")
+    cp = P.ModuleCheckpoint.model_validate_json(
+        mp.status_path.read_text(encoding="utf-8")
+    )
+    cp = cp.model_copy(
+        update={
+            "status": "FAILED",
+            "failed_step": "proposal_from_finding_creator",
+            "retryable": True,
+            "issues": [],
+            "error": "transient",
+        }
+    )
+    mp.status_path.write_text(cp.model_dump_json(indent=2), encoding="utf-8")
+
+    discover_calls.clear()
+    research_calls.clear()
+    pf_calls.clear()
+    run_with_telemetry(make_input(repo), config=cfg)
+    assert discover_calls == []
+    assert research_calls == []
+    assert pf_calls == ["v1.kv_offload"]

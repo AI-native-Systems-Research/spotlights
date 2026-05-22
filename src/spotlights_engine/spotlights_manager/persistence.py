@@ -26,9 +26,15 @@ from spotlights_engine.candidate_discovery.api import (
 )
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
 from spotlights_engine.modules_extractor.agent import ExtractionInvocation
+from spotlights_engine.proposal_from_finding_creator import (
+    ProposalFromFindingConfig,
+)
 from spotlights_engine.schemas.candidate import Candidates
 from spotlights_engine.schemas.common import PipelineStep, StepIssue
-from spotlights_engine.schemas.pipeline import ModuleDeepResearchOutput
+from spotlights_engine.schemas.pipeline import (
+    ModuleDeepResearchOutput,
+    ProposalFromFindingCreatorOutput,
+)
 from spotlights_engine.schemas.project import ProjectTree
 
 
@@ -39,6 +45,7 @@ CheckpointStatus = Literal[
     "PENDING",
     "DISCOVERED",
     "DEEP_RESEARCHED",
+    "FINDING_PROPOSALS_CREATED",
     "SUCCEEDED",
     "DEGRADED",
     "SKIPPED",
@@ -155,6 +162,14 @@ class ModulePaths:
     def deep_research_last_message_path(self) -> Path:
         return self.dir / "module_deep_research.last_message.md"
 
+    @property
+    def proposal_from_finding_path(self) -> Path:
+        return self.dir / "proposal_from_finding_creator.json"
+
+    @property
+    def proposal_from_finding_last_message_dir(self) -> Path:
+        return self.dir / "proposal_from_finding_creator.last_messages"
+
 
 @dataclass
 class LoadedModuleState:
@@ -172,6 +187,9 @@ class LoadedModuleState:
     discovery_total_cost_usd: float | None
     deep_research: ModuleDeepResearchOutput | None
     deep_research_duration_s: float | None
+    proposal_from_finding: ProposalFromFindingCreatorOutput | None
+    proposal_from_finding_duration_s: float | None
+    proposal_from_finding_per_pair_durations_s: dict[str, float]
 
 
 # ---------------------------------------------------------------------------
@@ -218,9 +236,11 @@ def build_config_fingerprint(
     extractor_cfg: BaseModel,
     discovery_cfg: BaseModel | None,
     deep_research_cfg: BaseModel | None,
+    proposal_from_finding_cfg: BaseModel | None,
 ) -> dict[str, Any]:
     effective_discovery_cfg = discovery_cfg or DiscoveryConfig()
     effective_deep_research_cfg = deep_research_cfg or CodexExecOptions()
+    effective_proposal_cfg = proposal_from_finding_cfg or ProposalFromFindingConfig()
     return {
         "module_filter": (
             module_filter.model_dump(mode="json") if module_filter is not None else None
@@ -233,6 +253,9 @@ def build_config_fingerprint(
         ),
         "deep_research_hash": hash_pydantic_excluding(
             effective_deep_research_cfg, exclude={"cwd", "output_last_message"}
+        ),
+        "proposal_from_finding_hash": hash_pydantic_excluding(
+            effective_proposal_cfg, exclude={"artifacts_dir", "repo_path"}
         ),
     }
 
@@ -319,6 +342,28 @@ def read_module_state(module_paths: ModulePaths) -> LoadedModuleState:
             # Backwards-compatible fallback: file may be the bare output.
             deep_research = ModuleDeepResearchOutput.model_validate(payload)
 
+    proposal_from_finding: ProposalFromFindingCreatorOutput | None = None
+    proposal_from_finding_duration_s: float | None = None
+    proposal_from_finding_per_pair_durations_s: dict[str, float] = {}
+    if module_paths.proposal_from_finding_path.exists():
+        payload = json.loads(
+            module_paths.proposal_from_finding_path.read_text(encoding="utf-8")
+        )
+        if "output" in payload:
+            proposal_from_finding = ProposalFromFindingCreatorOutput.model_validate(
+                payload["output"]
+            )
+            proposal_from_finding_duration_s = payload.get("duration_s")
+            per_pair = payload.get("per_pair_durations_s") or {}
+            if isinstance(per_pair, dict):
+                proposal_from_finding_per_pair_durations_s = {
+                    str(k): float(v) for k, v in per_pair.items()
+                }
+        else:
+            proposal_from_finding = ProposalFromFindingCreatorOutput.model_validate(
+                payload
+            )
+
     return LoadedModuleState(
         checkpoint=checkpoint,
         candidates=candidates,
@@ -327,6 +372,9 @@ def read_module_state(module_paths: ModulePaths) -> LoadedModuleState:
         discovery_total_cost_usd=discovery_total_cost_usd,
         deep_research=deep_research,
         deep_research_duration_s=deep_research_duration_s,
+        proposal_from_finding=proposal_from_finding,
+        proposal_from_finding_duration_s=proposal_from_finding_duration_s,
+        proposal_from_finding_per_pair_durations_s=proposal_from_finding_per_pair_durations_s,
     )
 
 
@@ -388,6 +436,27 @@ def clear_deep_research_artifacts(module_paths: ModulePaths) -> None:
             p.unlink()
 
 
+def write_proposal_from_finding(
+    module_paths: ModulePaths,
+    output: ProposalFromFindingCreatorOutput,
+    duration_s: float,
+    per_pair_durations_s: dict[str, float],
+) -> None:
+    payload = {
+        "output": output.model_dump(mode="json"),
+        "duration_s": duration_s,
+        "per_pair_durations_s": dict(per_pair_durations_s),
+    }
+    _atomic_write_json(module_paths.proposal_from_finding_path, payload)
+
+
+def clear_proposal_from_finding_artifacts(module_paths: ModulePaths) -> None:
+    if module_paths.proposal_from_finding_last_message_dir.exists():
+        shutil.rmtree(module_paths.proposal_from_finding_last_message_dir)
+    if module_paths.proposal_from_finding_path.exists():
+        module_paths.proposal_from_finding_path.unlink()
+
+
 def write_extractor_outputs(
     paths: ManagerPaths,
     project_tree: ProjectTree,
@@ -439,6 +508,7 @@ __all__ = [
     "clear_deep_research_artifacts",
     "clear_discovery_artifacts",
     "clear_extractor_artifacts",
+    "clear_proposal_from_finding_artifacts",
     "init_manifest",
     "read_extractor_outputs",
     "read_manifest",
@@ -450,4 +520,5 @@ __all__ = [
     "write_discovery_telemetry",
     "write_extractor_outputs",
     "write_manifest",
+    "write_proposal_from_finding",
 ]

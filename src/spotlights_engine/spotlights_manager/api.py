@@ -19,6 +19,9 @@ from spotlights_engine.candidate_discovery.api import (
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
 from spotlights_engine.modules_extractor import ExtractorConfig
 from spotlights_engine.modules_extractor.agent import ExtractionInvocation
+from spotlights_engine.proposal_from_finding_creator import (
+    ProposalFromFindingConfig,
+)
 from spotlights_engine.schemas.common import StepIssue
 from spotlights_engine.schemas.pipeline import (
     SpotlightsManagerInput,
@@ -45,6 +48,7 @@ class SpotlightsManagerConfig(BaseModel):
     extractor: ExtractorConfig = Field(default_factory=ExtractorConfig)
     discovery: DiscoveryConfig | None = None
     deep_research: CodexExecOptions | None = None
+    proposal_from_finding: ProposalFromFindingConfig | None = None
 
     resume: bool = True
 
@@ -58,6 +62,10 @@ class ModuleTelemetry(BaseModel):
     discovery_total_duration_s: float | None = None
     discovery_total_cost_usd: float | None = None
     deep_research_duration_s: float | None = None
+    proposal_from_finding_duration_s: float | None = None
+    proposal_from_finding_per_pair_durations_s: dict[str, float] = Field(
+        default_factory=dict
+    )
     issues: list[StepIssue] = Field(default_factory=list)
 
 

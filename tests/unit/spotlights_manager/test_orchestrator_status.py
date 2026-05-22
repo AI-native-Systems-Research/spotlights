@@ -21,6 +21,7 @@ from tests.unit.spotlights_manager._fakes import (
     make_input,
     make_research_output,
     make_tree,
+    patch_proposal_from_finding,
 )
 
 
@@ -59,6 +60,7 @@ def test_succeeded_happy_path(monkeypatch, repo: Path, artifacts: Path) -> None:
         "research_module",
         lambda inp, options=None: make_research_output(n_findings=2),
     )
+    patch_proposal_from_finding(monkeypatch, orch)
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
@@ -126,6 +128,7 @@ def test_degraded_on_recoverable_issue(monkeypatch, repo: Path, artifacts: Path)
             ],
         ),
     )
+    patch_proposal_from_finding(monkeypatch, orch)
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
@@ -136,6 +139,76 @@ def test_degraded_on_recoverable_issue(monkeypatch, repo: Path, artifacts: Path)
     mr = result.module_runs["v1.kv_offload"]
     assert mr.status == "DEGRADED"
     assert len(mr.findings) == 1
+
+
+def test_degraded_on_step4_recoverable_issue(
+    monkeypatch, repo: Path, artifacts: Path
+) -> None:
+    tree = make_tree()
+    _patch_extractor(monkeypatch, tree)
+    monkeypatch.setattr(
+        orch,
+        "discover",
+        lambda inp, *, config: make_discovery_result(inp.module_qualified_name),
+    )
+    monkeypatch.setattr(
+        orch,
+        "research_module",
+        lambda inp, options=None: make_research_output(n_findings=1),
+    )
+
+    def _fake_step4(inp, *, config, runner=None):
+        from spotlights_engine.proposal_from_finding_creator.api import (
+            ProposalFromFindingCreatorResult,
+        )
+        from spotlights_engine.schemas.candidate import Candidates
+        from spotlights_engine.schemas.common import StepIssue
+        from spotlights_engine.schemas.pipeline import (
+            ProposalFromFindingCreatorOutput,
+        )
+
+        cands = inp.candidates
+        advanced = Candidates(
+            module_qualified_name=cands.module_qualified_name,
+            candidates=[
+                c.model_copy(
+                    update={
+                        "state": "FINDING_PROPOSALS_CREATED",
+                        "deep_research_proposals": [],
+                    }
+                )
+                for c in cands.candidates
+            ],
+        )
+        return ProposalFromFindingCreatorResult(
+            output=ProposalFromFindingCreatorOutput(
+                candidates=advanced,
+                issues=[
+                    StepIssue(
+                        step="proposal_from_finding_creator",
+                        severity="warning",
+                        message="agent failure (cand-0001, find-0001): timeout",
+                        recoverable=True,
+                    )
+                ],
+            ),
+            per_pair_durations_s={},
+            total_duration_s=0.0,
+        )
+
+    monkeypatch.setattr(orch, "create_proposals_with_telemetry", _fake_step4)
+
+    cfg = SpotlightsManagerConfig(
+        artifacts_dir=artifacts,
+        module_filter=ModuleFilter(include=["v1.kv_offload"]),
+    )
+    result = run_with_telemetry(make_input(repo), config=cfg)
+    mr = result.module_runs["v1.kv_offload"]
+    assert mr.status == "DEGRADED"
+    assert any(
+        iss.step == "proposal_from_finding_creator" and iss.recoverable
+        for iss in mr.issues
+    )
 
 
 def test_failed_on_unrecoverable_issue(monkeypatch, repo: Path, artifacts: Path) -> None:

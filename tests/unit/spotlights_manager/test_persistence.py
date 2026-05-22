@@ -8,6 +8,9 @@ from pathlib import Path
 from spotlights_engine.candidate_discovery.api import DiscoveryConfig
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
 from spotlights_engine.modules_extractor import ExtractorConfig
+from spotlights_engine.proposal_from_finding_creator import (
+    ProposalFromFindingConfig,
+)
 from spotlights_engine.spotlights_manager import persistence as P
 from spotlights_engine.spotlights_manager.persistence import (
     ManagerPaths,
@@ -77,6 +80,77 @@ def test_candidates_and_deep_research_round_trip(tmp_path: Path) -> None:
     assert state.deep_research_duration_s == 4.2
 
 
+def test_proposal_from_finding_round_trip(tmp_path: Path) -> None:
+    from spotlights_engine.schemas.candidate import Candidates
+    from spotlights_engine.schemas.pipeline import (
+        ProposalFromFindingCreatorOutput,
+    )
+
+    paths = ManagerPaths(tmp_path)
+    mp = paths.for_module("v1.kv_offload")
+    mp.dir.mkdir(parents=True)
+
+    cands = make_candidates("v1.kv_offload", n=2)
+    advanced = Candidates(
+        module_qualified_name=cands.module_qualified_name,
+        candidates=[
+            c.model_copy(update={"state": "FINDING_PROPOSALS_CREATED"})
+            for c in cands.candidates
+        ],
+    )
+    output = ProposalFromFindingCreatorOutput(candidates=advanced, issues=[])
+    P.write_proposal_from_finding(
+        mp,
+        output,
+        duration_s=2.5,
+        per_pair_durations_s={"cand-0001__find-0001": 1.0},
+    )
+
+    state = P.read_module_state(mp)
+    assert state.proposal_from_finding is not None
+    assert len(state.proposal_from_finding.candidates.candidates) == 2
+    assert state.proposal_from_finding_duration_s == 2.5
+    assert state.proposal_from_finding_per_pair_durations_s == {
+        "cand-0001__find-0001": 1.0
+    }
+
+
+def test_clear_proposal_from_finding_artifacts_removes_sidecar_and_dir(
+    tmp_path: Path,
+) -> None:
+    from spotlights_engine.schemas.candidate import Candidates
+    from spotlights_engine.schemas.pipeline import (
+        ProposalFromFindingCreatorOutput,
+    )
+
+    paths = ManagerPaths(tmp_path)
+    mp = paths.for_module("v1.kv_offload")
+    mp.dir.mkdir(parents=True)
+
+    cands = make_candidates("v1.kv_offload")
+    advanced = Candidates(
+        module_qualified_name=cands.module_qualified_name,
+        candidates=[
+            c.model_copy(update={"state": "FINDING_PROPOSALS_CREATED"})
+            for c in cands.candidates
+        ],
+    )
+    P.write_proposal_from_finding(
+        mp,
+        ProposalFromFindingCreatorOutput(candidates=advanced, issues=[]),
+        duration_s=0.0,
+        per_pair_durations_s={},
+    )
+    mp.proposal_from_finding_last_message_dir.mkdir()
+    (mp.proposal_from_finding_last_message_dir / "cand-0001__find-0001.json").write_text(
+        "{}", encoding="utf-8"
+    )
+
+    P.clear_proposal_from_finding_artifacts(mp)
+    assert not mp.proposal_from_finding_path.exists()
+    assert not mp.proposal_from_finding_last_message_dir.exists()
+
+
 def test_clear_helpers_remove_artifacts(tmp_path: Path) -> None:
     paths = ManagerPaths(tmp_path)
     mp = paths.for_module("v1.kv_offload")
@@ -123,11 +197,13 @@ def test_config_fingerprint_treats_none_as_effective_defaults() -> None:
         extractor_cfg=ExtractorConfig(),
         discovery_cfg=None,
         deep_research_cfg=None,
+        proposal_from_finding_cfg=None,
     )
     explicit = P.build_config_fingerprint(
         module_filter=None,
         extractor_cfg=ExtractorConfig(),
         discovery_cfg=DiscoveryConfig(),
         deep_research_cfg=CodexExecOptions(),
+        proposal_from_finding_cfg=ProposalFromFindingConfig(),
     )
     assert base == explicit

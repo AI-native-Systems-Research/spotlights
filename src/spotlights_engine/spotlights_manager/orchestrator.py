@@ -29,7 +29,13 @@ from spotlights_engine.modules_extractor import (
     ExtractorConfig,
     extract_with_telemetry,
 )
-from spotlights_engine.schemas.candidate import Candidates
+from spotlights_engine.proposal_from_finding_creator import (
+    ProposalFromFindingConfig,
+    ProposalFromFindingSetupError,
+    ProposalFromFindingValidationError,
+    create_proposals_with_telemetry,
+)
+from spotlights_engine.schemas.candidate import Candidate, Candidates
 from spotlights_engine.schemas.common import (
     ModuleRunStatus,
     PipelineStep,
@@ -41,6 +47,8 @@ from spotlights_engine.schemas.pipeline import (
     ModuleDeepResearchOutput,
     ModuleRun,
     ModulesExtractorInput,
+    ProposalFromFindingCreatorInput,
+    ProposalFromFindingCreatorOutput,
     SpotlightsManagerInput,
 )
 from spotlights_engine.schemas.project import Module, ProjectTree
@@ -87,16 +95,22 @@ def _issue(
     )
 
 
-def _final_status_from_research(output: ModuleDeepResearchOutput) -> ModuleRunStatus:
-    """Translate step-3 issues into the architectural `ModuleRunStatus`.
+def _final_status(
+    research: ModuleDeepResearchOutput,
+    proposals: ProposalFromFindingCreatorOutput | None,
+) -> ModuleRunStatus:
+    """Translate combined step-3 + step-4 issues into the module status.
 
     - any `recoverable=False` issue -> `FAILED`
     - any issue at all (all recoverable) -> `DEGRADED`
-    - no issues -> `SUCCEEDED` (empty `findings` is allowed)
+    - no issues -> `SUCCEEDED`
     """
-    if any(not iss.recoverable for iss in output.issues):
+    issues: list[StepIssue] = list(research.issues)
+    if proposals is not None:
+        issues.extend(proposals.issues)
+    if any(not iss.recoverable for iss in issues):
         return "FAILED"
-    if output.issues:
+    if issues:
         return "DEGRADED"
     return "SUCCEEDED"
 
@@ -124,6 +138,21 @@ def _build_deep_research_options(
         return CodexExecOptions(cwd=repo_path, output_last_message=last_message_path)
     return base.model_copy(
         update={"cwd": repo_path, "output_last_message": last_message_path}
+    )
+
+
+def _build_proposal_from_finding_config(
+    cfg: SpotlightsManagerConfig,
+    repo_path: Path,
+    artifacts_dir: Path,
+) -> ProposalFromFindingConfig:
+    base = (
+        cfg.proposal_from_finding
+        if cfg.proposal_from_finding is not None
+        else ProposalFromFindingConfig()
+    )
+    return base.model_copy(
+        update={"repo_path": repo_path, "artifacts_dir": artifacts_dir}
     )
 
 
@@ -281,6 +310,7 @@ class _ModulePlan:
     skip_module: bool
     redo_step2: bool
     redo_step3: bool
+    redo_step4: bool
     started_at: str
 
 
@@ -291,44 +321,72 @@ _FAIL_FAST_CANCELLED_MESSAGE = (
 
 
 def _plan_module(state: LoadedModuleState) -> _ModulePlan:
-    """Resolve plan §7.4 onto a pair of booleans. The orchestrator always runs
-    step 3 if `redo_step3` is True OR step 2 just produced fresh candidates."""
+    """Resolve plan §5.4 onto a triple of booleans. The orchestrator runs
+    step 3 if `redo_step3` OR step 2 just produced fresh candidates, and runs
+    step 4 if `redo_step4` OR step 3 just produced fresh research."""
     cp = state.checkpoint
     started_at = cp.started_at if cp is not None else _now_iso()
 
+    def _plan(*, s2=False, s3=False, s4=False, skip=False) -> _ModulePlan:
+        return _ModulePlan(
+            skip_module=skip,
+            redo_step2=s2,
+            redo_step3=s3,
+            redo_step4=s4,
+            started_at=started_at,
+        )
+
     if cp is None:
-        return _ModulePlan(False, redo_step2=True, redo_step3=False, started_at=started_at)
+        return _plan(s2=True)
 
     if cp.status in {"SUCCEEDED", "DEGRADED", "SKIPPED"}:
-        return _ModulePlan(True, False, False, started_at)
+        return _plan(skip=True)
     if cp.status == "FAILED" and not cp.retryable:
-        return _ModulePlan(True, False, False, started_at)
+        return _plan(skip=True)
 
     if cp.status == "FAILED" and cp.retryable:
+        if cp.failed_step == "proposal_from_finding_creator":
+            if state.candidates is None:
+                return _plan(s2=True)
+            if state.deep_research is None:
+                return _plan(s3=True)
+            return _plan(s4=True)
         if cp.failed_step == "module_deep_research":
-            return _ModulePlan(False, False, True, started_at)
+            if state.candidates is None:
+                return _plan(s2=True)
+            return _plan(s3=True)
         # Anything else (incl. unknown/None) -> redo step 2 from scratch.
-        return _ModulePlan(False, True, False, started_at)
+        return _plan(s2=True)
 
     if cp.status == "PENDING":
-        return _ModulePlan(False, True, False, started_at)
+        return _plan(s2=True)
 
     if cp.status == "DISCOVERED":
         if state.candidates is None:
-            return _ModulePlan(False, True, False, started_at)
-        # Need step 3.
-        return _ModulePlan(False, False, True, started_at)
+            return _plan(s2=True)
+        return _plan(s3=True)
 
     if cp.status == "DEEP_RESEARCHED":
+        if state.candidates is None:
+            return _plan(s2=True)
         if state.deep_research is None:
-            return _ModulePlan(False, False, True, started_at)
-        return _ModulePlan(False, False, False, started_at)  # finalize-only
+            return _plan(s3=True)
+        return _plan(s4=True)
 
-    return _ModulePlan(False, True, False, started_at)
+    if cp.status == "FINDING_PROPOSALS_CREATED":
+        if state.candidates is None:
+            return _plan(s2=True)
+        if state.deep_research is None:
+            return _plan(s3=True)
+        if state.proposal_from_finding is None:
+            return _plan(s4=True)
+        return _plan()  # finalize-only
+
+    return _plan(s2=True)
 
 
 def _plan_requires_step_execution(plan: _ModulePlan) -> bool:
-    return plan.redo_step2 or plan.redo_step3
+    return plan.redo_step2 or plan.redo_step3 or plan.redo_step4
 
 
 async def _do_step2(
@@ -381,6 +439,61 @@ async def _do_step3(
     return output, duration
 
 
+def _candidate_at_state_finding_proposals_created(
+    candidate: Candidate,
+) -> Candidate:
+    """Round-trip an input candidate forward to `FINDING_PROPOSALS_CREATED`
+    with no proposals — the synthetic zero-findings path."""
+    return candidate.model_copy(
+        update={
+            "state": "FINDING_PROPOSALS_CREATED",
+            "deep_research_proposals": [],
+            "agent_proposals": list(candidate.agent_proposals),
+        }
+    )
+
+
+def _synthetic_step4_output_for_zero_findings(
+    candidates: Candidates,
+) -> ProposalFromFindingCreatorOutput:
+    """Build the step-4 output the architecture mandates when step 3 found
+    zero findings: every candidate advances to `FINDING_PROPOSALS_CREATED`
+    with `deep_research_proposals=[]` and no issues."""
+    return ProposalFromFindingCreatorOutput(
+        candidates=Candidates(
+            module_qualified_name=candidates.module_qualified_name,
+            candidates=[
+                _candidate_at_state_finding_proposals_created(c)
+                for c in candidates.candidates
+            ],
+        ),
+        issues=[],
+    )
+
+
+async def _do_step4(
+    *,
+    candidates: Candidates,
+    findings,
+    mgr_input: SpotlightsManagerInput,
+    cfg: SpotlightsManagerConfig,
+    module_paths: ModulePaths,
+) -> tuple[ProposalFromFindingCreatorOutput, float, dict[str, float]]:
+    """Returns (output, total_duration_s, per_pair_durations_s)."""
+    pf_input = ProposalFromFindingCreatorInput(
+        candidates=candidates,
+        findings=list(findings),
+        context=mgr_input.context,
+    )
+    pf_cfg = _build_proposal_from_finding_config(
+        cfg, mgr_input.repo_path, module_paths.dir
+    )
+    result = await asyncio.to_thread(
+        create_proposals_with_telemetry, pf_input, config=pf_cfg
+    )
+    return result.output, result.total_duration_s, dict(result.per_pair_durations_s)
+
+
 async def _write_cancelled_checkpoint(
     *,
     qn: str,
@@ -391,11 +504,12 @@ async def _write_cancelled_checkpoint(
     manifest_lock: asyncio.Lock,
     manifest: dict[str, Any],
 ) -> ModuleCheckpoint:
-    failed_step: PipelineStep = (
-        "module_deep_research"
-        if plan.redo_step3 and not plan.redo_step2
-        else "candidate_discovery"
-    )
+    if plan.redo_step4 and not plan.redo_step2 and not plan.redo_step3:
+        failed_step: PipelineStep = "proposal_from_finding_creator"
+    elif plan.redo_step3 and not plan.redo_step2:
+        failed_step = "module_deep_research"
+    else:
+        failed_step = "candidate_discovery"
     cp = _now_checkpoint(
         qn=qn,
         status="FAILED",
@@ -474,6 +588,7 @@ async def _run_module(
         if plan.redo_step2:
             P.clear_discovery_artifacts(module_paths)
             P.clear_deep_research_artifacts(module_paths)
+            P.clear_proposal_from_finding_artifacts(module_paths)
             cp = _now_checkpoint(
                 qn=qn,
                 status="PENDING",
@@ -570,6 +685,7 @@ async def _run_module(
         run_step3 = plan.redo_step2 or plan.redo_step3 or state.deep_research is None
         if plan.redo_step3:
             P.clear_deep_research_artifacts(module_paths)
+            P.clear_proposal_from_finding_artifacts(module_paths)
 
         if run_step3:
             try:
@@ -617,14 +733,106 @@ async def _run_module(
             assert state.deep_research is not None
             research_output = state.deep_research
 
-        final_status = _final_status_from_research(research_output)
+        # ------------------------- step 4 -----------------------------------
+        run_step4 = (
+            plan.redo_step2
+            or plan.redo_step3
+            or plan.redo_step4
+            or state.proposal_from_finding is None
+        )
+        if plan.redo_step4 and not (plan.redo_step2 or plan.redo_step3):
+            P.clear_proposal_from_finding_artifacts(module_paths)
+
+        proposal_output: ProposalFromFindingCreatorOutput | None = None
+
+        if run_step4:
+            if not research_output.findings:
+                # Architecture-mandated short-circuit: every candidate
+                # advances to FINDING_PROPOSALS_CREATED with no proposals,
+                # no Claude session is scheduled.
+                proposal_output = _synthetic_step4_output_for_zero_findings(
+                    candidates
+                )
+                P.write_proposal_from_finding(
+                    module_paths,
+                    proposal_output,
+                    duration_s=0.0,
+                    per_pair_durations_s={},
+                )
+            else:
+                try:
+                    proposal_output, pf_duration, per_pair = await _do_step4(
+                        candidates=candidates,
+                        findings=research_output.findings,
+                        mgr_input=mgr_input,
+                        cfg=cfg,
+                        module_paths=module_paths,
+                    )
+                except Exception as e:  # noqa: BLE001
+                    if isinstance(
+                        e,
+                        (
+                            ProposalFromFindingSetupError,
+                            ProposalFromFindingValidationError,
+                            ValueError,
+                        ),
+                    ):
+                        retryable = False
+                    else:
+                        retryable = True
+                    cp = _now_checkpoint(
+                        qn=qn,
+                        status="FAILED",
+                        last_step="module_deep_research",
+                        failed_step="proposal_from_finding_creator",
+                        error=f"{type(e).__name__}: {e}",
+                        retryable=retryable,
+                        issues=[
+                            _issue(
+                                "proposal_from_finding_creator",
+                                f"{type(e).__name__}: {e}",
+                                recoverable=retryable,
+                            )
+                        ],
+                        started_at=plan.started_at,
+                    )
+                    P.write_checkpoint(module_paths, cp)
+                    await _update_module_in_manifest(
+                        paths, manifest, manifest_lock, qn, cp
+                    )
+                    return cp
+
+                P.write_proposal_from_finding(
+                    module_paths,
+                    proposal_output,
+                    duration_s=pf_duration,
+                    per_pair_durations_s=per_pair,
+                )
+
+            cp = _now_checkpoint(
+                qn=qn,
+                status="FINDING_PROPOSALS_CREATED",
+                last_step="proposal_from_finding_creator",
+                issues=list(research_output.issues) + list(proposal_output.issues),
+                started_at=plan.started_at,
+            )
+            P.write_checkpoint(module_paths, cp)
+            await _update_module_in_manifest(paths, manifest, manifest_lock, qn, cp)
+        else:
+            assert state.proposal_from_finding is not None
+            proposal_output = state.proposal_from_finding
+
+        final_status = _final_status(research_output, proposal_output)
+        combined_issues: list[StepIssue] = list(research_output.issues)
+        if proposal_output is not None:
+            combined_issues.extend(proposal_output.issues)
         cp = _now_checkpoint(
             qn=qn,
             status=final_status,
             last_step=(
-                "module_deep_research"
+                "proposal_from_finding_creator"
                 if final_status != "FAILED"
-                else "candidate_discovery"
+                else "module_deep_research"
             ),
             failed_step=(
                 "module_deep_research" if final_status == "FAILED" else None
@@ -633,10 +841,10 @@ async def _run_module(
                 None
                 if final_status != "FAILED"
                 else "; ".join(
-                    iss.message for iss in research_output.issues if not iss.recoverable
+                    iss.message for iss in combined_issues if not iss.recoverable
                 )
             ),
-            issues=list(research_output.issues),
+            issues=combined_issues,
             started_at=plan.started_at,
         )
         P.write_checkpoint(module_paths, cp)
@@ -687,6 +895,7 @@ async def _run_async(
         extractor_cfg=config.extractor,
         discovery_cfg=config.discovery,
         deep_research_cfg=config.deep_research,
+        proposal_from_finding_cfg=config.proposal_from_finding,
     )
     manifest = _ensure_resume_compatible(
         paths, input_fp, config_fp, resume=config.resume
@@ -781,6 +990,10 @@ async def _run_async(
             discovery_total_duration_s=state.discovery_total_duration_s,
             discovery_total_cost_usd=state.discovery_total_cost_usd,
             deep_research_duration_s=state.deep_research_duration_s,
+            proposal_from_finding_duration_s=state.proposal_from_finding_duration_s,
+            proposal_from_finding_per_pair_durations_s=dict(
+                state.proposal_from_finding_per_pair_durations_s
+            ),
             issues=list(run_record.issues),
         )
         if run_record.status == "FAILED" and any(
@@ -844,10 +1057,18 @@ def _assemble_module_run(
     findings = list(state.deep_research.findings) if state.deep_research else []
     issues = list(cp.issues)
     issues.extend(exception_issues)
+    # Prefer the post-step-4 candidates (with `deep_research_proposals`
+    # populated and state advanced). Fall back to the step-2 view when step 4
+    # never produced output (e.g. failed before sidecar write).
+    candidates = (
+        state.proposal_from_finding.candidates
+        if state.proposal_from_finding is not None
+        else state.candidates
+    )
     return ModuleRun(
         module_qualified_name=qn,
         status=arch_status,
-        candidates=state.candidates,
+        candidates=candidates,
         findings=findings,
         issues=issues,
     )

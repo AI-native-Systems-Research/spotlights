@@ -11,13 +11,18 @@ from spotlights_engine.candidate_discovery.api import (
 )
 from spotlights_engine.modules_extractor.agent import ExtractionInvocation
 from spotlights_engine.modules_extractor.extractor import ExtractorResult
+from spotlights_engine.proposal_from_finding_creator.api import (
+    ProposalFromFindingCreatorResult,
+)
 from spotlights_engine.schemas.candidate import Candidate, Candidates
 from spotlights_engine.schemas.common import SpotlightContext, StepIssue
 from spotlights_engine.schemas.finding import Finding
 from spotlights_engine.schemas.pipeline import (
     ModuleDeepResearchOutput,
+    ProposalFromFindingCreatorOutput,
     SpotlightsManagerInput,
 )
+from spotlights_engine.schemas.proposals import DeepResearchProposal
 from spotlights_engine.schemas.project import (
     File,
     Module,
@@ -148,6 +153,69 @@ def make_discovery_result(qn: str, n_candidates: int = 1) -> DiscoveryResult:
     )
 
 
+def _advance_candidate(c: Candidate) -> Candidate:
+    """Round-trip a step-2 candidate forward to the post-step-4 state with
+    no synthesized proposals."""
+    return c.model_copy(
+        update={
+            "state": "FINDING_PROPOSALS_CREATED",
+            "deep_research_proposals": [],
+            "agent_proposals": list(c.agent_proposals),
+        }
+    )
+
+
+def make_proposal_from_finding_result(
+    qn: str,
+    n_candidates: int = 1,
+    *,
+    issues: list[StepIssue] | None = None,
+) -> ProposalFromFindingCreatorResult:
+    """Default step-4 fake: every input candidate advances to
+    `FINDING_PROPOSALS_CREATED` with no proposals and no issues.
+
+    Mirrors the synthetic zero-findings shape the orchestrator already
+    produces; tests that need richer outputs should construct their own."""
+    cands = make_candidates(qn, n=n_candidates)
+    advanced = Candidates(
+        module_qualified_name=cands.module_qualified_name,
+        candidates=[_advance_candidate(c) for c in cands.candidates],
+    )
+    output = ProposalFromFindingCreatorOutput(
+        candidates=advanced,
+        issues=list(issues or []),
+    )
+    return ProposalFromFindingCreatorResult(
+        output=output,
+        per_pair_durations_s={},
+        total_duration_s=0.0,
+    )
+
+
+def patch_proposal_from_finding(monkeypatch, orch_module) -> None:
+    """Stub `create_proposals_with_telemetry` on the orchestrator with a
+    synchronous fake that mirrors the input shape — used by every existing
+    manager test that wants to drive step 4 without invoking Claude."""
+
+    def _fake(inp, *, config, runner=None):
+        cands = inp.candidates
+        advanced = Candidates(
+            module_qualified_name=cands.module_qualified_name,
+            candidates=[_advance_candidate(c) for c in cands.candidates],
+        )
+        output = ProposalFromFindingCreatorOutput(
+            candidates=advanced,
+            issues=[],
+        )
+        return ProposalFromFindingCreatorResult(
+            output=output,
+            per_pair_durations_s={},
+            total_duration_s=0.0,
+        )
+
+    monkeypatch.setattr(orch_module, "create_proposals_with_telemetry", _fake)
+
+
 __all__ = [
     "make_candidate",
     "make_candidates",
@@ -156,6 +224,8 @@ __all__ = [
     "make_finding",
     "make_input",
     "make_iteration_telemetry",
+    "make_proposal_from_finding_result",
     "make_research_output",
     "make_tree",
+    "patch_proposal_from_finding",
 ]
