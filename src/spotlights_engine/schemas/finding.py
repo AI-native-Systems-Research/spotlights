@@ -1,8 +1,8 @@
-"""Finding entities and the candidate↔finding edge type.
+"""Finding entity produced by the per-module deep-research step.
 
-`Finding` is produced by step 3 (`module_deep_research`). `FindingMatch` is the
-edge attached to a `Candidate` by step 4 (`finding_to_candidates_mapper`); it
-references `Finding` directly, which is why both live here.
+`Finding` is produced by step 3 (`module_deep_research`). Step 4
+(`proposal_from_finding_creator`) consumes the findings list directly and
+considers each `(candidate, finding)` pair when drafting proposals.
 """
 
 from __future__ import annotations
@@ -22,8 +22,6 @@ FindingSourceType = Literal[
     "other",
 ]
 
-MappingConfidence = Literal["high", "medium", "low"]
-
 
 class Finding(BaseModel):
     """One relevant source-backed finding for a target module."""
@@ -38,25 +36,7 @@ class Finding(BaseModel):
     supporting_evidence: str = ""
 
 
-class FindingMatch(BaseModel):
-    """One mapped finding edge attached to a candidate.
-
-    Filled in by step 4 (`finding_to_candidates_mapper`). The edge is explicit
-    because applicability is a judgment, not a foreign-key join — it carries
-    confidence, rationale, and mapper identity.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    finding: Finding
-    confidence: MappingConfidence
-    rationale: str = Field(min_length=1)
-    mapped_by: str = Field(min_length=1)
-
-
 __all__ = [
     "Finding",
-    "FindingMatch",
     "FindingSourceType",
-    "MappingConfidence",
 ]

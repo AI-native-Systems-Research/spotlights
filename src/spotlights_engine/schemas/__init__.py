@@ -6,7 +6,7 @@ Everything else in the package is internal and may change without notice.
 Layout:
     common     — SpotlightContext, StepIssue, PipelineStep, ModuleRunStatus
     project    — File, Module, Repository, ProjectTree
-    finding    — Finding, FindingMatch, FindingSourceType, MappingConfidence
+    finding    — Finding, FindingSourceType
     proposals  — DeepResearchProposal, AgentProposal
     candidate  — Candidate, Candidates, CandidateKind, CandidateState, EstimatedImpact
     pipeline   — Per-step I/O contracts + ModuleRun + SpotlightsManagerInput/Result
@@ -29,16 +29,12 @@ from spotlights_engine.schemas.common import (
 )
 from spotlights_engine.schemas.finding import (
     Finding,
-    FindingMatch,
     FindingSourceType,
-    MappingConfidence,
 )
 from spotlights_engine.schemas.pipeline import (
     AgentProposalsInput,
     AgentProposalsOutput,
     CandidateDiscoveryInput,
-    FindingToCandidatesMapperInput,
-    FindingToCandidatesMapperOutput,
     ModuleDeepResearchInput,
     ModuleDeepResearchOutput,
     ModuleRun,
@@ -63,11 +59,7 @@ __all__ = [
     "EstimatedImpact",
     "File",
     "Finding",
-    "FindingMatch",
     "FindingSourceType",
-    "FindingToCandidatesMapperInput",
-    "FindingToCandidatesMapperOutput",
-    "MappingConfidence",
     "Module",
     "ModuleDeepResearchInput",
     "ModuleDeepResearchOutput",

@@ -130,10 +130,9 @@ def test_candidates_list_can_be_empty():
 
 def test_candidate_default_state_and_empty_attachments():
     """Per architecture, a freshly discovered candidate is at `DISCOVERED`
-    with empty match/proposal lists; later steps populate these fields."""
+    with empty proposal lists; later steps populate these fields."""
     c = Candidate.model_validate(_valid_candidate())
     assert c.state == "DISCOVERED"
-    assert c.finding_matches == []
     assert c.deep_research_proposals == []
     assert c.agent_proposals == []
 
@@ -141,7 +140,6 @@ def test_candidate_default_state_and_empty_attachments():
 def test_candidate_state_accepts_pipeline_progression():
     for state in (
         "DISCOVERED",
-        "FINDINGS_MAPPED",
         "FINDING_PROPOSALS_CREATED",
         "AGENT_PROPOSALS_CREATED",
     ):
@@ -151,7 +149,7 @@ def test_candidate_state_accepts_pipeline_progression():
 
 def test_candidate_rejects_unknown_state():
     with pytest.raises(ValidationError):
-        Candidate.model_validate(_valid_candidate(state="MAPPED"))
+        Candidate.model_validate(_valid_candidate(state="FINDINGS_MAPPED"))
 
 
 def test_candidates_model_json_schema_round_trips_through_json_dumps():
