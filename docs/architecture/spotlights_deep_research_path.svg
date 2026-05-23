@@ -1,4 +1,4 @@
-<svg viewBox="0 0 900 1140" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Inter, system-ui, sans-serif">
+<svg viewBox="0 0 900 1000" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Inter, system-ui, sans-serif">
   <defs>
     <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#4a4a4a"/>
@@ -16,7 +16,6 @@
       .s0     { fill:#f5f5f5; stroke:#525252; stroke-width:1.6; }
       .s1     { fill:#fff7e6; stroke:#d97706; stroke-width:1.6; }
       .s2     { fill:#f3edff; stroke:#7c3aed; stroke-width:1.6; }
-      .s3     { fill:#eef6ff; stroke:#2563eb; stroke-width:1.6; }
       .s4     { fill:#fef2f2; stroke:#dc2626; stroke-width:1.6; }
       .s5     { fill:#fff1f7; stroke:#be185d; stroke-width:1.6; }
       .skip   { fill:#f1f5f9; stroke:#64748b; stroke-width:1.4; stroke-dasharray:4 3; }
@@ -30,7 +29,7 @@
     </style>
   </defs>
 
-  <rect width="900" height="1140" fill="#fafafa"/>
+  <rect width="900" height="1000" fill="#fafafa"/>
 
   <!-- INPUTS -->
   <g transform="translate(220,20)">
@@ -46,10 +45,10 @@
 
   <!-- SpotlightsManager wrapper -->
   <g transform="translate(30,90)">
-    <rect width="840" height="1000" rx="12" class="mgr"/>
+    <rect width="840" height="860" rx="12" class="mgr"/>
     <text x="20" y="26" class="label">ORCHESTRATOR</text>
     <text x="20" y="50" class="title">SpotlightsManager</text>
-    <text x="20" y="70" class="body">Calls ModulesExtractor once, then runs steps 2-6 per target (leaf) module.</text>
+    <text x="20" y="70" class="body">Calls ModulesExtractor once, then runs steps 2, 3, 4, 5 per target (leaf) module.</text>
   </g>
 
   <!-- Step 1: ModulesExtractor -->
@@ -64,7 +63,7 @@
   <text x="460" y="308" class="label">FOR EACH TARGET MODULE</text>
 
   <!-- per-module loop frame -->
-  <rect x="60" y="320" width="780" height="740" rx="12" class="loop"/>
+  <rect x="60" y="320" width="780" height="600" rx="12" class="loop"/>
 
   <!-- Step 2 -->
   <g transform="translate(170,355)">
@@ -100,36 +99,27 @@
 
   <!-- Step 4 -->
   <g transform="translate(170,665)">
-    <rect width="560" height="100" rx="10" class="s3"/>
+    <rect width="560" height="120" rx="10" class="s4"/>
     <text x="20" y="28" class="label">STEP 4</text>
-    <text x="20" y="52" class="title">finding_to_candidates_mapper</text>
-    <text x="20" y="74" class="body">Per finding: select candidates it applies to; invert to candidate-centric.</text>
-    <text x="20" y="92" class="body">In: findings + candidates + context  -&gt;  Out: Candidates with finding_matches[]</text>
+    <text x="20" y="52" class="title">proposal_from_finding_creator</text>
+    <text x="20" y="74" class="body">For each (candidate, finding) pair: draft a DeepResearchProposal, or skip.</text>
+    <text x="20" y="92" class="body">In: candidates + findings + context</text>
+    <text x="20" y="110" class="body">Out: candidate.deep_research_proposals[]</text>
   </g>
-  <path class="line" marker-end="url(#arr)" d="M450 765 V 805"/>
+  <path class="line" marker-end="url(#arr)" d="M450 785 V 805"/>
 
   <!-- Step 5 -->
   <g transform="translate(170,805)">
-    <rect width="560" height="100" rx="10" class="s4"/>
-    <text x="20" y="28" class="label">STEP 5</text>
-    <text x="20" y="52" class="title">proposal_from_finding_creator</text>
-    <text x="20" y="74" class="body">For each (candidate, finding-match): draft a DeepResearchProposal, or skip.</text>
-    <text x="20" y="92" class="body">In: candidates + context  -&gt;  Out: candidate.deep_research_proposals[]</text>
-  </g>
-  <path class="line" marker-end="url(#arr)" d="M450 905 V 945"/>
-
-  <!-- Step 6 -->
-  <g transform="translate(170,945)">
     <rect width="560" height="100" rx="10" class="s5"/>
-    <text x="20" y="28" class="label">STEP 6</text>
+    <text x="20" y="28" class="label">STEP 5</text>
     <text x="20" y="52" class="title">agent_proposals</text>
     <text x="20" y="74" class="body">Agent-knowledge proposals NOT covered by deep_research_proposals.</text>
     <text x="20" y="92" class="body">In: project_tree + candidates + context  -&gt;  Out: candidate.agent_proposals[]</text>
   </g>
 
   <!-- OUTPUT -->
-  <path class="line" marker-end="url(#arr)" d="M450 1085 V 1105"/>
-  <g transform="translate(300,1095)">
+  <path class="line" marker-end="url(#arr)" d="M450 945 V 965"/>
+  <g transform="translate(300,955)">
     <rect width="300" height="40" rx="8" class="out"/>
     <text x="150" y="26" text-anchor="middle" class="mono">SpotlightsResult (module_runs)</text>
   </g>

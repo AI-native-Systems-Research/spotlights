@@ -1,12 +1,12 @@
 """The `Candidate` and `Candidates` schemas.
 
 Stage 1 (candidate_discovery) emits a `Candidates` object whose entries are at
-state `DISCOVERED` with empty match/proposal lists. Steps 4–6 progressively
-populate `finding_matches` (see `schemas.finding.FindingMatch`),
-`deep_research_proposals` (see `schemas.proposals.DeepResearchProposal`), and
-`agent_proposals` (see `schemas.proposals.AgentProposal`) and advance `state`.
-The shape constraints captured here are the contract: they are exported via
-`model_json_schema()` and consumed by downstream agents.
+state `DISCOVERED` with empty proposal lists. Steps 4 and 5 progressively
+populate `deep_research_proposals` (see
+`schemas.proposals.DeepResearchProposal`) and `agent_proposals` (see
+`schemas.proposals.AgentProposal`) and advance `state`. The shape constraints
+captured here are the contract: they are exported via `model_json_schema()`
+and consumed by downstream agents.
 """
 
 from __future__ import annotations
@@ -15,7 +15,6 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from spotlights_engine.schemas.finding import FindingMatch
 from spotlights_engine.schemas.proposals import AgentProposal, DeepResearchProposal
 
 CandidateKind = Literal[
@@ -30,7 +29,6 @@ CandidateKind = Literal[
 EstimatedImpact = Literal["high", "medium", "low"]
 CandidateState = Literal[
     "DISCOVERED",
-    "FINDINGS_MAPPED",
     "FINDING_PROPOSALS_CREATED",
     "AGENT_PROPOSALS_CREATED",
 ]
@@ -51,7 +49,6 @@ class Candidate(BaseModel):
     estimated_impact: EstimatedImpact
     estimated_impact_explanation: str = Field(min_length=1)
     state: CandidateState = "DISCOVERED"
-    finding_matches: list[FindingMatch] = Field(default_factory=list)
     deep_research_proposals: list[DeepResearchProposal] = Field(default_factory=list)
     agent_proposals: list[AgentProposal] = Field(default_factory=list)
 

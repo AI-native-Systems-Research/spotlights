@@ -35,8 +35,12 @@ class DiscoveryConfig(BaseModel):
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
-    repo_path: Path
-    artifacts_dir: Path
+    # `repo_path` and `artifacts_dir` are required at step entry but accept
+    # `None` at construction time so callers (e.g. `SpotlightsManager`) can
+    # build a config once and fill the per-module paths via `model_copy`.
+    # `discover()` raises `DiscoverySetupError` if either is still `None`.
+    repo_path: Path | None = None
+    artifacts_dir: Path | None = None
     repo_context_markdown: str | None = Field(
         default=None, min_length=1, max_length=20_000
     )
@@ -99,6 +103,11 @@ def discover(
     """
     repo = config.repo_path
     artifacts = config.artifacts_dir
+
+    if repo is None:
+        raise DiscoverySetupError("DiscoveryConfig.repo_path is required at step entry")
+    if artifacts is None:
+        raise DiscoverySetupError("DiscoveryConfig.artifacts_dir is required at step entry")
 
     if not repo.exists() or not repo.is_dir():
         raise DiscoverySetupError(

@@ -6,8 +6,10 @@ from pathlib import Path
 
 import pytest
 
+from spotlights_engine.candidate_discovery import DiscoverySetupError
 from spotlights_engine.candidate_discovery.api import (
     DiscoveryConfig,
+    discover,
     resolve_target_module,
 )
 from spotlights_engine.schemas.common import SpotlightContext
@@ -76,6 +78,36 @@ def test_resolve_target_module_dot_form() -> None:
     )
     m = resolve_target_module(inp)
     assert m.name == "attention"
+
+
+def test_discovery_config_paths_optional_at_construction() -> None:
+    """Plan §3.1: relaxed to `Path | None` so callers (SpotlightsManager) can
+    build a config once and fill the per-module paths via `model_copy`."""
+    cfg = DiscoveryConfig()
+    assert cfg.repo_path is None
+    assert cfg.artifacts_dir is None
+
+
+def test_discover_raises_when_repo_path_none() -> None:
+    inp = CandidateDiscoveryInput(
+        project_tree=_tree(),
+        module_qualified_name="foo",
+        context=_ctx(),
+    )
+    cfg = DiscoveryConfig(artifacts_dir=Path("/tmp/will-not-be-used"))
+    with pytest.raises(DiscoverySetupError, match="repo_path is required"):
+        discover(inp, config=cfg)
+
+
+def test_discover_raises_when_artifacts_dir_none(tmp_path: Path) -> None:
+    inp = CandidateDiscoveryInput(
+        project_tree=_tree(),
+        module_qualified_name="foo",
+        context=_ctx(),
+    )
+    cfg = DiscoveryConfig(repo_path=tmp_path)
+    with pytest.raises(DiscoverySetupError, match="artifacts_dir is required"):
+        discover(inp, config=cfg)
 
 
 def test_resolve_target_module_unknown_raises() -> None:

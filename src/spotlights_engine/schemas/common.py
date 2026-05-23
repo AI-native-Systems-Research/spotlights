@@ -1,10 +1,9 @@
 """Cross-cutting types used across multiple pipeline steps.
 
 `SpotlightContext` is the caller-supplied run context threaded into the
-discovery, deep-research, mapping, and proposal steps. `StepIssue`,
-`PipelineStep`, and `ModuleRunStatus` are the run-status vocabulary the
-manager and per-step modules share when reporting recoverable or fatal
-problems.
+discovery, deep-research, and proposal steps. `StepIssue`, `PipelineStep`,
+and `ModuleRunStatus` are the run-status vocabulary the manager and per-step
+modules share when reporting recoverable or fatal problems.
 """
 
 from __future__ import annotations
@@ -17,7 +16,6 @@ PipelineStep = Literal[
     "modules_extractor",
     "candidate_discovery",
     "module_deep_research",
-    "finding_to_candidates_mapper",
     "proposal_from_finding_creator",
     "agent_proposals",
 ]

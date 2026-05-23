@@ -5,20 +5,21 @@
 `spotlight-engine` proposes high-leverage code changes for a target repo. The
 deep-research path takes a repo, extracts its module tree, and runs candidate
 discovery for each **target module**. For target modules with discovered
-candidates, it runs a literature/web survey, maps findings onto candidates, and
-then attempts to attach evidence-backed proposals (from findings) and
-agent-knowledge proposals (beyond research) to each candidate. Proposal lists
-are allowed to be empty: an empty list means the step ran but found nothing
-supportable for that candidate.
+candidates, it runs a literature/web survey, then considers each
+(candidate, finding) pair directly to attach evidence-backed proposals (from
+findings) and finally agent-knowledge proposals (beyond research) to each
+candidate. Proposal lists are allowed to be empty: an empty list means the
+step ran but found nothing supportable for that candidate.
 
 `SpotlightsManager` orchestrates the flow: it calls `ModulesExtractor` once
-per repo, then runs steps 2–6 once per module from the extracted tree.
+per repo, then runs steps 2, 3, 4, and 5 once per module from the extracted
+tree.
 
 Callers also supply a `SpotlightContext` (objective, workload hints, validation
 plan) alongside the repo path. The context is threaded into the discovery,
-deep research, mapping, and proposal steps so they can bias their judgments
-toward the caller's goal. It is intentionally withheld from extraction so the
-structural map stays objective-agnostic and reusable across runs.
+deep research, and proposal steps so they can bias their judgments toward the
+caller's goal. It is intentionally withheld from extraction so the structural
+map stays objective-agnostic and reusable across runs.
 
 ## Block diagram
 
@@ -64,14 +65,12 @@ CandidateKind = Literal[
     "kernel", "config_block", "plugin_seam",
 ]
 EstimatedImpact = Literal["high", "medium", "low"]
-MappingConfidence = Literal["high", "medium", "low"]
 FindingSourceType = Literal[
     "paper", "blog", "docs", "issue", "pr", "talk", "codebase", "other",
 ]
 
 CandidateState = Literal[
     "DISCOVERED",
-    "FINDINGS_MAPPED",
     "FINDING_PROPOSALS_CREATED",
     "AGENT_PROPOSALS_CREATED",
 ]
@@ -80,7 +79,6 @@ PipelineStep = Literal[
     "modules_extractor",
     "candidate_discovery",
     "module_deep_research",
-    "finding_to_candidates_mapper",
     "proposal_from_finding_creator",
     "agent_proposals",
 ]
@@ -93,12 +91,6 @@ class Finding(BaseModel):
     source_type: FindingSourceType
     technique_summary: str
     supporting_evidence: str = ""     # short excerpt, paraphrase, or source note
-
-class FindingMatch(BaseModel):
-    finding: Finding
-    confidence: MappingConfidence
-    rationale: str
-    mapped_by: str                    # agent or mapper identifier
 
 class DeepResearchProposal(BaseModel):
     title: str
@@ -126,9 +118,8 @@ class Candidate(BaseModel):
     estimated_impact: EstimatedImpact
     estimated_impact_explanation: str
     state: CandidateState = "DISCOVERED"
-    finding_matches: list[FindingMatch] = []        # filled by step 4
-    deep_research_proposals: list[DeepResearchProposal] = []  # step 5
-    agent_proposals: list[AgentProposal] = []       # step 6
+    deep_research_proposals: list[DeepResearchProposal] = []  # step 4
+    agent_proposals: list[AgentProposal] = []       # step 5
 
 class Candidates(BaseModel):
     module_qualified_name: str
@@ -144,8 +135,16 @@ class ModuleRun(BaseModel):
     module_qualified_name: str
     status: ModuleRunStatus
     candidates: Candidates | None = None   # None only when the module failed before discovery
+    findings: list[Finding] = []           # populated by step 3 (module_deep_research)
     issues: list[StepIssue] = []
 ```
+
+`findings` carries the step-3 output for that module. It is populated even
+though step 4 also consumes findings as an input — keeping them on the
+`ModuleRun` makes the per-module record self-describing for audit, lets a
+run that stops before step 4 (partial pipeline, slice rollout) still surface
+what step 3 produced, and matches the lifecycle already used for
+`candidates`.
 
 ### SpotlightContext semantics
 
@@ -158,8 +157,8 @@ class ModuleRun(BaseModel):
 - `workload_hints` — free-form workload / deployment notes (batch sizes,
   traffic shape, hardware) that bias relevance judgments downstream.
 - `validation_plan` — how a proposed change should be validated in this
-  environment; lets proposal and mapping steps prefer changes whose evidence
-  is testable here.
+  environment; lets proposal steps prefer changes whose evidence is
+  testable here.
 
 The `list[str]` shape for `workload_hints` and `validation_plan` is a
 deliberate v1 trade-off: it pushes structure into prose so consuming steps
@@ -206,7 +205,7 @@ convention — they take or carry the qualified name rather than embedding a
 
 ### Target modules and lifecycle semantics
 
-`SpotlightsManager` starts the steps 2–6 pipeline only for **target modules**.
+`SpotlightsManager` starts the steps 2–5 pipeline only for **target modules**.
 A target module is a leaf `Module` with no `submodules`. Non-leaf modules
 provide hierarchy, qualified-name prefixes, descriptions, and dependency
 context; they are not processed directly. If a non-leaf area needs direct
@@ -214,16 +213,18 @@ analysis, its directly owned files should be modeled as a child leaf module so
 target scopes remain non-overlapping.
 
 Candidate lists may be empty. If `candidate_discovery` completes with zero
-candidates, the module run is marked `SKIPPED` and downstream research,
-mapping, and proposal steps are not run for that module.
+candidates, the module run is marked `SKIPPED` and downstream research and
+proposal steps are not run for that module.
 
 `Candidate.state` records the furthest pipeline step that completed for that
 candidate, not whether the corresponding lists are non-empty:
 
 - `DISCOVERED`: emitted by candidate discovery.
-- `FINDINGS_MAPPED`: mapping completed; `finding_matches` may be empty.
-- `FINDING_PROPOSALS_CREATED`: finding-based proposal generation completed;
-  `deep_research_proposals` may be empty.
+- `FINDING_PROPOSALS_CREATED`: finding-proposal phase complete for this
+  candidate; `deep_research_proposals` may be empty. When step 3 produced
+  zero findings and step 4 was skipped, the manager still advances the
+  candidate to this state with `deep_research_proposals=[]` so the state
+  machine remains a strict prefix relation.
 - `AGENT_PROPOSALS_CREATED`: agent proposal generation completed;
   `agent_proposals` may be empty.
 
@@ -238,9 +239,23 @@ continues with other target modules unless configured otherwise.
 
 Top-level orchestrator. Calls `ModulesExtractor` once on the repo, derives leaf
 target modules, then starts the per-module pipeline with candidate discovery.
-Steps 3–6 run only when candidates exist. A module with no discovered
-candidates is marked `SKIPPED`. A module that finishes with recoverable issues
-is marked `DEGRADED`; a module with an unrecoverable issue is marked `FAILED`.
+Steps 3, 4, and 5 run only when candidates exist. A module with no discovered
+candidates is marked `SKIPPED`. If step 3 produces zero findings, step 4 is
+skipped and the manager advances every candidate to
+`FINDING_PROPOSALS_CREATED` with `deep_research_proposals=[]` before step 5.
+A module that finishes with recoverable issues is marked `DEGRADED`; a module
+with an unrecoverable issue is marked `FAILED`.
+
+The manager owns persistence and resume for the run. After every step it
+checkpoints that step's output to an `artifacts_dir` so a crash mid-run can
+be recovered without redoing completed work; per-module pipelines write
+into per-module subdirectories so they don't contend on shared files. The
+manager also bounds in-flight work with a `max_parallel_sessions` gate
+across per-module pipelines. Persistence layout, atomicity rules, and
+resume semantics are deliberately left out of the architectural contract
+— they live with the manager implementation
+([spotlights_persist_impl_plan.md](spotlights_persist_impl_plan.md)) so
+the per-step contracts remain pure data shapes.
 
 **Input**
 
@@ -252,7 +267,7 @@ class SpotlightsManagerInput(BaseModel):
     continue_on_module_failure: bool = True
 ```
 
-The manager forwards `context` unchanged into steps 2, 3, 4, 5, and 6, and
+The manager forwards `context` unchanged into steps 2, 3, 4, and 5, and
 copies it onto `SpotlightsResult`. It is intentionally not passed to step 1.
 
 **Output**
@@ -303,8 +318,8 @@ class CandidateDiscoveryInput(BaseModel):
 ```
 
 **Output** — `Candidates` (see *Shared schemas*). At this stage
-`finding_matches`, `deep_research_proposals`, and `agent_proposals` are empty.
-If `candidates` is empty, the manager marks the module run `SKIPPED`.
+`deep_research_proposals` and `agent_proposals` are empty. If `candidates`
+is empty, the manager marks the module run `SKIPPED`.
 
 ### 3. module_deep_research
 
@@ -345,55 +360,35 @@ class ModuleDeepResearchOutput(BaseModel):
     issues: list[StepIssue] = []
 ```
 
-### 4. finding_to_candidates_mapper
+### 4. proposal_from_finding_creator
 
-Loops over findings; for each finding starts a Claude session whose input is
-the finding plus the full candidate list, and returns the subset of candidates
-the finding applies to. Edges are inverted into a candidate-centric mapping:
-each candidate is filled with its related matches on
-`Candidate.finding_matches`.
+For every `(candidate, finding)` pair in the cartesian product of
+`candidates.candidates × findings`, the step decides whether the finding
+provides enough information to support a concrete change to the candidate.
+If yes, it emits one `DeepResearchProposal` with `finding_id` set to the
+finding's id; if no, it emits nothing for that pair. A single candidate may
+collect zero, one, or many proposals (one per supporting finding).
 
-The match edge is explicit because applicability is a judgment, not just a
-foreign-key join. Each edge carries confidence, rationale, and mapper identity.
+Applicability and proposal drafting are folded into one judgment here:
+without a separate mapping step, `context.objective` is what keeps the step
+from drafting proposals from off-objective findings. `context.validation_plan`
+biases toward proposals whose claims can be tested in the caller's
+environment.
 
-Uses `context.objective` to score finding↔candidate confidence and to filter
-matches that are clearly off-objective. The target module is read off
+The contract imposes no dependency between pairs: each `(candidate, finding)`
+pair has its own emit-or-not decision tied to that finding's id, and the
+output schema does not require ordering or aggregation across pairs. Whether
+an implementation evaluates each pair in isolation, batches all findings per
+candidate, or runs the full cartesian product as one session is an
+implementation choice. The target module is read off
 `candidates.module_qualified_name`; no parallel argument is added.
 
 **Input**
 
 ```python
-class FindingToCandidatesMapperInput(BaseModel):
-    findings: list[Finding]            # from module_deep_research
-    candidates: Candidates             # from candidate_discovery
-    context: SpotlightContext
-```
-
-**Output**
-
-```python
-class FindingToCandidatesMapperOutput(BaseModel):
-    candidates: Candidates             # finding_matches populated; state -> FINDINGS_MAPPED
-    issues: list[StepIssue] = []
-```
-
-Empty `finding_matches` on a candidate is valid.
-
-### 5. proposal_from_finding_creator
-
-For every candidate/finding-match pair the candidate carries, drafts one
-`DeepResearchProposal`. The module may decide a finding does not contain enough
-information to support a proposal and skip it.
-
-Uses `context.validation_plan` to bias toward proposals whose claims can be
-tested in the caller's environment, and `context.objective` to keep the
-proposal aligned with the run's goal.
-
-**Input**
-
-```python
 class ProposalFromFindingCreatorInput(BaseModel):
-    candidates: Candidates             # with finding_matches, from step 4
+    candidates: Candidates             # from candidate_discovery; state == DISCOVERED
+    findings: list[Finding]            # from module_deep_research
     context: SpotlightContext
 ```
 
@@ -408,7 +403,7 @@ class ProposalFromFindingCreatorOutput(BaseModel):
 
 Empty `deep_research_proposals` on a candidate is valid.
 
-### 6. agent_proposals
+### 5. agent_proposals
 
 Per-candidate agent pass that proposes additional changes **not** already
 covered by `deep_research_proposals`. This pass still runs for candidates with
@@ -426,7 +421,7 @@ site alone.
 ```python
 class AgentProposalsInput(BaseModel):
     project_tree: ProjectModules
-    candidates: Candidates             # from step 5
+    candidates: Candidates             # from step 4
     context: SpotlightContext
 ```
 

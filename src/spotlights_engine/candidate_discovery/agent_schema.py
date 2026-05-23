@@ -1,17 +1,17 @@
 """Discovery-only output schema handed to the Claude / codex subprocess agents.
 
 The full `Candidate` schema in `spotlights_engine.schemas.candidate` carries
-fields (`state`, `finding_matches`, `deep_research_proposals`,
-`agent_proposals`) that are only filled in by later pipeline steps. They
-default to sensible empty values, which makes pydantic emit a JSON schema
-where those properties are *not* in `required`. Codex's `--output-schema`
-forwards the schema to OpenAI structured-output, whose strict mode rejects
-schemas with `additionalProperties: false` plus optional properties.
+fields (`state`, `deep_research_proposals`, `agent_proposals`) that are only
+filled in by later pipeline steps. They default to sensible empty values,
+which makes pydantic emit a JSON schema where those properties are *not* in
+`required`. Codex's `--output-schema` forwards the schema to OpenAI
+structured-output, whose strict mode rejects schemas with
+`additionalProperties: false` plus optional properties.
 
 To avoid that breakage we hand the agents a strict subset (`AgentCandidates`)
 whose properties exactly match `required`. The orchestrator promotes each
 parsed `AgentCandidate` into a full `Candidate` with `state="DISCOVERED"`
-and empty match/proposal lists.
+and empty proposal lists.
 """
 
 from __future__ import annotations

@@ -133,7 +133,7 @@ class Orchestrator:
 
     def _mint_run_dir(self) -> None:
         # Hand the agents the discovery-only schema (no `state`,
-        # `finding_matches`, etc.) so codex's strict structured-output stays
+        # proposal lists, etc.) so codex's strict structured-output stays
         # valid. The orchestrator promotes parsed payloads to full `Candidate`
         # objects via `AgentCandidates.to_candidates()`.
         schema_text = json.dumps(AgentCandidates.model_json_schema(), indent=2)

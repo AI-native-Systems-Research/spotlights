@@ -67,36 +67,23 @@ class ModuleDeepResearchOutput(BaseModel):
     issues: list[StepIssue] = Field(default_factory=list)
 
 
-class FindingToCandidatesMapperInput(BaseModel):
-    """Input contract for step 4 (`finding_to_candidates_mapper`)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    findings: list[Finding] = Field(default_factory=list)
-    candidates: Candidates
-    context: SpotlightContext
-
-
-class FindingToCandidatesMapperOutput(BaseModel):
-    """Output contract for step 4. `candidates.state` is `FINDINGS_MAPPED`."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    candidates: Candidates
-    issues: list[StepIssue] = Field(default_factory=list)
-
-
 class ProposalFromFindingCreatorInput(BaseModel):
-    """Input contract for step 5 (`proposal_from_finding_creator`)."""
+    """Input contract for step 4 (`proposal_from_finding_creator`).
+
+    Step 4 considers every `(candidate, finding)` pair directly: there is no
+    separate mapping step. The target module is read off
+    `candidates.module_qualified_name`.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     candidates: Candidates
+    findings: list[Finding]
     context: SpotlightContext
 
 
 class ProposalFromFindingCreatorOutput(BaseModel):
-    """Output contract for step 5.
+    """Output contract for step 4.
 
     `candidates.state` advances to `FINDING_PROPOSALS_CREATED`. Empty
     `deep_research_proposals` on a candidate is valid.
@@ -109,7 +96,7 @@ class ProposalFromFindingCreatorOutput(BaseModel):
 
 
 class AgentProposalsInput(BaseModel):
-    """Input contract for step 6 (`agent_proposals`)."""
+    """Input contract for step 5 (`agent_proposals`)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -119,7 +106,7 @@ class AgentProposalsInput(BaseModel):
 
 
 class AgentProposalsOutput(BaseModel):
-    """Output contract for step 6. State advances to `AGENT_PROPOSALS_CREATED`."""
+    """Output contract for step 5. State advances to `AGENT_PROPOSALS_CREATED`."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -139,6 +126,7 @@ class ModuleRun(BaseModel):
     module_qualified_name: str = Field(min_length=1)
     status: ModuleRunStatus
     candidates: Candidates | None = None
+    findings: list[Finding] = Field(default_factory=list)
     issues: list[StepIssue] = Field(default_factory=list)
 
 
@@ -171,8 +159,6 @@ __all__ = [
     "AgentProposalsInput",
     "AgentProposalsOutput",
     "CandidateDiscoveryInput",
-    "FindingToCandidatesMapperInput",
-    "FindingToCandidatesMapperOutput",
     "ModuleDeepResearchInput",
     "ModuleDeepResearchOutput",
     "ModuleRun",

@@ -48,13 +48,11 @@ def test_agent_candidates_strict_schema_marks_every_property_required():
 
 
 def test_agent_candidates_schema_omits_downstream_step_fields():
-    """The agent must not be asked to fill `state`, `finding_matches`,
-    `deep_research_proposals`, or `agent_proposals` — those belong to later
-    pipeline steps."""
+    """The agent must not be asked to fill `state`, `deep_research_proposals`,
+    or `agent_proposals` — those belong to later pipeline steps."""
     candidate_def = AgentCandidates.model_json_schema()["$defs"]["AgentCandidate"]
     forbidden = {
         "state",
-        "finding_matches",
         "deep_research_proposals",
         "agent_proposals",
     }
@@ -78,13 +76,12 @@ def test_agent_candidates_to_candidates_sets_default_state_and_empty_attachments
     assert len(promoted.candidates) == 1
     c = promoted.candidates[0]
     assert c.state == "DISCOVERED"
-    assert c.finding_matches == []
     assert c.deep_research_proposals == []
     assert c.agent_proposals == []
 
 
 def test_agent_candidate_rejects_extra_field():
-    payload = _valid_agent_candidate(state="FINDINGS_MAPPED")
+    payload = _valid_agent_candidate(state="DISCOVERED")
     with pytest.raises(ValidationError):
         AgentCandidate.model_validate(payload)
 

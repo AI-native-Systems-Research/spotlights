@@ -10,13 +10,11 @@ from pydantic import ValidationError
 
 from spotlights_engine.schemas.candidate import Candidate, Candidates
 from spotlights_engine.schemas.common import SpotlightContext, StepIssue
-from spotlights_engine.schemas.finding import Finding, FindingMatch
+from spotlights_engine.schemas.finding import Finding
 from spotlights_engine.schemas.pipeline import (
     AgentProposalsInput,
     AgentProposalsOutput,
     CandidateDiscoveryInput,
-    FindingToCandidatesMapperInput,
-    FindingToCandidatesMapperOutput,
     ModuleDeepResearchInput,
     ModuleDeepResearchOutput,
     ModuleRun,
@@ -154,25 +152,6 @@ def test_module_deep_research_output_schema_round_trips_through_json() -> None:
     assert json.loads(json.dumps(schema)) == schema
 
 
-def test_finding_to_candidates_mapper_io() -> None:
-    inp = FindingToCandidatesMapperInput(
-        findings=[_finding()], candidates=_candidates(), context=_ctx()
-    )
-    assert inp.findings[0].finding_id == "find-0001"
-
-    cs = _candidates()
-    cs.candidates[0].finding_matches.append(
-        FindingMatch(
-            finding=_finding(),
-            confidence="medium",
-            rationale="r",
-            mapped_by="claude",
-        )
-    )
-    out = FindingToCandidatesMapperOutput(candidates=cs)
-    assert out.issues == []
-
-
 def test_proposal_from_finding_creator_io() -> None:
     cs = _candidates()
     cs.candidates[0].deep_research_proposals.append(
@@ -184,10 +163,18 @@ def test_proposal_from_finding_creator_io() -> None:
             created_by="claude",
         )
     )
-    inp = ProposalFromFindingCreatorInput(candidates=cs, context=_ctx())
+    inp = ProposalFromFindingCreatorInput(
+        candidates=cs, findings=[_finding()], context=_ctx()
+    )
     out = ProposalFromFindingCreatorOutput(candidates=cs)
     assert inp.candidates is cs
+    assert inp.findings[0].finding_id == "find-0001"
     assert out.candidates.candidates[0].deep_research_proposals[0].finding_id == "find-0001"
+
+
+def test_proposal_from_finding_creator_requires_findings_field() -> None:
+    with pytest.raises(ValidationError):
+        ProposalFromFindingCreatorInput(candidates=_candidates(), context=_ctx())
 
 
 def test_agent_proposals_io() -> None:
