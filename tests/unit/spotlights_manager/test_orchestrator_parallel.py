@@ -18,6 +18,7 @@ from tests.unit.spotlights_manager._fakes import (
     make_input,
     make_research_output,
     make_tree,
+    patch_agent_proposals,
     patch_proposal_from_finding,
 )
 
@@ -54,6 +55,7 @@ def test_max_parallel_sessions_respected(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(orch, "discover", _discover)
     monkeypatch.setattr(orch, "research_module", _research)
     patch_proposal_from_finding(monkeypatch, orch)
+    patch_agent_proposals(monkeypatch, orch)
 
     repo = tmp_path / "repo"
     repo.mkdir()

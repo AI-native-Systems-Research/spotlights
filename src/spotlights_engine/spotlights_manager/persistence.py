@@ -20,6 +20,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from spotlights_engine.agent_proposals import AgentProposalsConfig
 from spotlights_engine.candidate_discovery.api import (
     DiscoveryConfig,
     IterationTelemetry,
@@ -32,6 +33,7 @@ from spotlights_engine.proposal_from_finding_creator import (
 from spotlights_engine.schemas.candidate import Candidates
 from spotlights_engine.schemas.common import PipelineStep, StepIssue
 from spotlights_engine.schemas.pipeline import (
+    AgentProposalsOutput,
     ModuleDeepResearchOutput,
     ProposalFromFindingCreatorOutput,
 )
@@ -46,6 +48,7 @@ CheckpointStatus = Literal[
     "DISCOVERED",
     "DEEP_RESEARCHED",
     "FINDING_PROPOSALS_CREATED",
+    "AGENT_PROPOSALS_CREATED",
     "SUCCEEDED",
     "DEGRADED",
     "SKIPPED",
@@ -170,6 +173,14 @@ class ModulePaths:
     def proposal_from_finding_last_message_dir(self) -> Path:
         return self.dir / "proposal_from_finding_creator.last_messages"
 
+    @property
+    def agent_proposals_path(self) -> Path:
+        return self.dir / "agent_proposals.json"
+
+    @property
+    def agent_proposals_last_message_dir(self) -> Path:
+        return self.dir / "agent_proposals.last_messages"
+
 
 @dataclass
 class LoadedModuleState:
@@ -190,6 +201,9 @@ class LoadedModuleState:
     proposal_from_finding: ProposalFromFindingCreatorOutput | None
     proposal_from_finding_duration_s: float | None
     proposal_from_finding_per_pair_durations_s: dict[str, float]
+    agent_proposals: AgentProposalsOutput | None
+    agent_proposals_duration_s: float | None
+    agent_proposals_per_candidate_durations_s: dict[str, dict[str, float]]
 
 
 # ---------------------------------------------------------------------------
@@ -237,10 +251,12 @@ def build_config_fingerprint(
     discovery_cfg: BaseModel | None,
     deep_research_cfg: BaseModel | None,
     proposal_from_finding_cfg: BaseModel | None,
+    agent_proposals_cfg: BaseModel | None,
 ) -> dict[str, Any]:
     effective_discovery_cfg = discovery_cfg or DiscoveryConfig()
     effective_deep_research_cfg = deep_research_cfg or CodexExecOptions()
     effective_proposal_cfg = proposal_from_finding_cfg or ProposalFromFindingConfig()
+    effective_agent_proposals_cfg = agent_proposals_cfg or AgentProposalsConfig()
     return {
         "module_filter": (
             module_filter.model_dump(mode="json") if module_filter is not None else None
@@ -257,7 +273,19 @@ def build_config_fingerprint(
         "proposal_from_finding_hash": hash_pydantic_excluding(
             effective_proposal_cfg, exclude={"artifacts_dir", "repo_path"}
         ),
+        "agent_proposals_hash": hash_pydantic_excluding(
+            effective_agent_proposals_cfg, exclude={"artifacts_dir", "repo_path"}
+        ),
     }
+
+
+def default_agent_proposals_hash() -> str:
+    """Stable hash of the default `AgentProposalsConfig`. Used by the one-shot
+    pre-step-5 manifest forward migration; see orchestrator
+    `_ensure_resume_compatible`."""
+    return hash_pydantic_excluding(
+        AgentProposalsConfig(), exclude={"artifacts_dir", "repo_path"}
+    )
 
 
 def read_manifest(paths: ManagerPaths) -> dict[str, Any] | None:
@@ -364,6 +392,28 @@ def read_module_state(module_paths: ModulePaths) -> LoadedModuleState:
                 payload
             )
 
+    agent_proposals: AgentProposalsOutput | None = None
+    agent_proposals_duration_s: float | None = None
+    agent_proposals_per_candidate_durations_s: dict[str, dict[str, float]] = {}
+    if module_paths.agent_proposals_path.exists():
+        payload = json.loads(
+            module_paths.agent_proposals_path.read_text(encoding="utf-8")
+        )
+        if "output" in payload:
+            agent_proposals = AgentProposalsOutput.model_validate(payload["output"])
+            agent_proposals_duration_s = payload.get("duration_s")
+            per_cand = payload.get("per_candidate_durations_s") or {}
+            if isinstance(per_cand, dict):
+                normalized: dict[str, dict[str, float]] = {}
+                for cand_id, durations in per_cand.items():
+                    if isinstance(durations, dict):
+                        normalized[str(cand_id)] = {
+                            str(k): float(v) for k, v in durations.items()
+                        }
+                agent_proposals_per_candidate_durations_s = normalized
+        else:
+            agent_proposals = AgentProposalsOutput.model_validate(payload)
+
     return LoadedModuleState(
         checkpoint=checkpoint,
         candidates=candidates,
@@ -375,6 +425,9 @@ def read_module_state(module_paths: ModulePaths) -> LoadedModuleState:
         proposal_from_finding=proposal_from_finding,
         proposal_from_finding_duration_s=proposal_from_finding_duration_s,
         proposal_from_finding_per_pair_durations_s=proposal_from_finding_per_pair_durations_s,
+        agent_proposals=agent_proposals,
+        agent_proposals_duration_s=agent_proposals_duration_s,
+        agent_proposals_per_candidate_durations_s=agent_proposals_per_candidate_durations_s,
     )
 
 
@@ -457,6 +510,30 @@ def clear_proposal_from_finding_artifacts(module_paths: ModulePaths) -> None:
         module_paths.proposal_from_finding_path.unlink()
 
 
+def write_agent_proposals(
+    module_paths: ModulePaths,
+    output: AgentProposalsOutput,
+    duration_s: float,
+    per_candidate_durations_s: dict[str, dict[str, float]],
+) -> None:
+    payload = {
+        "output": output.model_dump(mode="json"),
+        "duration_s": duration_s,
+        "per_candidate_durations_s": {
+            str(cand_id): {str(k): float(v) for k, v in durations.items()}
+            for cand_id, durations in per_candidate_durations_s.items()
+        },
+    }
+    _atomic_write_json(module_paths.agent_proposals_path, payload)
+
+
+def clear_agent_proposals_artifacts(module_paths: ModulePaths) -> None:
+    if module_paths.agent_proposals_last_message_dir.exists():
+        shutil.rmtree(module_paths.agent_proposals_last_message_dir)
+    if module_paths.agent_proposals_path.exists():
+        module_paths.agent_proposals_path.unlink()
+
+
 def write_extractor_outputs(
     paths: ManagerPaths,
     project_tree: ProjectTree,
@@ -505,15 +582,18 @@ __all__ = [
     "ModulePaths",
     "build_config_fingerprint",
     "build_input_fingerprint",
+    "clear_agent_proposals_artifacts",
     "clear_deep_research_artifacts",
     "clear_discovery_artifacts",
     "clear_extractor_artifacts",
     "clear_proposal_from_finding_artifacts",
+    "default_agent_proposals_hash",
     "init_manifest",
     "read_extractor_outputs",
     "read_manifest",
     "read_module_state",
     "slug_for",
+    "write_agent_proposals",
     "write_candidates",
     "write_checkpoint",
     "write_deep_research",

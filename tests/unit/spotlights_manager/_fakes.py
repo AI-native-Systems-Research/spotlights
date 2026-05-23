@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from spotlights_engine.agent_proposals.api import AgentProposalsResult
 from spotlights_engine.candidate_discovery.api import (
     DiscoveryResult,
     IterationTelemetry,
@@ -18,6 +19,7 @@ from spotlights_engine.schemas.candidate import Candidate, Candidates
 from spotlights_engine.schemas.common import SpotlightContext, StepIssue
 from spotlights_engine.schemas.finding import Finding
 from spotlights_engine.schemas.pipeline import (
+    AgentProposalsOutput,
     ModuleDeepResearchOutput,
     ProposalFromFindingCreatorOutput,
     SpotlightsManagerInput,
@@ -192,6 +194,55 @@ def make_proposal_from_finding_result(
     )
 
 
+def _advance_candidate_to_agent_proposals(c: Candidate) -> Candidate:
+    """Advance a step-4-output candidate to `AGENT_PROPOSALS_CREATED` with
+    no agent proposals."""
+    return c.model_copy(
+        update={
+            "state": "AGENT_PROPOSALS_CREATED",
+            "deep_research_proposals": list(c.deep_research_proposals),
+            "agent_proposals": [],
+        }
+    )
+
+
+def make_agent_proposals_result(
+    candidates: Candidates,
+    *,
+    issues: list[StepIssue] | None = None,
+    total_duration_s: float = 0.0,
+    per_candidate_durations_s: dict[str, dict[str, float]] | None = None,
+) -> AgentProposalsResult:
+    advanced = Candidates(
+        module_qualified_name=candidates.module_qualified_name,
+        candidates=[
+            _advance_candidate_to_agent_proposals(c) for c in candidates.candidates
+        ],
+    )
+    output = AgentProposalsOutput(
+        candidates=advanced,
+        issues=list(issues or []),
+    )
+    return AgentProposalsResult(
+        output=output,
+        per_candidate_durations_s=dict(per_candidate_durations_s or {}),
+        total_duration_s=total_duration_s,
+    )
+
+
+def patch_agent_proposals(monkeypatch, orch_module) -> None:
+    """Stub `create_agent_proposals_with_telemetry` on the orchestrator with a
+    synchronous fake that advances every candidate to `AGENT_PROPOSALS_CREATED`
+    with no proposals and no issues."""
+
+    def _fake(inp, *, config, claude_runner=None, codex_runner=None):
+        return make_agent_proposals_result(inp.candidates)
+
+    monkeypatch.setattr(
+        orch_module, "create_agent_proposals_with_telemetry", _fake
+    )
+
+
 def patch_proposal_from_finding(monkeypatch, orch_module) -> None:
     """Stub `create_proposals_with_telemetry` on the orchestrator with a
     synchronous fake that mirrors the input shape — used by every existing
@@ -220,6 +271,7 @@ __all__ = [
     "make_candidate",
     "make_candidates",
     "make_discovery_result",
+    "make_agent_proposals_result",
     "make_extractor_result",
     "make_finding",
     "make_input",
@@ -227,5 +279,6 @@ __all__ = [
     "make_proposal_from_finding_result",
     "make_research_output",
     "make_tree",
+    "patch_agent_proposals",
     "patch_proposal_from_finding",
 ]

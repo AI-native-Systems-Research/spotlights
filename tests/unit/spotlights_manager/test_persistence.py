@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from spotlights_engine.agent_proposals import AgentProposalsConfig
 from spotlights_engine.candidate_discovery.api import DiscoveryConfig
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
 from spotlights_engine.modules_extractor import ExtractorConfig
@@ -198,6 +199,7 @@ def test_config_fingerprint_treats_none_as_effective_defaults() -> None:
         discovery_cfg=None,
         deep_research_cfg=None,
         proposal_from_finding_cfg=None,
+        agent_proposals_cfg=None,
     )
     explicit = P.build_config_fingerprint(
         module_filter=None,
@@ -205,5 +207,6 @@ def test_config_fingerprint_treats_none_as_effective_defaults() -> None:
         discovery_cfg=DiscoveryConfig(),
         deep_research_cfg=CodexExecOptions(),
         proposal_from_finding_cfg=ProposalFromFindingConfig(),
+        agent_proposals_cfg=AgentProposalsConfig(),
     )
     assert base == explicit

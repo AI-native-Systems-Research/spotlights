@@ -22,6 +22,7 @@ from tests.unit.spotlights_manager._fakes import (
     make_input,
     make_research_output,
     make_tree,
+    patch_agent_proposals,
     patch_proposal_from_finding,
 )
 
@@ -100,6 +101,7 @@ def test_proposal_from_finding_options_per_module_override(
         )
 
     monkeypatch.setattr(orch, "create_proposals_with_telemetry", _capture)
+    patch_agent_proposals(monkeypatch, orch)
 
     caller_pf = ProposalFromFindingConfig(
         repo_path=Path("/tmp/will-be-overridden"),
@@ -147,6 +149,7 @@ def test_proposal_from_finding_default_when_caller_none(
         lambda inp, options=None: make_research_output(n_findings=1),
     )
     patch_proposal_from_finding(monkeypatch, orch)
+    patch_agent_proposals(monkeypatch, orch)
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,

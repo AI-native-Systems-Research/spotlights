@@ -18,6 +18,7 @@ from tests.unit.spotlights_manager._fakes import (
     make_input,
     make_research_output,
     make_tree,
+    patch_agent_proposals,
     patch_proposal_from_finding,
 )
 
@@ -43,6 +44,7 @@ def test_deep_research_options_per_module_override(tmp_path: Path, monkeypatch) 
 
     monkeypatch.setattr(orch, "research_module", _research)
     patch_proposal_from_finding(monkeypatch, orch)
+    patch_agent_proposals(monkeypatch, orch)
 
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -97,6 +99,7 @@ def test_deep_research_options_default_when_caller_none(
         lambda inp, options=None: (seen.append(options), make_research_output())[1],
     )
     patch_proposal_from_finding(monkeypatch, orch)
+    patch_agent_proposals(monkeypatch, orch)
 
     repo = tmp_path / "repo"
     repo.mkdir()

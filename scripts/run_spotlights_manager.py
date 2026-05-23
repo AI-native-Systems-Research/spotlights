@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from spotlights_engine.agent_proposals import AgentProposalsConfig
 from spotlights_engine.proposal_from_finding_creator import (
     ProposalFromFindingConfig,
 )
@@ -60,10 +61,28 @@ def _build_argparser() -> argparse.ArgumentParser:
     p.add_argument(
         "--debug-first-n-pairs",
         type=int,
-        default=10,
+        default=None,
         help=(
             "Debug-only: cap step 4 to the first N (candidate, finding) pairs. "
-            "Use only for local iteration."
+            "Disabled by default; use only for local iteration."
+        ),
+    )
+    p.add_argument(
+        "--max-parallel-candidates",
+        type=int,
+        default=None,
+        help=(
+            "Within-step parallelism for step 5 (agent_proposals). "
+            "Defaults to AgentProposalsConfig's default (5)."
+        ),
+    )
+    p.add_argument(
+        "--debug-first-n-candidates",
+        type=int,
+        default=None,
+        help=(
+            "Debug-only: cap step 5 to the first N candidates. "
+            "Disabled by default; use only for local iteration."
         ),
     )
     p.add_argument(
@@ -96,11 +115,24 @@ def main() -> None:
             proposal_kwargs["debug_first_n_pairs"] = args.debug_first_n_pairs
         proposal_cfg = ProposalFromFindingConfig(**proposal_kwargs)
 
+    agent_proposals_cfg: AgentProposalsConfig | None = None
+    if (
+        args.max_parallel_candidates is not None
+        or args.debug_first_n_candidates is not None
+    ):
+        agent_kwargs: dict = {}
+        if args.max_parallel_candidates is not None:
+            agent_kwargs["max_parallel_candidates"] = args.max_parallel_candidates
+        if args.debug_first_n_candidates is not None:
+            agent_kwargs["debug_first_n_candidates"] = args.debug_first_n_candidates
+        agent_proposals_cfg = AgentProposalsConfig(**agent_kwargs)
+
     cfg = SpotlightsManagerConfig(
         artifacts_dir=args.artifacts_dir,
         max_parallel_sessions=args.max_parallel,
         module_filter=ModuleFilter(include=list(args.include)) if args.include else None,
         proposal_from_finding=proposal_cfg,
+        agent_proposals=agent_proposals_cfg,
         resume=args.resume,
     )
 
@@ -116,10 +148,16 @@ def main() -> None:
             if mr.candidates
             else 0
         )
+        n_agent_proposals = (
+            sum(len(c.agent_proposals) for c in mr.candidates.candidates)
+            if mr.candidates
+            else 0
+        )
         print(
             f"  {qn}: status={mr.status} "
             f"candidates={n_cands} findings={n_findings} "
             f"proposals={n_proposals} "
+            f"agent_proposals={n_agent_proposals} "
             f"issues={len(mr.issues)}"
         )
     inv = result.extractor_invocation

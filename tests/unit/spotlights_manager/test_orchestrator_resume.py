@@ -21,6 +21,7 @@ from tests.unit.spotlights_manager._fakes import (
     make_input,
     make_research_output,
     make_tree,
+    patch_agent_proposals,
     patch_proposal_from_finding,
 )
 
@@ -57,6 +58,7 @@ def _wire_step_doubles(monkeypatch, *, tree, discover_calls, research_calls) -> 
     monkeypatch.setattr(orch, "discover", _discover)
     monkeypatch.setattr(orch, "research_module", _research)
     patch_proposal_from_finding(monkeypatch, orch)
+    patch_agent_proposals(monkeypatch, orch)
 
 
 def test_resume_skips_completed_module(monkeypatch, repo: Path, artifacts: Path) -> None:
@@ -184,6 +186,7 @@ def test_redoing_step2_clears_stale_research_output(
     monkeypatch.setattr(orch, "discover", _discover)
     monkeypatch.setattr(orch, "research_module", _research)
     patch_proposal_from_finding(monkeypatch, orch)
+    patch_agent_proposals(monkeypatch, orch)
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
@@ -193,6 +196,7 @@ def test_redoing_step2_clears_stale_research_output(
 
     paths = P.ManagerPaths(artifacts)
     mp = paths.for_module("v1.kv_offload")
+    assert mp.agent_proposals_path.exists()
     mp.candidates_path.unlink()
     cp = P.ModuleCheckpoint.model_validate_json(
         mp.status_path.read_text(encoding="utf-8")
@@ -204,6 +208,7 @@ def test_redoing_step2_clears_stale_research_output(
     mr = result.module_runs["v1.kv_offload"]
     assert mr.status == "SKIPPED"
     assert mr.findings == []
+    assert not mp.agent_proposals_path.exists()
     assert research_calls == ["v1.kv_offload"]
 
 

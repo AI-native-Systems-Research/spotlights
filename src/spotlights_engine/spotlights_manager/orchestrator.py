@@ -16,6 +16,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from spotlights_engine.agent_proposals import (
+    AgentProposalsConfig,
+    AgentProposalsSetupError,
+    AgentProposalsValidationError,
+    create_agent_proposals_with_telemetry,
+)
 from spotlights_engine.candidate_discovery import (
     DiscoveryConfig,
     DiscoveryMutationError,
@@ -42,6 +48,8 @@ from spotlights_engine.schemas.common import (
     StepIssue,
 )
 from spotlights_engine.schemas.pipeline import (
+    AgentProposalsInput,
+    AgentProposalsOutput,
     CandidateDiscoveryInput,
     ModuleDeepResearchInput,
     ModuleDeepResearchOutput,
@@ -98,8 +106,9 @@ def _issue(
 def _final_status(
     research: ModuleDeepResearchOutput,
     proposals: ProposalFromFindingCreatorOutput | None,
+    agent_output: AgentProposalsOutput | None = None,
 ) -> ModuleRunStatus:
-    """Translate combined step-3 + step-4 issues into the module status.
+    """Translate combined step-3 + step-4 + step-5 issues into the module status.
 
     - any `recoverable=False` issue -> `FAILED`
     - any issue at all (all recoverable) -> `DEGRADED`
@@ -108,6 +117,8 @@ def _final_status(
     issues: list[StepIssue] = list(research.issues)
     if proposals is not None:
         issues.extend(proposals.issues)
+    if agent_output is not None:
+        issues.extend(agent_output.issues)
     if any(not iss.recoverable for iss in issues):
         return "FAILED"
     if issues:
@@ -150,6 +161,21 @@ def _build_proposal_from_finding_config(
         cfg.proposal_from_finding
         if cfg.proposal_from_finding is not None
         else ProposalFromFindingConfig()
+    )
+    return base.model_copy(
+        update={"repo_path": repo_path, "artifacts_dir": artifacts_dir}
+    )
+
+
+def _build_agent_proposals_config(
+    cfg: SpotlightsManagerConfig,
+    repo_path: Path,
+    artifacts_dir: Path,
+) -> AgentProposalsConfig:
+    base = (
+        cfg.agent_proposals
+        if cfg.agent_proposals is not None
+        else AgentProposalsConfig()
     )
     return base.model_copy(
         update={"repo_path": repo_path, "artifacts_dir": artifacts_dir}
@@ -234,7 +260,30 @@ def _ensure_resume_compatible(
             existing=existing.get("input_fingerprint"),
             current=input_fp,
         )
-    if existing.get("config_fingerprint") != config_fp:
+
+    # One-shot forward migration for pre-step-5 manifests: if the existing
+    # fingerprint lacks `agent_proposals_hash`, otherwise matches the current
+    # fingerprint with that key removed, AND the current `agent_proposals_hash`
+    # matches the default `AgentProposalsConfig`, accept by upgrading the
+    # on-disk fingerprint. A non-default step-5 config falls through to the
+    # standard mismatch error since old manifests didn't record any step-5
+    # knobs.
+    existing_fp = existing.get("config_fingerprint") or {}
+    if (
+        isinstance(existing_fp, dict)
+        and "agent_proposals_hash" not in existing_fp
+        and "agent_proposals_hash" in config_fp
+        and config_fp["agent_proposals_hash"] == P.default_agent_proposals_hash()
+    ):
+        current_without_step5 = {
+            k: v for k, v in config_fp.items() if k != "agent_proposals_hash"
+        }
+        if existing_fp == current_without_step5:
+            existing["config_fingerprint"] = dict(config_fp)
+            P.write_manifest(paths, existing)
+            existing_fp = existing["config_fingerprint"]
+
+    if existing_fp != config_fp:
         raise ResumeMismatchError(
             "config fingerprint changed since the manager run dir was created",
             existing=existing.get("config_fingerprint"),
@@ -311,6 +360,7 @@ class _ModulePlan:
     redo_step2: bool
     redo_step3: bool
     redo_step4: bool
+    redo_step5: bool
     started_at: str
 
 
@@ -321,23 +371,47 @@ _FAIL_FAST_CANCELLED_MESSAGE = (
 
 
 def _plan_module(state: LoadedModuleState) -> _ModulePlan:
-    """Resolve plan §5.4 onto a triple of booleans. The orchestrator runs
-    step 3 if `redo_step3` OR step 2 just produced fresh candidates, and runs
-    step 4 if `redo_step4` OR step 3 just produced fresh research."""
+    """Resolve plan §5.4 onto a quad of booleans. The orchestrator runs
+    step 3 if `redo_step3` OR step 2 just produced fresh candidates, runs
+    step 4 if `redo_step4` OR step 3 just produced fresh research, and runs
+    step 5 if `redo_step5` OR any earlier step just produced fresh output."""
     cp = state.checkpoint
     started_at = cp.started_at if cp is not None else _now_iso()
 
-    def _plan(*, s2=False, s3=False, s4=False, skip=False) -> _ModulePlan:
+    def _plan(
+        *, s2=False, s3=False, s4=False, s5=False, skip=False
+    ) -> _ModulePlan:
         return _ModulePlan(
             skip_module=skip,
             redo_step2=s2,
             redo_step3=s3,
             redo_step4=s4,
+            redo_step5=s5,
             started_at=started_at,
         )
 
+    def _ladder_to_first_missing() -> _ModulePlan:
+        if state.candidates is None:
+            return _plan(s2=True)
+        if state.deep_research is None:
+            return _plan(s3=True)
+        if state.proposal_from_finding is None:
+            return _plan(s4=True)
+        return _plan(s5=True)
+
     if cp is None:
         return _plan(s2=True)
+
+    # Legacy pre-step-5 terminal checkpoints: SUCCEEDED/DEGRADED whose
+    # `last_step` is step 4 and which never wrote agent_proposals.json. Treat
+    # as "step 5 owed" so old runs acquire step 5 without redoing 1-4. Must
+    # run before the generic terminal-status skip.
+    if (
+        cp.status in {"SUCCEEDED", "DEGRADED"}
+        and cp.last_step == "proposal_from_finding_creator"
+        and state.agent_proposals is None
+    ):
+        return _ladder_to_first_missing()
 
     if cp.status in {"SUCCEEDED", "DEGRADED", "SKIPPED"}:
         return _plan(skip=True)
@@ -345,6 +419,8 @@ def _plan_module(state: LoadedModuleState) -> _ModulePlan:
         return _plan(skip=True)
 
     if cp.status == "FAILED" and cp.retryable:
+        if cp.failed_step == "agent_proposals":
+            return _ladder_to_first_missing()
         if cp.failed_step == "proposal_from_finding_creator":
             if state.candidates is None:
                 return _plan(s2=True)
@@ -380,13 +456,26 @@ def _plan_module(state: LoadedModuleState) -> _ModulePlan:
             return _plan(s3=True)
         if state.proposal_from_finding is None:
             return _plan(s4=True)
+        return _plan(s5=True)
+
+    if cp.status == "AGENT_PROPOSALS_CREATED":
+        if state.candidates is None:
+            return _plan(s2=True)
+        if state.deep_research is None:
+            return _plan(s3=True)
+        if state.proposal_from_finding is None:
+            return _plan(s4=True)
+        if state.agent_proposals is None:
+            return _plan(s5=True)
         return _plan()  # finalize-only
 
     return _plan(s2=True)
 
 
 def _plan_requires_step_execution(plan: _ModulePlan) -> bool:
-    return plan.redo_step2 or plan.redo_step3 or plan.redo_step4
+    return (
+        plan.redo_step2 or plan.redo_step3 or plan.redo_step4 or plan.redo_step5
+    )
 
 
 async def _do_step2(
@@ -494,6 +583,36 @@ async def _do_step4(
     return result.output, result.total_duration_s, dict(result.per_pair_durations_s)
 
 
+async def _do_step5(
+    *,
+    candidates: Candidates,
+    tree: ProjectTree,
+    mgr_input: SpotlightsManagerInput,
+    cfg: SpotlightsManagerConfig,
+    module_paths: ModulePaths,
+) -> tuple[AgentProposalsOutput, float, dict[str, dict[str, float]]]:
+    """Returns (output, total_duration_s, per_candidate_durations_s)."""
+    ap_input = AgentProposalsInput(
+        project_tree=tree,
+        candidates=candidates,
+        context=mgr_input.context,
+    )
+    ap_cfg = _build_agent_proposals_config(
+        cfg, mgr_input.repo_path, module_paths.dir
+    )
+    result = await asyncio.to_thread(
+        create_agent_proposals_with_telemetry, ap_input, config=ap_cfg
+    )
+    return (
+        result.output,
+        result.total_duration_s,
+        {
+            cand_id: dict(durations)
+            for cand_id, durations in result.per_candidate_durations_s.items()
+        },
+    )
+
+
 async def _write_cancelled_checkpoint(
     *,
     qn: str,
@@ -504,8 +623,15 @@ async def _write_cancelled_checkpoint(
     manifest_lock: asyncio.Lock,
     manifest: dict[str, Any],
 ) -> ModuleCheckpoint:
-    if plan.redo_step4 and not plan.redo_step2 and not plan.redo_step3:
-        failed_step: PipelineStep = "proposal_from_finding_creator"
+    if (
+        plan.redo_step5
+        and not plan.redo_step2
+        and not plan.redo_step3
+        and not plan.redo_step4
+    ):
+        failed_step: PipelineStep = "agent_proposals"
+    elif plan.redo_step4 and not plan.redo_step2 and not plan.redo_step3:
+        failed_step = "proposal_from_finding_creator"
     elif plan.redo_step3 and not plan.redo_step2:
         failed_step = "module_deep_research"
     else:
@@ -589,6 +715,7 @@ async def _run_module(
             P.clear_discovery_artifacts(module_paths)
             P.clear_deep_research_artifacts(module_paths)
             P.clear_proposal_from_finding_artifacts(module_paths)
+            P.clear_agent_proposals_artifacts(module_paths)
             cp = _now_checkpoint(
                 qn=qn,
                 status="PENDING",
@@ -686,6 +813,7 @@ async def _run_module(
         if plan.redo_step3:
             P.clear_deep_research_artifacts(module_paths)
             P.clear_proposal_from_finding_artifacts(module_paths)
+            P.clear_agent_proposals_artifacts(module_paths)
 
         if run_step3:
             try:
@@ -742,6 +870,7 @@ async def _run_module(
         )
         if plan.redo_step4 and not (plan.redo_step2 or plan.redo_step3):
             P.clear_proposal_from_finding_artifacts(module_paths)
+            P.clear_agent_proposals_artifacts(module_paths)
 
         proposal_output: ProposalFromFindingCreatorOutput | None = None
 
@@ -822,21 +951,124 @@ async def _run_module(
             assert state.proposal_from_finding is not None
             proposal_output = state.proposal_from_finding
 
-        final_status = _final_status(research_output, proposal_output)
+        # ------------------------- step 5 -----------------------------------
+        run_step5 = (
+            plan.redo_step2
+            or plan.redo_step3
+            or plan.redo_step4
+            or plan.redo_step5
+            or state.agent_proposals is None
+        )
+        if plan.redo_step5 and not (
+            plan.redo_step2 or plan.redo_step3 or plan.redo_step4
+        ):
+            P.clear_agent_proposals_artifacts(module_paths)
+
+        agent_output: AgentProposalsOutput | None = None
+        if run_step5:
+            try:
+                agent_output, ap_duration, per_cand = await _do_step5(
+                    candidates=proposal_output.candidates,
+                    tree=tree,
+                    mgr_input=mgr_input,
+                    cfg=cfg,
+                    module_paths=module_paths,
+                )
+            except Exception as e:  # noqa: BLE001
+                if isinstance(
+                    e,
+                    (
+                        AgentProposalsSetupError,
+                        AgentProposalsValidationError,
+                        ValueError,
+                    ),
+                ):
+                    retryable = False
+                else:
+                    retryable = True
+                cp = _now_checkpoint(
+                    qn=qn,
+                    status="FAILED",
+                    last_step="proposal_from_finding_creator",
+                    failed_step="agent_proposals",
+                    error=f"{type(e).__name__}: {e}",
+                    retryable=retryable,
+                    issues=[
+                        _issue(
+                            "agent_proposals",
+                            f"{type(e).__name__}: {e}",
+                            recoverable=retryable,
+                        )
+                    ],
+                    started_at=plan.started_at,
+                )
+                P.write_checkpoint(module_paths, cp)
+                await _update_module_in_manifest(
+                    paths, manifest, manifest_lock, qn, cp
+                )
+                return cp
+
+            P.write_agent_proposals(
+                module_paths,
+                agent_output,
+                duration_s=ap_duration,
+                per_candidate_durations_s=per_cand,
+            )
+            cp = _now_checkpoint(
+                qn=qn,
+                status="AGENT_PROPOSALS_CREATED",
+                last_step="agent_proposals",
+                issues=(
+                    list(research_output.issues)
+                    + list(proposal_output.issues)
+                    + list(agent_output.issues)
+                ),
+                started_at=plan.started_at,
+            )
+            P.write_checkpoint(module_paths, cp)
+            await _update_module_in_manifest(paths, manifest, manifest_lock, qn, cp)
+        else:
+            assert state.agent_proposals is not None
+            agent_output = state.agent_proposals
+
+        # ------------------------- finalize ---------------------------------
+        final_status = _final_status(research_output, proposal_output, agent_output)
         combined_issues: list[StepIssue] = list(research_output.issues)
         if proposal_output is not None:
             combined_issues.extend(proposal_output.issues)
+        if agent_output is not None:
+            combined_issues.extend(agent_output.issues)
+
+        # On FAILED, prefer the latest step that actually produced an
+        # unrecoverable issue. On success, last_step is the furthest step
+        # whose sidecar was written.
+        if final_status == "FAILED":
+            if agent_output is not None and any(
+                not iss.recoverable for iss in agent_output.issues
+            ):
+                failed_step: PipelineStep | None = "agent_proposals"
+            elif proposal_output is not None and any(
+                not iss.recoverable for iss in proposal_output.issues
+            ):
+                failed_step = "proposal_from_finding_creator"
+            else:
+                failed_step = "module_deep_research"
+            last_step_for_cp: PipelineStep | None = (
+                "agent_proposals"
+                if agent_output is not None
+                else "proposal_from_finding_creator"
+                if proposal_output is not None
+                else "module_deep_research"
+            )
+        else:
+            failed_step = None
+            last_step_for_cp = "agent_proposals"
+
         cp = _now_checkpoint(
             qn=qn,
             status=final_status,
-            last_step=(
-                "proposal_from_finding_creator"
-                if final_status != "FAILED"
-                else "module_deep_research"
-            ),
-            failed_step=(
-                "module_deep_research" if final_status == "FAILED" else None
-            ),
+            last_step=last_step_for_cp,
+            failed_step=failed_step,
             error=(
                 None
                 if final_status != "FAILED"
@@ -896,6 +1128,7 @@ async def _run_async(
         discovery_cfg=config.discovery,
         deep_research_cfg=config.deep_research,
         proposal_from_finding_cfg=config.proposal_from_finding,
+        agent_proposals_cfg=config.agent_proposals,
     )
     manifest = _ensure_resume_compatible(
         paths, input_fp, config_fp, resume=config.resume
@@ -994,6 +1227,11 @@ async def _run_async(
             proposal_from_finding_per_pair_durations_s=dict(
                 state.proposal_from_finding_per_pair_durations_s
             ),
+            agent_proposals_duration_s=state.agent_proposals_duration_s,
+            agent_proposals_per_candidate_durations_s={
+                cand_id: dict(durations)
+                for cand_id, durations in state.agent_proposals_per_candidate_durations_s.items()
+            },
             issues=list(run_record.issues),
         )
         if run_record.status == "FAILED" and any(
@@ -1057,14 +1295,15 @@ def _assemble_module_run(
     findings = list(state.deep_research.findings) if state.deep_research else []
     issues = list(cp.issues)
     issues.extend(exception_issues)
-    # Prefer the post-step-4 candidates (with `deep_research_proposals`
-    # populated and state advanced). Fall back to the step-2 view when step 4
-    # never produced output (e.g. failed before sidecar write).
-    candidates = (
-        state.proposal_from_finding.candidates
-        if state.proposal_from_finding is not None
-        else state.candidates
-    )
+    # Prefer the post-step-5 candidates (state advanced through agent_proposals).
+    # Fall back to the post-step-4 view, then the step-2 view, when later
+    # steps never produced output.
+    if state.agent_proposals is not None:
+        candidates = state.agent_proposals.candidates
+    elif state.proposal_from_finding is not None:
+        candidates = state.proposal_from_finding.candidates
+    else:
+        candidates = state.candidates
     return ModuleRun(
         module_qualified_name=qn,
         status=arch_status,

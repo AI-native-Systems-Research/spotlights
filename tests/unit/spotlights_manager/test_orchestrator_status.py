@@ -21,6 +21,7 @@ from tests.unit.spotlights_manager._fakes import (
     make_input,
     make_research_output,
     make_tree,
+    patch_agent_proposals,
     patch_proposal_from_finding,
 )
 
@@ -61,6 +62,7 @@ def test_succeeded_happy_path(monkeypatch, repo: Path, artifacts: Path) -> None:
         lambda inp, options=None: make_research_output(n_findings=2),
     )
     patch_proposal_from_finding(monkeypatch, orch)
+    patch_agent_proposals(monkeypatch, orch)
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
@@ -129,6 +131,7 @@ def test_degraded_on_recoverable_issue(monkeypatch, repo: Path, artifacts: Path)
         ),
     )
     patch_proposal_from_finding(monkeypatch, orch)
+    patch_agent_proposals(monkeypatch, orch)
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
@@ -197,6 +200,7 @@ def test_degraded_on_step4_recoverable_issue(
         )
 
     monkeypatch.setattr(orch, "create_proposals_with_telemetry", _fake_step4)
+    patch_agent_proposals(monkeypatch, orch)
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
@@ -234,6 +238,7 @@ def test_failed_on_unrecoverable_issue(monkeypatch, repo: Path, artifacts: Path)
             ],
         ),
     )
+    patch_agent_proposals(monkeypatch, orch)
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,

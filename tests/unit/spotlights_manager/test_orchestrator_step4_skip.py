@@ -21,6 +21,7 @@ from tests.unit.spotlights_manager._fakes import (
     make_input,
     make_research_output,
     make_tree,
+    patch_agent_proposals,
 )
 
 
@@ -64,6 +65,7 @@ def test_zero_findings_synthesizes_step4_without_invoking_claude(
         raise AssertionError("step 4 must not run for zero findings")
 
     monkeypatch.setattr(orch, "create_proposals_with_telemetry", _no_step4)
+    patch_agent_proposals(monkeypatch, orch)
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
@@ -77,7 +79,9 @@ def test_zero_findings_synthesizes_step4_without_invoking_claude(
     assert mr.findings == []
     assert mr.candidates is not None
     for c in mr.candidates.candidates:
-        assert c.state == "FINDING_PROPOSALS_CREATED"
+        # Step 5 advances every candidate from FINDING_PROPOSALS_CREATED to
+        # AGENT_PROPOSALS_CREATED; deep_research_proposals stays empty.
+        assert c.state == "AGENT_PROPOSALS_CREATED"
         assert c.deep_research_proposals == []
 
     # The synthetic sidecar must be on disk so a resume sees the step-4 outputs.

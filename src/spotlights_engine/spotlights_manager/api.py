@@ -12,6 +12,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from spotlights_engine.agent_proposals import AgentProposalsConfig
 from spotlights_engine.candidate_discovery.api import (
     DiscoveryConfig,
     IterationTelemetry,
@@ -49,6 +50,7 @@ class SpotlightsManagerConfig(BaseModel):
     discovery: DiscoveryConfig | None = None
     deep_research: CodexExecOptions | None = None
     proposal_from_finding: ProposalFromFindingConfig | None = None
+    agent_proposals: AgentProposalsConfig | None = None
 
     resume: bool = True
 
@@ -64,6 +66,10 @@ class ModuleTelemetry(BaseModel):
     deep_research_duration_s: float | None = None
     proposal_from_finding_duration_s: float | None = None
     proposal_from_finding_per_pair_durations_s: dict[str, float] = Field(
+        default_factory=dict
+    )
+    agent_proposals_duration_s: float | None = None
+    agent_proposals_per_candidate_durations_s: dict[str, dict[str, float]] = Field(
         default_factory=dict
     )
     issues: list[StepIssue] = Field(default_factory=list)
