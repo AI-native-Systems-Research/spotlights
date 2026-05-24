@@ -31,13 +31,13 @@ Walk through these questions one at a time. Wait for the PM's response before mo
 Call the Python module to build the intent and assemble a proposal:
 
 ```bash
-cd spotlights-engine && uv run python -m spotlights_engine.objectives.cli build-intent '<json with target_metric, target_direction, workload_classes, priorities, notes>'
+PYTHONPATH=src .venv/bin/python -m spotlights_engine.objectives.cli build-intent '<json with target_metric, target_direction, workload_classes, priorities, notes>'
 ```
 
 Then:
 
 ```bash
-cd spotlights-engine && uv run python -m spotlights_engine.objectives.cli assemble-proposal '{"intent": <the intent JSON from above>}'
+PYTHONPATH=src .venv/bin/python -m spotlights_engine.objectives.cli assemble-proposal '{"intent": <the intent JSON from above>}'
 ```
 
 ## Present the proposal
@@ -56,7 +56,7 @@ Ask: "Does this look right? You can adjust the workload classes, priorities, or 
 Ask for the PM's name (for the `approved_by` field). Generate a session ID (use a UUID). Then finalize:
 
 ```bash
-cd spotlights-engine && uv run python -m spotlights_engine.objectives.cli finalize '{"proposal": <proposal JSON>, "session_id": "<uuid>", "approved_by": "<pm name>", "output_path": "objective.json"}'
+PYTHONPATH=src .venv/bin/python -m spotlights_engine.objectives.cli finalize '{"proposal": <proposal JSON>, "session_id": "<uuid>", "approved_by": "<pm name>", "output_path": "objective.json"}'
 ```
 
 Report the location of the output file and confirm the objective is locked for this session.
