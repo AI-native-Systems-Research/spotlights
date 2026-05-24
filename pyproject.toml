@@ -16,9 +16,7 @@ classifiers = [
     "Topic :: Software Development :: Libraries",
 ]
 dependencies = [
-    "pydantic>=2",
-    "spotlight-observability>=0.1",
-    "spotlight-knowledge>=0.1",
+    "pydantic>=2"
 ]
 
 [project.urls]
