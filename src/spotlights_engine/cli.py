@@ -331,6 +331,14 @@ def _print_summary(result: SpotlightsManagerResult) -> None:
 def main(argv: list[str] | None = None) -> int:
     args = _build_argparser().parse_args(argv)
 
+    # Resolve to absolute up-front: codex runs subprocesses with `-C <repo_path>`,
+    # so any relative path baked into a config (schema, last_message, artifacts)
+    # would resolve under the target repo, not this project's CWD.
+    args.artifacts_dir = args.artifacts_dir.resolve()
+    args.output_folder = args.output_folder.resolve()
+    if args.repo is not None:
+        args.repo = args.repo.resolve()
+
     args.artifacts_dir.mkdir(parents=True, exist_ok=True)
     args.output_folder.mkdir(parents=True, exist_ok=True)
 

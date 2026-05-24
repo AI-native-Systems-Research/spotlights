@@ -78,15 +78,17 @@ def run_candidate_codex(
         except OSError:
             pass
 
+    # Codex runs with `cwd=repo_path` and `-C <repo_path>`, so any relative
+    # path here would resolve under the target repo. Pass absolutes.
     argv: list[str] = [
         "codex",
         "exec",
         "-",
         "--json",
         "--output-last-message",
-        str(last_message_path),
+        str(last_message_path.resolve()),
         "--output-schema",
-        str(schema_path),
+        str(schema_path.resolve()),
         "--sandbox",
         "read-only",
         "-C",
