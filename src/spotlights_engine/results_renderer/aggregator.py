@@ -28,6 +28,18 @@ class IndexRow(BaseModel):
     n_relevant_findings: int
 
 
+class CandidateRow(BaseModel):
+    """One row of the per-module candidates table."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_id: str
+    symbol: str
+    candidate_page_path: str
+    estimated_impact: str
+    n_deep_research_proposals: int
+
+
 class ModulePageView(BaseModel):
     """View-model for a single module page."""
 
@@ -37,6 +49,7 @@ class ModulePageView(BaseModel):
     module: Module | None
     status: str
     candidates_sorted: list[Candidate] = Field(default_factory=list)
+    candidate_rows: list[CandidateRow] = Field(default_factory=list)
     findings: list[Finding] = Field(default_factory=list)
     issues: list[StepIssue] = Field(default_factory=list)
 
@@ -92,6 +105,7 @@ def aggregate(
         n_relevant = _count_relevant_findings(candidates, findings)
 
         from_slug = _module_page_filename(qn)
+        module_slug = from_slug[:-3]  # strip ".md"
         rows.append(
             IndexRow(
                 module_qualified_name=qn,
@@ -103,12 +117,24 @@ def aggregate(
             )
         )
 
+        candidate_rows = [
+            CandidateRow(
+                candidate_id=c.id,
+                symbol=c.symbol,
+                candidate_page_path=f"{module_slug}/{_candidate_page_filename(c)}",
+                estimated_impact=str(c.estimated_impact),
+                n_deep_research_proposals=len(c.deep_research_proposals),
+            )
+            for c in candidates_sorted
+        ]
+
         issues = _aggregate_issues(state)
         views[qn] = ModulePageView(
             qualified_name=qn,
             module=module,
             status=str(manifest_status),
             candidates_sorted=candidates_sorted,
+            candidate_rows=candidate_rows,
             findings=findings,
             issues=issues,
         )
@@ -127,6 +153,16 @@ def _module_page_filename(qn: str) -> str:
     from spotlights_engine.spotlights_manager.persistence import slug_for
 
     return f"{slug_for(qn)}.md"
+
+
+def _candidate_page_filename(candidate: Candidate) -> str:
+    """Page filename for a candidate. `<symbol-slug>__<id>.md`.
+
+    The `__{id}` suffix prevents collisions across candidates that happen to
+    slugify to the same base (e.g. overloaded names, unicode collapsing)."""
+    from spotlights_engine.spotlights_manager.persistence import slug_for
+
+    return f"{slug_for(candidate.symbol)}__{candidate.id}.md"
 
 
 def _module_status(
@@ -197,6 +233,7 @@ def _aggregate_issues(state: Any) -> list[StepIssue]:
 
 
 __all__ = [
+    "CandidateRow",
     "IndexRow",
     "ModulePageView",
     "aggregate",

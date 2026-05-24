@@ -1,15 +1,17 @@
 """Markdown emission for the results renderer.
 
-All writes are atomic temp-file + `os.replace`. Module pages are written
-first, `index.md` last, so a crash mid-render never leaves an `index.md`
-that points at a missing page. When `config.overwrite=True` the writer
-wipes `output_folder/modules/` before emitting so re-renders after a
-manifest with a removed module don't leave orphan pages.
+All writes are atomic temp-file + `os.replace`. Per-candidate pages are
+written first, then the module page that links to them, then `index.md`
+last — so a crash mid-render never leaves a parent page that points at
+a missing child. When `config.overwrite=True` the writer wipes
+`output_folder/modules/` before emitting so re-renders after a manifest
+with a removed module don't leave orphan pages.
 """
 
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from pathlib import Path
 from typing import Any
@@ -49,10 +51,23 @@ def emit(
     rows, views, skipped, warnings = aggregate(loaded, config)
 
     module_pages: dict[str, Path] = {}
+    candidate_pages: dict[str, dict[str, Path]] = {}
     for qn, view in views.items():
-        page_path = modules_dir / _page_filename_for_view(view)
+        module_page_filename = _page_filename_for_view(view)
+        page_path = modules_dir / module_page_filename
         findings_by_id = {f.finding_id: f for f in view.findings}
-        page_text = _render_module_page(view, config, findings_by_id)
+
+        candidates_by_id = {cand.id: cand for cand in view.candidates_sorted}
+        per_module: dict[str, Path] = {}
+        for row in view.candidate_rows:
+            cand = candidates_by_id[row.candidate_id]
+            cand_path = modules_dir / row.candidate_page_path
+            cand_text = _render_candidate_page(view, cand, config, findings_by_id)
+            _atomic_write_text(cand_path, cand_text)
+            per_module[row.candidate_id] = cand_path
+        candidate_pages[qn] = per_module
+
+        page_text = _render_module_page(view)
         _atomic_write_text(page_path, page_text)
         module_pages[qn] = page_path
 
@@ -69,6 +84,7 @@ def emit(
     return RendererResult(
         index_path=index_path,
         module_pages=module_pages,
+        candidate_pages=candidate_pages,
         skipped_modules=skipped,
         warnings=warnings,
     )
@@ -213,13 +229,11 @@ def _render_index(
 # ---------------------------------------------------------------------------
 
 
-def _render_module_page(
-    view: ModulePageView,
-    config: RendererConfig,
-    findings_by_id: dict[str, Finding],
-) -> str:
+def _render_module_page(view: ModulePageView) -> str:
     lines: list[str] = []
     lines.append(f"# {view.qualified_name}")
+    lines.append("")
+    lines.append("[← All modules](../index.md)")
     lines.append("")
 
     lines.append("## Module")
@@ -250,14 +264,20 @@ def _render_module_page(
 
     lines.append("## Candidates")
     lines.append("")
-    if not view.candidates_sorted:
+    if not view.candidate_rows:
         lines.append("_No candidates._")
         lines.append("")
     else:
-        for cand in view.candidates_sorted:
-            lines.extend(
-                _render_candidate_section(cand, config, findings_by_id)
+        lines.append("| Candidate | Impact | Deep research proposals |")
+        lines.append("|---|---|---:|")
+        for row in view.candidate_rows:
+            cell_symbol = _escape_table_cell(row.symbol)
+            lines.append(
+                f"| [`{cell_symbol}`]({row.candidate_page_path}) "
+                f"| {row.estimated_impact} "
+                f"| {row.n_deep_research_proposals} |"
             )
+        lines.append("")
 
     lines.append("## Findings (full list)")
     lines.append("")
@@ -285,14 +305,19 @@ def _render_module_page(
     return "\n".join(lines).rstrip() + "\n"
 
 
-def _render_candidate_section(
+def _render_candidate_page(
+    view: ModulePageView,
     cand: Candidate,
     config: RendererConfig,
     findings_by_id: dict[str, Finding],
-) -> list[str]:
+) -> str:
     lines: list[str] = []
-    lines.append(f"### Candidate: `{cand.symbol}` (`{cand.id}`)")
+    lines.append(f"# {cand.symbol}")
     lines.append("")
+    module_page = _page_filename_for_view(view)
+    lines.append(f"[← {view.qualified_name}](../{module_page})")
+    lines.append("")
+
     file_link = _file_link(cand.file, config)
     lines.append(
         f"- **File:** {file_link} (lines {cand.line_start}–{cand.line_end})"
@@ -301,32 +326,33 @@ def _render_candidate_section(
     lines.append(f"- **Kind:** {cand.kind}")
     lines.append(f"- **Estimated impact:** {cand.estimated_impact}")
     lines.append(f"- **State:** {cand.state}")
+    lines.append(f"- **Id:** `{cand.id}`")
     lines.append("")
 
-    lines.append("#### Description")
+    lines.append("## Description")
     lines.append(cand.description)
     lines.append("")
 
-    lines.append("#### Current approach")
+    lines.append("## Current approach")
     lines.append(cand.current_approach)
     lines.append("")
 
-    lines.append("#### Estimated impact explanation")
+    lines.append("## Estimated impact explanation")
     lines.append(cand.estimated_impact_explanation)
     lines.append("")
 
-    lines.append("#### Evolve rationale")
+    lines.append("## Evolve rationale")
     lines.append(cand.evolve_rationale)
     lines.append("")
 
-    lines.append("#### Deep research proposals")
+    lines.append("## Deep research proposals")
     lines.append("")
     if not cand.deep_research_proposals:
         lines.append("_No proposals._")
         lines.append("")
     else:
         for n, p in enumerate(cand.deep_research_proposals, start=1):
-            lines.append(f"##### {n}. {p.title}")
+            lines.append(f"### {n}. {p.title}")
             finding = findings_by_id.get(p.finding_id)
             if finding is not None:
                 lines.append(
@@ -348,14 +374,14 @@ def _render_candidate_section(
             lines.append("---")
             lines.append("")
 
-    lines.append("#### Agent proposals")
+    lines.append("## Agent proposals")
     lines.append("")
     if not cand.agent_proposals:
         lines.append("_No proposals._")
         lines.append("")
     else:
         for n, p in enumerate(cand.agent_proposals, start=1):
-            lines.append(f"##### {n}. {p.title}")
+            lines.append(f"### {n}. {p.title}")
             lines.append(f"- **Agent:** {p.agent_name}")
             lines.append("")
             lines.append("**Detailed description.**")
@@ -369,7 +395,16 @@ def _render_candidate_section(
             lines.append("---")
             lines.append("")
 
-    return lines
+    return "\n".join(lines).rstrip() + "\n"
+
+
+_TABLE_CELL_WS_RE = re.compile(r"\s+")
+
+
+def _escape_table_cell(text: str) -> str:
+    """Escape `|` and collapse whitespace for safe inclusion in a markdown
+    table cell. Whitespace runs (including newlines) become a single space."""
+    return _TABLE_CELL_WS_RE.sub(" ", text.replace("|", r"\|")).strip()
 
 
 def _file_link(file_path: str, config: RendererConfig) -> str:

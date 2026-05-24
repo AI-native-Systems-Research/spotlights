@@ -39,6 +39,7 @@ class RendererResult(BaseModel):
 
     index_path: Path
     module_pages: dict[str, Path] = Field(default_factory=dict)
+    candidate_pages: dict[str, dict[str, Path]] = Field(default_factory=dict)
     skipped_modules: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 
