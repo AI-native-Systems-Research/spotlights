@@ -111,6 +111,7 @@ def test_resume_runs_only_step5_from_finding_proposals_created(
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         module_filter=ModuleFilter(include=["v1.kv_offload"]),
     )
     run_with_telemetry(make_input(repo), config=cfg)
@@ -160,6 +161,7 @@ def test_legacy_terminal_step4_resume_runs_only_step5(
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         module_filter=ModuleFilter(include=["v1.kv_offload"]),
     )
     run_with_telemetry(make_input(repo), config=cfg)
@@ -207,6 +209,7 @@ def test_pre_step5_manifest_migrates_for_default_agent_config(
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         module_filter=ModuleFilter(include=["v1.kv_offload"]),
     )
     run_with_telemetry(make_input(repo), config=cfg)
@@ -252,6 +255,7 @@ def test_pre_step5_manifest_rejects_non_default_agent_config(
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         module_filter=ModuleFilter(include=["v1.kv_offload"]),
     )
     run_with_telemetry(make_input(repo), config=cfg)

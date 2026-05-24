@@ -12,6 +12,7 @@ from spotlights_engine.modules_extractor import ExtractorConfig
 from spotlights_engine.proposal_from_finding_creator import (
     ProposalFromFindingConfig,
 )
+from spotlights_engine.schemas.common import SpotlightContext
 from spotlights_engine.spotlights_manager import persistence as P
 from spotlights_engine.spotlights_manager.persistence import (
     ManagerPaths,
@@ -177,6 +178,7 @@ def test_init_manifest_creates_tree(tmp_path: Path) -> None:
         paths,
         input_fingerprint={"a": 1},
         config_fingerprint={"b": 2},
+        context=SpotlightContext(objective="x"),
     )
     assert paths.manifest_path.exists()
     assert paths.modules_root.exists()

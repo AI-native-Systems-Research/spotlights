@@ -111,6 +111,7 @@ def test_proposal_from_finding_options_per_module_override(
     )
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         proposal_from_finding=caller_pf,
         module_filter=ModuleFilter(include=["v1.kv_offload"]),
     )
@@ -153,6 +154,7 @@ def test_proposal_from_finding_default_when_caller_none(
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         module_filter=ModuleFilter(include=["v1.kv_offload"]),
     )
     # Should not raise — defaults are used.

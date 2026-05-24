@@ -86,6 +86,7 @@ def test_agent_proposals_options_per_module_override(
     )
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         agent_proposals=caller_ap,
         module_filter=ModuleFilter(include=["v1.kv_offload"]),
     )

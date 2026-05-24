@@ -69,6 +69,7 @@ def test_zero_findings_synthesizes_step4_without_invoking_claude(
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         module_filter=ModuleFilter(include=["v1.kv_offload"]),
     )
     result = run_with_telemetry(make_input(repo), config=cfg)

@@ -45,6 +45,7 @@ from spotlights_engine.schemas.candidate import Candidate, Candidates
 from spotlights_engine.schemas.common import (
     ModuleRunStatus,
     PipelineStep,
+    SpotlightContext,
     StepIssue,
 )
 from spotlights_engine.schemas.pipeline import (
@@ -238,6 +239,7 @@ def _ensure_resume_compatible(
     config_fp: dict[str, Any],
     *,
     resume: bool,
+    context: SpotlightContext,
 ) -> dict[str, Any]:
     existing = P.read_manifest(paths)
     if existing is None:
@@ -245,6 +247,7 @@ def _ensure_resume_compatible(
             paths,
             input_fingerprint=input_fp,
             config_fingerprint=config_fp,
+            context=context,
         )
 
     if not resume:
@@ -1131,7 +1134,7 @@ async def _run_async(
         agent_proposals_cfg=config.agent_proposals,
     )
     manifest = _ensure_resume_compatible(
-        paths, input_fp, config_fp, resume=config.resume
+        paths, input_fp, config_fp, resume=config.resume, context=input.context
     )
 
     # Step 1.
@@ -1246,13 +1249,64 @@ async def _run_async(
     )
     P.write_manifest(paths, manifest)
 
+    renderer_result, manager_issues = _render_results(
+        artifacts_dir=paths.artifacts_dir,
+        output_folder=config.output_folder,
+    )
+
     return SpotlightsManagerResult(
         project_tree=tree,
         context=input.context,
         module_runs=module_runs,
         extractor_invocation=invocation,
         per_module_telemetry=per_module_telemetry,
+        manager_issues=manager_issues,
+        renderer_result=renderer_result,
     )
+
+
+def _render_results(
+    *, artifacts_dir: Path, output_folder: Path
+) -> tuple[Any, list[StepIssue]]:
+    """Step 6 — invoke the results renderer and translate failures into a
+    manager-level `StepIssue`. Returns `(RendererResult | None, issues)`."""
+    # Late import to avoid an import cycle (results_renderer imports
+    # spotlights_manager.persistence).
+    from spotlights_engine.results_renderer import (
+        RendererInput,
+        RendererSetupError,
+        render,
+    )
+
+    issues: list[StepIssue] = []
+    try:
+        result = render(
+            RendererInput(
+                artifacts_dir=artifacts_dir,
+                output_folder=output_folder,
+            )
+        )
+        return result, issues
+    except RendererSetupError as exc:
+        issues.append(
+            _issue(
+                "results_renderer",
+                f"results_renderer skipped: {type(exc).__name__}: {exc}",
+                recoverable=True,
+                severity="warning",
+            )
+        )
+        return None, issues
+    except Exception as exc:  # noqa: BLE001
+        issues.append(
+            _issue(
+                "results_renderer",
+                f"results_renderer failed: {type(exc).__name__}: {exc}",
+                recoverable=True,
+                severity="error",
+            )
+        )
+        return None, issues
 
 
 def _assemble_module_run(

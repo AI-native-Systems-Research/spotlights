@@ -31,7 +31,7 @@ from spotlights_engine.proposal_from_finding_creator import (
     ProposalFromFindingConfig,
 )
 from spotlights_engine.schemas.candidate import Candidates
-from spotlights_engine.schemas.common import PipelineStep, StepIssue
+from spotlights_engine.schemas.common import PipelineStep, SpotlightContext, StepIssue
 from spotlights_engine.schemas.pipeline import (
     AgentProposalsOutput,
     ModuleDeepResearchOutput,
@@ -305,6 +305,7 @@ def init_manifest(
     *,
     input_fingerprint: dict[str, Any],
     config_fingerprint: dict[str, Any],
+    context: SpotlightContext,
 ) -> dict[str, Any]:
     now = _now_iso()
     manifest: dict[str, Any] = {
@@ -314,6 +315,7 @@ def init_manifest(
         "status": "RUNNING",
         "input_fingerprint": input_fingerprint,
         "config_fingerprint": config_fingerprint,
+        "context": context.model_dump(mode="json"),
         "extractor": {"completed": False, "duration_s": None},
         "modules": {},
     }

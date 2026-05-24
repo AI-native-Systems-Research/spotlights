@@ -42,6 +42,7 @@ class SpotlightsManagerConfig(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     artifacts_dir: Path
+    output_folder: Path
     max_parallel_sessions: int = Field(default=1, ge=1)
 
     module_filter: ModuleFilter | None = None
@@ -91,6 +92,8 @@ class SpotlightsManagerResult(SpotlightsResult):
 
     extractor_invocation: ExtractionInvocation
     per_module_telemetry: dict[str, ModuleTelemetry] = Field(default_factory=dict)
+    manager_issues: list[StepIssue] = Field(default_factory=list)
+    renderer_result: "RendererResult | None" = None
 
 
 def run(
@@ -115,6 +118,16 @@ def run_with_telemetry(
     )
 
     return _orchestrator_run(input, config=config)
+
+
+# Resolve forward reference to `RendererResult`. The renderer package imports
+# `spotlights_manager.persistence`, not `spotlights_manager.api`, so the cycle
+# is avoided by deferring this import to module bottom.
+from spotlights_engine.results_renderer.api import (  # noqa: E402
+    RendererResult,
+)
+
+SpotlightsManagerResult.model_rebuild()
 
 
 __all__ = [

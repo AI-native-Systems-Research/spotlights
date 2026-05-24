@@ -59,6 +59,7 @@ def test_deep_research_options_per_module_override(tmp_path: Path, monkeypatch) 
     )
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         deep_research=caller_options,
         module_filter=ModuleFilter(include=["v1.kv_offload"]),
     )
@@ -108,6 +109,7 @@ def test_deep_research_options_default_when_caller_none(
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         module_filter=ModuleFilter(include=["v1.kv_offload"]),
     )
     run_with_telemetry(make_input(repo), config=cfg)

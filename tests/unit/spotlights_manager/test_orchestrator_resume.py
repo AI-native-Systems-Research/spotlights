@@ -74,6 +74,7 @@ def test_resume_skips_completed_module(monkeypatch, repo: Path, artifacts: Path)
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         module_filter=ModuleFilter(include=["v1.kv_offload"]),
     )
     run_with_telemetry(make_input(repo), config=cfg)
@@ -103,6 +104,7 @@ def test_resume_reruns_only_step3_when_research_artifact_missing(
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         module_filter=ModuleFilter(include=["v1.kv_offload"]),
     )
     run_with_telemetry(make_input(repo), config=cfg)
@@ -139,6 +141,7 @@ def test_resume_reruns_step2_when_candidates_missing(
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         module_filter=ModuleFilter(include=["v1.kv_offload"]),
     )
     run_with_telemetry(make_input(repo), config=cfg)
@@ -190,6 +193,7 @@ def test_redoing_step2_clears_stale_research_output(
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         module_filter=ModuleFilter(include=["v1.kv_offload"]),
     )
     run_with_telemetry(make_input(repo), config=cfg)
@@ -227,6 +231,7 @@ def test_resume_false_refuses_existing_run_dir(
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         module_filter=ModuleFilter(include=["v1.kv_offload"]),
     )
     run_with_telemetry(make_input(repo), config=cfg)
@@ -246,6 +251,7 @@ def test_resume_mismatch_on_changed_input(
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         module_filter=ModuleFilter(include=["v1.kv_offload"]),
     )
     run_with_telemetry(make_input(repo), config=cfg)
@@ -285,6 +291,7 @@ def test_resume_reruns_only_step4_when_proposal_artifact_missing(
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         module_filter=ModuleFilter(include=["v1.kv_offload"]),
     )
     run_with_telemetry(make_input(repo), config=cfg)
@@ -338,6 +345,7 @@ def test_resume_skips_step4_when_finding_proposals_created_intact(
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         module_filter=ModuleFilter(include=["v1.kv_offload"]),
     )
     run_with_telemetry(make_input(repo), config=cfg)
@@ -382,6 +390,7 @@ def test_resume_redoes_step4_only_when_failed_step_is_step4(
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         module_filter=ModuleFilter(include=["v1.kv_offload"]),
     )
     run_with_telemetry(make_input(repo), config=cfg)

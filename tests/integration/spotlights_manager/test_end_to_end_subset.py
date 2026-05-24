@@ -50,6 +50,7 @@ def test_manager_runs_subset_and_resumes(tmp_path: Path) -> None:
     )
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         module_filter=ModuleFilter(include=["v1.foo"]),
     )
 

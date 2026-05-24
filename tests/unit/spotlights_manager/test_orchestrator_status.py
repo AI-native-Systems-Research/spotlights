@@ -66,6 +66,7 @@ def test_succeeded_happy_path(monkeypatch, repo: Path, artifacts: Path) -> None:
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         module_filter=ModuleFilter(include=["v1.kv_offload"]),
     )
     result = run_with_telemetry(make_input(repo), config=cfg)
@@ -97,6 +98,7 @@ def test_skipped_when_no_candidates(monkeypatch, repo: Path, artifacts: Path) ->
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         module_filter=ModuleFilter(include=["v1.kv_offload"]),
     )
     result = run_with_telemetry(make_input(repo), config=cfg)
@@ -135,6 +137,7 @@ def test_degraded_on_recoverable_issue(monkeypatch, repo: Path, artifacts: Path)
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         module_filter=ModuleFilter(include=["v1.kv_offload"]),
     )
     result = run_with_telemetry(make_input(repo), config=cfg)
@@ -204,6 +207,7 @@ def test_degraded_on_step4_recoverable_issue(
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         module_filter=ModuleFilter(include=["v1.kv_offload"]),
     )
     result = run_with_telemetry(make_input(repo), config=cfg)
@@ -242,6 +246,7 @@ def test_failed_on_unrecoverable_issue(monkeypatch, repo: Path, artifacts: Path)
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         module_filter=ModuleFilter(include=["v1.kv_offload"]),
     )
     result = run_with_telemetry(make_input(repo), config=cfg)
@@ -264,6 +269,7 @@ def test_step2_exception_marks_failed_retryable(
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         module_filter=ModuleFilter(include=["v1.kv_offload"]),
     )
     result = run_with_telemetry(make_input(repo), config=cfg)
@@ -296,6 +302,7 @@ def test_fail_fast_writes_retryable_checkpoint_for_not_started_module(
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         max_parallel_sessions=1,
         module_filter=ModuleFilter(
             include=["v1.kv_offload", "v1.attention.paged_kv"]
@@ -355,6 +362,7 @@ def test_fail_fast_cancels_after_unhandled_task_exception(
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         max_parallel_sessions=1,
         module_filter=ModuleFilter(
             include=["v1.kv_offload", "v1.attention.paged_kv"]

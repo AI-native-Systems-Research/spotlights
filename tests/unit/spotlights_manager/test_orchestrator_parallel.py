@@ -64,6 +64,7 @@ def test_max_parallel_sessions_respected(tmp_path: Path, monkeypatch) -> None:
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
         max_parallel_sessions=2,
         module_filter=ModuleFilter(
             include=["v1.kv_offload", "v1.attention.paged_kv"]

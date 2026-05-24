@@ -26,6 +26,9 @@ from spotlights_engine.spotlights_manager import (
 
 REPO_PATH = Path("/Users/ophir/PycharmProjects/vllm")
 ARTIFACTS_DIR = Path(__file__).resolve().parent.parent / "tmp" / "spotlights_manager"
+OUTPUT_FOLDER = (
+    Path(__file__).resolve().parent.parent / "tmp" / "spotlights_results"
+)
 
 
 def _build_argparser() -> argparse.ArgumentParser:
@@ -41,6 +44,15 @@ def _build_argparser() -> argparse.ArgumentParser:
         type=Path,
         default=ARTIFACTS_DIR,
         help=f"Where to write checkpoints (default: {ARTIFACTS_DIR})",
+    )
+    p.add_argument(
+        "--output-folder",
+        type=Path,
+        default=OUTPUT_FOLDER,
+        help=(
+            "Where the renderer writes index.md and modules/*.md "
+            f"(default: {OUTPUT_FOLDER})"
+        ),
     )
     p.add_argument(
         "--include",
@@ -129,6 +141,7 @@ def main() -> None:
 
     cfg = SpotlightsManagerConfig(
         artifacts_dir=args.artifacts_dir,
+        output_folder=args.output_folder,
         max_parallel_sessions=args.max_parallel,
         module_filter=ModuleFilter(include=list(args.include)) if args.include else None,
         proposal_from_finding=proposal_cfg,
@@ -137,6 +150,7 @@ def main() -> None:
     )
 
     args.artifacts_dir.mkdir(parents=True, exist_ok=True)
+    args.output_folder.mkdir(parents=True, exist_ok=True)
     result = run_with_telemetry(inp, config=cfg)
 
     print(f"modules: {len(result.module_runs)}")
@@ -163,6 +177,10 @@ def main() -> None:
     inv = result.extractor_invocation
     print(f"extractor: duration_s={inv.duration_s:.1f} cost_usd={inv.cost_usd}")
     print(f"artifacts: {args.artifacts_dir}")
+    if result.renderer_result is not None:
+        print(f"results: {result.renderer_result.index_path}")
+    for issue in result.manager_issues:
+        print(f"manager-issue [{issue.step}/{issue.severity}]: {issue.message}")
 
 
 if __name__ == "__main__":

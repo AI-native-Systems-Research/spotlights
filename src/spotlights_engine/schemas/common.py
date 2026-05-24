@@ -18,6 +18,7 @@ PipelineStep = Literal[
     "module_deep_research",
     "proposal_from_finding_creator",
     "agent_proposals",
+    "results_renderer",
 ]
 
 ModuleRunStatus = Literal["SUCCEEDED", "DEGRADED", "SKIPPED", "FAILED"]
