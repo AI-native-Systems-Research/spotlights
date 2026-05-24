@@ -15,9 +15,6 @@ from spotlights_engine.results_renderer.api import RendererConfig
 from spotlights_engine.results_renderer.loader import LoadedRun
 
 
-_IMPACT_ORDER = {"high": 0, "medium": 1, "low": 2}
-
-
 class IndexRow(BaseModel):
     """One row of the index table — one per module."""
 
@@ -88,7 +85,7 @@ def aggregate(
 
         candidates_sorted = sorted(
             candidates,
-            key=lambda c: (_IMPACT_ORDER.get(c.estimated_impact, 99), c.id),
+            key=lambda c: (-len(c.deep_research_proposals), c.id),
         )
 
         n_high = sum(1 for c in candidates if c.estimated_impact == "high")
@@ -118,8 +115,7 @@ def aggregate(
 
     rows.sort(
         key=lambda r: (
-            -r.n_high_impact_candidates,
-            -r.n_candidates,
+            -r.n_relevant_findings,
             r.module_qualified_name,
         )
     )
