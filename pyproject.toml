@@ -1,16 +1,34 @@
 [project]
 name = "spotlight-engine"
-version = "0.0.0"
-description = "Spotlight Engine spine: schemas, orchestration, integration tests, and the demo path."
+version = "0.1.0"
+description = "Propose high-leverage, evidence-backed code changes for a target repo."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
 authors = [{ name = "Spotlight Engine contributors" }]
+keywords = ["llm", "code-analysis", "agent", "performance", "research"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries",
+]
 dependencies = [
     "pydantic>=2",
-    "spotlight-observability",
-    "spotlight-knowledge",
+    "spotlight-observability>=0.1",
+    "spotlight-knowledge>=0.1",
 ]
+
+[project.urls]
+Homepage      = "https://github.com/Video-AI/spotlight-engine"
+Documentation = "https://github.com/Video-AI/spotlight-engine#readme"
+Issues        = "https://github.com/Video-AI/spotlight-engine/issues"
+Source        = "https://github.com/Video-AI/spotlight-engine"
+
+[project.scripts]
+spotlight-engine = "spotlights_engine.cli:main"
 
 [project.optional-dependencies]
 dev = [
@@ -24,12 +42,21 @@ dev = [
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+# Path-source overrides for the sibling repos are intentionally NOT shipped in
+# the public pyproject.toml — they would break any clone outside a maintainer's
+# machine. Contributors who need editable installs of the siblings should keep
+# those overrides in a personal `uv.toml` or a separate `pyproject.dev.toml`.
+
 [tool.hatch.build.targets.wheel]
 packages = ["src/spotlights_engine"]
 
-[tool.uv.sources]
-spotlight-observability = { path = "../spotlight-observability", editable = true }
-spotlight-knowledge = { path = "../spotlight-knowledge", editable = true }
+[tool.hatch.build.targets.sdist]
+exclude = [
+    "tmp/",
+    "dist/",
+    "examples/**/artifacts/**",
+    "scripts/__pycache__/",
+]
 
 [tool.ruff]
 line-length = 100
