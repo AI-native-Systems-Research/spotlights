@@ -1,5 +1,12 @@
 """Spotlight Engine: spine for schemas, orchestration, and integration."""
 
+import logging as _logging
+
+# Library default: silence package-level logs unless the application opts in.
+# Avoids stderr noise from Python's `lastResort` handler for WARNING+ records
+# when the host application has not configured logging.
+_logging.getLogger("spotlights_engine").addHandler(_logging.NullHandler())
+
 from spotlights_engine.agent_proposals import (
     AgentProposalsConfig,
     AgentProposalsSetupError,

@@ -11,6 +11,7 @@ strict-mode reminder appended; a second failure raises.
 from __future__ import annotations
 
 import json
+import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -45,6 +46,9 @@ from spotlights_engine.candidate_discovery.validation import Validator
 from spotlights_engine.schemas.candidate import Candidate, Candidates
 from spotlights_engine.schemas.pipeline import CandidateDiscoveryInput
 from spotlights_engine.schemas.project import Module
+
+
+_log = logging.getLogger(__name__)
 
 
 _MIN_SEEN_ID = "cand-0000"
@@ -326,6 +330,14 @@ class Orchestrator:
         for c in outcome.candidates.candidates:
             if c.id > self._max_seen_id:
                 self._max_seen_id = c.id
+
+        _log.info(
+            "[%s] discovery: iteration %d (%s) — %d candidates so far",
+            self._input.module_qualified_name,
+            outcome.telemetry.n,
+            outcome.telemetry.agent,
+            len(outcome.candidates.candidates),
+        )
 
     def _copy_final(self) -> None:
         assert self._last_iter_dir is not None
