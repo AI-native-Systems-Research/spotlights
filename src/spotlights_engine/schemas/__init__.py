@@ -45,6 +45,7 @@ from spotlights_engine.schemas.pipeline import (
 )
 from spotlights_engine.schemas.project import File, Module, ProjectTree, Repository
 from spotlights_engine.schemas.proposals import AgentProposal, DeepResearchProposal
+from spotlights_engine.objectives.schemas import Objective, ObjectiveIntent
 
 __all__ = [
     "AgentProposal",
@@ -61,6 +62,8 @@ __all__ = [
     "Finding",
     "FindingSourceType",
     "Module",
+    "Objective",
+    "ObjectiveIntent",
     "ModuleDeepResearchInput",
     "ModuleDeepResearchOutput",
     "ModuleRun",
