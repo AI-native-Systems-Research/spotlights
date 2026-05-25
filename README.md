@@ -1,12 +1,23 @@
-# Spotlight Engine
+# Spotlights — A deep research agent that locates optimization targets across a repo and proposes evidence-backed changes
 
-Given a target repo and an objective, Spotlight Engine proposes evidence-backed,
-high-leverage code changes. It works in three tiers:
+Point Spotlights at a repo and an objective ("reduce TTFT", "cut memory in the
+hot path", "make this safer under concurrent writes") and it returns a ranked,
+browsable map of the few places worth touching — each with a concrete,
+evidence-backed proposal grounded in the code, the literature, and the
+objective.
 
-1. **Structural map** — extract the project's modules.
-2. **Candidates** — identify symbols worth investigating per module.
-3. **Proposals** — produce literature-derived and agent-derived change proposals
-   for each candidate.
+Most code-research tools either scan broadly and return shallow hits, or dive
+deeply into a single file you already picked. Spotlights does the part in
+between: it decides *which* symbols across the whole repo are worth deep
+investigation for your objective, then spends real research effort on each one.
+
+It works in three tiers, narrowing as it goes:
+
+1. **Structural map** — extract the project's modules and how they fit together.
+2. **Candidates** — pick the symbols, per module, most worth investigating for
+   the stated objective.
+3. **Proposals** — for each candidate, produce literature-derived and
+   agent-derived change proposals, with citations and rationale.
 
 The output is a tree of plain Markdown files you browse in any viewer (GitHub,
 VS Code preview, Obsidian).
@@ -58,6 +69,7 @@ On disk:
 ```
 spotlight-out/
   index.md                          # repo-level summary, one row per module
+  result.json                       # full structured run output
   modules/
     v1.kv_offload.md                # module page: candidates table
     v1.kv_offload/
