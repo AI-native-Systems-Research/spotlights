@@ -201,13 +201,12 @@ def _render_index(
         lines.append("_(no modules to display)_")
     else:
         lines.append(
-            "| Module | Status | Candidates | High-impact | Relevant findings |"
+            "| Module | Candidates | High-impact | Relevant findings |"
         )
-        lines.append("|---|---|---:|---:|---:|")
+        lines.append("|---|---:|---:|---:|")
         for row in rows:
             lines.append(
                 f"| [{row.module_qualified_name}]({row.module_page_path}) "
-                f"| {row.status} "
                 f"| {row.n_candidates} "
                 f"| {row.n_high_impact_candidates} "
                 f"| {row.n_relevant_findings} |"
