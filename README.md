@@ -170,8 +170,8 @@ output if `codex` still isn't on `PATH`.
 ### Install the engine
 
 ```bash
-git clone https://github.com/Video-AI/spotlights-engine.git
-cd spotlights-engine
+git clone https://github.com/Video-AI/spotlights.git
+cd spotlights
 uv sync --all-extras
 ```
 
