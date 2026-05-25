@@ -122,3 +122,20 @@ def _default_stage_stubs(request, monkeypatch):
         )
 
     monkeypatch.setattr(s04_change_generation, "_generate_change", _fake_change)
+
+    # ── Stage 05 ─────────────────────────────────────────────────────
+    from spotlights_engine.signal_pipeline.schemas import ExecutionResult
+    from spotlights_engine.signal_pipeline.stages import s05_execution
+
+    def _fake_execute(*, change, subject_root, log_dir, backend_id):
+        return ExecutionResult(
+            result_id=f"res-{change.candidate_ref}",
+            change_ref=change.change_id,
+            backend_id=backend_id,
+            status="applied",
+            file_edits=[],
+            rationale="conftest stub execution",
+            artifacts={},
+        )
+
+    monkeypatch.setattr(s05_execution, "_execute_change", _fake_execute)
