@@ -67,3 +67,41 @@ def _default_stage_stubs(request, monkeypatch):
         )
 
     monkeypatch.setattr(s02_projecttree, "_extract_project_tree", _fake_extract)
+
+    # ── Stage 03 ─────────────────────────────────────────────────────
+    from spotlights_engine.schemas.candidate import Candidate
+    from spotlights_engine.signal_pipeline.stages import s03_candidate_generation
+
+    def _fake_candidates(*, signals, project_tree, subject_root, log_dir):
+        return [
+            Candidate(
+                id="cand-0001",
+                file="stub_module/example.py",
+                line_start=1,
+                line_end=10,
+                symbol="stub_function_a",
+                kind="function",
+                description="Phase 1 stub candidate.",
+                current_approach="Stubbed.",
+                evolve_rationale="Stubbed.",
+                estimated_impact="medium",
+                estimated_impact_explanation="Stubbed.",
+            ),
+            Candidate(
+                id="cand-0002",
+                file="stub_module/example.py",
+                line_start=20,
+                line_end=30,
+                symbol="stub_function_b",
+                kind="function",
+                description="Phase 1 stub candidate.",
+                current_approach="Stubbed.",
+                evolve_rationale="Stubbed.",
+                estimated_impact="low",
+                estimated_impact_explanation="Stubbed.",
+            ),
+        ]
+
+    monkeypatch.setattr(
+        s03_candidate_generation, "_run_candidate_generation", _fake_candidates
+    )
