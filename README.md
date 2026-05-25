@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/logo.png" alt="Spotlights" width="400">
+</p>
+
 # Spotlights - A deep research agent that locates optimization targets across a repo and proposes evidence-backed changes
 
 Point Spotlights at a repo and an objective ("reduce TTFT", "raise throughput under sustained load") and it returns a ranked,
