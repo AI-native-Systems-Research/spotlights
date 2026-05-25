@@ -1,5 +1,5 @@
 [project]
-name = "spotlight-engine"
+name = "spotlights-engine"
 version = "0.1.0"
 description = "Propose high-leverage, evidence-backed code changes for a target repo."
 readme = "README.md"
@@ -20,13 +20,13 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage      = "https://github.com/Video-AI/spotlight-engine"
-Documentation = "https://github.com/Video-AI/spotlight-engine#readme"
-Issues        = "https://github.com/Video-AI/spotlight-engine/issues"
-Source        = "https://github.com/Video-AI/spotlight-engine"
+Homepage      = "https://github.com/Video-AI/spotlights-engine"
+Documentation = "https://github.com/Video-AI/spotlights-engine#readme"
+Issues        = "https://github.com/Video-AI/spotlights-engine/issues"
+Source        = "https://github.com/Video-AI/spotlights-engine"
 
 [project.scripts]
-spotlight-engine = "spotlights_engine.cli:main"
+spotlights-engine = "spotlights_engine.cli:main"
 
 [project.optional-dependencies]
 dev = [

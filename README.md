@@ -44,8 +44,8 @@ Both CLIs are required for the default end-to-end path; the engine will not
 run without one of them today.
 
 ```bash
-git clone https://github.com/Video-AI/spotlight-engine.git
-cd spotlight-engine
+git clone https://github.com/Video-AI/spotlights-engine.git
+cd spotlights-engine
 uv sync --all-extras
 ```
 
@@ -54,19 +54,19 @@ uv sync --all-extras
 Clone vLLM next to this repo, then:
 
 ```bash
-spotlight-engine \
+spotlights-engine \
   --repo ../vllm \
   --include v1.kv_offload \
   --objective "reduce the median TTFT and median TPOT (Time Per Output Token)" \
   --hint "Multi-turn agentic workload" \
-  --output-folder ./spotlight-out \
+  --output-folder ./spotlights-out \
   --artifacts-dir ./artifacts
 ```
 
 On disk:
 
 ```
-spotlight-out/
+spotlights-out/
   index.md                          # repo-level summary, one row per module
   result.json                       # full structured run output
   modules/
@@ -81,8 +81,8 @@ artifacts/
 or pass several values after a single flag:
 
 ```bash
-spotlight-engine --include v1.kv_offload v1.attention.paged_kv ...
-spotlight-engine --include v1.kv_offload --include v1.attention.paged_kv ...
+spotlights-engine --include v1.kv_offload v1.attention.paged_kv ...
+spotlights-engine --include v1.kv_offload --include v1.attention.paged_kv ...
 ```
 
 ## Example output
@@ -103,7 +103,7 @@ All flags are optional once `--repo` and the agent CLIs are available.
 | `--include` | (all modules) | Restrict to dot-form leaf qualified names. |
 | `--objective` | `"reduce hot-path latency on common workloads"` | Threaded into discovery + deep research. |
 | `--hint` (repeatable) | `[]` | Workload hints; map to `SpotlightContext.workload_hints`. |
-| `--output-folder` | `./spotlight-out` | Where `index.md` and module pages land. |
+| `--output-folder` | `./spotlights-out` | Where `index.md` and module pages land. |
 | `--artifacts-dir` | `./artifacts` | Checkpoints + raw transcripts (resume key). |
 | `--max-parallel` | `1` | Modules processed concurrently. |
 | `--max-parallel-pairs` | `5` | Within-step parallelism for step 4. |

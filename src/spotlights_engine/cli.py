@@ -1,4 +1,4 @@
-"""Public CLI for `spotlight-engine`.
+"""Public CLI for `spotlights-engine`.
 
 Thin shim over `spotlights_manager.run_with_telemetry`. Architectural inputs
 (`--repo`, `--objective`, `--hint`, `--max-findings-per-module`) bind to
@@ -32,14 +32,14 @@ from spotlights_engine.spotlights_manager import (
 
 
 _DEFAULT_REPO = Path("../vllm")
-_DEFAULT_OUTPUT = Path("./spotlight-out")
+_DEFAULT_OUTPUT = Path("./spotlights-out")
 _DEFAULT_ARTIFACTS = Path("./artifacts")
 _DEFAULT_OBJECTIVE = "reduce hot-path latency on common workloads"
 
 
 def _build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="spotlight-engine",
+        prog="spotlights-engine",
         description=(
             "Propose evidence-backed, high-leverage code changes for a target "
             "repo. Runs structural extraction, candidate discovery, deep "
