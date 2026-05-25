@@ -129,10 +129,6 @@ class StageSelection:
     def selected(self) -> list[StageId]:
         return [s for s in ALL_STAGES if self.from_stage <= s <= self.to_stage]
 
-    def upstream_required(self) -> list[StageId]:
-        """Stages strictly before `from_stage` — must be already complete."""
-        return [s for s in ALL_STAGES if s < self.from_stage]
-
 
 # ── Inject specs ─────────────────────────────────────────────────────────
 
@@ -682,21 +678,29 @@ def run_pipeline(
             )
             _save_status(layout, status)
 
-    # ── Pre-flight: every stage strictly before from_stage must be done ─
-    for up_id in sel.upstream_required():
+    # ── Pre-flight: every declared upstream of a selected stage must be
+    # complete, *unless* that upstream is itself in the selection (we'll
+    # run it ourselves in this invocation).
+    selected_set = set(sel.selected())
+    needed_upstream: set[StageId] = set()
+    for stage_id in sel.selected():
+        needed_upstream.update(STAGES[stage_id].upstream)
+    needed_upstream -= selected_set
+
+    for up_id in sorted(needed_upstream):
         spec = STAGES[up_id]
         upstreams = _try_load_upstreams(spec, STAGES, layout)
         if upstreams is None:
             raise PipelineLayoutError(
-                f"--from-stage {sel.from_stage} requires stage {up_id} to be "
-                f"complete on disk (its upstream is missing)"
+                f"selection {sel.from_stage}..{sel.to_stage} requires stage "
+                f"{up_id} to be complete on disk (its upstream is missing)"
             )
         complete, _issues = _is_complete(spec, layout, status, upstreams)
         if not complete:
             raise PipelineLayoutError(
-                f"--from-stage {sel.from_stage} requires stage {up_id} to be "
-                f"complete; it isn't (run earlier stages first or remove "
-                f"--from-stage)"
+                f"selection {sel.from_stage}..{sel.to_stage} requires stage "
+                f"{up_id} to be complete; it isn't (run earlier stages first "
+                f"or extend the selection)"
             )
 
     # ── Run loop ────────────────────────────────────────────────────────

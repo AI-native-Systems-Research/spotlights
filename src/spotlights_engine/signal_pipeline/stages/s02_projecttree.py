@@ -1,26 +1,30 @@
 """Stage 02 — ProjectTree extraction.
 
-**Phase 1 stub.** Emits a minimal `ProjectTree` so downstream stages can
-run end-to-end. Step 3 of the implementation order replaces this with a
-delegation to `spotlights_engine.modules_extractor.extract`.
+Delegates to `spotlights_engine.modules_extractor.extract` from origin/main
+(LLM-backed, runs `claude -p` on the subject repo). Each invocation places
+its modules-extractor working tree under a fresh timestamped subdir of the
+stage's `log_dir`, sidestepping main's "pre-existing run dir is unsupported"
+guard so re-runs don't collide.
 
-Doc divergence flagged in
-`/Users/idanfr/.claude/plans/humble-plotting-cook.md` "Known doc/code
-divergences §1": the flow doc labels this stage "deterministic, no LLM"
-but main's `modules_extractor` is LLM-backed (the schema's `description` /
-`role` fields require it). Resolution belongs to the flow-doc owner.
+⚠ Doc divergence flagged in the plan
+(`/Users/idanfr/.claude/plans/humble-plotting-cook.md` "Known doc/code
+divergences §1"): the flow doc labels this stage "deterministic, no LLM"
+but the schema's `description` / `role` fields require an LLM. Resolution
+belongs to the flow-doc owner.
 
-The `modules_extractor.extract` import lives inside `run` (not at module
-top) so a missing origin/main layout fails fast via the runner's
-`_check_layout()` precondition rather than as an opaque ImportError at
-package import time.
+The `modules_extractor` import is local to `_extract_project_tree` (not
+at module top) so a missing origin/main layout fails fast in the runner's
+`_check_layout()` rather than as an opaque ImportError at package import.
 """
 
 from __future__ import annotations
 
+import re
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
-from spotlights_engine.schemas.project import Module, ProjectTree, Repository
+from spotlights_engine.schemas.project import ProjectTree
 from spotlights_engine.signal_pipeline.stages._types import StageContext, StageSpec
 
 
@@ -28,24 +32,31 @@ def parse_artifact(raw: Any) -> ProjectTree:
     return ProjectTree.model_validate(raw)
 
 
-def run(ctx: StageContext) -> ProjectTree:
-    # Phase 1 stub. Step 3 replaces with:
-    #   from spotlights_engine.modules_extractor import extract, ExtractorConfig
-    #   from spotlights_engine.schemas.pipeline import ModulesExtractorInput
-    #   return extract(ModulesExtractorInput(repo_path=ctx.signal_input.subject_root))
-    return ProjectTree(
-        repository=Repository(
-            name="stub-repo",
-            summary="Phase 1 stub — replace via modules_extractor.extract in step 3.",
-        ),
-        modules=[
-            Module(
-                name="stub_module",
-                path="stub_module",
-                description="Phase 1 stub module.",
-            )
-        ],
+def _ts_subdir() -> str:
+    """Filesystem-safe UTC ISO timestamp for a per-invocation subdir name."""
+    iso = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return re.sub(r"[:+]", "-", iso)
+
+
+def _extract_project_tree(subject_root: Path, log_dir: Path) -> ProjectTree:
+    """Real extraction path. Factored for ease of monkeypatching in tests.
+
+    The conftest in `tests/unit/signal_pipeline/` swaps this out with a
+    placeholder so runner state-machine tests don't fire Claude.
+    """
+    # Lazy import per the safety order in the approved plan.
+    from spotlights_engine.modules_extractor import ExtractorConfig, extract
+    from spotlights_engine.schemas.pipeline import ModulesExtractorInput
+
+    artifacts_dir = log_dir / _ts_subdir()
+    return extract(
+        ModulesExtractorInput(repo_path=subject_root),
+        config=ExtractorConfig(artifacts_dir=artifacts_dir),
     )
+
+
+def run(ctx: StageContext) -> ProjectTree:
+    return _extract_project_tree(ctx.signal_input.subject_root, ctx.log_dir)
 
 
 SPEC = StageSpec(
