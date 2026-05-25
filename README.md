@@ -41,7 +41,85 @@ Prerequisites:
 - A target repo on disk (the quickstart below uses [vLLM](https://github.com/vllm-project/vllm)).
 
 Both CLIs are required for the default end-to-end path; the engine will not
-run without one of them today.
+run without one of them today. Install, authenticate, and verify each before
+launching the engine.
+
+### Install the `claude` CLI
+
+Pick one install method. See the
+[official setup docs](https://code.claude.com/docs/en/setup) for the full
+matrix (Windows, WSL, Linux package managers, npm, version pinning).
+
+```bash
+# macOS / Linux / WSL — native installer (auto-updates)
+curl -fsSL https://claude.ai/install.sh | bash
+
+# macOS — Homebrew
+brew install --cask claude-code
+
+# Any platform with Node.js 18+ — npm (do NOT use sudo)
+npm install -g @anthropic-ai/claude-code
+```
+
+Windows PowerShell: `irm https://claude.ai/install.ps1 | iex`.
+
+A Pro, Max, Team, Enterprise, or Console plan is required (the free Claude.ai
+plan does not include Claude Code). After install, **open a new terminal** and
+authenticate by running `claude` once and following the browser prompt:
+
+```bash
+claude          # first run: log in via browser
+claude --version
+claude doctor   # deeper environment check
+```
+
+### Install the `codex` CLI
+
+Pick one install method. See the
+[Codex CLI repo](https://github.com/openai/codex) for the full matrix
+(Windows, manual binary downloads, API-key auth).
+
+```bash
+# macOS / Linux — native installer
+curl -fsSL https://chatgpt.com/codex/install.sh | sh
+
+# macOS — Homebrew
+brew install --cask codex
+
+# Any platform with Node.js — npm
+npm install -g @openai/codex
+```
+
+Windows PowerShell:
+`powershell -ExecutionPolicy ByPass -c "irm https://chatgpt.com/codex/install.ps1 | iex"`.
+
+A ChatGPT Plus, Pro, Business, Edu, or Enterprise plan is the easiest auth
+path; an OpenAI API key also works with extra config. After install, **open a
+new terminal** and authenticate by running `codex` once and choosing
+"Sign in with ChatGPT":
+
+```bash
+codex           # first run: pick "Sign in with ChatGPT"
+codex --version
+```
+
+### Verify both CLIs from a fresh shell
+
+Open a new terminal (so any `PATH` changes from the installers are picked up)
+and confirm both binaries resolve and report a version:
+
+```bash
+which claude && claude --version
+which codex  && codex  --version
+```
+
+If either command is `not found`, re-open your terminal so shell `PATH`
+updates from the installers take effect. The native `claude` installer drops
+its binary at `~/.local/bin/claude`; the `codex` binary location depends on
+the install method (e.g. `/opt/homebrew/bin/codex` for Homebrew, `~/.local/bin/codex` for the native installer) — check the installer's final
+output if `codex` still isn't on `PATH`.
+
+### Install the engine
 
 ```bash
 git clone https://github.com/Video-AI/spotlights-engine.git
