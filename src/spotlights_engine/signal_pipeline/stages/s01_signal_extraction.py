@@ -1,19 +1,28 @@
 """Stage 01 — signal extraction (Bundle A).
 
-**Phase 1 stub.** Emits a placeholder `Signals` bundle so downstream stages
-can run end-to-end without `spotlight_observability` installed. Step 4 of
-the implementation order replaces this with a fixture-loader that reads
-`<telemetry_from>/01_signals.json` (the user-supplied or fixture-derived
-file). Real Bundle A — heuristic extraction from raw telemetry — comes from
-the sibling `spotlight-observability` repo.
+Phase 1 was a synthetic stub. This step adds a **fixture loader**: when
+the user passes `--telemetry-from <path>`, stage 01 reads a hand-prepared
+`Signals` JSON from there instead of fabricating placeholder data.
 
-See `docs/signal-based/signal_discovery_flow.md` "Bundle A" and
-`docs/_review-notes/signal_extraction_run_n50_kvprobe.md` for the fixture
-that step 4 will target.
+When `telemetry_from` is None, we still return synthetic data so the
+runner state-machine tests can run without a fixture. This is a
+deferred-Bundle-A bridge — once `spotlight-observability` lands its real
+heuristic extractor, the synthetic branch goes away and this stage
+becomes "real Bundle A or hand-craft a JSON, no third option".
+
+`telemetry_from` resolution:
+
+- `<file>.json` — used directly (any filename ending `.json`)
+- `<dir>/`     — looks for `01_signals.json` inside; alternative names
+  `signals.json` / `signal.json` recognized as a convenience.
+
+Schema is `signal_pipeline.schemas.Signals` (placeholder for the locked
+contract in `spotlight_observability.signals` until the sibling lands).
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from spotlights_engine.signal_pipeline.schemas import (
@@ -25,15 +34,59 @@ from spotlights_engine.signal_pipeline.schemas import (
 from spotlights_engine.signal_pipeline.stages._types import StageContext, StageSpec
 
 
+# Filename candidates the directory-form loader will try, in order.
+_DIR_CANDIDATES = ("01_signals.json", "signals.json", "signal.json")
+
+
 def parse_artifact(raw: Any) -> Signals:
     return Signals.model_validate(raw)
 
 
-def run(ctx: StageContext) -> Signals:
+def _resolve_signals_file(target: Path) -> Path:
+    """Map `--telemetry-from <target>` to the JSON file to read.
+
+    Raises `FileNotFoundError` with a clear message if the target is a
+    directory that doesn't contain any of the recognized filenames, or
+    if the path doesn't exist at all.
+    """
+    if not target.exists():
+        raise FileNotFoundError(
+            f"--telemetry-from path does not exist: {target}"
+        )
+    if target.is_file():
+        return target
+    # Directory case
+    for name in _DIR_CANDIDATES:
+        candidate = target / name
+        if candidate.is_file():
+            return candidate
+    raise FileNotFoundError(
+        f"--telemetry-from {target} is a directory but contains none of "
+        f"{list(_DIR_CANDIDATES)}; pass the file directly or place a "
+        f"`01_signals.json` inside it"
+    )
+
+
+def _load_signals(telemetry_from: Path) -> Signals:
+    """Real loader path. Factored for ease of monkeypatching in tests."""
+    import json
+
+    src = _resolve_signals_file(telemetry_from)
+    raw = json.loads(src.read_text(encoding="utf-8"))
+    return Signals.model_validate(raw)
+
+
+def _synthetic_signals() -> Signals:
+    """Phase-1-bridge synthetic data for runs without `--telemetry-from`.
+
+    Goes away once Bundle A is real."""
     return Signals(
         workload=WorkloadProfileLite(
             workload_id="stub-workload",
-            description="Phase 1 stub — replace via --telemetry-from in step 4.",
+            description=(
+                "Synthetic Signals — no --telemetry-from provided. Real "
+                "Bundle A from spotlight-observability is still deferred."
+            ),
         ),
         traces=[
             TraceSummaryLite(
@@ -50,6 +103,13 @@ def run(ctx: StageContext) -> Signals:
             )
         ],
     )
+
+
+def run(ctx: StageContext) -> Signals:
+    target = ctx.signal_input.telemetry_from
+    if target is None:
+        return _synthetic_signals()
+    return _load_signals(target)
 
 
 SPEC = StageSpec(
