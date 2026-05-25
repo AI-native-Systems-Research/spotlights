@@ -1,8 +1,7 @@
 # Spotlights — A deep research agent that locates optimization targets across a repo and proposes evidence-backed changes
 
-Point Spotlights at a repo and an objective ("reduce TTFT", "cut memory in the
-hot path", "make this safer under concurrent writes") and it returns a ranked,
-browsable map of the few places worth touching — each with a concrete,
+Point Spotlights at a repo and an objective ("reduce TTFT", "raise throughput under sustained load") and it returns a ranked,
+browsable map of the few places worth touching - each with a concrete,
 evidence-backed proposal grounded in the code, the literature, and the
 objective.
 
