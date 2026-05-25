@@ -103,6 +103,54 @@ codex           # first run: pick "Sign in with ChatGPT"
 codex --version
 ```
 
+### Optional: route both CLIs through a LiteLLM proxy
+
+If you can't (or don't want to) authenticate against Anthropic and OpenAI
+directly — for example, when running inside a corporate environment that
+exposes models via a [LiteLLM](https://github.com/BerriAI/litellm) proxy —
+you can point each CLI at the proxy instead of its native backend.
+
+**`claude` CLI** — edit `~/.claude/settings.json` and set the
+`ANTHROPIC_BASE_URL` plus the per-tier model overrides to models served by
+your proxy. Concrete example (IBM-internal LiteLLM deployment):
+
+```json
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://ete-litellm.ai-models.vpc-int.res.ibm.com",
+    "ANTHROPIC_AUTH_TOKEN": "<your-litellm-key>",
+    "ANTHROPIC_MODEL": "aws/claude-opus-4-7",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "aws/claude-opus-4-7",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "aws/claude-sonnet-4-6",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "aws/claude-haiku-4-5"
+  },
+  "model": "opus"
+}
+```
+
+Replace the host and model IDs with whatever your LiteLLM deployment exposes.
+
+**`codex` CLI** — edit `~/.codex/config.toml` and define a `litellm`
+provider, then select it as the default. Concrete example (IBM-internal
+LiteLLM deployment):
+
+```toml
+model = "azure/gpt-5.5"
+model_provider = "litellm"
+model_reasoning_effort = "xhigh"
+
+[model_providers.litellm]
+name = "LiteLLM"
+base_url = "https://ete-litellm.ai-models.vpc-int.res.ibm.com/v1"
+experimental_bearer_token = "<your-litellm-key>"
+wire_api = "responses"
+```
+
+Again, swap the `model` value and `base_url` for ones your proxy serves.
+After editing either file, re-run `claude --version` / `codex --version` from
+a fresh shell to confirm the CLI still launches; the engine will then route
+all of its agent calls through the proxy.
+
 ### Verify both CLIs from a fresh shell
 
 Open a new terminal (so any `PATH` changes from the installers are picked up)
