@@ -64,7 +64,7 @@ def normalize_module_deep_research_output(
 def parse_module_deep_research_output(
     text: str,
     *,
-    max_findings_per_module: int = 10,
+    max_findings_per_module: int = 30,
 ) -> ModuleDeepResearchOutput:
     """Parse and normalize one agent response into `ModuleDeepResearchOutput`.
 

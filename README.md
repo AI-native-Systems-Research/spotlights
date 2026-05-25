@@ -47,22 +47,10 @@ Clone vLLM next to this repo, then:
 spotlight-engine \
   --repo ../vllm \
   --include v1.kv_offload \
-  --objective "reduce decode latency on long-context workloads" \
-  --hint "prefill-heavy traffic, batch size 1-8" \
-  --hint "Hopper GPUs, FP8 KV cache" \
+  --objective "reduce the media TTFT and median TPOT (Time Per Output Token)" \
+  --hint "multi-turn agentic workload" \
   --output-folder ./spotlight-out \
   --artifacts-dir ./artifacts
-```
-
-Expected stdout shape:
-
-```
-[1/5] modules_extractor … 1 module kept (v1.kv_offload)
-[2/5] candidate_discovery (v1.kv_offload) … 6 candidates
-[3/5] module_deep_research (v1.kv_offload) … 4 findings
-[4/5] proposal_from_finding_creator (v1.kv_offload) … 9 proposals attached
-[5/5] agent_proposals (v1.kv_offload) … 7 agent proposals attached
-results: ./spotlight-out/index.md
 ```
 
 On disk:
@@ -107,63 +95,13 @@ All flags are optional once `--repo` and the agent CLIs are available.
 | `--max-parallel` | `1` | Modules processed concurrently. |
 | `--max-parallel-pairs` | `5` | Within-step parallelism for step 4. |
 | `--max-parallel-candidates` | `5` | Within-step parallelism for step 5. |
-| `--max-findings-per-module` | `10` | Cap on findings produced by step 3 per module. |
-| `--no-resume` | resume on | Refuse to start over an existing run dir. |
-| `--debug-first-n-pairs` | off | Cap step 4 (debug only). |
-| `--debug-first-n-candidates` | off | Cap step 5 (debug only). |
+| `--max-findings-per-module` | `30` | Cap on findings produced by step 3 per module. |
+
 
 Agent authentication is handled by the underlying `claude` and `codex` CLIs;
 no engine config file is required for the happy path.
 
-## How it fits together
 
-The Spotlight Engine project is split across three repos:
-
-- `spotlight-engine` (this repo) — the spine: schemas, orchestration, CLI.
-- `spotlight-observability` — telemetry collection and signal extraction.
-- `spotlight-knowledge` — literature index and experimental archive.
-
-Dependency direction: `spotlight-engine` depends on the two leaf repos. The
-graph is a tree, not a cycle.
-
-## Library usage
-
-```python
-from pathlib import Path
-
-from spotlights_engine import (
-    SpotlightsManagerConfig,
-    ModuleFilter,
-    run_with_telemetry,
-)
-from spotlights_engine.schemas.common import SpotlightContext
-from spotlights_engine.schemas.pipeline import SpotlightsManagerInput
-
-result = run_with_telemetry(
-    SpotlightsManagerInput(
-        repo_path=Path("../vllm"),
-        context=SpotlightContext(
-            objective="reduce decode latency on long-context workloads",
-            workload_hints=["prefill-heavy traffic", "Hopper GPUs"],
-        ),
-    ),
-    config=SpotlightsManagerConfig(
-        artifacts_dir=Path("./artifacts"),
-        output_folder=Path("./spotlight-out"),
-        module_filter=ModuleFilter(include=["v1.kv_offload"]),
-    ),
-)
-print(result.renderer_result.index_path)
-```
-
-The `schemas` module (`Candidate`, `Change`, re-exported `Signal` types) is
-the public contract surface; everything else may change without notice.
-
-## Status & contributing
-
-Stage: **alpha**. The schemas are stable; orchestration internals and per-step
-agent prompts are still moving. File issues at
-<https://github.com/Video-AI/spotlight-engine/issues>.
 
 ## License
 

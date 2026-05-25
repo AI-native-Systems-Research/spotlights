@@ -129,7 +129,7 @@ def _build_argparser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Cap on findings produced by step 3 per module. "
-            "Default: SpotlightsManagerInput default (10)."
+            "Default: SpotlightsManagerInput default (30)."
         ),
     )
     p.add_argument(

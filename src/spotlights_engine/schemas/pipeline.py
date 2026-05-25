@@ -55,7 +55,7 @@ class ModuleDeepResearchInput(BaseModel):
     module_qualified_name: str = Field(min_length=1)
     context: SpotlightContext
     repo_path: Path
-    max_findings_per_module: int = Field(default=10, ge=0)
+    max_findings_per_module: int = Field(default=30, ge=0)
 
 
 class ModuleDeepResearchOutput(BaseModel):
@@ -137,7 +137,7 @@ class SpotlightsManagerInput(BaseModel):
 
     repo_path: Path
     context: SpotlightContext
-    max_findings_per_module: int = Field(default=10, ge=0)
+    max_findings_per_module: int = Field(default=30, ge=0)
     continue_on_module_failure: bool = True
 
 
