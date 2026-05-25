@@ -77,12 +77,6 @@ artifacts/
   spotlights_manager/               # checkpoints, raw transcripts (resumable)
 ```
 
-A sample run on this subset is checked in under
-[examples/vllm_subset/](examples/vllm_subset/): browse the rendered
-[index.md](examples/vllm_subset/index.md) and per-module pages under
-[modules/](examples/vllm_subset/modules/), or inspect the raw
-[result.json](examples/vllm_subset/result.json).
-
 `--include` accepts one or more dot-form leaf qualified names. Repeat the flag
 or pass several values after a single flag:
 
@@ -90,6 +84,14 @@ or pass several values after a single flag:
 spotlight-engine --include v1.kv_offload v1.attention.paged_kv ...
 spotlight-engine --include v1.kv_offload --include v1.attention.paged_kv ...
 ```
+
+## Example output
+
+A sample run on this subset is checked in under
+[examples/vllm_subset/](examples/vllm_subset/): browse the rendered
+[index.md](examples/vllm_subset/index.md) and per-module pages under
+[modules/](examples/vllm_subset/modules/), or inspect the raw
+[result.json](examples/vllm_subset/result.json).
 
 ## Configuration
 
