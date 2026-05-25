@@ -105,3 +105,20 @@ def _default_stage_stubs(request, monkeypatch):
     monkeypatch.setattr(
         s03_candidate_generation, "_run_candidate_generation", _fake_candidates
     )
+
+    # ── Stage 04 ─────────────────────────────────────────────────────
+    from spotlights_engine.signal_pipeline.schemas import Change
+    from spotlights_engine.signal_pipeline.stages import s04_change_generation
+
+    def _fake_change(candidate, subject_root, log_dir):
+        return Change(
+            change_id=f"chg-{candidate.id}",
+            candidate_ref=candidate.id,
+            change_type="other",
+            mechanism="conftest stub change",
+            expected_effect="stub effect",
+            required_changes="stub changes",
+            evaluation_metric="stub metric",
+        )
+
+    monkeypatch.setattr(s04_change_generation, "_generate_change", _fake_change)
