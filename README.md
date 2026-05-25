@@ -58,7 +58,7 @@ spotlight-engine \
   --repo ../vllm \
   --include v1.kv_offload \
   --objective "reduce the median TTFT and median TPOT (Time Per Output Token)" \
-  --hint "multi-turn agentic workload" \
+  --hint "Multi-turn agentic workload" \
   --output-folder ./spotlight-out \
   --artifacts-dir ./artifacts
 ```
