@@ -14,6 +14,7 @@ from spotlights_engine.objectives import (
 )
 from spotlights_engine.objectives.schemas import (
     Objective,
+    ObjectiveIntent,
     ObjectiveProposal,
 )
 
@@ -136,6 +137,69 @@ class TestFinalizeObjective:
         )
         with pytest.raises(ValidationError):
             objective.approved_by = "mallory"  # type: ignore[misc]
+
+
+class TestRoleAndComponents:
+    def test_role_defaults_to_pm(self):
+        intent = build_intent(
+            target_metric="latency",
+            target_direction="minimize",
+            workload_classes=["agentic"],
+        )
+        assert intent.role == "pm"
+
+    def test_developer_role(self):
+        intent = build_intent(
+            target_metric="kv_cache_hit_rate",
+            target_direction="maximize",
+            workload_classes=["long-context"],
+            target_components=["kv_cache", "memory_allocator"],
+            role="developer",
+        )
+        assert intent.role == "developer"
+        assert intent.target_components == ["kv_cache", "memory_allocator"]
+
+    def test_old_json_without_role_defaults_to_pm(self):
+        old_json = (
+            '{"target_metric": "latency", "target_direction": "minimize",'
+            ' "workload_classes": ["agentic"], "priorities": [], "notes": ""}'
+        )
+        intent = ObjectiveIntent.model_validate_json(old_json)
+        assert intent.role == "pm"
+        assert intent.target_components == []
+
+    def test_invalid_role_rejected(self):
+        with pytest.raises(ValidationError):
+            build_intent(
+                target_metric="latency",
+                target_direction="minimize",
+                workload_classes=["agentic"],
+                role="wizard",
+            )
+
+    def test_role_preserved_in_objective(self):
+        intent = build_intent(
+            target_metric="throughput",
+            target_direction="maximize",
+            workload_classes=["batch-inference"],
+            target_components=["scheduler"],
+            role="developer",
+        )
+        proposal = assemble_proposal(intent)
+        objective = finalize_objective(proposal, session_id="sess-dev", approved_by="dev1")
+        assert objective.intent.role == "developer"
+        assert objective.intent.target_components == ["scheduler"]
+        parsed = json.loads(objective.model_dump_json())
+        assert parsed["intent"]["role"] == "developer"
+        assert parsed["intent"]["target_components"] == ["scheduler"]
+
+    def test_target_components_default_empty(self):
+        intent = build_intent(
+            target_metric="latency",
+            target_direction="minimize",
+            workload_classes=["mixed"],
+        )
+        assert intent.target_components == []
 
 
 class TestJsonRoundtrip:

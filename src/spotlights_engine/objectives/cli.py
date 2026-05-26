@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 
 from spotlights_engine.objectives.core import (
     assemble_proposal,
@@ -18,8 +19,10 @@ def _cmd_build_intent(data: dict) -> str:
         target_metric=data["target_metric"],
         target_direction=data["target_direction"],
         workload_classes=data["workload_classes"],
+        target_components=data.get("target_components", []),
         priorities=data.get("priorities", []),
         notes=data.get("notes", ""),
+        role=data.get("role", "pm"),
     )
     return intent.model_dump_json(indent=2)
 
@@ -38,9 +41,18 @@ def _cmd_finalize(data: dict) -> str:
         approved_by=data["approved_by"],
     )
     json_str = objective.model_dump_json(indent=2)
-    output_path = data.get("output_path", "objective.json")
-    with open(output_path, "w") as f:
-        f.write(json_str + "\n")
+    if "output_path" in data:
+        output_path = Path(data["output_path"])
+    else:
+        from datetime import UTC, datetime
+
+        timestamp = datetime.now(UTC).strftime("%Y-%m-%d_%H%M%S")
+        sanitized_name = data["approved_by"].lower().replace(" ", "_")
+        sanitized_name = "".join(c for c in sanitized_name if c.isalnum() or c == "_")
+        role = data.get("proposal", {}).get("intent", {}).get("role", "pm")
+        output_path = Path(f"output/objectives/{timestamp}_{sanitized_name}_{role}.json")
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json_str + "\n")
     return json_str
 
 

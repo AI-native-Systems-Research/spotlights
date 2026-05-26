@@ -17,14 +17,18 @@ def build_intent(
     target_metric: str,
     target_direction: str,
     workload_classes: list[str],
+    target_components: list[str] | None = None,
     priorities: list[str] | None = None,
     notes: str = "",
+    role: str = "pm",
 ) -> ObjectiveIntent:
     """Validate inputs and construct an ObjectiveIntent."""
     return ObjectiveIntent(
+        role=role,  # type: ignore[arg-type]
         target_metric=target_metric,
         target_direction=target_direction,  # type: ignore[arg-type]
         workload_classes=workload_classes,
+        target_components=target_components or [],
         priorities=priorities or [],
         notes=notes,
     )

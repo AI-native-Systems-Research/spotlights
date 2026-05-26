@@ -7,13 +7,17 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+Role = Literal["pm", "developer", "researcher", "sre-platform", "red-team"]
+
 
 class ObjectiveIntent(BaseModel):
-    """Structured intent produced from the PM interview."""
+    """Structured intent produced from the objective-setting interview."""
 
+    role: Role = "pm"
     target_metric: str = Field(min_length=1)
     target_direction: Literal["minimize", "maximize"]
     workload_classes: list[str] = Field(min_length=1)
+    target_components: list[str] = Field(default_factory=list)
     priorities: list[str] = Field(default_factory=list)
     notes: str = ""
 
