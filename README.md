@@ -154,7 +154,7 @@ If either command is not found, re-open your terminal so shell PATH updates from
 ### Install the engine
 
 ```bash
-git clone https://github.com/Video-AI/spotlights.git
+git clone https://github.com/AI-native-Systems-Research/spotlights.git
 cd spotlights
 uv sync --all-extras
 ```
