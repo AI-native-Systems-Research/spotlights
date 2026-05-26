@@ -6,13 +6,13 @@
 
 <p align="center"><b>Find the few places in a codebase worth optimizing — and see the evidence for why.</b></p>
 
-Point Spotlights at a repo and a goal (`reduce TTFT`, `raise throughput under sustained load`) and it returns a ranked, browsable map of the few places worth touching — each with a concrete, evidence-backed proposal grounded in the code, the literature, and your goal.
+Point Spotlights at a repo and a goal (e.g., `reduce p99 latency`, `minimize memory allocations`) and it returns a ranked, browsable map of the few places worth touching — each with a concrete, evidence-backed proposal grounded in the code, the literature, and your goal.
 
-Most code-research tools either scan broadly and return shallow hits, or dive deeply into a single file you already picked. Spotlights does the part in between: it decides *which* functions and code regions across the whole repo are worth deep investigation for your goal, then spends real research effort on each one.
+Most code-research tools either scan broadly and return shallow hits, or dive deeply into a single file you already picked. **Spotlights acts as the targeting system**: it decides which functions and code regions across the whole repo are worth deep investigation for your goal, then spends real research effort on each one.
 
-The bet behind the project: execution tooling — coding agents, evolutionary search, experiment harnesses — is abundant and improving fast. The harder, less-solved problem is knowing **where to point it**. Spotlights treats that as a discovery problem in its own right: build a map of the codebase, converge independent signal sources onto that map, and let the places where evidence piles up — the *spots that light up* — surface as candidates worth optimizing.
+The core philosophy behind the project: execution tooling — coding agents, evolutionary search, experiment harnesses — is abundant and improving fast. The harder, less-solved problem is knowing **where to point it**. Spotlights treats that as a first-class discovery problem: build a map of the codebase, converge independent signal sources onto that map, and let the places where evidence piles up — the *spots that light up* — surface as candidates worth optimizing.
 
-> **Status, honestly:** today Spotlights runs end-to-end on two signal sources — **code structure** and the **research literature**. Runtime telemetry, repository history, and paper-driven discovery are in active development. See [Signal sources & roadmap](#signal-sources--roadmap).
+> **Current Status:** today Spotlights runs on two signal sources — **code structure** and the **deep research literature**. Runtime telemetry, repository history, and paper-driven discovery are in active development. See [Signal sources & roadmap](#signal-sources--roadmap).
 
 ## How it works
 
@@ -22,13 +22,12 @@ A single structural map of the repo is the substrate. Signal sources attach to i
 2. **Candidates** — per module, pick the functions and code regions most worth investigating for the stated goal.
 3. **Proposals** — for each candidate, produce evidence-backed change proposals, with citations and rationale. Proposals aren't limited to local tweaks: when the literature supports it, a proposal can be a genuinely new approach — applying a technique from a recent paper, or building a new kernel — not just a refinement of what's already there.
 
-The output is a tree of plain Markdown files you browse in any viewer (GitHub, VS Code preview, Obsidian).
+The output is a tree of Markdown files.
 
-What feeds tiers 2 and 3 is a *signal source*. The first one implemented is a deep-research engine that pulls findings from the web, arXiv, blogs, and documentation, and grounds proposals in that literature alongside the code itself. The architecture is built so that additional signal sources — telemetry, repo history, and others — plug into the same map and the same candidate/proposal pipeline.
+*Signal sources* drive the second and third tiers The first one implemented is a deep-research engine that pulls findings from the web, arXiv, blogs, and documentation, and grounds proposals in that literature alongside the code itself. The architecture is built so that additional signal sources — telemetry, repo history, and others — plug into the same map and the same candidate/proposal pipeline.
 
-Discovery runs in two directions. The primary, live direction starts from the system: a candidate surfaces, relevant findings are gathered, and a concrete change is proposed (signal → candidate → proposal). The inverse direction starts from an idea: given a promising paper or technique, Spotlights searches the map for where it could apply — down to whether it's worth building a new kernel for it (technique → location). The second direction shares the same map and pipeline and is an active area of exploration.
+Discovery runs in two directions. The primary, live direction starts from the system: a candidate surfaces, relevant findings are gathered, and a concrete change is proposed (signal → candidate → proposal). The inverse direction starts from an idea: given a promising paper or technique, Spotlights searches the map for where it could apply — down to whether it's worth building a new sub-system for it (technique → location). The second direction shares the same map and pipeline and is an active area of exploration.
 
-![Architecture](docs/architecture.png)
 
 ## Signal sources & roadmap
 
@@ -41,6 +40,7 @@ The module map is a shared coordinate system: every signal source projects onto 
 | **Runtime telemetry** | OpenTelemetry traces, logs, and profiles surface bottlenecks visible only under load, not in the source. | In development |
 | **Repository history** | Issues, pull requests, and commit history capture known limitations, past reasoning, and undocumented benchmarks that never reach code comments. | In development |
 | **Technique-driven discovery** | Start from a paper or technique and search the codebase for where it could apply — the inverse of starting from a bottleneck. | Exploring |
+| *…and more* | *The list isn't closed — if you have a signal source in mind, propose one via [Contributing](#contributing).* | *Open* |
 
 Contributions to any of these are welcome — see [Contributing](#contributing).
 
@@ -220,7 +220,7 @@ Agent authentication is handled by the underlying `claude` and `codex` CLIs; no 
 
 ## Where Spotlights fits
 
-Spotlights decides *what* to optimize and proposes *how* — it is not itself an execution engine. Its candidates and proposals are designed to hand off to whatever runs and validates changes: coding agents, evolutionary search, or experiment frameworks. Think of it as the front-end that points existing optimization machinery at the places most worth its effort.
+Spotlights decides *what* to optimize and proposes *how* — it is not itself an execution engine. Its candidates and proposals are designed to hand off to whatever runs and validates changes: coding agents, evolutionary search, or experiment frameworks. Think of it as the scouting engine that points existing optimization machinery at the places most worth its effort.
 
 ## Contributing
 
