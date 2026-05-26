@@ -6,9 +6,9 @@
 
 <p align="center"><b>Find the few places in a codebase worth optimizing — and see the evidence for why.</b></p>
 
-Point Spotlights at a repo and an objective (`reduce TTFT`, `raise throughput under sustained load`) and it returns a ranked, browsable map of the few places worth touching — each with a concrete, evidence-backed proposal grounded in the code, the literature, and your objective.
+Point Spotlights at a repo and a goal (`reduce TTFT`, `raise throughput under sustained load`) and it returns a ranked, browsable map of the few places worth touching — each with a concrete, evidence-backed proposal grounded in the code, the literature, and your goal.
 
-Most code-research tools either scan broadly and return shallow hits, or dive deeply into a single file you already picked. Spotlights does the part in between: it decides *which* symbols across the whole repo are worth deep investigation for your objective, then spends real research effort on each one.
+Most code-research tools either scan broadly and return shallow hits, or dive deeply into a single file you already picked. Spotlights does the part in between: it decides *which* functions and code regions across the whole repo are worth deep investigation for your goal, then spends real research effort on each one.
 
 The bet behind the project: execution tooling — coding agents, evolutionary search, experiment harnesses — is abundant and improving fast. The harder, less-solved problem is knowing **where to point it**. Spotlights treats that as a discovery problem in its own right: build a map of the codebase, converge independent signal sources onto that map, and let the places where evidence piles up — the *spots that light up* — surface as candidates worth optimizing.
 
@@ -19,7 +19,7 @@ The bet behind the project: execution tooling — coding agents, evolutionary se
 A single structural map of the repo is the substrate. Signal sources attach to it, and a candidate is a region of that map where a signal indicates something worth investigating. The engine narrows in three tiers:
 
 1. **Structural map** — static analysis extracts the project's modules and how they fit together.
-2. **Candidates** — per module, pick the symbols most worth investigating for the stated objective.
+2. **Candidates** — per module, pick the functions and code regions most worth investigating for the stated goal.
 3. **Proposals** — for each candidate, produce evidence-backed change proposals, with citations and rationale. Proposals aren't limited to local tweaks: when the literature supports it, a proposal can be a genuinely new approach — applying a technique from a recent paper, or building a new kernel — not just a refinement of what's already there.
 
 The output is a tree of plain Markdown files you browse in any viewer (GitHub, VS Code preview, Obsidian).
@@ -228,7 +228,7 @@ The project is organized around signal sources, and the most useful contribution
 
 - **New signal sources** — telemetry, repo history, and technique-driven discovery are the active frontiers (see the [roadmap](#signal-sources--roadmap)). The candidate/proposal pipeline and the module map are shared, so a new source mostly means projecting its evidence onto existing candidates.
 - **Engine improvements** — better module extraction, candidate ranking, proposal quality, parallelism, or resumability.
-- **Adapters** — support for target repos and objectives beyond the vLLM examples.
+- **Adapters** — support for target repos and goals beyond the vLLM examples.
 
 Open an issue to discuss a direction before a large change. Bug reports and example runs on new repos are also valuable.
 
