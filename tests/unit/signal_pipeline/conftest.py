@@ -46,6 +46,44 @@ def _default_stage_stubs(request, monkeypatch):
     if request.node.get_closest_marker("no_stub_stages"):
         return
 
+    # ── Stage 01 ─────────────────────────────────────────────────────
+    # Only the agent-extraction branch needs stubbing; the pre-cooked
+    # JSON branch and synthetic-fallback branch don't fire claude. Tests
+    # that pass `--telemetry-from <dir-with-traces.jsonl>` would hit
+    # the agent path, so stub it defensively.
+    from spotlights_engine.signal_pipeline.schemas import (
+        AnomalyLite,
+        Signals,
+        TraceSummaryLite,
+        WorkloadProfileLite,
+    )
+    from spotlights_engine.signal_pipeline.stages import s01_signal_extraction
+
+    def _fake_extract_signals(target_dir, log_dir):
+        return Signals(
+            workload=WorkloadProfileLite(
+                workload_id="conftest-stub-workload",
+                description="conftest stub for runner state-machine tests",
+            ),
+            traces=[
+                TraceSummaryLite(
+                    trace_id="conftest-trace",
+                    summary="conftest stub trace",
+                )
+            ],
+            anomalies=[
+                AnomalyLite(
+                    anomaly_id="conftest-anomaly",
+                    type="stub",
+                    description="conftest stub anomaly",
+                )
+            ],
+        )
+
+    monkeypatch.setattr(
+        s01_signal_extraction, "_extract_signals_via_claude", _fake_extract_signals
+    )
+
     # ── Stage 02 ─────────────────────────────────────────────────────
     from spotlights_engine.signal_pipeline.stages import s02_projecttree
 
