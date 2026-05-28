@@ -27,8 +27,12 @@ Source        = "https://github.com/AI-native-Systems-Research/spotlights"
 
 [project.scripts]
 spotlights-engine = "spotlights_engine.cli:main"
+spotlights-validation = "spotlights_validation.cli:cli"
 
 [project.optional-dependencies]
+validation = [
+    "click>=8",
+]
 dev = [
     "ruff",
     "mypy",
@@ -46,7 +50,7 @@ build-backend = "hatchling.build"
 # those overrides in a personal `uv.toml` or a separate `pyproject.dev.toml`.
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/spotlights_engine"]
+packages = ["src/spotlights_engine", "src/spotlights_validation"]
 
 [tool.hatch.build.targets.sdist]
 exclude = [
