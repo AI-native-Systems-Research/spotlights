@@ -46,7 +46,7 @@
         "invoke": "pytest -v tests/v1/kv_connector/unit/test_kv_connector_lifecycle.py",
         "components": ["kv_offload", "distributed.kv_transfer"],
         "output_format": "pytest-json",
-        "estimated_duration": 180
+        "estimated_duration": 600
       },
       "workloads": []
     },
@@ -62,7 +62,7 @@
         "invoke": "pytest -v tests/v1/kv_connector/unit/test_kv_cache_layout.py",
         "components": ["kv_offload", "kv_cache"],
         "output_format": "pytest-json",
-        "estimated_duration": 180
+        "estimated_duration": 600
       },
       "workloads": []
     },
@@ -78,7 +78,7 @@
         "invoke": "pytest -v tests/v1/kv_connector/unit/test_kv_load_failure_recovery.py",
         "components": ["kv_offload"],
         "output_format": "pytest-json",
-        "estimated_duration": 180
+        "estimated_duration": 600
       },
       "workloads": []
     },
