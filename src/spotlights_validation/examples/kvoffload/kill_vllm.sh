@@ -2,12 +2,12 @@
 # Kill all vLLM-related processes (active and zombie) running under the current user.
 set -euo pipefail
 
-# Source 1: processes whose cmdline contains serve.py or vllm (python only).
-# [v]llm trick: pattern won't match the pgrep command line itself.
-# Filter to python processes only — vLLM workers are python, not bash wrappers.
-CMDLINE_PIDS=$(pgrep -u "$USER" -f "serve\.py|[v]llm" 2>/dev/null \
-    | grep -v "^$$\$" \
-    | xargs -r ps -o pid,comm --no-headers -p 2>/dev/null \
+# Source 1: processes whose cmdline contains vLLM server entrypoints (python only).
+# Narrow pattern targets actual vLLM server processes — avoids killing the
+# validation runner whose --source-tree path also contains "vllm".
+CMDLINE_PIDS=$(pgrep -u "$USER" -f "vllm\.entrypoints|vllm\.engine|serve\.py" 2>/dev/null \
+    | xargs -r ps -o pid,args --no-headers -p 2>/dev/null \
+    | grep -v "spotlights_validation" \
     | awk 'tolower($2) ~ /python/ {print $1}' \
     || true)
 
