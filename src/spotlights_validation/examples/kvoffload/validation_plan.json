@@ -353,14 +353,15 @@
       "priority": 6,
       "halt_on_failure": false,
       "index": 20,
+      "before_run": "bash $ROOT_DIR/spotlights/src/spotlights_validation/examples/kvoffload/kill_vllm.sh",
       "harness_entry": {
         "id": "integration-kv-connector-nixl",
         "name": "integration tests — KV connector NixL accuracy",
         "kind": "integration",
         "path": "tests/v1/kv_connector/nixl_integration",
-        "invoke": "pytest -v tests/v1/kv_connector/nixl_integration/test_accuracy.py",
+        "invoke": "bash tests/v1/kv_connector/nixl_integration/run_accuracy_test.sh",
         "components": ["kv_offload", "distributed.kv_transfer"],
-        "output_format": "pytest-json",
+        "output_format": "custom",
         "estimated_duration": 1800
       },
       "workloads": [

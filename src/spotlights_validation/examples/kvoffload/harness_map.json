@@ -166,9 +166,9 @@
       "name": "integration tests — KV connector NixL accuracy",
       "kind": "integration",
       "path": "tests/v1/kv_connector/nixl_integration",
-      "invoke": "pytest -v tests/v1/kv_connector/nixl_integration/test_accuracy.py",
+      "invoke": "bash tests/v1/kv_connector/nixl_integration/run_accuracy_test.sh",
       "components": ["kv_offload", "distributed.kv_transfer"],
-      "output_format": "pytest-json",
+      "output_format": "custom",
       "estimated_duration": 1800
     },
     {
