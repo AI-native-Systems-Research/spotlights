@@ -78,9 +78,12 @@ elif [[ -z "${ENV_FILE:-}" ]]; then
     ENV_FILE_DEFAULTED=1
 fi
 
+# --- output directory for this run (separate from change validation) ---
+OUTPUT_DIR="$ARTIFACTS_DIR/output/baseline"
+mkdir -p "$OUTPUT_DIR"
+
 # --- redirect stdout/stderr so files are visible during the run ---
-mkdir -p "$ARTIFACTS_DIR"
-exec > "$ARTIFACTS_DIR/validation_baseline.stdout" 2> "$ARTIFACTS_DIR/validation_baseline.stderr"
+exec > "$OUTPUT_DIR/validation_baseline.stdout" 2> "$OUTPUT_DIR/validation_baseline.stderr"
 
 # --- load env file (sourced before flags are applied so flags win) ---
 if [[ -f "$ENV_FILE" ]]; then
@@ -118,7 +121,7 @@ export VLLM_LOGGING_LEVEL="${VLLM_LOGGING_LEVEL:-INFO}"
 export VLLM_WORKER_MULTIPROC_METHOD="${VLLM_WORKER_MULTIPROC_METHOD:-spawn}"
 
 # --- paths ---
-LOGS_DIR="$ARTIFACTS_DIR/logs/baseline"
+LOGS_DIR="$OUTPUT_DIR/logs"
 mkdir -p "$LOGS_DIR"
 
 echo "Job started:    $(date)"
@@ -135,7 +138,7 @@ echo "Mode:           BASELINE (LRU + ARC; evolved policy skipped)"
 # Skip benchmark-multi-turn-kv-offload-lab (the evolved policy entry) by
 # setting skipped=true and adding a skip_reason.
 PLAN_SRC="$ARTIFACTS_DIR/validation_plan.json"
-PLAN_BASELINE="$ARTIFACTS_DIR/validation_plan_baseline.json"
+PLAN_BASELINE="$OUTPUT_DIR/validation_plan_baseline.json"
 jq '(.entries[] | select(.harness_entry.id == "benchmark-multi-turn-kv-offload-lab")) |=
     (.skipped = true | .skip_reason = "baseline run: evolved policy not applied")' \
     "$PLAN_SRC" > "$PLAN_BASELINE"
@@ -148,6 +151,6 @@ python -m spotlights_validation.cli run \
     --source-tree "$ROOT_DIR/vllm" \
     --change-ref  "kv-offload-lab@HEAD" \
     --logs-dir    "$LOGS_DIR" \
-    --out         "$ARTIFACTS_DIR/validation_result_baseline.json"
+    --out         "$OUTPUT_DIR/validation_result_baseline.json"
 
 echo "Job finished: $(date)"

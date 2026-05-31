@@ -79,9 +79,12 @@ elif [[ -z "${ENV_FILE:-}" ]]; then
     ENV_FILE_DEFAULTED=1
 fi
 
+# --- output directory for this run (separate from baseline validation) ---
+OUTPUT_DIR="$ARTIFACTS_DIR/output/change"
+mkdir -p "$OUTPUT_DIR"
+
 # --- redirect stdout/stderr so files are visible during the run ---
-mkdir -p "$ARTIFACTS_DIR"
-exec > "$ARTIFACTS_DIR/validation_change.stdout" 2> "$ARTIFACTS_DIR/validation_change.stderr"
+exec > "$OUTPUT_DIR/validation_change.stdout" 2> "$OUTPUT_DIR/validation_change.stderr"
 
 # --- load env file (sourced before flags are applied so flags win) ---
 if [[ -f "$ENV_FILE" ]]; then
@@ -119,7 +122,7 @@ export VLLM_LOGGING_LEVEL="${VLLM_LOGGING_LEVEL:-INFO}"
 export VLLM_WORKER_MULTIPROC_METHOD="${VLLM_WORKER_MULTIPROC_METHOD:-spawn}"
 
 # --- paths ---
-LOGS_DIR="$ARTIFACTS_DIR/logs/change"
+LOGS_DIR="$OUTPUT_DIR/logs"
 mkdir -p "$LOGS_DIR"
 
 echo "Job started:    $(date)"
@@ -157,7 +160,7 @@ cp -v "$EVOLVED_SRC" "$TARGET"
 # Skip benchmark-multi-turn-kv-offload-lab-lru and -arc (baseline entries)
 # since we're testing the evolved policy here.
 PLAN_SRC="$ARTIFACTS_DIR/validation_plan.json"
-PLAN_CHANGE="$ARTIFACTS_DIR/validation_plan_change.json"
+PLAN_CHANGE="$OUTPUT_DIR/validation_plan_change.json"
 jq '(.entries[] | select(
     .harness_entry.id == "benchmark-multi-turn-kv-offload-lab-lru" or
     .harness_entry.id == "benchmark-multi-turn-kv-offload-lab-arc"
@@ -172,7 +175,7 @@ python -m spotlights_validation.cli run \
     --source-tree "$ROOT_DIR/vllm" \
     --change-ref  "kv-offload-lab@HEAD" \
     --logs-dir    "$LOGS_DIR" \
-    --out         "$ARTIFACTS_DIR/validation_result_change.json"
+    --out         "$OUTPUT_DIR/validation_result_change.json"
 
 # --- revert manager.py to original ---
 echo "Reverting manager.py to original"
