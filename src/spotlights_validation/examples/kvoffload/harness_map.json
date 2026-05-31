@@ -196,9 +196,9 @@
       "name": "stress tests — KV offload under memory pressure",
       "kind": "stress",
       "path": "tests/v1/kv_connector/nixl_integration",
-      "invoke": "pytest -v tests/v1/kv_connector/nixl_integration/test_edge_cases.py -k memory",
+      "invoke": "bash -lc 'bash \"$ROOT_DIR/spotlights/src/spotlights_validation/examples/kvoffload/scripts/run_nixl_stress.sh\"'",
       "components": ["kv_offload", "kv_cache", "scheduler"],
-      "output_format": "pytest-json",
+      "output_format": "custom",
       "estimated_duration": 1800
     },
     {
