@@ -265,6 +265,7 @@
       "priority": 1,
       "halt_on_failure": true,
       "index": 17,
+      "before_run": "bash $ROOT_DIR/spotlights/src/spotlights_validation/examples/kvoffload/kill_vllm.sh",
       "harness_entry": {
         "id": "benchmark-multi-turn-kv-offload-lab",
         "name": "benchmark — multi-turn KV offload (kv-offload-lab)",
