@@ -638,31 +638,19 @@
       "metrics": [
         {
           "name": "ttft_ms_mean",
-          "baseline_value": null,
-          "measured_value": 147.364,
-          "relative_change": null,
-          "regressed": false
+          "measured_value": 147.364
         },
         {
           "name": "tpot_ms_mean",
-          "baseline_value": null,
-          "measured_value": 12.462,
-          "relative_change": null,
-          "regressed": false
+          "measured_value": 12.462
         },
         {
           "name": "cpu_hit_rate",
-          "baseline_value": null,
-          "measured_value": 0.04127944870974948,
-          "relative_change": null,
-          "regressed": false
+          "measured_value": 0.04127944870974948
         },
         {
           "name": "evictions",
-          "baseline_value": null,
-          "measured_value": 361587.0,
-          "relative_change": null,
-          "regressed": false
+          "measured_value": 361587.0
         }
       ],
       "optimization_target": null,
@@ -676,31 +664,19 @@
       "metrics": [
         {
           "name": "ttft_ms_mean",
-          "baseline_value": null,
-          "measured_value": 145.823,
-          "relative_change": null,
-          "regressed": false
+          "measured_value": 145.823
         },
         {
           "name": "tpot_ms_mean",
-          "baseline_value": null,
-          "measured_value": 12.465,
-          "relative_change": null,
-          "regressed": false
+          "measured_value": 12.465
         },
         {
           "name": "cpu_hit_rate",
-          "baseline_value": null,
-          "measured_value": 0.04582199406234538,
-          "relative_change": null,
-          "regressed": false
+          "measured_value": 0.04582199406234538
         },
         {
           "name": "evictions",
-          "baseline_value": null,
-          "measured_value": 356791.0,
-          "relative_change": null,
-          "regressed": false
+          "measured_value": 356791.0
         }
       ],
       "optimization_target": null,
@@ -714,31 +690,19 @@
       "metrics": [
         {
           "name": "ttft_ms_mean",
-          "baseline_value": null,
-          "measured_value": 139.22,
-          "relative_change": null,
-          "regressed": false
+          "measured_value": 139.22
         },
         {
           "name": "tpot_ms_mean",
-          "baseline_value": null,
-          "measured_value": 12.308,
-          "relative_change": null,
-          "regressed": false
+          "measured_value": 12.308
         },
         {
           "name": "cpu_hit_rate",
-          "baseline_value": null,
-          "measured_value": 0.15867685910362833,
-          "relative_change": null,
-          "regressed": false
+          "measured_value": 0.15867685910362833
         },
         {
           "name": "evictions",
-          "baseline_value": null,
-          "measured_value": 246295.0,
-          "relative_change": null,
-          "regressed": false
+          "measured_value": 246295.0
         }
       ],
       "optimization_target": null,

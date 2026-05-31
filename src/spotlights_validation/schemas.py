@@ -130,10 +130,10 @@ class ValidationPlan(BaseModel):
 
 class MetricResult(BaseModel):
     name: str
-    baseline_value: float | None = None
+    baseline_value: float | None = Field(default=None, exclude=True)
     measured_value: float | None = None
-    relative_change: float | None = None
-    regressed: bool = False
+    relative_change: float | None = Field(default=None, exclude=True)
+    regressed: bool = Field(default=False, exclude=True)
 
 
 class TestError(BaseModel):
