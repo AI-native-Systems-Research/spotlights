@@ -350,13 +350,70 @@ pip install -e .
 This exposes both `python -m spotlights_validation.cli` and the
 `spotlights-validation` console script.
 
-## Running via `src/spotlights_validation/sample/kvoffload/run_validation.sh`
+## Running the validation
 
-`src/spotlights_validation/sample/kvoffload/run_validation.sh` is the LSF-submittable wrapper
+The validation plan is designed to run **twice** — once as a baseline and
+once with the evolved policy applied — so that the evolved policy's
+benchmark results can be compared against LRU/ARC baselines collected
+under the same conditions.
+
+| Script | What it does | Benchmark entries run |
+| --- | --- | --- |
+| `run_baseline.sh` | Runs on the **original** vLLM 0.18.0 (no code changes) | LRU + ARC (`benchmark-multi-turn-kv-offload-lab-lru`, `-arc`) |
+| `run_change_validation.sh` | Applies the **evolved policy** (`manager_freq_init.py`) on top of vLLM 0.18.0, runs validation, then **reverts** `manager.py` back to the original | Evolved (`benchmark-multi-turn-kv-offload-lab`) |
+
+Both scripts run all non-benchmark entries (unit, integration, stress,
+correctness) in addition to their respective benchmark subset. Entries
+not applicable to a given run are marked `skipped` in the generated plan
+file.
+
+### How entry skipping works
+
+Each script uses `jq` to derive a variant plan from the canonical
+`validation_plan.json`:
+
+- `run_baseline.sh` → `validation_plan_baseline.json` — sets
+  `"skipped": true` on `benchmark-multi-turn-kv-offload-lab` (the evolved
+  policy entry).
+- `run_change_validation.sh` → `validation_plan_change.json` — sets
+  `"skipped": true` on `benchmark-multi-turn-kv-offload-lab-lru` and
+  `benchmark-multi-turn-kv-offload-lab-arc`.
+
+The runner respects `entry.skipped == true` and logs a skip reason
+without executing the entry.
+
+### Evolved policy application and revert
+
+`run_change_validation.sh` performs three extra steps around the
+validation run:
+
+1. **Backup** the original `$ROOT_DIR/kv_offload_lab/backends/labcpu/manager.py`
+   to `manager.py.orig`.
+2. **Replace** it with the evolved file at
+   `$ROOT_DIR/kv-offload-lab/experiments/openevolve/exp9/openevolve_output/fix/manager_freq_init.py`.
+3. **Revert** after the run completes — copies `manager.py.orig` back to
+   `manager.py` and removes the backup.
+
+This ensures the working tree is left clean regardless of whether the
+validation passes or fails.
+
+### Output separation
+
+| Script | Result file | Logs dir |
+| --- | --- | --- |
+| `run_baseline.sh` | `validation_result_baseline.json` | `logs/baseline/` |
+| `run_change_validation.sh` | `validation_result_change.json` | `logs/change/` |
+
+---
+
+## Running via `run_validation.sh` (single combined run)
+
+`run_validation.sh` is the original LSF-submittable wrapper
 that activates the venv, exports the HuggingFace / vLLM environment, and
 launches `python -m spotlights_validation.cli run` against the reference
-`kvoffload` plan. Each input can be supplied as a CLI flag, in the
-`.env` file, or as an exported environment variable in the calling
+`kvoffload` plan. It runs **all** entries (including all three benchmark
+policies) in a single pass. Each input can be supplied as a CLI flag, in
+the `.env` file, or as an exported environment variable in the calling
 shell.
 
 **Precedence (highest first): CLI flag > `.env` file > calling shell
@@ -427,10 +484,27 @@ HF_TOKEN=<your-hf-token>
 # VLLM_WORKER_MULTIPROC_METHOD=spawn
 ```
 
-### Submitting the job
+### Submitting the jobs
 
-The `#BSUB` headers at the top of the script reserve the GPU resources;
-submit it with `bsub`. Pick the input style that matches how you prefer
+The `#BSUB` headers at the top of each script reserve the GPU resources;
+submit with `bsub`. The split scripts are submitted independently:
+
+```bash
+# Baseline (original vLLM, LRU + ARC benchmarks)
+bsub < src/spotlights_validation/examples/kvoffload/run_baseline.sh
+
+# Change validation (evolved policy applied, evolved benchmark)
+bsub < src/spotlights_validation/examples/kvoffload/run_change_validation.sh
+```
+
+Or submit the combined single-run script if you want all three policies
+in one pass (requires the evolved policy to already be applied manually):
+
+```bash
+bsub < src/spotlights_validation/examples/kvoffload/run_validation.sh
+```
+
+Pick the input style that matches how you prefer
 to manage configuration (all three honor the precedence rules above):
 
 #### Option 1 — `.env` file (simplest for repeat runs)
