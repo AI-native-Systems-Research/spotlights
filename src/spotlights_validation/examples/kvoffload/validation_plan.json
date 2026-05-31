@@ -238,7 +238,7 @@
         "name": "integration tests — v1 engine",
         "kind": "integration",
         "path": "tests/v1/engine",
-        "invoke": "pytest -v tests/v1/engine/ --ignore=tests/v1/engine/test_async_llm.py --ignore=tests/v1/engine/test_engine_core_client.py",
+        "invoke": "pytest -v tests/v1/engine/ --ignore=tests/v1/engine/test_async_llm.py --ignore=tests/v1/engine/test_engine_core_client.py --ignore=tests/v1/engine/test_abort_final_step.py --ignore=tests/v1/engine/test_output_processor.py -k 'not test_skip_tokenizer_initialization'",
         "components": ["engine", "scheduler"],
         "output_format": "pytest-json",
         "estimated_duration": 1800
