@@ -179,7 +179,7 @@
       "invoke": "pytest -v tests/v1/engine/",
       "components": ["engine", "scheduler"],
       "output_format": "pytest-json",
-      "estimated_duration": 900
+      "estimated_duration": 1800
     },
     {
       "id": "correctness-basic",
