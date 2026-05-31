@@ -126,7 +126,7 @@
         "invoke": "pytest -v tests/v1/core/test_kv_cache_utils.py",
         "components": ["kv_cache"],
         "output_format": "pytest-json",
-        "estimated_duration": 300
+        "estimated_duration": 600
       },
       "workloads": []
     },

@@ -58,6 +58,8 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)" || 
 DEFAULT_ARTIFACTS_DIR=""
 if [[ -n "$SCRIPT_DIR" && -f "$SCRIPT_DIR/run_validation.sh" ]]; then
     DEFAULT_ARTIFACTS_DIR="$SCRIPT_DIR"
+elif [[ -n "${LS_SUBCWD:-}" && -f "$LS_SUBCWD/run_validation.sh" ]]; then
+    DEFAULT_ARTIFACTS_DIR="$LS_SUBCWD"
 elif [[ -n "${LS_SUBCWD:-}" && -f "$LS_SUBCWD/artifacts/kvoffload/run_validation.sh" ]]; then
     DEFAULT_ARTIFACTS_DIR="$LS_SUBCWD/artifacts/kvoffload"
 fi
