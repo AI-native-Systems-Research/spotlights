@@ -134,6 +134,8 @@
       "priority": 3,
       "halt_on_failure": false,
       "index": 9,
+      "skipped": true,
+      "skip_reason": "tests/v1/core/test_kv_cache_coordinator.py does not exist in vllm v0.18.0 — re-enable once vllm is upgraded to a version that includes this test",
       "harness_entry": {
         "id": "unit-kv-cache-coordinator",
         "name": "unit tests — KV cache coordinator",
@@ -142,8 +144,7 @@
         "invoke": "pytest -v tests/v1/core/test_kv_cache_coordinator.py",
         "components": ["kv_cache"],
         "output_format": "pytest-json",
-        "estimated_duration": 300,
-        "_comment": "tests/v1/core/test_kv_cache_coordinator.py does not exist in vllm v0.18.0 (the version used by the mvp demo) and was not found in this repo's history at all. Entry retained for parity with the latest-vllm validation plan; it will collect 0 items / pytest-exit-4 on v0.18.0. halt_on_failure is already false so this entry merely warns. Re-evaluate once vllm is upgraded to a version that includes this test, or until an equivalent coordinator-level test is identified."
+        "estimated_duration": 300
       },
       "workloads": []
     },
