@@ -240,7 +240,7 @@
         "invoke": "pytest -v tests/v1/engine/ --ignore=tests/v1/engine/test_async_llm.py --ignore=tests/v1/engine/test_engine_core_client.py",
         "components": ["engine", "scheduler"],
         "output_format": "pytest-json",
-        "estimated_duration": 900
+        "estimated_duration": 1800
       },
       "workloads": []
     },
