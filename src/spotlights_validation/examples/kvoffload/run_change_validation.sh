@@ -137,7 +137,7 @@ echo "Mode:           CHANGE (evolved policy applied; LRU + ARC skipped)"
 
 # --- apply evolved policy: replace manager.py ---
 EVOLVED_SRC="$ROOT_DIR/kv-offload-lab/experiments/openevolve/exp9/openevolve_output/fix/manager_freq_init.py"
-TARGET="$ROOT_DIR/kv_offload_lab/backends/labcpu/manager.py"
+TARGET="$ROOT_DIR/kv-offload-lab/kv_offload_lab/backends/labcpu/manager.py"
 
 if [[ ! -f "$EVOLVED_SRC" ]]; then
     echo "ERROR: evolved policy source not found: $EVOLVED_SRC" >&2
