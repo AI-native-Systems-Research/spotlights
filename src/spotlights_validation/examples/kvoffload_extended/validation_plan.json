@@ -8,7 +8,7 @@
       "index": 1,
       "harness_entry": {
         "id": "unit-kv-offload-tiering",
-        "name": "unit tests \u2014 KV offload tiering",
+        "name": "unit tests — KV offload tiering",
         "kind": "unit",
         "path": "tests/v1/kv_offload",
         "invoke": "pytest -v tests/v1/kv_offload/ -k 'not test_cpu_offloading'",
@@ -26,10 +26,10 @@
       "index": 2,
       "harness_entry": {
         "id": "unit-kv-connector-offloading",
-        "name": "unit tests \u2014 KV connector offloading",
+        "name": "unit tests — KV connector offloading",
         "kind": "unit",
         "path": "tests/v1/kv_connector/unit/test_offloading_connector.py",
-        "invoke": "python /proj/vlt-evolve/work/orit/spotlights-validation/artifacts/kvoffload/scripts/serial_pytest.py tests/v1/kv_connector/unit/test_offloading_connector.py -k 'not meta-llama and not tiering'",
+        "invoke": "pytest -v tests/v1/kv_connector/unit/test_offloading_connector.py",
         "components": [
           "kv_offload",
           "distributed.kv_transfer"
@@ -45,7 +45,7 @@
       "index": 3,
       "harness_entry": {
         "id": "gh_cache_pollution_prevention",
-        "name": "correctness tests \u2014 prefix-cache pollution prevention (invalid block eviction)",
+        "name": "correctness tests — prefix-cache pollution prevention (invalid block eviction)",
         "kind": "correctness",
         "path": "tests/v1/kv_connector/unit/test_cache_pollution_prevention.py",
         "invoke": "pytest -v tests/v1/kv_connector/unit/test_cache_pollution_prevention.py",
@@ -70,7 +70,7 @@
             "kv_cache",
             "scheduler"
           ],
-          "description": "DeepSeek-V4-Flash multi-turn A\u2192B\u2192A pattern: verifies prefix-cache soft-pin prevents 0% hit rate on re-sent requests when a different request B runs between identical A prompts."
+          "description": "DeepSeek-V4-Flash multi-turn A→B→A pattern: verifies prefix-cache soft-pin prevents 0% hit rate on re-sent requests when a different request B runs between identical A prompts."
         }
       ]
     },
@@ -80,7 +80,7 @@
       "index": 4,
       "harness_entry": {
         "id": "gh_invalid_blocks_correctness",
-        "name": "correctness tests \u2014 invalid block handling (sync recompute, sync fail, async recompute)",
+        "name": "correctness tests — invalid block handling (sync recompute, sync fail, async recompute)",
         "kind": "correctness",
         "path": "tests/v1/kv_connector/unit/test_invalid_blocks_correctness.py",
         "invoke": "pytest -v tests/v1/kv_connector/unit/test_invalid_blocks_correctness.py",
@@ -103,7 +103,7 @@
       "index": 5,
       "harness_entry": {
         "id": "unit-kv-connector-lifecycle",
-        "name": "unit tests \u2014 KV connector lifecycle",
+        "name": "unit tests — KV connector lifecycle",
         "kind": "unit",
         "path": "tests/v1/kv_connector/unit/test_kv_connector_lifecycle.py",
         "invoke": "pytest -v tests/v1/kv_connector/unit/test_kv_connector_lifecycle.py",
@@ -122,7 +122,7 @@
       "index": 6,
       "harness_entry": {
         "id": "unit-kv-cache-layout",
-        "name": "unit tests \u2014 KV cache layout",
+        "name": "unit tests — KV cache layout",
         "kind": "unit",
         "path": "tests/v1/kv_connector/unit/test_kv_cache_layout.py",
         "invoke": "pytest -v tests/v1/kv_connector/unit/test_kv_cache_layout.py",
@@ -141,7 +141,7 @@
       "index": 7,
       "harness_entry": {
         "id": "unit-kv-load-failure-recovery",
-        "name": "unit tests \u2014 KV load failure recovery",
+        "name": "unit tests — KV load failure recovery",
         "kind": "unit",
         "path": "tests/v1/kv_connector/unit/test_kv_load_failure_recovery.py",
         "invoke": "pytest -v tests/v1/kv_connector/unit/test_kv_load_failure_recovery.py",
@@ -159,7 +159,7 @@
       "index": 8,
       "harness_entry": {
         "id": "gh_error_propagation",
-        "name": "unit tests \u2014 KV connector error propagation",
+        "name": "unit tests — KV connector error propagation",
         "kind": "unit",
         "path": "tests/v1/kv_connector/unit/test_error_propagation.py",
         "invoke": "pytest -v tests/v1/kv_connector/unit/test_error_propagation.py",
@@ -181,7 +181,7 @@
       "index": 9,
       "harness_entry": {
         "id": "unit-kv-cache-manager",
-        "name": "unit tests \u2014 KV cache manager (via prefix caching)",
+        "name": "unit tests — KV cache manager (via prefix caching)",
         "kind": "unit",
         "path": "tests/v1/core/test_prefix_caching.py",
         "invoke": "pytest -v tests/v1/core/test_prefix_caching.py",
@@ -199,7 +199,7 @@
       "index": 10,
       "harness_entry": {
         "id": "unit-single-type-kv-cache-manager",
-        "name": "unit tests \u2014 single-type KV cache manager",
+        "name": "unit tests — single-type KV cache manager",
         "kind": "unit",
         "path": "tests/v1/core/test_single_type_kv_cache_manager.py",
         "invoke": "pytest -v tests/v1/core/test_single_type_kv_cache_manager.py",
@@ -217,7 +217,7 @@
       "index": 11,
       "harness_entry": {
         "id": "unit-kv-cache-utils",
-        "name": "unit tests \u2014 KV cache utilities",
+        "name": "unit tests — KV cache utilities",
         "kind": "unit",
         "path": "tests/v1/core/test_kv_cache_utils.py",
         "invoke": "pytest -v tests/v1/core/test_kv_cache_utils.py",
@@ -233,9 +233,29 @@
       "priority": 3,
       "halt_on_failure": false,
       "index": 12,
+      "skipped": true,
+      "skip_reason": "tests/v1/core/test_kv_cache_coordinator.py does not exist in vllm v0.18.0 — re-enable once vllm is upgraded to a version that includes this test",
+      "harness_entry": {
+        "id": "unit-kv-cache-coordinator",
+        "name": "unit tests — KV cache coordinator",
+        "kind": "unit",
+        "path": "tests/v1/core/test_kv_cache_coordinator.py",
+        "invoke": "pytest -v tests/v1/core/test_kv_cache_coordinator.py",
+        "components": [
+          "kv_cache"
+        ],
+        "output_format": "pytest-json",
+        "estimated_duration": 300
+      },
+      "workloads": []
+    },
+    {
+      "priority": 3,
+      "halt_on_failure": false,
+      "index": 13,
       "harness_entry": {
         "id": "gh_reset_prefix_cache_e2e",
-        "name": "correctness tests \u2014 prefix cache reset end-to-end",
+        "name": "correctness tests — prefix cache reset end-to-end",
         "kind": "correctness",
         "path": "tests/v1/core/test_reset_prefix_cache_e2e.py",
         "invoke": "pytest -v tests/v1/core/test_reset_prefix_cache_e2e.py",
@@ -266,10 +286,10 @@
     {
       "priority": 4,
       "halt_on_failure": false,
-      "index": 13,
+      "index": 14,
       "harness_entry": {
         "id": "unit-cache-kernels",
-        "name": "unit tests \u2014 cache kernels (test_gather_cache_oob deselected)",
+        "name": "unit tests — cache kernels (test_gather_cache_oob deselected)",
         "kind": "unit",
         "path": "tests/kernels/test_cache_kernels.py",
         "invoke": "pytest -v tests/kernels/test_cache_kernels.py -k 'not test_gather_cache_oob'",
@@ -286,10 +306,10 @@
     {
       "priority": 4,
       "halt_on_failure": false,
-      "index": 14,
+      "index": 15,
       "harness_entry": {
         "id": "unit-scheduler",
-        "name": "unit tests \u2014 scheduler",
+        "name": "unit tests — scheduler",
         "kind": "unit",
         "path": "tests/v1/core/test_scheduler.py",
         "invoke": "pytest -v tests/v1/core/test_scheduler.py",
@@ -304,10 +324,10 @@
     {
       "priority": 4,
       "halt_on_failure": false,
-      "index": 15,
+      "index": 16,
       "harness_entry": {
         "id": "unit-async-scheduler",
-        "name": "unit tests \u2014 async scheduler",
+        "name": "unit tests — async scheduler",
         "kind": "unit",
         "path": "tests/v1/core/test_async_scheduler.py",
         "invoke": "pytest -v tests/v1/core/test_async_scheduler.py",
@@ -322,10 +342,10 @@
     {
       "priority": 4,
       "halt_on_failure": false,
-      "index": 16,
+      "index": 17,
       "harness_entry": {
         "id": "unit-worker",
-        "name": "unit tests \u2014 worker",
+        "name": "unit tests — worker",
         "kind": "unit",
         "path": "tests/v1/worker",
         "invoke": "pytest -v tests/v1/worker/",
@@ -340,10 +360,10 @@
     {
       "priority": 5,
       "halt_on_failure": false,
-      "index": 17,
+      "index": 18,
       "harness_entry": {
         "id": "integration-scheduler-e2e",
-        "name": "integration tests \u2014 scheduler end-to-end",
+        "name": "integration tests — scheduler end-to-end",
         "kind": "integration",
         "path": "tests/v1/core/test_scheduler_e2e.py",
         "invoke": "pytest -v tests/v1/core/test_scheduler_e2e.py",
@@ -359,29 +379,29 @@
     {
       "priority": 5,
       "halt_on_failure": false,
-      "index": 18,
+      "index": 19,
       "harness_entry": {
         "id": "integration-engine",
-        "name": "integration tests \u2014 v1 engine",
+        "name": "integration tests — v1 engine",
         "kind": "integration",
         "path": "tests/v1/engine",
-        "invoke": "pytest -v tests/v1/engine/ --ignore=tests/v1/engine/test_async_llm.py --ignore=tests/v1/engine/test_engine_core_client.py",
+        "invoke": "pytest -v tests/v1/engine/ --ignore=tests/v1/engine/test_async_llm.py --ignore=tests/v1/engine/test_engine_core_client.py --ignore=tests/v1/engine/test_abort_final_step.py --ignore=tests/v1/engine/test_output_processor.py -k 'not test_skip_tokenizer_initialization'",
         "components": [
           "engine",
           "scheduler"
         ],
         "output_format": "pytest-json",
-        "estimated_duration": 900
+        "estimated_duration": 1800
       },
       "workloads": []
     },
     {
       "priority": 6,
       "halt_on_failure": true,
-      "index": 19,
+      "index": 20,
       "harness_entry": {
         "id": "correctness-basic",
-        "name": "correctness tests \u2014 basic model output",
+        "name": "correctness tests — basic model output",
         "kind": "correctness",
         "path": "tests/basic_correctness",
         "_comment": "test_cumem/test_cpu_offload/test_models[Gemma2] excluded: cudaErrorDevicesUnavailable / fork-after-CUDA on hosts with Compute Mode=Exclusive_Process. test_prefetch_offload excluded: needs gated meta-llama/Llama-3.2-1B-Instruct cache; the active HF token's access request is awaiting review.",
@@ -398,13 +418,13 @@
     {
       "priority": 1,
       "halt_on_failure": true,
-      "index": 20,
+      "index": 21,
       "harness_entry": {
         "id": "benchmark-multi-turn-kv-offload-lab",
-        "name": "benchmark \u2014 multi-turn KV offload (kv-offload-lab)",
+        "name": "benchmark — multi-turn KV offload (kv-offload-lab, evolved)",
         "kind": "benchmark",
-        "path": "/proj/vlt-evolve/work/orit/kv-offload-lab/benchmark/multi-turn/run_benchmark.sh",
-        "invoke": "bash -lc 'set -a; source /proj/vlt-evolve/work/orit/kv-offload-lab/.env; export HF_HOME=/proj/vlt-evolve/work/cache/huggingface; export HF_HUB_CACHE=/proj/vlt-evolve/work/cache/huggingface/hub; export TRANSFORMERS_CACHE=/proj/vlt-evolve/work/cache/huggingface/hub; set +a; bash /proj/vlt-evolve/work/orit/kv-offload-lab/benchmark/multi-turn/run_benchmark.sh --workload sharegpt --policy evolved --gpu-util 0.5 --num-clients 4 --max-active 128 --kv-size 26'",
+        "path": "kv-offload-lab/benchmark/multi-turn/run_benchmark.sh",
+        "invoke": "bash -lc 'set -a; source \"$ROOT_DIR/kv-offload-lab/.env\"; set +a; bash \"$ROOT_DIR/kv-offload-lab/benchmark/multi-turn/run_benchmark.sh\" --workload sharegpt --policy evolved --gpu-util 0.5 --num-clients 4 --max-active 128 --kv-size 26'",
         "components": [
           "kv_offload",
           "scheduler"
@@ -413,49 +433,99 @@
         "estimated_duration": 1800,
         "output_template": {
           "format": "json-file",
-          "source": "/proj/vlt-evolve/work/orit/kv-offload-lab/experiments/openevolve/exp9/openevolve_output/best/best_program_info.json",
+          "source": "$ROOT_DIR/kv-offload-lab/benchmark/multi-turn/results/evolved/sharegpt/gpu_0.5_active_128_cpu_26/summary.json",
           "metric_paths": {
-            "combined_score": "metrics.combined_score",
-            "cpu_hit_rate": "metrics.cpu_hit_rate",
-            "ttft_ratio": "metrics.ttft_ratio",
-            "throughput_ratio": "metrics.throughput_ratio",
-            "lookup_total": "metrics.lookup_total",
-            "lookup_hits": "metrics.lookup_hits",
-            "lookup_misses": "metrics.lookup_misses",
-            "evictions": "metrics.evictions",
-            "eviction_rate": "metrics.eviction_rate",
-            "engine_external_prefix_hit_rate": "metrics.engine_external_prefix_hit_rate",
-            "engine_gpu_prefix_hit_rate": "metrics.engine_gpu_prefix_hit_rate",
-            "request_throughput": "metrics.metrics.request_throughput",
-            "output_token_throughput": "metrics.metrics.output_token_throughput",
-            "mean_ttft_ms": "metrics.metrics.mean_ttft_ms",
-            "p99_ttft_ms": "metrics.metrics.p99_ttft_ms",
-            "mean_request_latency_ms": "metrics.metrics.mean_request_latency_ms",
-            "total_requests": "metrics.metrics.total_requests",
-            "failures": "metrics.metrics.failures"
+            "ttft_ms_mean": "ttft_ms_mean",
+            "tpot_ms_mean": "tpot_ms_mean",
+            "cpu_hit_rate": "cpu_hit_rate",
+            "evictions": "evictions"
           },
-          "notes": "The benchmark wrapper writes a single JSON document with two nested groups: top-level metrics.* are kv-offload eviction/hit-rate stats and ratios; metrics.metrics.* are the serving-side throughput and latency numbers. When multiple matches exist on disk the runner picks the most recently modified file."
+          "notes": "Metrics consolidated by collect_summary.py from benchmark_run_1.log (regex for ttft/tpot avg) and kv_stats_1.json (lookup/eviction stats). cpu_hit_rate = lookup_hits / lookup_total."
         },
-        "comparison_guidance": "Compare against the baseline best_program_info.json captured for the policy under test before the change.\n  - Pass when combined_score is >= baseline (within 1% noise band) AND ttft_ratio <= baseline * 1.05 AND throughput_ratio >= baseline * 0.98 AND failures == 0.\n  - Investigate when cpu_hit_rate or engine_external_prefix_hit_rate drops by more than 3 absolute points: that usually means an eviction-policy regression, not a perf regression \u2014 cross-check eviction_rate and lookup_misses.\n  - Mean/p99 ttft_ms and mean_request_latency_ms are absolute numbers; report deltas in ms and as percentage of baseline. p99_ttft_ms regressing >10% is a hard fail even if the mean looks OK.\n  - request_throughput and output_token_throughput should be considered together: a gain in request throughput at the cost of a >5% drop in output_token_throughput usually means shorter outputs were generated and the comparison is invalid.",
-        "_comment": "Stand-alone command line (run from /proj/vlt-evolve/work/orit/kv-offload-lab): set -a; source .env; export HF_HOME=/proj/vlt-evolve/work/cache/huggingface; export HF_HUB_CACHE=/proj/vlt-evolve/work/cache/huggingface/hub; export TRANSFORMERS_CACHE=/proj/vlt-evolve/work/cache/huggingface/hub; set +a; bash benchmark/multi-turn/run_benchmark.sh --workload sharegpt --policy evolved --gpu-util 0.5 --num-clients 4 --max-active 128 --kv-size 26."
+        "comparison_guidance": "Compare evolved policy against LRU/ARC baselines.\n  - Pass when ttft_ms_mean is <= LRU baseline * 1.05 AND cpu_hit_rate >= LRU baseline.\n  - Investigate when cpu_hit_rate drops by more than 3 absolute points vs baseline.\n  - evictions should be comparable or lower than LRU for the same workload."
+      },
+      "workloads": [],
+      "before_run": "bash $ROOT_DIR/spotlights/src/spotlights_validation/examples/kvoffload/kill_vllm.sh"
+    },
+    {
+      "priority": 1,
+      "halt_on_failure": true,
+      "index": 22,
+      "before_run": "bash $ROOT_DIR/spotlights/src/spotlights_validation/examples/kvoffload/kill_vllm.sh",
+      "harness_entry": {
+        "id": "benchmark-multi-turn-kv-offload-lab-lru",
+        "name": "benchmark — multi-turn KV offload (kv-offload-lab, LRU)",
+        "kind": "benchmark",
+        "path": "kv-offload-lab/benchmark/multi-turn/run_benchmark.sh",
+        "invoke": "bash -lc 'set -a; source \"$ROOT_DIR/kv-offload-lab/.env\"; set +a; bash \"$ROOT_DIR/kv-offload-lab/benchmark/multi-turn/run_benchmark.sh\" --workload sharegpt --policy lru --gpu-util 0.5 --num-clients 4 --max-active 128 --kv-size 26'",
+        "components": [
+          "kv_offload",
+          "scheduler"
+        ],
+        "output_format": "custom",
+        "estimated_duration": 3600,
+        "output_template": {
+          "format": "json-file",
+          "source": "$ROOT_DIR/kv-offload-lab/benchmark/multi-turn/results/lru/sharegpt/gpu_0.5_active_128_cpu_26/summary.json",
+          "metric_paths": {
+            "ttft_ms_mean": "ttft_ms_mean",
+            "tpot_ms_mean": "tpot_ms_mean",
+            "cpu_hit_rate": "cpu_hit_rate",
+            "evictions": "evictions"
+          },
+          "notes": "LRU baseline. Same metric collection as evolved via collect_summary.py."
+        },
+        "comparison_guidance": "LRU serves as the baseline for comparison with evolved/ARC policies. Record these values for cross-entry comparison."
+      },
+      "workloads": []
+    },
+    {
+      "priority": 1,
+      "halt_on_failure": true,
+      "index": 23,
+      "before_run": "bash $ROOT_DIR/spotlights/src/spotlights_validation/examples/kvoffload/kill_vllm.sh",
+      "harness_entry": {
+        "id": "benchmark-multi-turn-kv-offload-lab-arc",
+        "name": "benchmark — multi-turn KV offload (kv-offload-lab, ARC)",
+        "kind": "benchmark",
+        "path": "kv-offload-lab/benchmark/multi-turn/run_benchmark.sh",
+        "invoke": "bash -lc 'set -a; source \"$ROOT_DIR/kv-offload-lab/.env\"; set +a; bash \"$ROOT_DIR/kv-offload-lab/benchmark/multi-turn/run_benchmark.sh\" --workload sharegpt --policy arc --gpu-util 0.5 --num-clients 4 --max-active 128 --kv-size 26'",
+        "components": [
+          "kv_offload",
+          "scheduler"
+        ],
+        "output_format": "custom",
+        "estimated_duration": 3600,
+        "output_template": {
+          "format": "json-file",
+          "source": "$ROOT_DIR/kv-offload-lab/benchmark/multi-turn/results/arc/sharegpt/gpu_0.5_active_128_cpu_26/summary.json",
+          "metric_paths": {
+            "ttft_ms_mean": "ttft_ms_mean",
+            "tpot_ms_mean": "tpot_ms_mean",
+            "cpu_hit_rate": "cpu_hit_rate",
+            "evictions": "evictions"
+          },
+          "notes": "ARC baseline. Same metric collection as evolved via collect_summary.py."
+        },
+        "comparison_guidance": "ARC serves as a baseline for comparison with evolved policy. Record these values for cross-entry comparison."
       },
       "workloads": []
     },
     {
       "priority": 6,
       "halt_on_failure": false,
-      "index": 21,
+      "index": 24,
       "harness_entry": {
         "id": "integration-kv-connector-nixl",
-        "name": "integration tests \u2014 KV connector NixL accuracy",
+        "name": "integration tests — KV connector NixL accuracy",
         "kind": "integration",
         "path": "tests/v1/kv_connector/nixl_integration",
-        "invoke": "pytest -v tests/v1/kv_connector/nixl_integration/test_accuracy.py",
+        "invoke": "bash tests/v1/kv_connector/nixl_integration/run_accuracy_test.sh",
         "components": [
           "kv_offload",
           "distributed.kv_transfer"
         ],
-        "output_format": "pytest-json",
+        "output_format": "custom",
         "estimated_duration": 1800
       },
       "workloads": [
@@ -472,15 +542,16 @@
           ],
           "description": "Decode under memory pressure: 128 concurrent requests with 16K KV cache per request, intentionally exceeding GPU VRAM to trigger KV offload eviction and reload."
         }
-      ]
+      ],
+      "before_run": "bash $ROOT_DIR/spotlights/src/spotlights_validation/examples/kvoffload/kill_vllm.sh"
     },
     {
       "priority": 6,
       "halt_on_failure": false,
-      "index": 22,
+      "index": 25,
       "harness_entry": {
         "id": "gh_nixl_disagg_accuracy",
-        "name": "integration tests \u2014 NixL disaggregated prefill/decode accuracy",
+        "name": "integration tests — NixL disaggregated prefill/decode accuracy",
         "kind": "integration",
         "path": "tests/v1/kv_connector/nixl_integration/test_disagg_accuracy.py",
         "invoke": "pytest -v tests/v1/kv_connector/nixl_integration/test_disagg_accuracy.py",
@@ -513,19 +584,19 @@
     {
       "priority": 7,
       "halt_on_failure": false,
-      "index": 23,
+      "index": 26,
       "harness_entry": {
         "id": "stress-kv-offload-memory-pressure",
-        "name": "stress tests \u2014 KV offload under memory pressure",
+        "name": "stress tests — KV offload under memory pressure",
         "kind": "stress",
         "path": "tests/v1/kv_connector/nixl_integration",
-        "invoke": "pytest -v tests/v1/kv_connector/nixl_integration/test_edge_cases.py -k memory",
+        "invoke": "bash -lc 'bash \"$ROOT_DIR/spotlights/src/spotlights_validation/examples/kvoffload/scripts/run_nixl_stress.sh\"'",
         "components": [
           "kv_offload",
           "kv_cache",
           "scheduler"
         ],
-        "output_format": "pytest-json",
+        "output_format": "custom",
         "estimated_duration": 1800
       },
       "workloads": [
@@ -559,12 +630,12 @@
     {
       "priority": 8,
       "halt_on_failure": false,
-      "index": 24,
+      "index": 27,
       "skipped": true,
-      "skip_reason": "no output_template defined yet \u2014 re-enable once metric extraction is wired up",
+      "skip_reason": "no output_template defined yet — re-enable once metric extraction is wired up",
       "harness_entry": {
         "id": "benchmark-attention",
-        "name": "benchmark \u2014 attention backends",
+        "name": "benchmark — attention backends",
         "kind": "benchmark",
         "path": "benchmarks/attention_benchmarks",
         "invoke": "python benchmarks/attention_benchmarks/benchmark.py --config benchmarks/attention_benchmarks/configs/standard_attention.yaml",
@@ -606,12 +677,12 @@
     {
       "priority": 8,
       "halt_on_failure": false,
-      "index": 25,
+      "index": 28,
       "skipped": true,
-      "skip_reason": "no output_template defined yet \u2014 re-enable once metric extraction is wired up",
+      "skip_reason": "no output_template defined yet — re-enable once metric extraction is wired up",
       "harness_entry": {
         "id": "benchmark-prefix-caching",
-        "name": "benchmark \u2014 prefix caching throughput",
+        "name": "benchmark — prefix caching throughput",
         "kind": "benchmark",
         "path": "benchmarks/benchmark_prefix_caching.py",
         "invoke": "python benchmarks/benchmark_prefix_caching.py --model meta-llama/Llama-3.1-8B-Instruct",
@@ -639,12 +710,12 @@
     {
       "priority": 8,
       "halt_on_failure": false,
-      "index": 26,
+      "index": 29,
       "skipped": true,
-      "skip_reason": "no output_template defined yet \u2014 re-enable once metric extraction is wired up",
+      "skip_reason": "no output_template defined yet — re-enable once metric extraction is wired up",
       "harness_entry": {
         "id": "gh_benchmark_latency",
-        "name": "benchmark \u2014 latency (TTFT and TPOT vs. baseline pre-change)",
+        "name": "benchmark — latency (TTFT and TPOT vs. baseline pre-change)",
         "kind": "benchmark",
         "path": "benchmarks/benchmark_latency.py",
         "invoke": "python benchmarks/benchmark_latency.py --model meta-llama/Llama-3.1-8B-Instruct --input-len 512 --output-len 128 --num-iters 50",
@@ -679,12 +750,12 @@
     {
       "priority": 9,
       "halt_on_failure": false,
-      "index": 27,
+      "index": 30,
       "skipped": true,
-      "skip_reason": "no output_template defined yet \u2014 re-enable once metric extraction is wired up",
+      "skip_reason": "no output_template defined yet — re-enable once metric extraction is wired up",
       "harness_entry": {
         "id": "benchmark-serving-throughput",
-        "name": "benchmark \u2014 serving throughput",
+        "name": "benchmark — serving throughput",
         "kind": "benchmark",
         "path": "benchmarks/benchmark_serving.py",
         "invoke": "vllm bench serve --model meta-llama/Llama-3.1-8B-Instruct --request-rate 10 --num-prompts 100",
@@ -727,12 +798,12 @@
     {
       "priority": 9,
       "halt_on_failure": false,
-      "index": 28,
+      "index": 31,
       "skipped": true,
-      "skip_reason": "no output_template defined yet \u2014 re-enable once metric extraction is wired up",
+      "skip_reason": "no output_template defined yet — re-enable once metric extraction is wired up",
       "harness_entry": {
         "id": "gh_benchmark_throughput",
-        "name": "benchmark \u2014 throughput (tokens/s vs. baseline pre-change)",
+        "name": "benchmark — throughput (tokens/s vs. baseline pre-change)",
         "kind": "benchmark",
         "path": "benchmarks/benchmark_throughput.py",
         "invoke": "python benchmarks/benchmark_throughput.py --model meta-llama/Llama-3.1-8B-Instruct --num-prompts 1000 --input-len 512 --output-len 128",
@@ -778,12 +849,12 @@
     {
       "priority": 9,
       "halt_on_failure": false,
-      "index": 29,
+      "index": 32,
       "skipped": true,
-      "skip_reason": "no output_template defined yet \u2014 re-enable once metric extraction is wired up",
+      "skip_reason": "no output_template defined yet — re-enable once metric extraction is wired up",
       "harness_entry": {
         "id": "benchmark-long-document-qa",
-        "name": "benchmark \u2014 long document Q&A throughput",
+        "name": "benchmark — long document Q&A throughput",
         "kind": "benchmark",
         "path": "benchmarks/benchmark_long_document_qa_throughput.py",
         "invoke": "python benchmarks/benchmark_long_document_qa_throughput.py --model meta-llama/Llama-3.1-8B-Instruct",
@@ -805,7 +876,7 @@
             "scheduler",
             "kv_offload"
           ],
-          "description": "Long document Q&A: 32K\u2013128K input tokens testing KV block management for very long sequences."
+          "description": "Long document Q&A: 32K–128K input tokens testing KV block management for very long sequences."
         }
       ]
     }
