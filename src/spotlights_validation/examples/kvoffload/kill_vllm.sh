@@ -61,4 +61,44 @@ if [[ -n "$ZOMBIE_PARENTS" ]]; then
     done
 fi
 
+# Wait for all killed processes to fully exit
+ALL_KILLED=$(printf '%s\n%s\n' "$ACTIVE_PIDS" "$ZOMBIE_PARENTS" | sort -un | grep -v '^$' || true)
+if [[ -n "$ALL_KILLED" ]]; then
+    echo "Waiting for processes to exit..."
+    TIMEOUT=30
+    ELAPSED=0
+    while [[ $ELAPSED -lt $TIMEOUT ]]; do
+        STILL_ALIVE=""
+        for PID in $ALL_KILLED; do
+            if kill -0 "$PID" 2>/dev/null; then
+                STILL_ALIVE="$STILL_ALIVE $PID"
+            fi
+        done
+        if [[ -z "$STILL_ALIVE" ]]; then
+            break
+        fi
+        sleep 1
+        ELAPSED=$((ELAPSED + 1))
+    done
+    if [[ -n "$STILL_ALIVE" ]]; then
+        echo "WARNING: processes still alive after ${TIMEOUT}s:$STILL_ALIVE"
+    fi
+fi
+
+# Wait for the vLLM port to be released
+VLLM_PORT="${EVOLVE_SERVER_PORT:-8000}"
+echo "Waiting for port $VLLM_PORT to be released..."
+TIMEOUT=15
+ELAPSED=0
+while [[ $ELAPSED -lt $TIMEOUT ]]; do
+    if ! ss -tlnp 2>/dev/null | grep -q ":${VLLM_PORT} "; then
+        break
+    fi
+    sleep 1
+    ELAPSED=$((ELAPSED + 1))
+done
+if ss -tlnp 2>/dev/null | grep -q ":${VLLM_PORT} "; then
+    echo "WARNING: port $VLLM_PORT still in use after ${TIMEOUT}s"
+fi
+
 echo "Done."
