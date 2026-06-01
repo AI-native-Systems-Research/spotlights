@@ -1,8 +1,8 @@
 # Extended Validation Plan — Discovery Report
 
 **Target version:** vllm v0.18.0
-**Base plan:** `artifacts/kvoffload/validation_plan.json`
-**Extended plan:** `artifacts/kvoffload_extended/validation_plan.json`
+**Base plan:** `src/spotlights_validation/examples/kvoffload/validation_plan.json`
+**Extended plan:** `src/spotlights_validation/examples/kvoffload_extended/validation_plan.json`
 
 The extended plan starts from the base kvoffload artifacts and adds entries
 discovered from vllm GitHub issues and PRs. All paths were verified against the
@@ -12,8 +12,9 @@ discovered from vllm GitHub issues and PRs. All paths were verified against the
 
 ## Added entries
 
-7 entries were added on top of the base plan. They are grouped below by kind and
-priority.
+7 entries were added on top of the base plan, plus `unit-kv-cache-coordinator`
+was promoted from "excluded" to a skipped entry in the plan itself (see index 12
+below). The added entries are grouped below by kind and priority.
 
 ---
 
@@ -87,7 +88,7 @@ the worker process.
 
 ### Correctness — Priority 3 (no halt)
 
-#### index 12 — `gh_reset_prefix_cache_e2e`
+#### index 13 — `gh_reset_prefix_cache_e2e`
 
 **Name:** correctness tests — prefix cache reset end-to-end
 **Source:** PR [vllm-project/vllm#41956](https://github.com/vllm-project/vllm/pull/41956)
@@ -109,7 +110,7 @@ over multiple eviction cycles, run against `benchmarks/benchmark_prefix_caching.
 
 ### Integration — Priority 6 (no halt)
 
-#### index 22 — `gh_nixl_disagg_accuracy`
+#### index 25 — `gh_nixl_disagg_accuracy`
 
 **Name:** integration tests — NixL disaggregated prefill/decode accuracy
 **Source:** issue [vllm-project/vllm#33689](https://github.com/vllm-project/vllm/issues/33689)
@@ -133,7 +134,7 @@ correctness validation (large KV blocks, multiple concurrent requests).
 Both benchmark entries are currently skipped pending `output_template`
 configuration. They will be re-enabled once metric extraction is wired up.
 
-#### index 26 — `gh_benchmark_latency`
+#### index 29 — `gh_benchmark_latency`
 
 **Name:** benchmark — latency (TTFT and TPOT vs. baseline pre-change)
 **Source:** issue [vllm-project/vllm#32604](https://github.com/vllm-project/vllm/issues/32604)
@@ -152,7 +153,7 @@ regress by more than 10% vs. the no-offload baseline.
 
 ---
 
-#### index 28 — `gh_benchmark_throughput`
+#### index 31 — `gh_benchmark_throughput`
 
 **Name:** benchmark — throughput (tokens/s vs. baseline pre-change)
 **Source:** issue [vllm-project/vllm#32604](https://github.com/vllm-project/vllm/issues/32604)
@@ -175,10 +176,44 @@ evictions does not regress throughput.
 
 ---
 
+## Base-plan sync (2026-06-01)
+
+The following changes were propagated from the base `kvoffload/validation_plan.json`
+to keep the extended plan consistent:
+
+- **Hardcoded paths removed:** all `/proj/...` absolute paths replaced with
+  `$ROOT_DIR`-relative references (benchmark invoke, output_template source).
+- **`before_run` hooks added:** benchmark entries (indices 21–23) and the NixL
+  integration entry (index 24) now run `kill_vllm.sh` before starting to avoid
+  port conflicts with stale vLLM processes.
+- **LRU/ARC baseline benchmarks added:** two new entries (indices 22–23) run the
+  multi-turn benchmark with `--policy lru` and `--policy arc` respectively,
+  providing baselines for the evolved-policy comparison.
+- **`unit-kv-cache-coordinator` promoted:** moved from the Excluded table to a
+  skipped entry (index 12) with an explicit `skip_reason`, matching the base plan.
+- **`integration-engine` invoke updated:** added `--ignore` flags for
+  `test_abort_final_step.py` and `test_output_processor.py`, plus
+  `-k 'not test_skip_tokenizer_initialization'` to exclude tests requiring gated
+  HF models. `estimated_duration` increased to 1800 s.
+- **NixL integration invoke updated:** switched from `pytest` to
+  `bash tests/v1/kv_connector/nixl_integration/run_accuracy_test.sh` (starts the
+  full server stack); `output_format` changed to `custom`.
+- **Stress test invoke updated:** switched from `pytest` to the
+  `run_nixl_stress.sh` wrapper script; `output_format` changed to `custom`.
+- **Benchmark output_template simplified:** metric paths now point to the
+  `collect_summary.py`-generated `summary.json` (flat keys: `ttft_ms_mean`,
+  `tpot_ms_mean`, `cpu_hit_rate`, `evictions`) instead of the old nested
+  `best_program_info.json` structure.
+- **All indices renumbered** to account for the 3 inserted entries (coordinator,
+  LRU, ARC). Total entry count: 32.
+
+---
+
 ## Excluded entries
 
-9 entries were identified during initial discovery but excluded because their
-test paths do not exist in the vllm `v0.18.0` tag.
+8 entries were identified during initial discovery but excluded because their
+test paths do not exist in the vllm `v0.18.0` tag. (`unit-kv-cache-coordinator`
+was previously in this list but is now included as a skipped entry at index 12.)
 
 | id | missing path | reason |
 |---|---|---|
@@ -189,7 +224,6 @@ test paths do not exist in the vllm `v0.18.0` tag.
 | `gh_offloading_connector_metrics` | `tests/v1/kv_connector/unit/offloading_connector/test_metrics.py` | same missing subdir |
 | `gh_offloading_connector_worker_metadata` | `tests/v1/kv_connector/unit/offloading_connector/test_worker_metadata.py` | same missing subdir |
 | `gh_bidirectional_kv_transfer` | `tests/v1/kv_connector/unit/test_bidirectional_kv_transfer.py` | introduced in PR #43097, merged after v0.18.0 |
-| `unit-kv-cache-coordinator` | `tests/v1/core/test_kv_cache_coordinator.py` | test file absent (source exists, no test in v0.18.0) |
 | `gh_nixl_multi_connector_edge_cases` | `tests/v1/kv_connector/nixl_integration/test_multi_connector_edge_cases.py` | path absent; only `test_multi_connector.py` exists at unit level |
 | `gh_hybrid_prefix_cache_eviction` | *(no test file)* | issue [#42948](https://github.com/vllm-project/vllm/issues/42948): `_maybe_evict_cached_block` destroys single-storage cache keys for hybrid MLA+SWA groups unconditionally; no test exists in v0.18.0 — the closest coverage is `test_maybe_evict_cached_block` in `tests/v1/core/test_prefix_caching.py` (PR #21400) which only exercises the basic two-block-same-hash case |
 
