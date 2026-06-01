@@ -31,7 +31,11 @@
       "output_format": "pytest-json",
       "estimated_duration": 300,
       "source_refs": [
-        "https://github.com/vllm-project/vllm/pull/42799"
+        "https://github.com/vllm-project/vllm/pull/42799",
+        "https://github.com/vllm-project/vllm/pull/36636",
+        "https://github.com/vllm-project/vllm/issues/41515",
+        "https://github.com/vllm-project/vllm/issues/35507",
+        "https://github.com/vllm-project/vllm/pull/41549"
       ]
     },
     {
@@ -462,6 +466,72 @@
       "path_verified": true,
       "source": "github_pr",
       "source_ref": "https://github.com/vllm-project/vllm/pull/41956"
+    },
+    {
+      "id": "gh_basic_cpu_offload_correctness",
+      "name": "correctness tests — CPU offload output determinism under concurrency",
+      "kind": "correctness",
+      "path": "tests/basic_correctness/test_cpu_offload.py",
+      "invoke": "pytest -v tests/basic_correctness/test_cpu_offload.py",
+      "components": ["kv_offload", "kv_cache", "worker"],
+      "output_format": "pytest-json",
+      "estimated_duration": 900,
+      "path_verified": true,
+      "source": "github_issue",
+      "source_ref": "https://github.com/vllm-project/vllm/issues/31210",
+      "source_refs": [
+        "https://github.com/vllm-project/vllm/issues/31210",
+        "https://github.com/vllm-project/vllm/issues/40259"
+      ]
+    },
+    {
+      "id": "gh_prefetch_offload_correctness",
+      "name": "correctness tests — prefetch KV offload path",
+      "kind": "correctness",
+      "path": "tests/basic_correctness/test_prefetch_offload.py",
+      "invoke": "pytest -v tests/basic_correctness/test_prefetch_offload.py",
+      "components": ["kv_offload", "kv_cache"],
+      "output_format": "pytest-json",
+      "estimated_duration": 600,
+      "path_verified": true,
+      "source": "github_issue",
+      "source_ref": "https://github.com/vllm-project/vllm/issues/33689"
+    },
+    {
+      "id": "gh_cpu_offloading_e2e",
+      "name": "integration tests — CPU offloading end-to-end (full model path)",
+      "kind": "integration",
+      "path": "tests/v1/kv_offload/test_cpu_offloading.py",
+      "invoke": "pytest -v tests/v1/kv_offload/test_cpu_offloading.py",
+      "components": ["kv_offload", "kv_cache", "scheduler", "worker"],
+      "output_format": "pytest-json",
+      "estimated_duration": 1200,
+      "path_verified": true,
+      "source": "github_issue",
+      "source_ref": "https://github.com/vllm-project/vllm/issues/31210",
+      "source_refs": [
+        "https://github.com/vllm-project/vllm/issues/31210",
+        "https://github.com/vllm-project/vllm/issues/41515",
+        "https://github.com/vllm-project/vllm/pull/36636"
+      ]
+    },
+    {
+      "id": "gh_nixl_edge_cases",
+      "name": "stress tests — NixL integration edge cases (memory pressure, error recovery)",
+      "kind": "stress",
+      "path": "tests/v1/kv_connector/nixl_integration/test_edge_cases.py",
+      "invoke": "pytest -v tests/v1/kv_connector/nixl_integration/test_edge_cases.py",
+      "components": ["kv_offload", "distributed.kv_transfer", "kv_cache"],
+      "output_format": "pytest-json",
+      "estimated_duration": 1800,
+      "path_verified": true,
+      "source": "github_issue",
+      "source_ref": "https://github.com/vllm-project/vllm/issues/42085",
+      "source_refs": [
+        "https://github.com/vllm-project/vllm/issues/42085",
+        "https://github.com/vllm-project/vllm/issues/42371",
+        "https://github.com/vllm-project/vllm/issues/40259"
+      ]
     }
   ]
 }

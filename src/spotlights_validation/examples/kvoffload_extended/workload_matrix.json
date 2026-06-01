@@ -155,6 +155,70 @@
         "metric": "output_token_throughput",
         "regression_threshold_pct": 10
       }
+    },
+    {
+      "workload_id": "gh_wl_high_concurrency_correctness",
+      "workload_class": "batch-inference",
+      "source": "github_issue",
+      "source_ref": "https://github.com/vllm-project/vllm/issues/31210",
+      "config_path": null,
+      "components_exercised": ["kv_offload", "kv_cache", "scheduler", "worker"],
+      "description": "High-concurrency correctness check with OffloadingConnector: validates that KV blocks restored from CPU memory do not contain corrupted data under sustained concurrent load. Based on issue #31210 where wrong/garbled output was produced under high concurrency with CPU offload. Determinism check: same prompt must produce identical output with VLLM_BATCH_INVARIANT=1.",
+      "parameters": {
+        "model": "meta-llama/Llama-3.1-8B-Instruct",
+        "kv_connector": "OffloadingConnector",
+        "kv_connector_extra_config": {"num_cpu_blocks": 50000},
+        "max_model_len": 9000,
+        "max_num_seqs": 96,
+        "enable_chunked_prefill": true,
+        "num_requests": 500,
+        "input_len": 4000,
+        "output_len": 180,
+        "max_concurrency": 7,
+        "env": {"VLLM_BATCH_INVARIANT": "1"}
+      }
+    },
+    {
+      "workload_id": "gh_wl_hma_hybrid_model_offload",
+      "workload_class": "agentic",
+      "source": "github_issue",
+      "source_ref": "https://github.com/vllm-project/vllm/issues/41515",
+      "config_path": null,
+      "components_exercised": ["kv_offload", "kv_cache", "scheduler"],
+      "description": "Hybrid attention model (mixed FullAttention + Mamba/GatedDeltaNet) with HMA enabled and KV offloading active. Multi-turn chat pattern where subsequent requests after the first fail. Validates that OffloadingConnector correctly implements SupportsHMA and does not corrupt state across turns. Regression from issues #41515 and #36636.",
+      "parameters": {
+        "model": "Qwen/Qwen3.5-27B",
+        "kv_connector": "OffloadingConnector",
+        "enable_prefix_caching": true,
+        "hybrid_kv_cache_manager": true,
+        "num_requests": 10,
+        "input_len": 512,
+        "output_len": 256,
+        "multi_turn": true,
+        "turns_per_session": 3
+      }
+    },
+    {
+      "workload_id": "gh_wl_dcp_offloading",
+      "workload_class": "batch-inference",
+      "source": "github_pr",
+      "source_ref": "https://github.com/vllm-project/vllm/pull/41549",
+      "config_path": null,
+      "components_exercised": ["kv_offload", "distributed.kv_transfer", "scheduler"],
+      "description": "Decode Context Parallelism (DCP) with OffloadingConnector: validates that num_blocks accounting is correct when decode_context_parallel_size > 1. Without the fix from PR #41549, the engine dies with AssertionError at scheduler.py:269 on the first request spanning multiple blocks. Requires TP >= 4.",
+      "parameters": {
+        "model": "Qwen/Qwen2.5-1.5B-Instruct",
+        "kv_connector": "OffloadingConnector",
+        "tensor_parallel_size": 4,
+        "decode_context_parallel_size": 2,
+        "kv_offloading_size": 8,
+        "enable_prefix_caching": true,
+        "block_size": 16,
+        "enforce_eager": true,
+        "num_requests": 10,
+        "input_len": 600,
+        "output_len": 128
+      }
     }
   ]
 }
