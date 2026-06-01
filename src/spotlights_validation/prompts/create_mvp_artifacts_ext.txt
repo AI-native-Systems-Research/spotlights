@@ -37,7 +37,7 @@ curl -s -H "Accept: application/vnd.github+json" \
 
 Run additional queries as needed to get broad coverage. If a `GITHUB_TOKEN` environment variable is available, include `-H "Authorization: Bearer $GITHUB_TOKEN"` to increase rate limits from 10 to 30 requests/minute.
 
-### Step 2 - Filter out no-trustable issues 
+### Step 2 - Filter out non-trustable issues 
 Filtering Conditions:
 - No maintainer commented on the issue and approved this is a real problem
 - The issue author did not submit many issues, and his few issues were not processed and\or not approved by maintainers

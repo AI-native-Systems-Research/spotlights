@@ -323,6 +323,10 @@ to keep the extended plan consistent:
 
 ## Excluded entries
 
+No entries were excluded because of non-trustable author or content. All issues
+used as primary sources had maintainer or core-contributor engagement verified
+via the GitHub comments API.
+
 8 entries were identified during initial discovery but excluded because their
 test paths do not exist in the vllm `v0.18.0` tag. (`unit-kv-cache-coordinator`
 was previously in this list but is now included as a skipped entry at index 12.)
