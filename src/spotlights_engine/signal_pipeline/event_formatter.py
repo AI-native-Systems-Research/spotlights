@@ -1,8 +1,7 @@
 """Per-stage formatter for live signal-pipeline progress lines.
 
 Wraps a sink (default `print`) and applies three transforms to the
-one-line summaries `_summarize_event` produces in `claude_subprocess.py`
-and `modules_extractor/agent.py`:
+one-line summaries `summarize_event` produces in `_subprocess_util.py`:
 
 1. **Stage-id prefix**: `[01] +12.3s  Bash: ...` — multi-stage runs stay
    scannable when several stages share one terminal.
@@ -12,15 +11,19 @@ and `modules_extractor/agent.py`:
 3. **Terminal-event rewrite**: the trailing `+...s  RESULT subtype=...`
    line becomes `[01] DONE in 6:57, 36 turns, $3.10` (or `ERROR ...`).
 
-The formatter is invoked from the subprocess reader thread (one
-formatter per stage, one reader thread per stage), so no locks are
-needed. The runner calls `flush()` after each stage so the last
-buffered burst is emitted.
+The formatter is normally invoked from one subprocess reader thread at a
+time (one formatter per stage; fan-out stages run one item at a time
+today), but a `threading.Lock` guards the pending-burst state defensively
+so future parallel fan-out doesn't race. The runner calls `flush()` after
+each stage so the last buffered burst is emitted; fan-out callers can
+also call `flush()` between items to prevent dedup from bleeding across
+candidates.
 """
 
 from __future__ import annotations
 
 import re
+import threading
 import time
 from dataclasses import dataclass
 from typing import Callable
@@ -70,11 +73,13 @@ class StageEventFormatter:
             sink if sink is not None else lambda s: print(s, flush=True)
         )
         self._pending: _Pending | None = None
+        self._lock = threading.Lock()
 
     def __call__(self, line: str) -> None:
         m = _RESULT_RE.match(line)
         if m:
-            self._flush_pending()
+            with self._lock:
+                self._flush_pending_locked()
             elapsed_s, subtype, turns, cost = m.groups()
             verb = "DONE" if subtype == "success" else subtype.upper()
             tail = f"{verb} in {_fmt_duration(float(elapsed_s))}, {turns} turns"
@@ -85,23 +90,29 @@ class StageEventFormatter:
 
         sig = _ELAPSED_RE.sub("", line, count=1)
         now = time.monotonic()
-        p = self._pending
-        if p is not None and p.sig == sig and (now - p.last_t) <= _BURST_WINDOW_S:
-            p.count += 1
-            p.last_t = now
-            return
-        self._flush_pending()
-        self._pending = _Pending(line=line, sig=sig, count=1, last_t=now)
+        with self._lock:
+            p = self._pending
+            if p is not None and p.sig == sig and (now - p.last_t) <= _BURST_WINDOW_S:
+                p.count += 1
+                p.last_t = now
+                return
+            self._flush_pending_locked()
+            self._pending = _Pending(line=line, sig=sig, count=1, last_t=now)
 
     def flush(self) -> None:
-        self._flush_pending()
+        with self._lock:
+            self._flush_pending_locked()
 
-    def _flush_pending(self) -> None:
+    def _flush_pending_locked(self) -> None:
+        """Emit and clear pending burst. Caller must hold self._lock."""
         p = self._pending
         if p is None:
             return
         self._pending = None
         line = p.line if p.count == 1 else f"{p.line} (×{p.count})"
+        # _emit may call into user-supplied sink which we don't want to hold
+        # the lock during; but we already swapped _pending to None, so it's
+        # safe to release. Keep simple: emit while holding the lock.
         self._emit(line)
 
     def _emit(self, body: str) -> None:

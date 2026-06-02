@@ -27,6 +27,7 @@ from typing import Any, Callable, Iterable
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from spotlights_engine.signal_pipeline.event_formatter import StageEventFormatter
+from spotlights_engine.signal_pipeline.findings import emit_findings
 from spotlights_engine.signal_pipeline.layout import (
     ALL_STAGES,
     RunDirLayout,
@@ -610,9 +611,16 @@ def _run_fanout(
 
     # Run missing ids.
     ctx = ctx_factory(spec)
+    # Each fan-out item is a separate `claude -p` invocation, so flush the
+    # progress formatter between items to prevent burst dedup from collapsing
+    # cross-item events that happen to share a signature.
+    on_event = ctx.on_event
+    flush = getattr(on_event, "flush", None) if on_event is not None else None
     for id_ in expected_ids:
         if id_ in keep:
             continue
+        if flush is not None:
+            flush()
         payload = spec.run_one(ctx, id_)
         raw = (
             payload.model_dump(mode="json", by_alias=True, exclude_none=False)
@@ -819,7 +827,7 @@ def run_pipeline(
     # change specs into a single human-readable view. Skipped silently if the
     # candidates artifact isn't on disk yet (e.g. selection ended before 03).
     try:
-        _emit_findings(layout)
+        emit_findings(layout)
     except Exception as exc:  # noqa: BLE001 — never fail the pipeline on rollup
         aggregate_issues.append(f"findings rollup failed: {exc}")
 
@@ -829,95 +837,6 @@ def run_pipeline(
         skipped_stages=skipped,
         issues=aggregate_issues,
     )
-
-
-def _emit_findings(layout: RunDirLayout) -> None:
-    """Write `findings.json` + `findings.md` joining 03 candidates with 04 changes.
-
-    Idempotent — overwrites on every invocation. No-ops if 03_candidates.json
-    is missing.
-    """
-    candidates_path = layout.stage_artifact("03", shape="single")
-    if not candidates_path.exists():
-        return
-
-    raw = json.loads(candidates_path.read_text(encoding="utf-8"))
-    candidates = raw["candidates"] if isinstance(raw, dict) and "candidates" in raw else raw
-
-    changes_dir = layout.root / "04_changes"
-    findings: list[dict[str, Any]] = []
-    for c in candidates:
-        cid = c.get("id")
-        change_path = changes_dir / f"{cid}.json"
-        change = (
-            json.loads(change_path.read_text(encoding="utf-8"))
-            if change_path.exists()
-            else None
-        )
-        findings.append({"candidate": c, "change": change})
-
-    atomic_write_json(layout.root / "findings.json", findings)
-
-    md: list[str] = []
-    md.append(f"# Findings — `{layout.root.name}`\n")
-    md.append(f"_{len(findings)} candidates_ from this pipeline run.\n")
-    md.append("## Summary\n")
-    md.append("| ID | Impact | File:Lines | Symbol | One-line |")
-    md.append("|---|---|---|---|---|")
-    for f in findings:
-        c = f["candidate"]
-        symbol = c.get("symbol", "?")
-        kind = c.get("kind", "")
-        loc = f"`{c.get('file','?')}:{c.get('line_start','?')}-{c.get('line_end','?')}`"
-        impact = c.get("estimated_impact", "?")
-        desc = (c.get("description") or "").split(".")[0][:120]
-        md.append(f"| {c.get('id')} | {impact} | {loc} | `{symbol}` ({kind}) | {desc} |")
-    md.append("")
-
-    for f in findings:
-        c = f["candidate"]
-        chg = f["change"]
-        md.append(f"## {c.get('id')} — `{c.get('symbol','?')}`")
-        md.append(f"- **Location:** `{c.get('file','?')}:{c.get('line_start','?')}-{c.get('line_end','?')}`")
-        md.append(f"- **Kind:** {c.get('kind','?')}")
-        md.append(f"- **Estimated impact:** {c.get('estimated_impact','?')}")
-        md.append("")
-        md.append("### Description")
-        md.append(c.get("description") or "_(none)_")
-        md.append("")
-        if c.get("current_approach"):
-            md.append("### Current approach")
-            md.append(c["current_approach"])
-            md.append("")
-        if c.get("estimated_impact_explanation"):
-            md.append("### Why this matters")
-            md.append(c["estimated_impact_explanation"])
-            md.append("")
-        if c.get("evolve_rationale"):
-            md.append("### Rationale")
-            md.append(c["evolve_rationale"])
-            md.append("")
-        if chg:
-            md.append(f"### Proposed change ({chg.get('change_type','?')})")
-            md.append("**Mechanism:**")
-            md.append(chg.get("mechanism", "_(none)_"))
-            md.append("")
-            md.append("**Required changes:**")
-            md.append(chg.get("required_changes", "_(none)_"))
-            md.append("")
-            md.append("**Expected effect:**")
-            md.append(chg.get("expected_effect", "_(none)_"))
-            md.append("")
-            md.append("**Evaluation:**")
-            md.append(chg.get("evaluation_metric", "_(none)_"))
-            md.append("")
-        else:
-            md.append("### Proposed change")
-            md.append("_(stage 04 not run for this candidate)_")
-            md.append("")
-        md.append("---\n")
-
-    atomic_write_text(layout.root / "findings.md", "\n".join(md))
 
 
 def _try_load(stage_id: StageId, registry: dict[StageId, Any], layout: RunDirLayout) -> Any | None:
