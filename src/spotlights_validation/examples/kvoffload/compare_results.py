@@ -103,7 +103,7 @@ def test_comparison_table():
         if entry["harness_entry"]["kind"] in test_kinds:
             all_ids.append(hid)
 
-    headers = ["row", "index", "id", "status", "priority", "halt_on_failure",
+    headers = ["row", "id", "status",
                "invoke", "pass", "failed", "skipped"]
     rows = []
 
@@ -111,28 +111,22 @@ def test_comparison_table():
         plan_entry = baseline_plan.get(hid)
         result_entry = baseline_result.get(hid)
         status = determine_test_status(plan_entry, result_entry)
-        idx = plan_entry["index"] if plan_entry else ""
-        priority = plan_entry["priority"] if plan_entry else ""
-        halt = plan_entry["halt_on_failure"] if plan_entry else ""
         invoke = plan_entry["harness_entry"]["invoke"] if plan_entry else ""
         passed = result_entry.get("passed", "") if result_entry else ""
         failed = result_entry.get("failed", "") if result_entry else ""
         skipped_count = result_entry.get("skipped", "") if result_entry else ""
-        rows.append(["baseline", idx, hid, status, priority, halt,
+        rows.append(["baseline", hid, status,
                      invoke, passed, failed, skipped_count])
 
     for hid in all_ids:
         plan_entry = change_plan.get(hid)
         result_entry = change_result.get(hid)
         status = determine_test_status(plan_entry, result_entry)
-        idx = plan_entry["index"] if plan_entry else ""
-        priority = plan_entry["priority"] if plan_entry else ""
-        halt = plan_entry["halt_on_failure"] if plan_entry else ""
         invoke = plan_entry["harness_entry"]["invoke"] if plan_entry else ""
         passed = result_entry.get("passed", "") if result_entry else ""
         failed = result_entry.get("failed", "") if result_entry else ""
         skipped_count = result_entry.get("skipped", "") if result_entry else ""
-        rows.append(["evolved", idx, hid, status, priority, halt,
+        rows.append(["evolved", hid, status,
                      invoke, passed, failed, skipped_count])
 
     return headers, rows
@@ -153,7 +147,7 @@ def benchmark_comparison_table():
             if m["name"] not in all_metric_names:
                 all_metric_names.append(m["name"])
 
-    headers = ["row", "index", "id", "status", "priority", "halt_on_failure",
+    headers = ["row", "id", "status",
                "policy"] + all_metric_names
     rows = []
 
@@ -169,16 +163,13 @@ def benchmark_comparison_table():
     for row_label, hid, plan, result_entry, policy in configs:
         plan_entry = plan.get(hid)
         status = determine_benchmark_status(plan_entry, result_entry)
-        idx = plan_entry["index"] if plan_entry else ""
-        priority = plan_entry["priority"] if plan_entry else ""
-        halt = plan_entry["halt_on_failure"] if plan_entry else ""
 
         metric_values = {}
         if result_entry:
             for m in result_entry.get("metrics", []):
                 metric_values[m["name"]] = m["measured_value"]
 
-        row = [row_label, idx, hid, status, priority, halt, policy]
+        row = [row_label, hid, status, policy]
         for mn in all_metric_names:
             row.append(metric_values.get(mn, ""))
         rows.append(row)
