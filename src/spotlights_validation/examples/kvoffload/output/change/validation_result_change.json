@@ -1,0 +1,293 @@
+{
+  "change_ref": "kv-offload-lab@HEAD",
+  "verdict": "fail",
+  "verdict_reasoning": "Validation halted after 'correctness tests — basic model output' failed (halt_on_failure=true). 6 entries were not executed.",
+  "conditions": [],
+  "intent_aligned": null,
+  "test_results": [
+    {
+      "harness_id": "unit-kv-offload-tiering",
+      "script": "unit tests — KV offload tiering",
+      "kind": "unit",
+      "invoke": "pytest -v tests/v1/kv_offload/ -k 'not test_cpu_offloading'",
+      "passed": 22,
+      "failed": 0,
+      "skipped": 0,
+      "errors": [],
+      "duration_seconds": 450.87,
+      "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-kv-offload-tiering.log",
+      "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-kv-offload-tiering.report.json"
+    },
+    {
+      "harness_id": "unit-kv-connector-offloading",
+      "script": "unit tests — KV connector offloading",
+      "kind": "unit",
+      "invoke": "pytest -v tests/v1/kv_connector/unit/test_offloading_connector.py",
+      "passed": 14,
+      "failed": 0,
+      "skipped": 0,
+      "errors": [],
+      "duration_seconds": 458.29,
+      "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-kv-connector-offloading.log",
+      "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-kv-connector-offloading.report.json"
+    },
+    {
+      "harness_id": "unit-kv-connector-lifecycle",
+      "script": "unit tests — KV connector lifecycle",
+      "kind": "unit",
+      "invoke": "pytest -v tests/v1/kv_connector/unit/test_kv_connector_lifecycle.py",
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "errors": [],
+      "duration_seconds": 466.88,
+      "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-kv-connector-lifecycle.log",
+      "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-kv-connector-lifecycle.report.json"
+    },
+    {
+      "harness_id": "unit-kv-cache-layout",
+      "script": "unit tests — KV cache layout",
+      "kind": "unit",
+      "invoke": "pytest -v tests/v1/kv_connector/unit/test_kv_cache_layout.py",
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "errors": [],
+      "duration_seconds": 401.15,
+      "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-kv-cache-layout.log",
+      "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-kv-cache-layout.report.json"
+    },
+    {
+      "harness_id": "unit-kv-load-failure-recovery",
+      "script": "unit tests — KV load failure recovery",
+      "kind": "unit",
+      "invoke": "pytest -v tests/v1/kv_connector/unit/test_kv_load_failure_recovery.py",
+      "passed": 11,
+      "failed": 0,
+      "skipped": 0,
+      "errors": [],
+      "duration_seconds": 492.14,
+      "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-kv-load-failure-recovery.log",
+      "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-kv-load-failure-recovery.report.json"
+    },
+    {
+      "harness_id": "unit-kv-cache-manager",
+      "script": "unit tests — KV cache manager (via prefix caching)",
+      "kind": "unit",
+      "invoke": "pytest -v tests/v1/core/test_prefix_caching.py",
+      "passed": 49,
+      "failed": 0,
+      "skipped": 0,
+      "errors": [],
+      "duration_seconds": 458.68,
+      "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-kv-cache-manager.log",
+      "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-kv-cache-manager.report.json"
+    },
+    {
+      "harness_id": "unit-single-type-kv-cache-manager",
+      "script": "unit tests — single-type KV cache manager",
+      "kind": "unit",
+      "invoke": "pytest -v tests/v1/core/test_single_type_kv_cache_manager.py",
+      "passed": 7,
+      "failed": 0,
+      "skipped": 0,
+      "errors": [],
+      "duration_seconds": 449.43,
+      "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-single-type-kv-cache-manager.log",
+      "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-single-type-kv-cache-manager.report.json"
+    },
+    {
+      "harness_id": "unit-kv-cache-utils",
+      "script": "unit tests — KV cache utilities",
+      "kind": "unit",
+      "invoke": "pytest -v tests/v1/core/test_kv_cache_utils.py",
+      "passed": 48,
+      "failed": 0,
+      "skipped": 0,
+      "errors": [],
+      "duration_seconds": 557.04,
+      "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-kv-cache-utils.log",
+      "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-kv-cache-utils.report.json"
+    },
+    {
+      "harness_id": "unit-cache-kernels",
+      "script": "unit tests — cache kernels (test_gather_cache_oob deselected)",
+      "kind": "unit",
+      "invoke": "pytest -v tests/kernels/test_cache_kernels.py -k 'not test_gather_cache_oob'",
+      "passed": 0,
+      "failed": 1,
+      "skipped": 0,
+      "errors": [
+        {
+          "nodeid": "<pytest-exit-5>",
+          "phase": "call",
+          "message": "no tests collected (collected=1 deselected=1 passed=0 failed=0 skipped=0)",
+          "file": null,
+          "lineno": null,
+          "longrepr": "no tests collected (collected=1 deselected=1 passed=0 failed=0 skipped=0)"
+        }
+      ],
+      "duration_seconds": 554.21,
+      "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-cache-kernels.log",
+      "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-cache-kernels.report.json"
+    },
+    {
+      "harness_id": "unit-scheduler",
+      "script": "unit tests — scheduler",
+      "kind": "unit",
+      "invoke": "pytest -v tests/v1/core/test_scheduler.py",
+      "passed": 92,
+      "failed": 1,
+      "skipped": 1,
+      "errors": [
+        {
+          "nodeid": "tests/v1/core/test_scheduler.py::test_async_scheduling_pp_allows_rescheduling_with_output_placeholders",
+          "phase": "call",
+          "message": "pydantic_core._pydantic_core.ValidationError: 1 validation error for ParallelConfig\n  Value error, World size (2) is larger than the number of available GPUs (1) in this node. If this is intentional and you are using:\n- ray, set '--distributed-executor-backend ray'.\n- multiprocessing, set '--nnodes' appropriately. [type=value_error, input_value=ArgsKwargs((), {'pipeline_parallel_size': 2}), input_type=ArgsKwargs]\n    For further information visit https://errors.pydantic.dev/2.13/v/value_error",
+          "file": "/proj/vlt-evolve/work/orit/vllm/tests/v1/core/utils.py",
+          "lineno": 137,
+          "longrepr": "def test_async_scheduling_pp_allows_rescheduling_with_output_placeholders():\n        \"\"\"Async scheduling + PP: allow multi-step in-flight scheduling per request\"\"\"\n>       scheduler = create_scheduler(async_scheduling=True, pipeline_parallel_size=2)\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\ntests/v1/core/test_scheduler.py:132: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nmodel = 'facebook/opt-125m', max_num_seqs = 16, max_num_batched_tokens = 8192\nenable_chunked_prefill = True, enable_prefix_caching = False\nlong_prefill_token_threshold = 0, disable_chunked_mm_input = False\nuse_kv_connector = None, num_blocks = 10000, block_size = 16\nmax_model_len = 8192, num_speculative_tokens = None, skip_tokenizer_init = False\nasync_scheduling = True, pipeline_parallel_size = 2, use_ec_connector = False\nec_role = None\n\n    def create_scheduler(\n        model: str = \"facebook/opt-125m\",\n        max_num_seqs: int = 16,\n        max_num_batched_tokens: int = 8192,\n        enable_chunked_prefill: bool = True,\n        enable_prefix_caching: bool = False,\n        long_prefill_token_threshold: int = 0,\n        disable_chunked_mm_input: bool = False,\n        use_kv_connector: None | bool | MockKVConfig = None,\n        num_blocks: int = 10000,\n        block_size: int = 16,\n        max_model_len: int | None = None,\n        num_speculative_tokens: int | None = None,\n        skip_tokenizer_init: bool = False,\n        async_scheduling: bool = False,\n        pipeline_parallel_size: int = 1,\n        use_ec_connector: bool = False,\n        ec_role: str | None = None,\n    ) -> Scheduler | AsyncScheduler:\n        \"\"\"Create scheduler under test.\n    \n        Args:\n          model: model under test\n          max_num_seqs: max sequences to schedule\n          max_num_batch_tokens: max num tokens to batch\n          enable_prefix_caching: optionally force APC config\n                                 (True/False) or use default\n                                 (False)\n    \n        Returns:\n          {class}`Scheduler` instance\n        \"\"\"\n        model_config = ModelConfig(\n            model=model,\n            trust_remote_code=True,\n            dtype=\"float16\",\n            seed=42,\n            skip_tokenizer_init=skip_tokenizer_init,\n        )\n        if max_model_len is None:\n            max_model_len = max_num_batched_tokens\n        scheduler_config = SchedulerConfig(\n            max_num_seqs=max_num_seqs,\n            max_num_batched_tokens=max_num_batched_tokens,\n            max_model_len=max_model_len,\n            long_prefill_token_threshold=long_prefill_token_threshold,\n            disable_chunked_mm_input=disable_chunked_mm_input,\n            enable_chunked_prefill=enable_chunked_prefill,\n            async_scheduling=async_scheduling,\n            is_encoder_decoder=model_config.is_encoder_decoder,\n        )\n        # Cache config, optionally force APC\n        cache_config = CacheConfig(\n            block_size=block_size,\n            gpu_memory_utilization=0.9,\n            cache_dtype=\"auto\",\n            enable_prefix_caching=enable_prefix_caching,\n        )\n        kv_transfer_config = None\n        if isinstance(use_kv_connector, MockKVConfig):\n            kv_transfer_config = KVTransferConfig(\n                kv_connector=\"MockKVConnector\",\n                kv_role=\"kv_both\",\n                kv_connector_extra_config={\n                    \"matched_tokens\": use_kv_connector.matched_tokens,\n                    \"is_async\": use_kv_connector.is_async,\n                },\n            )\n        elif use_kv_connector:\n            kv_transfer_config = KVTransferConfig(\n                kv_connector=\"ExampleConnector\",\n                kv_role=\"kv_both\",\n                kv_connector_extra_config={\"shared_storage_path\": \"local_storage\"},\n            )\n    \n        speculative_config: SpeculativeConfig | None = None\n        if num_speculative_tokens is not None:\n            speculative_config "
+        }
+      ],
+      "duration_seconds": 596.16,
+      "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-scheduler.log",
+      "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-scheduler.report.json"
+    },
+    {
+      "harness_id": "unit-async-scheduler",
+      "script": "unit tests — async scheduler",
+      "kind": "unit",
+      "invoke": "pytest -v tests/v1/core/test_async_scheduler.py",
+      "passed": 8,
+      "failed": 0,
+      "skipped": 0,
+      "errors": [],
+      "duration_seconds": 492.45,
+      "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-async-scheduler.log",
+      "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-async-scheduler.report.json"
+    },
+    {
+      "harness_id": "unit-worker",
+      "script": "unit tests — worker",
+      "kind": "unit",
+      "invoke": "pytest -v tests/v1/worker/",
+      "passed": 62,
+      "failed": 0,
+      "skipped": 1,
+      "errors": [],
+      "duration_seconds": 570.37,
+      "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-worker.log",
+      "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-worker.report.json"
+    },
+    {
+      "harness_id": "integration-scheduler-e2e",
+      "script": "integration tests — scheduler end-to-end",
+      "kind": "integration",
+      "invoke": "pytest -v tests/v1/core/test_scheduler_e2e.py",
+      "passed": 2,
+      "failed": 0,
+      "skipped": 0,
+      "errors": [],
+      "duration_seconds": 973.44,
+      "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/integration-scheduler-e2e.log",
+      "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/integration-scheduler-e2e.report.json"
+    },
+    {
+      "harness_id": "integration-engine",
+      "script": "integration tests — v1 engine",
+      "kind": "integration",
+      "invoke": "pytest -v tests/v1/engine/ --ignore=tests/v1/engine/test_async_llm.py --ignore=tests/v1/engine/test_engine_core_client.py --ignore=tests/v1/engine/test_abort_final_step.py --ignore=tests/v1/engine/test_output_processor.py -k 'not test_skip_tokenizer_initialization'",
+      "passed": 0,
+      "failed": 1,
+      "skipped": 0,
+      "errors": [
+        {
+          "nodeid": "<exit-code--9>",
+          "phase": "call",
+          "message": "Running 25 items in this shard: tests/v1/engine/test_engine_args.py::test_prefix_caching_from_cli, tests/v1/engine/test_engine_args.py::test_prefix_caching_xxhash_from_cli, tests/v1/engine/test_engine_args.py::test_defaults_with_usage_context, tests/v1/engine/test_engine_core.py::test_engine_core, tests/v1/engine/test_engine_core.py::test_engine_core_advanced_sampling, tests/v1/engine/test_engine_core.py::test_engine_core_concurrent_batches, tests/v1/engine/test_engine_core.py::test_engine_core_tp, tests/v1/engine/test_engine_core.py::test_engine_core_invalid_request_id_type, tests/v1/engine/test_engine_core.py::test_encoder_instance_zero_kv_cache[False-ec_producer-0.01-False], tests/v1/engine/test_engine_core.py::test_encoder_instance_zero_kv_cache[False-ec_consumer-0.7-True], tests/v1/engine/test_engine_core.py::test_encoder_instance_zero_kv_cache[False-ec_consumer-0.7-False], tests/v1/engine/test_engine_core.py::test_encoder_instance_zero_kv_cache[True-ec_producer-0.01-False], tests/v1/engine/test_engine_core.py::test_encoder_instance_zero_kv_cache[True-ec_consumer-0.7-True], tests/v1/engine/test_engine_core.py::test_encoder_instance_zero_kv_cache[True-ec_consumer-0.7-False], tests/v1/engine/test_fast_incdec_prefix_err.py::test_fast_inc_detok_invalid_utf8_err_case, tests/v1/engine/test_init_error_messaging.py::test_kv_cache_oom_no_memory, tests/v1/engine/test_init_error_messaging.py::test_kv_cache_oom_insufficient_memory, tests/v1/engine/test_llm_engine.py::test_compatibility_with_skip_tokenizer_init[False], tests/v1/engine/test_llm_engine.py::test_compatibility_with_skip_tokenizer_init[True], tests/v1/engine/test_llm_engine.py::test_parallel_sampling[False], tests/v1/engine/test_llm_engine.py::test_parallel_sampling[True], tests/v1/engine/test_llm_engine.py::test_engine_metrics, tests/v1/engine/test_parallel_sampling.py::test_parent_request_to_output_stream, tests/v1/engine/test_parallel_sampling.py::test_parent_request_to_output_final_only, tests/v1/engine/test_preprocess_error_handling.py::test_preprocess_error_handling",
+          "file": null,
+          "lineno": null,
+          "longrepr": "Running 25 items in this shard: tests/v1/engine/test_engine_args.py::test_prefix_caching_from_cli, tests/v1/engine/test_engine_args.py::test_prefix_caching_xxhash_from_cli, tests/v1/engine/test_engine_args.py::test_defaults_with_usage_context, tests/v1/engine/test_engine_core.py::test_engine_core, tests/v1/engine/test_engine_core.py::test_engine_core_advanced_sampling, tests/v1/engine/test_engine_core.py::test_engine_core_concurrent_batches, tests/v1/engine/test_engine_core.py::test_engine_core_tp, tests/v1/engine/test_engine_core.py::test_engine_core_invalid_request_id_type, tests/v1/engine/test_engine_core.py::test_encoder_instance_zero_kv_cache[False-ec_producer-0.01-False], tests/v1/engine/test_engine_core.py::test_encoder_instance_zero_kv_cache[False-ec_consumer-0.7-True], tests/v1/engine/test_engine_core.py::test_encoder_instance_zero_kv_cache[False-ec_consumer-0.7-False], tests/v1/engine/test_engine_core.py::test_encoder_instance_zero_kv_cache[True-ec_producer-0.01-False], tests/v1/engine/test_engine_core.py::test_encoder_instance_zero_kv_cache[True-ec_consumer-0.7-True], tests/v1/engine/test_engine_core.py::test_encoder_instance_zero_kv_cache[True-ec_consumer-0.7-False], tests/v1/engine/test_fast_incdec_prefix_err.py::test_fast_inc_detok_invalid_utf8_err_case, tests/v1/engine/test_init_error_messaging.py::test_kv_cache_oom_no_memory, tests/v1/engine/test_init_error_messaging.py::test_kv_cache_oom_insufficient_memory, tests/v1/engine/test_llm_engine.py::test_compatibility_with_skip_tokenizer_init[False], tests/v1/engine/test_llm_engine.py::test_compatibility_with_skip_tokenizer_init[True], tests/v1/engine/test_llm_engine.py::test_parallel_sampling[False], tests/v1/engine/test_llm_engine.py::test_parallel_sampling[True], tests/v1/engine/test_llm_engine.py::test_engine_metrics, tests/v1/engine/test_parallel_sampling.py::test_parent_request_to_output_stream, tests/v1/engine/test_parallel_sampling.py::test_parent_request_to_output_final_only, tests/v1/engine/test_preprocess_error_handling.py::test_preprocess_error_handling\ntests/v1/engine/test_init_error_messaging.py::test_kv_cache_oom_no_memory PASSED [ 64%]\ntests/v1/engine/test_init_error_messaging.py::test_kv_cache_oom_insufficient_memory PASSED [ 68%]\ntests/v1/engine/test_preprocess_error_handling.py::test_preprocess_error_handling "
+        }
+      ],
+      "duration_seconds": 3600.12,
+      "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/integration-engine.log",
+      "json_report_path": null
+    },
+    {
+      "harness_id": "correctness-basic",
+      "script": "correctness tests — basic model output",
+      "kind": "correctness",
+      "invoke": "pytest -v tests/basic_correctness/ -k 'not meta-llama and not tiering and not test_cumem and not test_cpu_offload and not Gemma2 and not test_prefetch_offload'",
+      "passed": 0,
+      "failed": 2,
+      "skipped": 8,
+      "errors": [
+        {
+          "nodeid": "tests/basic_correctness/test_basic_correctness.py::test_vllm_gc_ed",
+          "phase": "call",
+          "message": "RuntimeError: Engine core initialization failed. See root cause above. Failed core proc(s): {}",
+          "file": "/proj/vlt-evolve/work/orit/vllm/vllm/v1/engine/utils.py",
+          "lineno": 1031,
+          "longrepr": "def test_vllm_gc_ed():\n        \"\"\"Verify vllm instance is GC'ed when it is deleted\"\"\"\n>       llm = LLM(\"hmellor/tiny-random-LlamaForCausalLM\")\n              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\ntests/basic_correctness/test_basic_correctness.py:37: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \nvllm/entrypoints/llm.py:382: in __init__\n    self.llm_engine = LLMEngine.from_engine_args(\nvllm/v1/engine/llm_engine.py:177: in from_engine_args\n    return cls(\nvllm/v1/engine/llm_engine.py:111: in __init__\n    self.engine_core = EngineCoreClient.make_client(\nvllm/v1/engine/core_client.py:99: in make_client\n    return SyncMPClient(vllm_config, executor_class, log_stats)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nvllm/tracing/otel.py:178: in sync_wrapper\n    return func(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^\nvllm/v1/engine/core_client.py:747: in __init__\n    super().__init__(\nvllm/v1/engine/core_client.py:583: in __init__\n    with launch_core_engines(\n/u/oprince9/.local/share/uv/python/cpython-3.12.13-linux-x86_64-gnu/lib/python3.12/contextlib.py:144: in __exit__\n    next(self.gen)\nvllm/v1/engine/utils.py:972: in launch_core_engines\n    wait_for_engine_startup(\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nhandshake_socket = <zmq.Socket(zmq.ROUTER) at 0x15076ce9a430 closed>\naddresses = EngineZmqAddresses(inputs=['ipc:///tmp/443245b2-2105-4d64-865e-2e248cc33c04'], outputs=['ipc:///tmp/aba675b5-123c-4e14-b839-ac462fcd534f'], coordinator_input=None, coordinator_output=None, frontend_stats_publish_address=None)\ncore_engines = [<vllm.v1.engine.utils.CoreEngine object at 0x15076ca12e70>]\nparallel_config = ParallelConfig(pipeline_parallel_size=1, tensor_parallel_size=1, prefill_context_parallel_size=1, data_parallel_size=1..._comm_backend='ag_rs', cp_kv_cache_interleave_size=1, data_parallel_index=0, _api_process_count=1, _api_process_rank=0)\ncoordinated_dp = False\ncache_config = CacheConfig(block_size=16, user_specified_block_size=False, gpu_memory_utilization=0.9, cache_dtype='auto', is_attenti...=False, kv_cache_memory_bytes=None, kv_offloading_size=None, kv_offloading_backend='native', _block_size_resolved=True)\nproc_manager = <vllm.v1.engine.utils.CoreEngineProcManager object at 0x15076ccfc1d0>\ncoord_process = None\n\n    def wait_for_engine_startup(\n        handshake_socket: zmq.Socket,\n        addresses: EngineZmqAddresses,\n        core_engines: list[CoreEngine],\n        parallel_config: ParallelConfig,\n        coordinated_dp: bool,\n        cache_config: CacheConfig,\n        proc_manager: CoreEngineProcManager | None,\n        coord_process: Process | None,\n    ):\n        # Wait for engine core process(es) to send ready messages.\n        local_count = parallel_config.data_parallel_size_local\n        remote_count = len(core_engines) - local_count\n        # [local, remote] counts\n        conn_pending, start_pending = [local_count, remote_count], [0, 0]\n        poller = zmq.Poller()\n        poller.register(handshake_socket, zmq.POLLIN)\n    \n        remote_should_be_headless = (\n            not parallel_config.data_parallel_hybrid_lb\n            and not parallel_config.data_parallel_external_lb\n        )\n    \n        if proc_manager is not None:\n            for sentinel in proc_manager.sentinels():\n                poller.register(sentinel, zmq.POLLIN)\n        if coord_process is not None:\n            poller.register(coord_process.sentinel, zmq.POLLIN)\n        while any(conn_pending) or any(start_pending):\n            events = poller.poll(STARTUP_POLL_PERIOD_MS)\n            if not events:\n                if any(conn_pending):\n                    logger.debug(\n                        \"Waiting for %d local, %d remote core engine proc(s) to connect.\",\n                        *conn_pending,\n                    )\n                if any(start_pending):\n                    logger.debug(\n                        \"Waiting for %d local, %d remote "
+        },
+        {
+          "nodeid": "tests/basic_correctness/test_basic_correctness.py::test_failed_model_execution",
+          "phase": "call",
+          "message": "torch.AcceleratorError: CUDA error: CUDA-capable device(s) is/are busy or unavailable\nSearch for `cudaErrorDevicesUnavailable' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.\nCUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.\nFor debugging consider passing CUDA_LAUNCH_BLOCKING=1\nCompile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.",
+          "file": "/proj/vlt-evolve/work/orit/vllm/.venv/lib/python3.12/site-packages/torch/cuda/memory.py",
+          "lineno": 897,
+          "longrepr": "vllm_runner = <class 'tests.conftest.VllmRunner'>\nmonkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x15076ca29880>\n\n    def test_failed_model_execution(vllm_runner, monkeypatch) -> None:\n        # Needed to mock an error in the same process\n        monkeypatch.setenv(\"VLLM_ENABLE_V1_MULTIPROCESSING\", \"0\")\n    \n>       with vllm_runner(\"facebook/opt-125m\", enforce_eager=True) as vllm_model:\n             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\ntests/basic_correctness/test_basic_correctness.py:217: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \ntests/conftest.py:824: in __init__\n    self.llm = LLM(\nvllm/entrypoints/llm.py:382: in __init__\n    self.llm_engine = LLMEngine.from_engine_args(\nvllm/v1/engine/llm_engine.py:177: in from_engine_args\n    return cls(\nvllm/v1/engine/llm_engine.py:111: in __init__\n    self.engine_core = EngineCoreClient.make_client(\nvllm/v1/engine/core_client.py:101: in make_client\n    return InprocClient(vllm_config, executor_class, log_stats)\n           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nvllm/v1/engine/core_client.py:283: in __init__\n    self.engine_core = EngineCore(*args, **kwargs)\n                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^\nvllm/v1/engine/core.py:112: in __init__\n    self.model_executor = executor_class(vllm_config)\n                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^\nvllm/tracing/otel.py:178: in sync_wrapper\n    return func(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^\nvllm/v1/executor/abstract.py:103: in __init__\n    self._init_executor()\nvllm/v1/executor/uniproc_executor.py:49: in _init_executor\n    self.driver_worker.init_device()\nvllm/v1/worker/worker_base.py:312: in init_device\n    self.worker.init_device()  # type: ignore\n    ^^^^^^^^^^^^^^^^^^^^^^^^^\nvllm/tracing/otel.py:178: in sync_wrapper\n    return func(*args, **kwargs)\n           ^^^^^^^^^^^^^^^^^^^^^\nvllm/v1/worker/gpu_worker.py:282: in init_device\n    self.init_snapshot = init_snapshot = MemorySnapshot(device=self.device)\n                                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n<string>:12: in __init__\n    ???\nvllm/utils/mem_utils.py:90: in __post_init__\n    self.measure()\nvllm/utils/mem_utils.py:104: in measure\n    self.free_memory, self.total_memory = current_platform.mem_get_info(device)\n                                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\ndevice = 0\n\n    def mem_get_info(device: \"Device\" = None) -> tuple[int, int]:\n        r\"\"\"Return the global free and total GPU memory for a given device using cudaMemGetInfo.\n    \n        Args:\n            device (torch.device or int or str, optional): selected device. Returns\n                statistic for the current device, given by :func:`~torch.cuda.current_device`,\n                if :attr:`device` is ``None`` (default) or if the device index is not specified.\n    \n        .. note::\n            See :ref:`cuda-memory-management` for more\n            details about GPU memory management.\n        \"\"\"\n        if device is None:\n            device = torch.cuda.current_device()\n        # optional=True allows `device = torch.device('cuda')` for which device.index is None\n        device = _get_device_index(device, optional=True)\n>       return torch.cuda.cudart().cudaMemGetInfo(device)\n               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\nE       torch.AcceleratorError: CUDA error: CUDA-capable device(s) is/are busy or unavailable\nE       Search for `cudaErrorDevicesUnavailable' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.\nE       CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.\nE       For debugging consider passing CUDA_LAUNCH_BLOCKING=1\nE       Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.\n\n.venv/lib/python3.12/site-packages/torch/cuda/memory.py"
+        }
+      ],
+      "duration_seconds": 730.77,
+      "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/correctness-basic.log",
+      "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/correctness-basic.report.json"
+    }
+  ],
+  "benchmark_results": [
+    {
+      "workload_id": "default",
+      "workload_class": "batch-inference",
+      "script": "benchmark — multi-turn KV offload (kv-offload-lab, evolved)",
+      "invoke": "bash -lc 'set -a; source \"$ROOT_DIR/kv-offload-lab/.env\"; set +a; bash \"$ROOT_DIR/kv-offload-lab/benchmark/multi-turn/run_benchmark.sh\" --workload sharegpt --policy evolved --gpu-util 0.5 --num-clients 4 --max-active 128 --kv-size 26'",
+      "metrics": [
+        {
+          "name": "ttft_ms_mean",
+          "baseline_value": null,
+          "measured_value": 131.538,
+          "relative_change": null,
+          "regressed": false
+        },
+        {
+          "name": "tpot_ms_mean",
+          "baseline_value": null,
+          "measured_value": 12.48,
+          "relative_change": null,
+          "regressed": false
+        },
+        {
+          "name": "cpu_hit_rate",
+          "baseline_value": null,
+          "measured_value": 0.34762372972256556,
+          "relative_change": null,
+          "regressed": false
+        },
+        {
+          "name": "evictions",
+          "baseline_value": null,
+          "measured_value": 120870.0,
+          "relative_change": null,
+          "regressed": false
+        }
+      ],
+      "optimization_target": null,
+      "raw_output": "-----------------------------------------------\n01-06-2026 09:38:24 [INFO] - Using timeout of 146s based on max_tokens 730\n01-06-2026 09:38:34 [INFO] - Using timeout of 143s based on max_tokens 716\n01-06-2026 09:38:49 [INFO] - Using timeout of 140s based on max_tokens 700\n01-06-2026 09:38:50 [INFO] - Using timeout of 154s based on max_tokens 770\n01-06-2026 09:39:20 [INFO] - \u001b[96mFinished 369 out of 500 conversations (74%), 0 out of 4 clients finished, collected 3429 measurements, runtime 3180.093 sec\u001b[0m\n01-06-2026 09:39:20 [INFO] - \u001b[96mEstimated req/sec 1.078, estimated runtime left 1128.976 sec\u001b[0m\n01-06-2026 09:39:20 [INFO] - --------------------------------------------------\n01-06-2026 09:39:20 [INFO] - [moving_avg_ttft_ms       ] avg:    200.017 (60 samples)\n01-06-2026 09:39:20 [INFO] - [moving_avg_tpot_ms       ] avg:     13.245 (60 samples)\n01-06-2026 09:39:20 [INFO] - [ttft_ms                  ] avg:    130.704, min:     43.753, max:   1250.944\n01-06-2026 09:39:20 [INFO] - [tpot_ms                  ] avg:     12.472, min:      0.000, max:     71.147\n01-06-2026 09:39:20 [INFO] - [latency_ms               ] avg:   3701.170, min:     57.519, max:  29294.833\n01-06-2026 09:39:20 [INFO] - [input_num_turns          ] avg:     10.228, min:      1.000, max:     47.000\n01-06-2026 09:39:20 [INFO] - [input_num_tokens         ] avg:   1579.637, min:      1.000, max:  14197.000\n01-06-2026 09:39:20 [INFO] - [output_num_tokens        ] avg:    284.813, min:      1.000, max:   1284.000\n01-06-2026 09:39:20 [INFO] - --------------------------------------------------\n01-06-2026 09:39:30 [INFO] - Using timeout of 153s based on max_tokens 768\n01-06-2026 09:39:44 [INFO] - \u001b[96mFinished 372 out of 500 conversations (74%), 0 out of 4 clients finished, collected 3450 measurements, runtime 3204.504 sec\u001b[0m\n01-06-2026 09:39:44 [INFO] - \u001b[96mEstimated req/sec 1.077, estimated runtime left 1102.625 sec\u001b[0m\n01-06-2026 09:39:44 [INFO] - --------------------------------------------------\n01-06-2026 09:39:44 [INFO] - [moving_avg_ttft_ms       ] avg:    205.560 (60 samples)\n01-06-2026 09:39:44 [INFO] - [moving_avg_tpot_ms       ] avg:     13.449 (60 samples)\n01-06-2026 09:39:44 [INFO] - [ttft_ms                  ] avg:    131.291, min:     43.753, max:   1250.944\n01-06-2026 09:39:44 [INFO] - [tpot_ms                  ] avg:     12.479, min:      0.000, max:     71.147\n01-06-2026 09:39:44 [INFO] - [latency_ms               ] avg:   3708.378, min:     57.519, max:  29294.833\n01-06-2026 09:39:44 [INFO] - [input_num_turns          ] avg:     10.270, min:      1.000, max:     47.000\n01-06-2026 09:39:44 [INFO] - [input_num_tokens         ] avg:   1589.458, min:      1.000, max:  14197.000\n01-06-2026 09:39:44 [INFO] - [output_num_tokens        ] avg:    285.158, min:      1.000, max:   1284.000\n01-06-2026 09:39:44 [INFO] - --------------------------------------------------\n01-06-2026 09:39:45 [INFO] - Using timeout of 153s based on max_tokens 767\n01-06-2026 09:39:51 [INFO] - Using timeout of 136s based on max_tokens 683\n01-06-2026 09:39:51 [INFO] - Using timeout of 149s based on max_tokens 749\n01-06-2026 09:40:03 [INFO] - \u001b[93mClient 2 has no more work\u001b[0m\n01-06-2026 09:40:03 [INFO] - \u001b[96mClient 2 is done (num_successes=883, num_failures=0)\u001b[0m\n01-06-2026 09:40:03 [INFO] - \u001b[96m1 out of 4 clients finished\u001b[0m\n01-06-2026 09:40:03 [INFO] - \u001b[93mSending termination signal to clients\u001b[0m\n01-06-2026 09:40:06 [INFO] - \u001b[93mClient 1 received a termination signal\u001b[0m\n01-06-2026 09:40:06 [INFO] - \u001b[96mClient 1 is done (num_successes=876, num_failures=0)\u001b[0m\n01-06-2026 09:40:06 [INFO] - \u001b[96m2 out of 4 clients finished\u001b[0m\n01-06-2026 09:40:07 [INFO] - \u001b[93mClient 0 received a termination signal\u001b[0m\n01-06-2026 09:40:07 [INFO] - \u001b[96mClient 0 is done (num_successes=886, num_failures=0)\u001b[0m\n01-06-2026 09:40:07 [INFO] - \u001b[96m3 out of 4 clients finished\u001b[0m\n01-06-2026 09:40:08 [INFO] - \u001b[93mClient 3 received a termination signal\u001b[0m\n01-06-2026 09:40:08 [INFO] - \u001b[96mClient 3 is done (num_successes=826, num_failures=0)\u001b[0m\n01-06-2026 09:40:08 [INFO] - \u001b[96mFinished 375 out of 500 conversations (75%), 3 out of 4 clients finished, collected 3470 measurements, runtime 3228.539 sec\u001b[0m\n01-06-2026 09:40:08 [INFO] - \u001b[96mEstimated req/sec 1.075, estimated runtime left 1076.18 sec\u001b[0m\n01-06-2026 09:40:08 [INFO] - --------------------------------------------------\n01-06-2026 09:40:08 [INFO] - [moving_avg_ttft_ms       ] avg:    216.016 (60 samples)\n01-06-2026 09:40:08 [INFO] - [moving_avg_tpot_ms       ] avg:     13.483 (60 samples)\n01-06-2026 09:40:08 [INFO] - [ttft_ms                  ] avg:    131.538, min:     43.753, max:   1250.944\n01-06-2026 09:40:08 [INFO] - [tpot_ms                  ] avg:     12.480, min:      0.000, max:     71.147\n01-06-2026 09:40:08 [INFO] - [latency_ms               ] avg:   3712.114, min:     57.519, max:  29294.833\n01-06-2026 09:40:08 [INFO] - [input_num_turns          ] avg:     10.285, min:      1.000, max:     47.000\n01-06-2026 09:40:08 [INFO] - [input_num_tokens         ] avg:   1592.238, min:      1.000, max:  14197.000\n01-06-2026 09:40:08 [INFO] - [output_num_tokens        ] avg:    285.432, min:      1.000, max:   1284.000\n01-06-2026 09:40:08 [INFO] - --------------------------------------------------\n01-06-2026 09:40:08 [INFO] - \u001b[96m4 out of 4 clients finished\u001b[0m\n01-06-2026 09:40:08 [INFO] - \u001b[96mAll 4 clients finished\u001b[0m\n01-06-2026 09:40:08 [INFO] - Collected 3471 samples from all the clients\n01-06-2026 09:40:08 [INFO] - \u001b[96mWaiting for client client_0 (is alive: False)\u001b[0m\n01-06-2026 09:40:08 [INFO] - \u001b[96mWaiting for client client_1 (is alive: False)\u001b[0m\n01-06-2026 09:40:08 [INFO] - \u001b[96mWaiting for client client_2 (is alive: False)\u001b[0m\n01-06-2026 09:40:08 [INFO] - \u001b[96mWaiting for client client_3 (is alive: True)\u001b[0m\n01-06-2026 09:40:08 [INFO] - All 4 clients exited (successfully finished 375 out of 500 conversations)\n01-06-2026 09:40:08 [INFO] - \u001b[92mAll clients finished, benchmark runtime: 3228.834 sec (3228834.363 ms), requests per second: 1.075\u001b[0m\n01-06-2026 09:40:08 [INFO] - Processing 3471 samples...\n01-06-2026 09:40:08 [INFO] - \u001b[92mWriting conversations file: /proj/vlt-evolve/work/orit/kv-offload-lab/benchmark/multi-turn/results/evolved/sharegpt/gpu_0.5_active_128_cpu_26/benchmark_run_1.json\u001b[0m\n----------------------------------------------------------------------------------------------------\n\u001b[93mParameters:\u001b[0m\nmodel=NousResearch/Hermes-3-Llama-3.1-8B\nnum_clients=4\nnum_conversations=500\nactive_conversations=128\nseed=0\n----------------------------------------------------------------------------------------------------\n\u001b[93mStatistics summary:\u001b[0m\nruntime_sec = 3228.381\nrequests_per_sec = 1.075\n----------------------------------------------------------------------------------------------------\n                    count     mean      std  ...       99%     99.9%       max\nttft_ms            3471.0   131.53   107.52  ...    527.74    745.00   1250.94\ntpot_ms            3471.0    12.48     2.63  ...     17.20     55.88     71.15\nlatency_ms         3471.0  3712.77  2639.73  ...  10448.94  19280.67  29294.83\ninput_num_turns    3471.0    10.29     9.12  ...     39.00     45.00     47.00\ninput_num_tokens   3471.0  1592.02  1764.66  ...   7627.60  11164.82  14197.00\noutput_num_tokens  3471.0   285.50   194.36  ...    768.00    777.06   1284.00\noutput_num_chunks  3471.0   279.78   190.75  ...    766.00    773.59   1283.00\n\n[7 rows x 11 columns]\n----------------------------------------------------------------------------------------------------\nWrote /proj/vlt-evolve/work/orit/kv-offload-lab/benchmark/multi-turn/results/evolved/sharegpt/gpu_0.5_active_128_cpu_26/summary.json\nRun 1 complete.\n\n============================================================\nAll runs complete. Results in /proj/vlt-evolve/work/orit/kv-offload-lab/benchmark/multi-turn/results/evolved/sharegpt/gpu_0.5_active_128_cpu_26/\n============================================================\n"
+    }
+  ],
+  "observability_context": {
+    "signal_refs": []
+  },
+  "notes": "Skipped due to halt: integration tests — KV connector NixL accuracy, stress tests — KV offload under memory pressure, benchmark — attention backends, benchmark — prefix caching throughput, benchmark — serving throughput, benchmark — long document Q&A throughput; Plan-level skips: benchmark — multi-turn KV offload (kv-offload-lab, LRU) (change validation run: only evolved policy tested), benchmark — multi-turn KV offload (kv-offload-lab, ARC) (change validation run: only evolved policy tested), unit tests — KV cache coordinator (tests/v1/core/test_kv_cache_coordinator.py does not exist in vllm v0.18.0 — re-enable once vllm is upgraded to a version that includes this test)",
+  "timestamp": "2026-06-01T16:32:54.719405"
+}
