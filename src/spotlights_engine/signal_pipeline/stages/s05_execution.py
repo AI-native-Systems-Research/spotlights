@@ -135,6 +135,7 @@ def _execute_change(
     subject_root: Path,
     log_dir: Path,
     backend_id: str,
+    on_event=None,
 ) -> ExecutionResult:
     """Real path. Test-monkeypatch seam.
 
@@ -156,6 +157,7 @@ def _execute_change(
         # caveat about running on a clean git checkout / worktree.
         permission_mode="bypassPermissions",
         allowed_tools=("Read", "Write", "Edit", "Bash"),
+        on_event=on_event,
     )
     if result.error is not None or result.structured_output is None:
         raise ExecutionError(
@@ -197,6 +199,7 @@ def run_one(ctx: StageContext, id_: str) -> ExecutionResult:
         subject_root=subject_root,
         log_dir=per_id_log_dir,
         backend_id=ctx.signal_input.backend_id,
+        on_event=ctx.on_event,
     )
 
 

@@ -38,7 +38,9 @@ def _ts_subdir() -> str:
     return re.sub(r"[:+]", "-", iso)
 
 
-def _extract_project_tree(subject_root: Path, log_dir: Path) -> ProjectTree:
+def _extract_project_tree(
+    subject_root: Path, log_dir: Path, on_event=None
+) -> ProjectTree:
     """Real extraction path. Factored for ease of monkeypatching in tests.
 
     The conftest in `tests/unit/signal_pipeline/` swaps this out with a
@@ -52,11 +54,14 @@ def _extract_project_tree(subject_root: Path, log_dir: Path) -> ProjectTree:
     return extract(
         ModulesExtractorInput(repo_path=subject_root),
         config=ExtractorConfig(artifacts_dir=artifacts_dir),
+        on_event=on_event,
     )
 
 
 def run(ctx: StageContext) -> ProjectTree:
-    return _extract_project_tree(ctx.signal_input.subject_root, ctx.log_dir)
+    return _extract_project_tree(
+        ctx.signal_input.subject_root, ctx.log_dir, ctx.on_event
+    )
 
 
 SPEC = StageSpec(

@@ -44,7 +44,7 @@ def test_run_calls_extract_with_subject_root_and_log_subdir(monkeypatch, tmp_pat
     log_dir (so re-runs don't trip main's pre-existing-dir guard)."""
     captured: dict = {}
 
-    def fake_extract(subject_root: Path, log_dir: Path) -> ProjectTree:
+    def fake_extract(subject_root: Path, log_dir: Path, on_event=None) -> ProjectTree:
         captured["subject_root"] = subject_root
         captured["log_dir"] = log_dir
         return _custom_tree()
@@ -117,7 +117,7 @@ def test_artifacts_dir_is_a_fresh_subdir_of_log_dir(monkeypatch, tmp_path):
     deterministic instead of wall-clock-dependent."""
     seen: list[Path] = []
 
-    def fake_inner_extract(input, *, config):
+    def fake_inner_extract(input, *, config, on_event=None):
         seen.append(config.artifacts_dir)
         return _custom_tree()
 

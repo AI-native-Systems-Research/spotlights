@@ -114,7 +114,9 @@ def _load_signals(telemetry_from: Path) -> Signals:
     return Signals.model_validate(raw)
 
 
-def _extract_signals_via_claude(target_dir: Path, log_dir: Path) -> Signals:
+def _extract_signals_via_claude(
+    target_dir: Path, log_dir: Path, on_event=None
+) -> Signals:
     """Agent-extraction branch. Test-monkeypatch seam.
 
     Spawns one `claude -p` session with `cwd=target_dir`, hands it
@@ -143,6 +145,7 @@ def _extract_signals_via_claude(target_dir: Path, log_dir: Path) -> Signals:
         timeout_s=_TIMEOUT_S,
         permission_mode="plan",  # read-only; agent never edits the dir
         allowed_tools=("Read", "Bash"),
+        on_event=on_event,
     )
     if result.error is not None or result.structured_output is None:
         raise SignalExtractionError(
@@ -201,7 +204,7 @@ def run(ctx: StageContext) -> Signals:
         # Else: if the dir looks like an OTel capture, dispatch to the
         # agent. Else: clear error from `_resolve_signals_file`.
         if not _has_pre_cooked_signals(target) and _has_otel_discriminator(target):
-            return _extract_signals_via_claude(target, ctx.log_dir)
+            return _extract_signals_via_claude(target, ctx.log_dir, ctx.on_event)
     return _load_signals(target)
 
 

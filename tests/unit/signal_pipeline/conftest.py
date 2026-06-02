@@ -59,7 +59,7 @@ def _default_stage_stubs(request, monkeypatch):
     )
     from spotlights_engine.signal_pipeline.stages import s01_signal_extraction
 
-    def _fake_extract_signals(target_dir, log_dir):
+    def _fake_extract_signals(target_dir, log_dir, on_event=None):
         return Signals(
             workload=WorkloadProfileLite(
                 workload_id="conftest-stub-workload",
@@ -87,7 +87,7 @@ def _default_stage_stubs(request, monkeypatch):
     # ── Stage 02 ─────────────────────────────────────────────────────
     from spotlights_engine.signal_pipeline.stages import s02_projecttree
 
-    def _fake_extract(subject_root: Path, log_dir: Path) -> ProjectTree:
+    def _fake_extract(subject_root: Path, log_dir: Path, on_event=None) -> ProjectTree:
         # Tests don't depend on this exact shape — only that it
         # round-trips through `02_projecttree.json` and parses back.
         return ProjectTree(
@@ -110,7 +110,7 @@ def _default_stage_stubs(request, monkeypatch):
     from spotlights_engine.schemas.candidate import Candidate
     from spotlights_engine.signal_pipeline.stages import s03_candidate_generation
 
-    def _fake_candidates(*, signals, project_tree, subject_root, log_dir):
+    def _fake_candidates(*, signals, project_tree, subject_root, log_dir, on_event=None):
         return [
             Candidate(
                 id="cand-0001",
@@ -148,7 +148,7 @@ def _default_stage_stubs(request, monkeypatch):
     from spotlights_engine.signal_pipeline.schemas import Change
     from spotlights_engine.signal_pipeline.stages import s04_change_generation
 
-    def _fake_change(candidate, subject_root, log_dir):
+    def _fake_change(candidate, subject_root, log_dir, on_event=None):
         return Change(
             change_id=f"chg-{candidate.id}",
             candidate_ref=candidate.id,
@@ -165,7 +165,7 @@ def _default_stage_stubs(request, monkeypatch):
     from spotlights_engine.signal_pipeline.schemas import ExecutionResult
     from spotlights_engine.signal_pipeline.stages import s05_execution
 
-    def _fake_execute(*, change, subject_root, log_dir, backend_id):
+    def _fake_execute(*, change, subject_root, log_dir, backend_id, on_event=None):
         return ExecutionResult(
             result_id=f"res-{change.candidate_ref}",
             change_ref=change.change_id,

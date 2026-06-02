@@ -6,8 +6,21 @@ JSON schema derived from `ProjectTree`. The single terminal `result` event
 from `stream-json` carries the validated object on `structured_output`,
 which we parse back into a `ProjectTree`.
 
-Permission mode is `plan`, which allows reads of the target repo but blocks
-mutations — exactly what we need for a structural map.
+Permission mode is `plan`, which pre-approves the read/list tools (Bash,
+Read, Glob, Grep) needed for a structural map and blocks mutations. Older
+CLIs (≤ 2.1.87) auto-denied `ExitPlanMode` in non-interactive `-p` runs,
+sending the agent into a retry loop until `--max-turns` was exhausted; CLI
+2.1.140 fixes that, so plan mode is once again the right choice here.
+
+Windows note: the bundled `claude` CLI is `claude.CMD` (a cmd.exe shim). The
+shim buffers the child's stdout, so a live reader sees no events until the
+child exits — indistinguishable from a hang. We resolve `claude.exe` directly
+under `%APPDATA%\\npm\\node_modules\\@anthropic-ai\\claude-code\\` instead.
+
+Output is streamed live: a reader thread parses each stream-json event as it
+arrives and forwards a one-line summary via the caller-provided
+`on_event` callback (defaults to printing). On timeout the entire process
+tree is killed (taskkill /T /F on Windows, killpg on POSIX).
 """
 
 from __future__ import annotations
@@ -16,9 +29,12 @@ import json
 import os
 import shutil
 import subprocess
+import sys
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from pydantic import ValidationError
 
@@ -56,6 +72,122 @@ def _clean_env() -> dict[str, str]:
     return env
 
 
+def _resolve_claude_argv0(claude_bin: str) -> list[str]:
+    """Return argv prefix that invokes claude.
+
+    On Windows, `claude` on PATH is a `.CMD` shim that buffers child stdout
+    and breaks live streaming. Resolve `claude.exe` directly under
+    `%APPDATA%\\npm\\node_modules\\@anthropic-ai\\claude-code` instead. The
+    shim is fine on POSIX; pass through `shutil.which` there.
+    """
+    if sys.platform == "win32":
+        appdata = os.environ.get("APPDATA")
+        if appdata:
+            base = Path(appdata) / "npm" / "node_modules" / "@anthropic-ai" / "claude-code"
+            for candidate in (base / "claude.exe", base / "bin" / "claude.exe"):
+                if candidate.exists():
+                    return [str(candidate)]
+
+    resolved = shutil.which(claude_bin)
+    if resolved is None:
+        raise ExtractorSetupError(
+            f"required CLI not on PATH: {claude_bin}",
+            executable=claude_bin,
+        )
+    return [resolved]
+
+
+def _kill_tree(proc: subprocess.Popen) -> None:
+    """Terminate the process tree rooted at the spawned child.
+
+    Windows: taskkill /T /F walks descendants so the cmd shim AND the node
+    grandchild both die. POSIX: we started the child in a new session, so
+    killpg kills the whole tree without touching the parent.
+    """
+    if sys.platform == "win32":
+        subprocess.run(
+            ["taskkill", "/F", "/T", "/PID", str(proc.pid)],
+            capture_output=True, check=False,
+        )
+        return
+    try:
+        os.killpg(os.getpgid(proc.pid), 9)
+    except (OSError, ProcessLookupError):
+        try:
+            proc.kill()
+        except (OSError, ProcessLookupError):
+            pass
+
+
+def _summarize_event(ev: dict, t0: float) -> str | None:
+    """One-line summary of a stream-json event, or None to skip.
+
+    Mirrors diag_stream.py — kept terse so a long run scrolls cleanly.
+    """
+    et = ev.get("type")
+    elapsed = f"+{time.monotonic() - t0:6.1f}s"
+
+    if et == "system" and ev.get("subtype") == "init":
+        sid = (ev.get("session_id") or "?")[:8]
+        return f"{elapsed}  init session={sid}"
+
+    if et == "assistant":
+        msg = ev.get("message") or {}
+        for c in msg.get("content") or []:
+            if c.get("type") == "tool_use":
+                name = c.get("name", "?")
+                inp = c.get("input") or {}
+                if name == "Bash":
+                    desc = inp.get("description") or (inp.get("command") or "")[:80]
+                elif name in ("Glob", "Grep"):
+                    desc = inp.get("pattern", "")
+                elif name == "Read":
+                    desc = inp.get("file_path", "")
+                else:
+                    desc = json.dumps(inp)[:80]
+                return f"{elapsed}  {name}: {desc}"
+            if c.get("type") == "text":
+                t = (c.get("text") or "").strip()
+                if t:
+                    return f"{elapsed}  text: {t[:120]}"
+        return None
+
+    if et == "user":
+        msg = ev.get("message") or {}
+        for c in msg.get("content") or []:
+            if c.get("type") == "tool_result":
+                content = c.get("content")
+                if isinstance(content, str):
+                    body = content
+                elif isinstance(content, list):
+                    body = json.dumps(content)
+                else:
+                    body = ""
+                err = " ERR" if c.get("is_error") else ""
+                if not body:
+                    snippet = "(empty)"
+                elif len(body) > 1024:
+                    snippet = f"<{len(body)} chars>"
+                else:
+                    snippet = body.replace("\n", " | ")[:80]
+                return f"{elapsed}  result{err}: {snippet}"
+        return None
+
+    if et == "result":
+        sub = ev.get("subtype", "?")
+        turns = ev.get("num_turns")
+        cost = ev.get("total_cost_usd")
+        if cost is not None:
+            return f"{elapsed}  RESULT subtype={sub} turns={turns} cost=${cost:.3f}"
+        return f"{elapsed}  RESULT subtype={sub} turns={turns}"
+
+    return None
+
+
+def _default_on_event(line: str) -> None:
+    print(line, flush=True)
+
+
 @dataclass
 class ExtractionInvocation:
     """Side-channel telemetry from one Claude run."""
@@ -82,6 +214,7 @@ def run_extraction(
     max_turns: int = 60,
     timeout_s: int = 1800,
     artifacts_dir: Path | None = None,
+    on_event: Callable[[str], None] | None = _default_on_event,
 ) -> ExtractionRunResult:
     """Invoke Claude Code over `repo_path` and return a validated `ProjectTree`.
 
@@ -89,12 +222,11 @@ def run_extraction(
     schema handed to the CLI, the raw stdout/stderr, and the final structured
     payload. The caller owns directory creation and uniqueness; this function
     writes into the directory as-is.
+
+    `on_event` is called with a one-line summary of each stream-json event as
+    it arrives. Default is `print(..., flush=True)`. Pass `None` to silence.
     """
-    if shutil.which(claude_bin) is None:
-        raise ExtractorSetupError(
-            f"required CLI not on PATH: {claude_bin}",
-            executable=claude_bin,
-        )
+    argv0 = _resolve_claude_argv0(claude_bin)
     if not repo_path.exists() or not repo_path.is_dir():
         raise ExtractorSetupError(
             f"repo_path does not exist or is not a directory: {repo_path}",
@@ -115,8 +247,7 @@ def run_extraction(
         (artifacts_dir / "prompt.md").write_text(prompt, encoding="utf-8")
         (artifacts_dir / "schema.json").write_text(schema_text, encoding="utf-8")
 
-    argv = [
-        claude_bin,
+    argv = argv0 + [
         "-p",
         "--output-format",
         "stream-json",
@@ -129,42 +260,105 @@ def run_extraction(
         str(max_turns),
     ]
 
+    # POSIX: start_new_session lets us killpg the whole tree without
+    # signaling ourselves. (No-op on Windows; taskkill /T handles tree there.)
+    popen_kwargs: dict = {}
+    if sys.platform != "win32":
+        popen_kwargs["start_new_session"] = True
+
     start = time.monotonic()
-    try:
-        completed = subprocess.run(
-            argv,
-            input=prompt.encode("utf-8"),
-            capture_output=True,
-            env=_clean_env(),
-            cwd=str(repo_path),
-            timeout=timeout_s,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as exc:
-        duration = time.monotonic() - start
-        if artifacts_dir is not None:
-            _write_streams(artifacts_dir, exc.stdout or b"", exc.stderr or b"")
+    proc = subprocess.Popen(
+        argv,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        env=_clean_env(),
+        cwd=str(repo_path),
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+        **popen_kwargs,
+    )
+    # Write the prompt and close stdin so the child sees EOF and starts work.
+    # Prompts are small (≤ a few KB), so a direct write doesn't block.
+    proc.stdin.write(prompt)
+    proc.stdin.close()
+
+    stdout_chunks: list[str] = []
+    stderr_chunks: list[str] = []
+
+    def _drain(stream, sink: list[str], parse: bool) -> None:
+        for line in iter(stream.readline, ""):
+            sink.append(line)
+            if not parse or on_event is None:
+                continue
+            stripped = line.strip()
+            if not stripped:
+                continue
+            try:
+                ev = json.loads(stripped)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(ev, dict):
+                continue
+            summary = _summarize_event(ev, start)
+            if summary:
+                try:
+                    on_event(summary)
+                except Exception:  # noqa: BLE001 - never let UI errors abort the run
+                    pass
+        stream.close()
+
+    t_out = threading.Thread(target=_drain, args=(proc.stdout, stdout_chunks, True), daemon=True)
+    t_err = threading.Thread(target=_drain, args=(proc.stderr, stderr_chunks, False), daemon=True)
+    t_out.start(); t_err.start()
+
+    timed_out = False
+    deadline = start + timeout_s
+    while True:
+        rc = proc.poll()
+        if rc is not None:
+            break
+        if time.monotonic() > deadline:
+            _kill_tree(proc)
+            timed_out = True
+            # Wait briefly for the process to actually die so threads exit.
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
+            break
+        time.sleep(0.5)
+
+    t_out.join(timeout=10)
+    t_err.join(timeout=10)
+
+    duration = time.monotonic() - start
+    completed_stdout = "".join(stdout_chunks).encode("utf-8")
+    completed_stderr = "".join(stderr_chunks).encode("utf-8")
+
+    if artifacts_dir is not None:
+        _write_streams(artifacts_dir, completed_stdout, completed_stderr)
+
+    if timed_out:
         raise ExtractorAgentError(
             f"claude timed out after {duration:.1f}s",
             timeout_s=timeout_s,
-        ) from exc
+        )
 
-    duration = time.monotonic() - start
-
-    if artifacts_dir is not None:
-        _write_streams(artifacts_dir, completed.stdout, completed.stderr)
-
-    if completed.returncode != 0:
-        stderr_tail = (completed.stderr or b"")[-500:].decode("utf-8", "replace")
-        stdout_tail = (completed.stdout or b"")[-500:].decode("utf-8", "replace")
+    rc = proc.returncode if proc.returncode is not None else -1
+    if rc != 0:
+        stderr_tail = completed_stderr[-500:].decode("utf-8", "replace")
+        stdout_tail = completed_stdout[-500:].decode("utf-8", "replace")
         raise ExtractorAgentError(
-            f"claude exit={completed.returncode}",
-            returncode=completed.returncode,
+            f"claude exit={rc}",
+            returncode=rc,
             stderr_tail=stderr_tail,
             stdout_tail=stdout_tail,
         )
 
-    result_event = _extract_result_event(completed.stdout)
+    result_event = _extract_result_event(completed_stdout)
     if result_event is None:
         raise ExtractorAgentError(
             "claude stream-json had no terminal result event",

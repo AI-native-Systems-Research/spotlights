@@ -176,6 +176,16 @@ Stage `NN` declares stage `M` as upstream, and `M` isn't on disk
 (or its `status.json` entry isn't `done`). Either run from earlier,
 extend the selection, or `--inject` an upstream artifact.
 
+### Stage 02 stalls with no progress (Windows)
+
+The bundled `claude` CLI on Windows is `claude.CMD`, a cmd.exe shim that
+buffers the child's stdout. Live readers see no events until the child
+exits — indistinguishable from a hang. Both
+[`agent.py`](../modules_extractor/agent.py) and
+[`claude_subprocess.py`](claude_subprocess.py) bypass the shim by
+resolving `claude.exe` directly under
+`%APPDATA%\npm\node_modules\@anthropic-ai\claude-code\` (CLI 2.1.140+).
+
 ### Stage 03 produces zero candidates
 
 Stage 01's anomalies were too thin (e.g. only `instrumentation_gap`
