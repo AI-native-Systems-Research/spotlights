@@ -1,0 +1,647 @@
+{
+  "change_ref": null,
+  "archive_context": [],
+  "entries": [
+    {
+      "priority": 1,
+      "halt_on_failure": true,
+      "index": 1,
+      "harness_entry": {
+        "id": "unit-kv-offload-tiering",
+        "name": "unit tests — KV offload tiering",
+        "kind": "unit",
+        "path": "tests/v1/kv_offload",
+        "invoke": "pytest -v tests/v1/kv_offload/ -k 'not test_cpu_offloading'",
+        "components": [
+          "kv_offload"
+        ],
+        "output_format": "pytest-json",
+        "estimated_duration": 600
+      },
+      "workloads": []
+    },
+    {
+      "priority": 1,
+      "halt_on_failure": true,
+      "index": 2,
+      "harness_entry": {
+        "id": "unit-kv-connector-offloading",
+        "name": "unit tests — KV connector offloading",
+        "kind": "unit",
+        "path": "tests/v1/kv_connector/unit/test_offloading_connector.py",
+        "invoke": "pytest -v tests/v1/kv_connector/unit/test_offloading_connector.py",
+        "components": [
+          "kv_offload",
+          "distributed.kv_transfer"
+        ],
+        "output_format": "pytest-json",
+        "estimated_duration": 300
+      },
+      "workloads": []
+    },
+    {
+      "priority": 2,
+      "halt_on_failure": true,
+      "index": 3,
+      "harness_entry": {
+        "id": "unit-kv-connector-lifecycle",
+        "name": "unit tests — KV connector lifecycle",
+        "kind": "unit",
+        "path": "tests/v1/kv_connector/unit/test_kv_connector_lifecycle.py",
+        "invoke": "pytest -v tests/v1/kv_connector/unit/test_kv_connector_lifecycle.py",
+        "components": [
+          "kv_offload",
+          "distributed.kv_transfer"
+        ],
+        "output_format": "pytest-json",
+        "estimated_duration": 600
+      },
+      "workloads": []
+    },
+    {
+      "priority": 2,
+      "halt_on_failure": true,
+      "index": 4,
+      "harness_entry": {
+        "id": "unit-kv-cache-layout",
+        "name": "unit tests — KV cache layout",
+        "kind": "unit",
+        "path": "tests/v1/kv_connector/unit/test_kv_cache_layout.py",
+        "invoke": "pytest -v tests/v1/kv_connector/unit/test_kv_cache_layout.py",
+        "components": [
+          "kv_offload",
+          "kv_cache"
+        ],
+        "output_format": "pytest-json",
+        "estimated_duration": 600
+      },
+      "workloads": []
+    },
+    {
+      "priority": 2,
+      "halt_on_failure": true,
+      "index": 5,
+      "harness_entry": {
+        "id": "unit-kv-load-failure-recovery",
+        "name": "unit tests — KV load failure recovery",
+        "kind": "unit",
+        "path": "tests/v1/kv_connector/unit/test_kv_load_failure_recovery.py",
+        "invoke": "pytest -v tests/v1/kv_connector/unit/test_kv_load_failure_recovery.py",
+        "components": [
+          "kv_offload"
+        ],
+        "output_format": "pytest-json",
+        "estimated_duration": 600
+      },
+      "workloads": []
+    },
+    {
+      "priority": 3,
+      "halt_on_failure": true,
+      "index": 6,
+      "harness_entry": {
+        "id": "unit-kv-cache-manager",
+        "name": "unit tests — KV cache manager (via prefix caching)",
+        "kind": "unit",
+        "path": "tests/v1/core/test_prefix_caching.py",
+        "invoke": "pytest -v tests/v1/core/test_prefix_caching.py",
+        "components": [
+          "kv_cache"
+        ],
+        "output_format": "pytest-json",
+        "estimated_duration": 300
+      },
+      "workloads": []
+    },
+    {
+      "priority": 3,
+      "halt_on_failure": true,
+      "index": 7,
+      "harness_entry": {
+        "id": "unit-single-type-kv-cache-manager",
+        "name": "unit tests — single-type KV cache manager",
+        "kind": "unit",
+        "path": "tests/v1/core/test_single_type_kv_cache_manager.py",
+        "invoke": "pytest -v tests/v1/core/test_single_type_kv_cache_manager.py",
+        "components": [
+          "kv_cache"
+        ],
+        "output_format": "pytest-json",
+        "estimated_duration": 300
+      },
+      "workloads": []
+    },
+    {
+      "priority": 3,
+      "halt_on_failure": false,
+      "index": 8,
+      "harness_entry": {
+        "id": "unit-kv-cache-utils",
+        "name": "unit tests — KV cache utilities",
+        "kind": "unit",
+        "path": "tests/v1/core/test_kv_cache_utils.py",
+        "invoke": "pytest -v tests/v1/core/test_kv_cache_utils.py",
+        "components": [
+          "kv_cache"
+        ],
+        "output_format": "pytest-json",
+        "estimated_duration": 600
+      },
+      "workloads": []
+    },
+    {
+      "priority": 3,
+      "halt_on_failure": false,
+      "index": 9,
+      "skipped": true,
+      "skip_reason": "tests/v1/core/test_kv_cache_coordinator.py does not exist in vllm v0.18.0 — re-enable once vllm is upgraded to a version that includes this test",
+      "harness_entry": {
+        "id": "unit-kv-cache-coordinator",
+        "name": "unit tests — KV cache coordinator",
+        "kind": "unit",
+        "path": "tests/v1/core/test_kv_cache_coordinator.py",
+        "invoke": "pytest -v tests/v1/core/test_kv_cache_coordinator.py",
+        "components": [
+          "kv_cache"
+        ],
+        "output_format": "pytest-json",
+        "estimated_duration": 300
+      },
+      "workloads": []
+    },
+    {
+      "priority": 4,
+      "halt_on_failure": false,
+      "index": 10,
+      "harness_entry": {
+        "id": "unit-cache-kernels",
+        "name": "unit tests — cache kernels (test_gather_cache_oob deselected)",
+        "kind": "unit",
+        "path": "tests/kernels/test_cache_kernels.py",
+        "invoke": "pytest -v tests/kernels/test_cache_kernels.py -k 'not test_gather_cache_oob'",
+        "components": [
+          "kv_cache",
+          "kernels"
+        ],
+        "output_format": "pytest-json",
+        "estimated_duration": 900,
+        "_comment": "Deselect test_gather_cache_oob: upstream bug in vllm. Commit 77e10c9ca (#28029) added a Tensor `token_to_seq` arg as the 5th parameter of _C_cache_ops::gather_and_maybe_dequant_cache and updated the Python wrapper + production caller (mla_attention.py), but did not update tests/kernels/test_cache_kernels.py::test_gather_cache_oob, which still passes the old 8-arg layout (batch_size where token_to_seq should be). The test fails with: 'Expected Tensor for token_to_seq but found int'. Fix is upstream-only (origin/main still broken as of fetch on 2026-05-24); halt_on_failure lowered to false so this entry merely warns until a fix lands."
+      },
+      "workloads": []
+    },
+    {
+      "priority": 4,
+      "halt_on_failure": false,
+      "index": 11,
+      "harness_entry": {
+        "id": "unit-scheduler",
+        "name": "unit tests — scheduler",
+        "kind": "unit",
+        "path": "tests/v1/core/test_scheduler.py",
+        "invoke": "pytest -v tests/v1/core/test_scheduler.py",
+        "components": [
+          "scheduler"
+        ],
+        "output_format": "pytest-json",
+        "estimated_duration": 600
+      },
+      "workloads": []
+    },
+    {
+      "priority": 4,
+      "halt_on_failure": false,
+      "index": 12,
+      "harness_entry": {
+        "id": "unit-async-scheduler",
+        "name": "unit tests — async scheduler",
+        "kind": "unit",
+        "path": "tests/v1/core/test_async_scheduler.py",
+        "invoke": "pytest -v tests/v1/core/test_async_scheduler.py",
+        "components": [
+          "scheduler"
+        ],
+        "output_format": "pytest-json",
+        "estimated_duration": 300
+      },
+      "workloads": []
+    },
+    {
+      "priority": 4,
+      "halt_on_failure": false,
+      "index": 13,
+      "harness_entry": {
+        "id": "unit-worker",
+        "name": "unit tests — worker",
+        "kind": "unit",
+        "path": "tests/v1/worker",
+        "invoke": "pytest -v tests/v1/worker/",
+        "components": [
+          "worker"
+        ],
+        "output_format": "pytest-json",
+        "estimated_duration": 600
+      },
+      "workloads": []
+    },
+    {
+      "priority": 5,
+      "halt_on_failure": false,
+      "index": 14,
+      "harness_entry": {
+        "id": "integration-scheduler-e2e",
+        "name": "integration tests — scheduler end-to-end",
+        "kind": "integration",
+        "path": "tests/v1/core/test_scheduler_e2e.py",
+        "invoke": "pytest -v tests/v1/core/test_scheduler_e2e.py",
+        "components": [
+          "scheduler",
+          "kv_cache"
+        ],
+        "output_format": "pytest-json",
+        "estimated_duration": 900
+      },
+      "workloads": []
+    },
+    {
+      "priority": 5,
+      "halt_on_failure": false,
+      "index": 15,
+      "harness_entry": {
+        "id": "integration-engine",
+        "name": "integration tests — v1 engine",
+        "kind": "integration",
+        "path": "tests/v1/engine",
+        "invoke": "pytest -v tests/v1/engine/ --ignore=tests/v1/engine/test_async_llm.py --ignore=tests/v1/engine/test_engine_core_client.py --ignore=tests/v1/engine/test_abort_final_step.py --ignore=tests/v1/engine/test_output_processor.py -k 'not test_skip_tokenizer_initialization'",
+        "components": [
+          "engine",
+          "scheduler"
+        ],
+        "output_format": "pytest-json",
+        "estimated_duration": 1800
+      },
+      "workloads": []
+    },
+    {
+      "priority": 6,
+      "halt_on_failure": true,
+      "index": 16,
+      "harness_entry": {
+        "id": "correctness-basic",
+        "name": "correctness tests — basic model output",
+        "kind": "correctness",
+        "path": "tests/basic_correctness",
+        "_comment": "test_cumem/test_cpu_offload/test_models[Gemma2] excluded: cudaErrorDevicesUnavailable / fork-after-CUDA on hosts with Compute Mode=Exclusive_Process. test_prefetch_offload excluded: needs gated meta-llama/Llama-3.2-1B-Instruct cache; the active HF token's access request is awaiting review.",
+        "invoke": "pytest -v tests/basic_correctness/ -k 'not meta-llama and not tiering and not test_cumem and not test_cpu_offload and not Gemma2 and not test_prefetch_offload'",
+        "components": [
+          "model_executor",
+          "kv_cache"
+        ],
+        "output_format": "pytest-json",
+        "estimated_duration": 1200
+      },
+      "workloads": []
+    },
+    {
+      "priority": 1,
+      "halt_on_failure": true,
+      "index": 17,
+      "before_run": "bash $ROOT_DIR/spotlights/src/spotlights_validation/examples/kvoffload/kill_vllm.sh",
+      "harness_entry": {
+        "id": "benchmark-multi-turn-kv-offload-lab",
+        "name": "benchmark — multi-turn KV offload (kv-offload-lab, evolved)",
+        "kind": "benchmark",
+        "path": "kv-offload-lab/benchmark/multi-turn/run_benchmark.sh",
+        "invoke": "bash -lc 'set -a; source \"$ROOT_DIR/kv-offload-lab/.env\"; set +a; bash \"$ROOT_DIR/kv-offload-lab/benchmark/multi-turn/run_benchmark.sh\" --workload sharegpt --policy evolved --gpu-util 0.5 --num-clients 4 --max-active 128 --kv-size 26'",
+        "components": [
+          "kv_offload",
+          "scheduler"
+        ],
+        "output_format": "custom",
+        "estimated_duration": 3600,
+        "output_template": {
+          "format": "json-file",
+          "source": "$ROOT_DIR/kv-offload-lab/benchmark/multi-turn/results/evolved/sharegpt/gpu_0.5_active_128_cpu_26/summary.json",
+          "metric_paths": {
+            "ttft_ms_mean": "ttft_ms_mean",
+            "tpot_ms_mean": "tpot_ms_mean",
+            "cpu_hit_rate": "cpu_hit_rate",
+            "evictions": "evictions"
+          },
+          "notes": "Metrics consolidated by collect_summary.py from benchmark_run_1.log (regex for ttft/tpot avg) and kv_stats_1.json (lookup/eviction stats). cpu_hit_rate = lookup_hits / lookup_total."
+        },
+        "comparison_guidance": "Compare evolved policy against LRU/ARC baselines.\n  - Pass when ttft_ms_mean is <= LRU baseline * 1.05 AND cpu_hit_rate >= LRU baseline.\n  - Investigate when cpu_hit_rate drops by more than 3 absolute points vs baseline.\n  - evictions should be comparable or lower than LRU for the same workload."
+      },
+      "workloads": []
+    },
+    {
+      "priority": 1,
+      "halt_on_failure": true,
+      "index": 18,
+      "before_run": "bash $ROOT_DIR/spotlights/src/spotlights_validation/examples/kvoffload/kill_vllm.sh",
+      "harness_entry": {
+        "id": "benchmark-multi-turn-kv-offload-lab-lru",
+        "name": "benchmark — multi-turn KV offload (kv-offload-lab, LRU)",
+        "kind": "benchmark",
+        "path": "kv-offload-lab/benchmark/multi-turn/run_benchmark.sh",
+        "invoke": "bash -lc 'set -a; source \"$ROOT_DIR/kv-offload-lab/.env\"; set +a; bash \"$ROOT_DIR/kv-offload-lab/benchmark/multi-turn/run_benchmark.sh\" --workload sharegpt --policy lru --gpu-util 0.5 --num-clients 4 --max-active 128 --kv-size 26'",
+        "components": [
+          "kv_offload",
+          "scheduler"
+        ],
+        "output_format": "custom",
+        "estimated_duration": 3600,
+        "output_template": {
+          "format": "json-file",
+          "source": "$ROOT_DIR/kv-offload-lab/benchmark/multi-turn/results/lru/sharegpt/gpu_0.5_active_128_cpu_26/summary.json",
+          "metric_paths": {
+            "ttft_ms_mean": "ttft_ms_mean",
+            "tpot_ms_mean": "tpot_ms_mean",
+            "cpu_hit_rate": "cpu_hit_rate",
+            "evictions": "evictions"
+          },
+          "notes": "LRU baseline. Same metric collection as evolved via collect_summary.py."
+        },
+        "comparison_guidance": "LRU serves as the baseline for comparison with evolved/ARC policies. Record these values for cross-entry comparison."
+      },
+      "workloads": [],
+      "skipped": true,
+      "skip_reason": "change validation run: only evolved policy tested"
+    },
+    {
+      "priority": 1,
+      "halt_on_failure": true,
+      "index": 19,
+      "before_run": "bash $ROOT_DIR/spotlights/src/spotlights_validation/examples/kvoffload/kill_vllm.sh",
+      "harness_entry": {
+        "id": "benchmark-multi-turn-kv-offload-lab-arc",
+        "name": "benchmark — multi-turn KV offload (kv-offload-lab, ARC)",
+        "kind": "benchmark",
+        "path": "kv-offload-lab/benchmark/multi-turn/run_benchmark.sh",
+        "invoke": "bash -lc 'set -a; source \"$ROOT_DIR/kv-offload-lab/.env\"; set +a; bash \"$ROOT_DIR/kv-offload-lab/benchmark/multi-turn/run_benchmark.sh\" --workload sharegpt --policy arc --gpu-util 0.5 --num-clients 4 --max-active 128 --kv-size 26'",
+        "components": [
+          "kv_offload",
+          "scheduler"
+        ],
+        "output_format": "custom",
+        "estimated_duration": 3600,
+        "output_template": {
+          "format": "json-file",
+          "source": "$ROOT_DIR/kv-offload-lab/benchmark/multi-turn/results/arc/sharegpt/gpu_0.5_active_128_cpu_26/summary.json",
+          "metric_paths": {
+            "ttft_ms_mean": "ttft_ms_mean",
+            "tpot_ms_mean": "tpot_ms_mean",
+            "cpu_hit_rate": "cpu_hit_rate",
+            "evictions": "evictions"
+          },
+          "notes": "ARC baseline. Same metric collection as evolved via collect_summary.py."
+        },
+        "comparison_guidance": "ARC serves as a baseline for comparison with evolved policy. Record these values for cross-entry comparison."
+      },
+      "workloads": [],
+      "skipped": true,
+      "skip_reason": "change validation run: only evolved policy tested"
+    },
+    {
+      "priority": 6,
+      "halt_on_failure": false,
+      "index": 20,
+      "before_run": "bash $ROOT_DIR/spotlights/src/spotlights_validation/examples/kvoffload/kill_vllm.sh",
+      "harness_entry": {
+        "id": "integration-kv-connector-nixl",
+        "name": "integration tests — KV connector NixL accuracy",
+        "kind": "integration",
+        "path": "tests/v1/kv_connector/nixl_integration",
+        "invoke": "bash tests/v1/kv_connector/nixl_integration/run_accuracy_test.sh",
+        "components": [
+          "kv_offload",
+          "distributed.kv_transfer"
+        ],
+        "output_format": "custom",
+        "estimated_duration": 1800
+      },
+      "workloads": [
+        {
+          "workload_id": "wl-large-kv-decode",
+          "workload_class": "batch-inference",
+          "source": "curated",
+          "config_path": null,
+          "components_exercised": [
+            "kv_offload",
+            "kv_cache",
+            "scheduler",
+            "worker"
+          ],
+          "description": "Decode under memory pressure: 128 concurrent requests with 16K KV cache per request, intentionally exceeding GPU VRAM to trigger KV offload eviction and reload. Core scenario for validating kv-offload correctness and measuring throughput cost of offloading. Derived from the mla_decode.yaml batch spec pattern (128q1s16k) scaled to a standard attention model."
+        }
+      ]
+    },
+    {
+      "priority": 7,
+      "halt_on_failure": false,
+      "index": 21,
+      "harness_entry": {
+        "id": "stress-kv-offload-memory-pressure",
+        "name": "stress tests — KV offload under memory pressure",
+        "kind": "stress",
+        "path": "tests/v1/kv_connector/nixl_integration",
+        "invoke": "bash -lc 'bash \"$ROOT_DIR/spotlights/src/spotlights_validation/examples/kvoffload/scripts/run_nixl_stress.sh\"'",
+        "components": [
+          "kv_offload",
+          "kv_cache",
+          "scheduler"
+        ],
+        "output_format": "custom",
+        "estimated_duration": 1800
+      },
+      "workloads": [
+        {
+          "workload_id": "wl-large-kv-decode",
+          "workload_class": "batch-inference",
+          "source": "curated",
+          "config_path": null,
+          "components_exercised": [
+            "kv_offload",
+            "kv_cache",
+            "scheduler",
+            "worker"
+          ],
+          "description": "Decode under memory pressure: 128 concurrent requests with 16K KV cache per request, intentionally exceeding GPU VRAM to trigger KV offload eviction and reload. Core scenario for validating kv-offload correctness and measuring throughput cost of offloading. Derived from the mla_decode.yaml batch spec pattern (128q1s16k) scaled to a standard attention model."
+        },
+        {
+          "workload_id": "wl-agentic",
+          "workload_class": "agentic",
+          "source": "curated",
+          "config_path": null,
+          "components_exercised": [
+            "scheduler",
+            "kv_cache",
+            "kv_offload"
+          ],
+          "description": "Agentic multi-turn workload: sequences of short decode steps interleaved with tool calls, modelling ReAct or function-calling patterns. KV blocks from earlier turns must be retained across multiple short generations. Validates that the LRU/ARC eviction policy does not prematurely evict blocks needed for active multi-turn sessions under concurrent load."
+        }
+      ]
+    },
+    {
+      "priority": 8,
+      "halt_on_failure": false,
+      "index": 22,
+      "skipped": true,
+      "skip_reason": "no output_template defined yet — re-enable once metric extraction is wired up",
+      "harness_entry": {
+        "id": "benchmark-attention",
+        "name": "benchmark — attention backends",
+        "kind": "benchmark",
+        "path": "benchmarks/attention_benchmarks",
+        "invoke": "python benchmarks/attention_benchmarks/benchmark.py --config benchmarks/attention_benchmarks/configs/standard_attention.yaml",
+        "components": [
+          "attention",
+          "kv_cache"
+        ],
+        "output_format": "custom",
+        "estimated_duration": 1800
+      },
+      "workloads": [
+        {
+          "workload_id": "wl-standard-decode",
+          "workload_class": "batch-inference",
+          "source": "discovered",
+          "config_path": "benchmarks/attention_benchmarks/configs/standard_attention.yaml",
+          "components_exercised": [
+            "attention",
+            "kv_cache",
+            "scheduler"
+          ],
+          "description": "Standard decode workload: 64 concurrent requests, 1K KV cache per request. Represents the typical online serving baseline with no memory pressure. Used as the reference point for throughput and latency regression checks."
+        },
+        {
+          "workload_id": "wl-mixed-prefill-decode",
+          "workload_class": "mixed",
+          "source": "discovered",
+          "config_path": "benchmarks/attention_benchmarks/configs/standard_attention.yaml",
+          "components_exercised": [
+            "attention",
+            "kv_cache",
+            "scheduler",
+            "worker"
+          ],
+          "description": "Concurrent prefill and decode: mixed batch with new requests being prefilled while existing ones are mid-decode. Exercises the scheduler's block allocation and the attention backend simultaneously. Used to detect regressions where KV offload interferes with prefill block allocation."
+        }
+      ]
+    },
+    {
+      "priority": 8,
+      "halt_on_failure": false,
+      "index": 23,
+      "skipped": true,
+      "skip_reason": "no output_template defined yet — re-enable once metric extraction is wired up",
+      "harness_entry": {
+        "id": "benchmark-prefix-caching",
+        "name": "benchmark — prefix caching throughput",
+        "kind": "benchmark",
+        "path": "benchmarks/benchmark_prefix_caching.py",
+        "invoke": "python benchmarks/benchmark_prefix_caching.py --model meta-llama/Llama-3.1-8B-Instruct",
+        "components": [
+          "kv_cache",
+          "scheduler"
+        ],
+        "output_format": "custom",
+        "estimated_duration": 1800
+      },
+      "workloads": [
+        {
+          "workload_id": "wl-prefix-heavy",
+          "workload_class": "batch-inference",
+          "source": "discovered",
+          "config_path": "benchmarks/benchmark_prefix_caching.py",
+          "components_exercised": [
+            "kv_cache",
+            "scheduler"
+          ],
+          "description": "High prefix cache reuse: requests sharing a long common prefix (e.g., system prompt + document context). Validates that prefix blocks evicted to NVMe/CPU are correctly reloaded and hash-verified on reuse. Throughput here is sensitive to eviction policy and reload latency."
+        }
+      ]
+    },
+    {
+      "priority": 9,
+      "halt_on_failure": false,
+      "index": 24,
+      "skipped": true,
+      "skip_reason": "no output_template defined yet — re-enable once metric extraction is wired up",
+      "harness_entry": {
+        "id": "benchmark-serving-throughput",
+        "name": "benchmark — serving throughput",
+        "kind": "benchmark",
+        "path": "benchmarks/benchmark_serving.py",
+        "invoke": "vllm bench serve --model meta-llama/Llama-3.1-8B-Instruct --request-rate 10 --num-prompts 100",
+        "components": [
+          "scheduler",
+          "kv_cache",
+          "worker"
+        ],
+        "output_format": "custom",
+        "estimated_duration": 3600
+      },
+      "workloads": [
+        {
+          "workload_id": "wl-standard-decode",
+          "workload_class": "batch-inference",
+          "source": "discovered",
+          "config_path": "benchmarks/attention_benchmarks/configs/standard_attention.yaml",
+          "components_exercised": [
+            "attention",
+            "kv_cache",
+            "scheduler"
+          ],
+          "description": "Standard decode workload: 64 concurrent requests, 1K KV cache per request. Represents the typical online serving baseline with no memory pressure. Used as the reference point for throughput and latency regression checks."
+        },
+        {
+          "workload_id": "wl-large-kv-decode",
+          "workload_class": "batch-inference",
+          "source": "curated",
+          "config_path": null,
+          "components_exercised": [
+            "kv_offload",
+            "kv_cache",
+            "scheduler",
+            "worker"
+          ],
+          "description": "Decode under memory pressure: 128 concurrent requests with 16K KV cache per request, intentionally exceeding GPU VRAM to trigger KV offload eviction and reload. Core scenario for validating kv-offload correctness and measuring throughput cost of offloading. Derived from the mla_decode.yaml batch spec pattern (128q1s16k) scaled to a standard attention model."
+        }
+      ]
+    },
+    {
+      "priority": 9,
+      "halt_on_failure": false,
+      "index": 25,
+      "skipped": true,
+      "skip_reason": "no output_template defined yet — re-enable once metric extraction is wired up",
+      "harness_entry": {
+        "id": "benchmark-long-document-qa",
+        "name": "benchmark — long document Q&A throughput",
+        "kind": "benchmark",
+        "path": "benchmarks/benchmark_long_document_qa_throughput.py",
+        "invoke": "python benchmarks/benchmark_long_document_qa_throughput.py --model meta-llama/Llama-3.1-8B-Instruct",
+        "components": [
+          "kv_cache",
+          "scheduler"
+        ],
+        "output_format": "custom",
+        "estimated_duration": 3600
+      },
+      "workloads": [
+        {
+          "workload_id": "wl-long-context",
+          "workload_class": "long-context",
+          "source": "discovered",
+          "config_path": "benchmarks/benchmark_long_document_qa_throughput.py",
+          "components_exercised": [
+            "kv_cache",
+            "scheduler",
+            "kv_offload"
+          ],
+          "description": "Long document Q&A: single requests with 32K–128K input tokens. Tests that KV blocks for very long sequences are correctly managed (allocated, potentially offloaded and reloaded) without corruption or silent truncation. Catches regressions in large-KV-block handling specific to the offloading path."
+        }
+      ]
+    }
+  ]
+}
