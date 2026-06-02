@@ -78,11 +78,18 @@ class ClaudeRunResult:
     final `result` event in the stream-json stdout.
     On failure: caller can inspect `error` plus the persisted log_dir
     for raw streams.
+
+    `model` comes from the stream's `system/init` event; `cost_usd` and
+    `num_turns` come from the terminal `result` event. Either may be
+    None on older `claude` versions or on early failure.
     """
 
     structured_output: dict | list | None
     duration_s: float
     error: str | None = None
+    model: str | None = None
+    cost_usd: float | None = None
+    num_turns: int | None = None
 
 
 def ensure_claude_available(claude_bin: str = "claude") -> None:
@@ -161,6 +168,10 @@ def run_claude(
 
     _persist_streams(log_dir, result.stdout, result.stderr)
 
+    # Extract model from init event regardless of success/failure — useful
+    # for debugging "which model did this run?" even when the stage failed.
+    model = _extract_model_from_init(result.stdout)
+
     if result.returncode != 0:
         stderr_tail = result.stderr[-500:].decode("utf-8", "replace")
         return ClaudeRunResult(
@@ -170,6 +181,7 @@ def run_claude(
                 f"claude exit={result.returncode}: stderr={stderr_tail!r} "
                 f"(see {log_dir / 'raw_stderr.log'})"
             ),
+            model=model,
         )
 
     try:
@@ -179,18 +191,39 @@ def run_claude(
             structured_output=None,
             duration_s=result.duration_s,
             error=str(e),
+            model=model,
         )
     if result_event is None:
         return ClaudeRunResult(
             structured_output=None,
             duration_s=result.duration_s,
             error="claude stream-json had no terminal result event",
+            model=model,
         )
+
+    cost_usd = result_event.get("total_cost_usd")
+    if not isinstance(cost_usd, (int, float)):
+        cost_usd = None
+    num_turns = result_event.get("num_turns")
+    if not isinstance(num_turns, int):
+        num_turns = None
+
+    _write_meta(
+        log_dir,
+        model=model,
+        cost_usd=cost_usd,
+        duration_s=result.duration_s,
+        num_turns=num_turns,
+    )
 
     structured = result_event.get("structured_output")
     if isinstance(structured, (dict, list)):
         return ClaudeRunResult(
-            structured_output=structured, duration_s=result.duration_s
+            structured_output=structured,
+            duration_s=result.duration_s,
+            model=model,
+            cost_usd=cost_usd,
+            num_turns=num_turns,
         )
 
     # Older CLI versions: the JSON payload may live in `result` as text.
@@ -203,17 +236,66 @@ def run_claude(
                 structured_output=None,
                 duration_s=result.duration_s,
                 error=f"claude result text not JSON: {e}",
+                model=model,
+                cost_usd=cost_usd,
+                num_turns=num_turns,
             )
         if isinstance(parsed, (dict, list)):
             return ClaudeRunResult(
-                structured_output=parsed, duration_s=result.duration_s
+                structured_output=parsed,
+                duration_s=result.duration_s,
+                model=model,
+                cost_usd=cost_usd,
+                num_turns=num_turns,
             )
 
     return ClaudeRunResult(
         structured_output=None,
         duration_s=result.duration_s,
         error="claude produced no structured_output and no usable fallback",
+        model=model,
+        cost_usd=cost_usd,
+        num_turns=num_turns,
     )
+
+
+def _extract_model_from_init(stdout: bytes) -> str | None:
+    """Read the first stream-json line; return its `model` field if it's
+    a `system/init` event."""
+    for raw_line in stdout.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(obj, dict) and obj.get("type") == "system" and obj.get("subtype") == "init":
+            model = obj.get("model")
+            return model if isinstance(model, str) else None
+        return None
+    return None
+
+
+def _write_meta(
+    log_dir: Path,
+    *,
+    model: str | None,
+    cost_usd: float | None,
+    duration_s: float,
+    num_turns: int | None,
+) -> None:
+    """Persist a small per-invocation meta.json next to raw_stdout.log.
+
+    The runner reads these to populate `status.json` with model + cost
+    info per stage (summing across fan-out invocations)."""
+    meta = {
+        "model": model,
+        "cost_usd": cost_usd,
+        "duration_s": round(duration_s, 3),
+        "num_turns": num_turns,
+    }
+    (log_dir / "meta.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
 
 
 def _persist_streams(log_dir: Path, stdout: bytes, stderr: bytes) -> None:

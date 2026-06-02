@@ -48,6 +48,11 @@ API costs at the time of writing (see the improvements backlog for
 levers). Stages 01 + 02 are independent and could be parallelized;
 they currently run sequentially.
 
+Per-stage `model` and `cost_usd` are recorded in `status.json`, so you
+can answer "which model produced this artifact, and what did it cost?"
+after the fact. Stage 02 currently goes through main's
+`modules_extractor` and doesn't surface model/cost yet.
+
 ---
 
 ## Artifacts-dir layout
@@ -71,7 +76,9 @@ runs/<run-id>/
 │   └── <candidate_id>.json    # one ExecutionResult per candidate
 └── _logs/
     └── <NN>_<name>/           # raw stdout/stderr from claude -p,
-                               #  prompts, parsed events
+                               #  prompts, parsed events, meta.json
+                               #  (model, cost_usd, duration_s,
+                               #   num_turns) per invocation
 ```
 
 `runs/` is gitignored. The same `--artifacts-dir` can be re-used: `--resume`

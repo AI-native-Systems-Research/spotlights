@@ -194,6 +194,13 @@ class StageStatus(BaseModel):
     ended_at: str | None = None
     error: str | None = None
     issues: list[str] = Field(default_factory=list)
+    # Populated post-stage from `_logs/<stage>/**/meta.json` written by
+    # `claude_subprocess.run_claude`. Stage 02 goes through main's
+    # `modules_extractor` (no meta.json), so these stay None for it until
+    # main grows equivalent metadata.
+    model: str | None = None
+    cost_usd: float | None = None
+    duration_s: float | None = None
 
 
 class PipelineStatus(BaseModel):
@@ -224,6 +231,44 @@ def _save_status(layout: RunDirLayout, status: PipelineStatus) -> None:
         layout.status_path,
         status.model_dump_json(indent=2) + "\n",
     )
+
+
+# ── Meta aggregation (model + cost from claude_subprocess) ───────────────
+
+
+def _aggregate_meta(log_dir: Path) -> dict[str, Any]:
+    """Walk a stage's log dir, sum cost across `meta.json` files, dedupe models.
+
+    Each `claude -p` invocation writes one `meta.json` (see
+    `claude_subprocess._write_meta`). Fan-out stages produce multiple
+    (`<id>/meta.json`) — we sum cost and collapse models to a unique
+    list. Stages that don't go through `claude_subprocess` (stage 02
+    via `modules_extractor`) just won't have any files; result is empty.
+    """
+    if not log_dir.exists():
+        return {}
+    models: list[str] = []
+    cost_total: float = 0.0
+    saw_cost = False
+    for meta_path in sorted(log_dir.rglob("meta.json")):
+        try:
+            data = json.loads(meta_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        m = data.get("model")
+        if isinstance(m, str) and m not in models:
+            models.append(m)
+        c = data.get("cost_usd")
+        if isinstance(c, (int, float)):
+            cost_total += float(c)
+            saw_cost = True
+    out: dict[str, Any] = {}
+    if models:
+        # Single-model run is the common case — flatten for readability.
+        out["model"] = models[0] if len(models) == 1 else ",".join(models)
+    if saw_cost:
+        out["cost_usd"] = round(cost_total, 4)
+    return out
 
 
 # ── Artifact load / completeness ─────────────────────────────────────────
@@ -806,6 +851,7 @@ def run_pipeline(
 
         formatter.flush()
         stage_elapsed = time.monotonic() - stage_t0
+        meta = _aggregate_meta(log_dir)
         sink(f"[{stage_id}] STAGE DONE in {_fmt_stage_duration(stage_elapsed)}")
 
         # Mark done.
@@ -817,6 +863,9 @@ def run_pipeline(
                 ended_at=_now_iso(),
                 error=None,
                 issues=issues,
+                model=meta.get("model"),
+                cost_usd=meta.get("cost_usd"),
+                duration_s=round(stage_elapsed, 3),
             ),
         )
         _save_status(layout, status)
