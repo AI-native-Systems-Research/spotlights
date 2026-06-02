@@ -2,7 +2,7 @@
 
 ## Regressions (passed in baseline, failed in evolved)
 
-- **correctness-basic**
+- **`correctness-basic`** (validation entry)
   - RuntimeError: Engine core initialization failed. See root cause above. Failed core proc(s): {}
   - torch.AcceleratorError: CUDA error: CUDA-capable device(s) is/are busy or unavailable
 Search for `cudaErrorDevicesUnavailable' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.

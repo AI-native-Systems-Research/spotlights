@@ -214,7 +214,7 @@ def regressions_and_fixes_section():
     lines.append("## Regressions (passed in baseline, failed in evolved)\n")
     if regressions:
         for hid, reasons in regressions:
-            lines.append(f"- **{hid}**")
+            lines.append(f"- **`{hid}`** (validation entry)")
             for reason in reasons:
                 lines.append(f"  - {reason}")
     else:
@@ -224,7 +224,7 @@ def regressions_and_fixes_section():
     lines.append("## Fixes (failed in baseline, passed in evolved)\n")
     if fixes:
         for hid, reasons in fixes:
-            lines.append(f"- **{hid}**")
+            lines.append(f"- **`{hid}`** (validation entry)")
             lines.append("  - Baseline failure reason:")
             for reason in reasons:
                 lines.append(f"    - {reason}")
