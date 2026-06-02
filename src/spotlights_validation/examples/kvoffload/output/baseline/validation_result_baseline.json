@@ -16,11 +16,14 @@
       "script": "unit tests — KV offload tiering",
       "kind": "unit",
       "invoke": "pytest -v tests/v1/kv_offload/ -k 'not test_cpu_offloading'",
+      "index": 1,
+      "priority": 1,
+      "halt_on_failure": true,
       "passed": 22,
       "failed": 0,
       "skipped": 0,
       "errors": [],
-      "duration_seconds": 406.61,
+      "duration_seconds": 244.66,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/unit-kv-offload-tiering.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/unit-kv-offload-tiering.report.json"
     },
@@ -29,11 +32,14 @@
       "script": "unit tests — KV connector offloading",
       "kind": "unit",
       "invoke": "pytest -v tests/v1/kv_connector/unit/test_offloading_connector.py",
+      "index": 2,
+      "priority": 1,
+      "halt_on_failure": true,
       "passed": 14,
       "failed": 0,
       "skipped": 0,
       "errors": [],
-      "duration_seconds": 404.96,
+      "duration_seconds": 257.96,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/unit-kv-connector-offloading.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/unit-kv-connector-offloading.report.json"
     },
@@ -42,11 +48,14 @@
       "script": "unit tests — KV connector lifecycle",
       "kind": "unit",
       "invoke": "pytest -v tests/v1/kv_connector/unit/test_kv_connector_lifecycle.py",
+      "index": 3,
+      "priority": 2,
+      "halt_on_failure": true,
       "passed": 1,
       "failed": 0,
       "skipped": 0,
       "errors": [],
-      "duration_seconds": 406.69,
+      "duration_seconds": 286.95,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/unit-kv-connector-lifecycle.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/unit-kv-connector-lifecycle.report.json"
     },
@@ -55,11 +64,14 @@
       "script": "unit tests — KV cache layout",
       "kind": "unit",
       "invoke": "pytest -v tests/v1/kv_connector/unit/test_kv_cache_layout.py",
+      "index": 4,
+      "priority": 2,
+      "halt_on_failure": true,
       "passed": 2,
       "failed": 0,
       "skipped": 0,
       "errors": [],
-      "duration_seconds": 397.37,
+      "duration_seconds": 259.41,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/unit-kv-cache-layout.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/unit-kv-cache-layout.report.json"
     },
@@ -68,11 +80,14 @@
       "script": "unit tests — KV load failure recovery",
       "kind": "unit",
       "invoke": "pytest -v tests/v1/kv_connector/unit/test_kv_load_failure_recovery.py",
+      "index": 5,
+      "priority": 2,
+      "halt_on_failure": true,
       "passed": 11,
       "failed": 0,
       "skipped": 0,
       "errors": [],
-      "duration_seconds": 380.02,
+      "duration_seconds": 392.99,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/unit-kv-load-failure-recovery.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/unit-kv-load-failure-recovery.report.json"
     },
@@ -81,11 +96,14 @@
       "script": "unit tests — KV cache manager (via prefix caching)",
       "kind": "unit",
       "invoke": "pytest -v tests/v1/core/test_prefix_caching.py",
+      "index": 6,
+      "priority": 3,
+      "halt_on_failure": true,
       "passed": 49,
       "failed": 0,
       "skipped": 0,
       "errors": [],
-      "duration_seconds": 349.01,
+      "duration_seconds": 214.94,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/unit-kv-cache-manager.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/unit-kv-cache-manager.report.json"
     },
@@ -94,11 +112,14 @@
       "script": "unit tests — single-type KV cache manager",
       "kind": "unit",
       "invoke": "pytest -v tests/v1/core/test_single_type_kv_cache_manager.py",
+      "index": 7,
+      "priority": 3,
+      "halt_on_failure": true,
       "passed": 7,
       "failed": 0,
       "skipped": 0,
       "errors": [],
-      "duration_seconds": 312.28,
+      "duration_seconds": 196.08,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/unit-single-type-kv-cache-manager.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/unit-single-type-kv-cache-manager.report.json"
     },
@@ -107,11 +128,14 @@
       "script": "unit tests — KV cache utilities",
       "kind": "unit",
       "invoke": "pytest -v tests/v1/core/test_kv_cache_utils.py",
+      "index": 8,
+      "priority": 3,
+      "halt_on_failure": false,
       "passed": 48,
       "failed": 0,
       "skipped": 0,
       "errors": [],
-      "duration_seconds": 353.27,
+      "duration_seconds": 227.0,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/unit-kv-cache-utils.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/unit-kv-cache-utils.report.json"
     },
@@ -120,6 +144,9 @@
       "script": "unit tests — cache kernels (test_gather_cache_oob deselected)",
       "kind": "unit",
       "invoke": "pytest -v tests/kernels/test_cache_kernels.py -k 'not test_gather_cache_oob'",
+      "index": 10,
+      "priority": 4,
+      "halt_on_failure": false,
       "passed": 0,
       "failed": 1,
       "skipped": 0,
@@ -133,7 +160,7 @@
           "longrepr": "no tests collected (collected=1 deselected=1 passed=0 failed=0 skipped=0)"
         }
       ],
-      "duration_seconds": 308.0,
+      "duration_seconds": 164.77,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/unit-cache-kernels.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/unit-cache-kernels.report.json"
     },
@@ -142,6 +169,9 @@
       "script": "unit tests — scheduler",
       "kind": "unit",
       "invoke": "pytest -v tests/v1/core/test_scheduler.py",
+      "index": 11,
+      "priority": 4,
+      "halt_on_failure": false,
       "passed": 92,
       "failed": 1,
       "skipped": 1,
@@ -155,7 +185,7 @@
           "longrepr": "def test_async_scheduling_pp_allows_rescheduling_with_output_placeholders():\n        \"\"\"Async scheduling + PP: allow multi-step in-flight scheduling per request\"\"\"\n>       scheduler = create_scheduler(async_scheduling=True, pipeline_parallel_size=2)\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\ntests/v1/core/test_scheduler.py:132: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nmodel = 'facebook/opt-125m', max_num_seqs = 16, max_num_batched_tokens = 8192\nenable_chunked_prefill = True, enable_prefix_caching = False\nlong_prefill_token_threshold = 0, disable_chunked_mm_input = False\nuse_kv_connector = None, num_blocks = 10000, block_size = 16\nmax_model_len = 8192, num_speculative_tokens = None, skip_tokenizer_init = False\nasync_scheduling = True, pipeline_parallel_size = 2, use_ec_connector = False\nec_role = None\n\n    def create_scheduler(\n        model: str = \"facebook/opt-125m\",\n        max_num_seqs: int = 16,\n        max_num_batched_tokens: int = 8192,\n        enable_chunked_prefill: bool = True,\n        enable_prefix_caching: bool = False,\n        long_prefill_token_threshold: int = 0,\n        disable_chunked_mm_input: bool = False,\n        use_kv_connector: None | bool | MockKVConfig = None,\n        num_blocks: int = 10000,\n        block_size: int = 16,\n        max_model_len: int | None = None,\n        num_speculative_tokens: int | None = None,\n        skip_tokenizer_init: bool = False,\n        async_scheduling: bool = False,\n        pipeline_parallel_size: int = 1,\n        use_ec_connector: bool = False,\n        ec_role: str | None = None,\n    ) -> Scheduler | AsyncScheduler:\n        \"\"\"Create scheduler under test.\n    \n        Args:\n          model: model under test\n          max_num_seqs: max sequences to schedule\n          max_num_batch_tokens: max num tokens to batch\n          enable_prefix_caching: optionally force APC config\n                                 (True/False) or use default\n                                 (False)\n    \n        Returns:\n          {class}`Scheduler` instance\n        \"\"\"\n        model_config = ModelConfig(\n            model=model,\n            trust_remote_code=True,\n            dtype=\"float16\",\n            seed=42,\n            skip_tokenizer_init=skip_tokenizer_init,\n        )\n        if max_model_len is None:\n            max_model_len = max_num_batched_tokens\n        scheduler_config = SchedulerConfig(\n            max_num_seqs=max_num_seqs,\n            max_num_batched_tokens=max_num_batched_tokens,\n            max_model_len=max_model_len,\n            long_prefill_token_threshold=long_prefill_token_threshold,\n            disable_chunked_mm_input=disable_chunked_mm_input,\n            enable_chunked_prefill=enable_chunked_prefill,\n            async_scheduling=async_scheduling,\n            is_encoder_decoder=model_config.is_encoder_decoder,\n        )\n        # Cache config, optionally force APC\n        cache_config = CacheConfig(\n            block_size=block_size,\n            gpu_memory_utilization=0.9,\n            cache_dtype=\"auto\",\n            enable_prefix_caching=enable_prefix_caching,\n        )\n        kv_transfer_config = None\n        if isinstance(use_kv_connector, MockKVConfig):\n            kv_transfer_config = KVTransferConfig(\n                kv_connector=\"MockKVConnector\",\n                kv_role=\"kv_both\",\n                kv_connector_extra_config={\n                    \"matched_tokens\": use_kv_connector.matched_tokens,\n                    \"is_async\": use_kv_connector.is_async,\n                },\n            )\n        elif use_kv_connector:\n            kv_transfer_config = KVTransferConfig(\n                kv_connector=\"ExampleConnector\",\n                kv_role=\"kv_both\",\n                kv_connector_extra_config={\"shared_storage_path\": \"local_storage\"},\n            )\n    \n        speculative_config: SpeculativeConfig | None = None\n        if num_speculative_tokens is not None:\n            speculative_config "
         }
       ],
-      "duration_seconds": 437.31,
+      "duration_seconds": 242.2,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/unit-scheduler.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/unit-scheduler.report.json"
     },
@@ -164,11 +194,14 @@
       "script": "unit tests — async scheduler",
       "kind": "unit",
       "invoke": "pytest -v tests/v1/core/test_async_scheduler.py",
+      "index": 12,
+      "priority": 4,
+      "halt_on_failure": false,
       "passed": 8,
       "failed": 0,
       "skipped": 0,
       "errors": [],
-      "duration_seconds": 421.99,
+      "duration_seconds": 221.56,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/unit-async-scheduler.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/unit-async-scheduler.report.json"
     },
@@ -177,11 +210,14 @@
       "script": "unit tests — worker",
       "kind": "unit",
       "invoke": "pytest -v tests/v1/worker/",
+      "index": 13,
+      "priority": 4,
+      "halt_on_failure": false,
       "passed": 62,
       "failed": 0,
       "skipped": 1,
       "errors": [],
-      "duration_seconds": 360.54,
+      "duration_seconds": 389.15,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/unit-worker.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/unit-worker.report.json"
     },
@@ -190,11 +226,14 @@
       "script": "integration tests — scheduler end-to-end",
       "kind": "integration",
       "invoke": "pytest -v tests/v1/core/test_scheduler_e2e.py",
+      "index": 14,
+      "priority": 5,
+      "halt_on_failure": false,
       "passed": 2,
       "failed": 0,
       "skipped": 0,
       "errors": [],
-      "duration_seconds": 691.43,
+      "duration_seconds": 461.1,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/integration-scheduler-e2e.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/integration-scheduler-e2e.report.json"
     },
@@ -203,6 +242,9 @@
       "script": "integration tests — v1 engine",
       "kind": "integration",
       "invoke": "pytest -v tests/v1/engine/ --ignore=tests/v1/engine/test_async_llm.py --ignore=tests/v1/engine/test_engine_core_client.py --ignore=tests/v1/engine/test_abort_final_step.py --ignore=tests/v1/engine/test_output_processor.py -k 'not test_skip_tokenizer_initialization'",
+      "index": 15,
+      "priority": 5,
+      "halt_on_failure": false,
       "passed": 23,
       "failed": 1,
       "skipped": 1,
@@ -213,10 +255,10 @@
           "message": "AssertionError: assert 10 == 0\n +  where 10 = len([16440, 15197, 15377, 24174, 10224, 12929, ...])\n +    where [16440, 15197, 15377, 24174, 10224, 12929, ...] = CompletionOutput(index=0, text='hd Business pleasure canción Stock Mohból vieрюści', token_ids=[16440, 15197, 15377, 24174, 10224, 12929, 26976, 6316, 17087, 4255], routed_experts=None, cumulative_logprob=None, logprobs=None, finish_reason=length, stop_reason=None).token_ids",
           "file": "/proj/vlt-evolve/work/orit/vllm/tests/v1/engine/test_preprocess_error_handling.py",
           "lineno": 55,
-          "longrepr": "monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x146687908fe0>\n\n    def test_preprocess_error_handling(monkeypatch: pytest.MonkeyPatch):\n        \"\"\"Test that preprocessing errors are handled gracefully.\"\"\"\n    \n        if current_platform.is_rocm() or current_platform.is_xpu():\n            pytest.skip(\n                \"Skipped on ROCm/XPU: this test only works with 'fork', \"\n                \"but ROCm/XPU uses 'spawn'.\"\n            )\n    \n        assert not torch.cuda.is_initialized(), (\n            \"fork needs to be used for the engine \"\n            \"core process and this isn't possible if cuda is already initialized\"\n        )\n    \n        # Store original method to call for non-failing requests\n        original_preprocess = EngineCore.preprocess_add_request\n    \n        # Monkeypatch to make preprocess_add_request raise an exception\n        # only for requests with \"FAIL\" in the first token\n        def conditional_failing_preprocess(self, request: EngineCoreRequest):\n            # Fail if the first token id is 333\n            if request.prompt_token_ids and request.prompt_token_ids[0] == 333:\n                raise ValueError(\"Simulated preprocessing error!\")\n            return original_preprocess(self, request)\n    \n        monkeypatch.setattr(\n            EngineCore, \"preprocess_add_request\", conditional_failing_preprocess\n        )\n    \n        llm = LLM(model=MODEL_NAME)\n    \n        # Create a failing request by crafting a request with an invalid token\n        # We need to use a direct approach since LLM.generate tokenizes for us\n        from vllm.inputs import TokensPrompt\n    \n        # This should raise an exception due to the preprocessing failure\n        # Special token id to trigger the failure\n        failing_prompt = TokensPrompt(prompt_token_ids=[333])\n        outputs = llm.generate(failing_prompt, SamplingParams(max_tokens=10))  # type: ignore\n        assert len(outputs) == 1\n>       assert len(outputs[0].outputs[0].token_ids) == 0\nE       AssertionError: assert 10 == 0\nE        +  where 10 = len([16440, 15197, 15377, 24174, 10224, 12929, ...])\nE        +    where [16440, 15197, 15377, 24174, 10224, 12929, ...] = CompletionOutput(index=0, text='hd Business pleasure canción Stock Mohból vieрюści', token_ids=[16440, 15197, 15377, 24174, 10224, 12929, 26976, 6316, 17087, 4255], routed_experts=None, cumulative_logprob=None, logprobs=None, finish_reason=length, stop_reason=None).token_ids\n\ntests/v1/engine/test_preprocess_error_handling.py:55: AssertionError"
+          "longrepr": "monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x14684d608fb0>\n\n    def test_preprocess_error_handling(monkeypatch: pytest.MonkeyPatch):\n        \"\"\"Test that preprocessing errors are handled gracefully.\"\"\"\n    \n        if current_platform.is_rocm() or current_platform.is_xpu():\n            pytest.skip(\n                \"Skipped on ROCm/XPU: this test only works with 'fork', \"\n                \"but ROCm/XPU uses 'spawn'.\"\n            )\n    \n        assert not torch.cuda.is_initialized(), (\n            \"fork needs to be used for the engine \"\n            \"core process and this isn't possible if cuda is already initialized\"\n        )\n    \n        # Store original method to call for non-failing requests\n        original_preprocess = EngineCore.preprocess_add_request\n    \n        # Monkeypatch to make preprocess_add_request raise an exception\n        # only for requests with \"FAIL\" in the first token\n        def conditional_failing_preprocess(self, request: EngineCoreRequest):\n            # Fail if the first token id is 333\n            if request.prompt_token_ids and request.prompt_token_ids[0] == 333:\n                raise ValueError(\"Simulated preprocessing error!\")\n            return original_preprocess(self, request)\n    \n        monkeypatch.setattr(\n            EngineCore, \"preprocess_add_request\", conditional_failing_preprocess\n        )\n    \n        llm = LLM(model=MODEL_NAME)\n    \n        # Create a failing request by crafting a request with an invalid token\n        # We need to use a direct approach since LLM.generate tokenizes for us\n        from vllm.inputs import TokensPrompt\n    \n        # This should raise an exception due to the preprocessing failure\n        # Special token id to trigger the failure\n        failing_prompt = TokensPrompt(prompt_token_ids=[333])\n        outputs = llm.generate(failing_prompt, SamplingParams(max_tokens=10))  # type: ignore\n        assert len(outputs) == 1\n>       assert len(outputs[0].outputs[0].token_ids) == 0\nE       AssertionError: assert 10 == 0\nE        +  where 10 = len([16440, 15197, 15377, 24174, 10224, 12929, ...])\nE        +    where [16440, 15197, 15377, 24174, 10224, 12929, ...] = CompletionOutput(index=0, text='hd Business pleasure canción Stock Mohból vieрюści', token_ids=[16440, 15197, 15377, 24174, 10224, 12929, 26976, 6316, 17087, 4255], routed_experts=None, cumulative_logprob=None, logprobs=None, finish_reason=length, stop_reason=None).token_ids\n\ntests/v1/engine/test_preprocess_error_handling.py:55: AssertionError"
         }
       ],
-      "duration_seconds": 2861.41,
+      "duration_seconds": 2696.76,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/integration-engine.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/integration-engine.report.json"
     },
@@ -225,11 +267,14 @@
       "script": "correctness tests — basic model output",
       "kind": "correctness",
       "invoke": "pytest -v tests/basic_correctness/ -k 'not meta-llama and not tiering and not test_cumem and not test_cpu_offload and not Gemma2 and not test_prefetch_offload'",
+      "index": 16,
+      "priority": 6,
+      "halt_on_failure": true,
       "passed": 2,
       "failed": 0,
       "skipped": 8,
       "errors": [],
-      "duration_seconds": 943.61,
+      "duration_seconds": 753.24,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/correctness-basic.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/correctness-basic.report.json"
     },
@@ -238,6 +283,9 @@
       "script": "integration tests — KV connector NixL accuracy",
       "kind": "integration",
       "invoke": "bash tests/v1/kv_connector/nixl_integration/run_accuracy_test.sh",
+      "index": 20,
+      "priority": 6,
+      "halt_on_failure": false,
       "passed": 0,
       "failed": 1,
       "skipped": 0,
@@ -245,13 +293,13 @@
         {
           "nodeid": "<exit-code-2>",
           "phase": "call",
-          "message": "(APIServer pid=2675232) TypeError: expected str, bytes or os.PathLike object, not NoneType",
+          "message": "(APIServer pid=3341779) TypeError: expected str, bytes or os.PathLike object, not NoneType",
           "file": null,
           "lineno": null,
-          "longrepr": "(APIServer pid=2675232) TypeError: expected str, bytes or os.PathLike object, not NoneType\n(APIServer pid=2675218) TypeError: expected str, bytes or os.PathLike object, not NoneType"
+          "longrepr": "(APIServer pid=3341779) TypeError: expected str, bytes or os.PathLike object, not NoneType\n(APIServer pid=3341854) TypeError: expected str, bytes or os.PathLike object, not NoneType"
         }
       ],
-      "duration_seconds": 1201.2,
+      "duration_seconds": 1200.4,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/integration-kv-connector-nixl.log",
       "json_report_path": null
     },
@@ -260,6 +308,9 @@
       "script": "stress tests — KV offload under memory pressure",
       "kind": "stress",
       "invoke": "bash -lc 'bash \"$ROOT_DIR/spotlights/src/spotlights_validation/examples/kvoffload/scripts/run_nixl_stress.sh\"'",
+      "index": 21,
+      "priority": 7,
+      "halt_on_failure": false,
       "passed": 0,
       "failed": 1,
       "skipped": 0,
@@ -267,13 +318,13 @@
         {
           "nodeid": "<exit-code-2>",
           "phase": "call",
-          "message": "(APIServer pid=2687370) TypeError: expected str, bytes or os.PathLike object, not NoneType",
+          "message": "(APIServer pid=3540622) TypeError: expected str, bytes or os.PathLike object, not NoneType",
           "file": null,
           "lineno": null,
-          "longrepr": "(APIServer pid=2687370) TypeError: expected str, bytes or os.PathLike object, not NoneType\n(APIServer pid=2687369) TypeError: expected str, bytes or os.PathLike object, not NoneType"
+          "longrepr": "(APIServer pid=3540622) TypeError: expected str, bytes or os.PathLike object, not NoneType\n(APIServer pid=3540621) TypeError: expected str, bytes or os.PathLike object, not NoneType"
         }
       ],
-      "duration_seconds": 1203.61,
+      "duration_seconds": 1203.51,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/baseline/logs/stress-kv-offload-memory-pressure.log",
       "json_report_path": null
     }
@@ -284,81 +335,63 @@
       "workload_class": "batch-inference",
       "script": "benchmark — multi-turn KV offload (kv-offload-lab, LRU)",
       "invoke": "bash -lc 'set -a; source \"$ROOT_DIR/kv-offload-lab/.env\"; set +a; bash \"$ROOT_DIR/kv-offload-lab/benchmark/multi-turn/run_benchmark.sh\" --workload sharegpt --policy lru --gpu-util 0.5 --num-clients 4 --max-active 128 --kv-size 26'",
+      "index": 18,
+      "priority": 1,
+      "halt_on_failure": true,
       "metrics": [
         {
           "name": "ttft_ms_mean",
-          "baseline_value": null,
-          "measured_value": 146.444,
-          "relative_change": null,
-          "regressed": false
+          "measured_value": 133.315
         },
         {
           "name": "tpot_ms_mean",
-          "baseline_value": null,
-          "measured_value": 12.413,
-          "relative_change": null,
-          "regressed": false
+          "measured_value": 12.268
         },
         {
           "name": "cpu_hit_rate",
-          "baseline_value": null,
-          "measured_value": 0.04290750951308535,
-          "relative_change": null,
-          "regressed": false
+          "measured_value": 0.05419577462406333
         },
         {
           "name": "evictions",
-          "baseline_value": null,
-          "measured_value": 356470.0,
-          "relative_change": null,
-          "regressed": false
+          "measured_value": 326646.0
         }
       ],
       "optimization_target": null,
-      "raw_output": "6-2026 10:02:03 [INFO] - \u001b[96mEstimated req/sec 1.082, estimated runtime left 1146.459 sec\u001b[0m\n01-06-2026 10:02:03 [INFO] - --------------------------------------------------\n01-06-2026 10:02:03 [INFO] - [moving_avg_ttft_ms       ] avg:    219.359 (60 samples)\n01-06-2026 10:02:03 [INFO] - [moving_avg_tpot_ms       ] avg:     13.311 (60 samples)\n01-06-2026 10:02:03 [INFO] - [ttft_ms                  ] avg:    143.847, min:     42.829, max:   1251.320\n01-06-2026 10:02:03 [INFO] - [tpot_ms                  ] avg:     12.392, min:      0.000, max:     49.039\n01-06-2026 10:02:03 [INFO] - [latency_ms               ] avg:   3687.370, min:     44.998, max:  15439.655\n01-06-2026 10:02:03 [INFO] - [input_num_turns          ] avg:     10.140, min:      1.000, max:     45.000\n01-06-2026 10:02:03 [INFO] - [input_num_tokens         ] avg:   1561.854, min:      1.000, max:  14197.000\n01-06-2026 10:02:03 [INFO] - [output_num_tokens        ] avg:    284.416, min:      1.000, max:   1284.000\n01-06-2026 10:02:03 [INFO] - --------------------------------------------------\n01-06-2026 10:02:03 [INFO] - Using timeout of 146s based on max_tokens 730\n01-06-2026 10:02:04 [INFO] - Using timeout of 145s based on max_tokens 726\n01-06-2026 10:02:15 [INFO] - Using timeout of 149s based on max_tokens 749\n01-06-2026 10:02:24 [INFO] - Using timeout of 121s based on max_tokens 607\n01-06-2026 10:02:28 [INFO] - Using timeout of 122s based on max_tokens 612\n01-06-2026 10:02:28 [INFO] - Using timeout of 154s based on max_tokens 770\n01-06-2026 10:02:44 [INFO] - Using timeout of 153s based on max_tokens 767\n01-06-2026 10:02:48 [INFO] - Using timeout of 123s based on max_tokens 616\n01-06-2026 10:02:59 [INFO] - \u001b[96mFinished 369 out of 500 conversations (74%), 0 out of 4 clients finished, collected 3426 measurements, runtime 3186.884 sec\u001b[0m\n01-06-2026 10:02:59 [INFO] - \u001b[96mEstimated req/sec 1.075, estimated runtime left 1131.387 sec\u001b[0m\n01-06-2026 10:02:59 [INFO] - --------------------------------------------------\n01-06-2026 10:02:59 [INFO] - [moving_avg_ttft_ms       ] avg:    269.749 (60 samples)\n01-06-2026 10:02:59 [INFO] - [moving_avg_tpot_ms       ] avg:     13.308 (60 samples)\n01-06-2026 10:02:59 [INFO] - [ttft_ms                  ] avg:    145.564, min:     42.829, max:   1251.320\n01-06-2026 10:02:59 [INFO] - [tpot_ms                  ] avg:     12.402, min:      0.000, max:     49.039\n01-06-2026 10:02:59 [INFO] - [latency_ms               ] avg:   3712.458, min:     44.998, max:  15439.655\n01-06-2026 10:02:59 [INFO] - [input_num_turns          ] avg:     10.215, min:      1.000, max:     47.000\n01-06-2026 10:02:59 [INFO] - [input_num_tokens         ] avg:   1577.908, min:      1.000, max:  14197.000\n01-06-2026 10:02:59 [INFO] - [output_num_tokens        ] avg:    285.949, min:      1.000, max:   1284.000\n01-06-2026 10:02:59 [INFO] - --------------------------------------------------\n01-06-2026 10:03:12 [INFO] - Using timeout of 153s based on max_tokens 768\n01-06-2026 10:03:17 [INFO] - Using timeout of 153s based on max_tokens 767\n01-06-2026 10:03:24 [INFO] - Using timeout of 132s based on max_tokens 663\n01-06-2026 10:03:36 [INFO] - \u001b[96mFinished 372 out of 500 conversations (74%), 0 out of 4 clients finished, collected 3458 measurements, runtime 3224.179 sec\u001b[0m\n01-06-2026 10:03:36 [INFO] - \u001b[96mEstimated req/sec 1.073, estimated runtime left 1109.395 sec\u001b[0m\n01-06-2026 10:03:36 [INFO] - --------------------------------------------------\n01-06-2026 10:03:36 [INFO] - [moving_avg_ttft_ms       ] avg:    259.741 (60 samples)\n01-06-2026 10:03:36 [INFO] - [moving_avg_tpot_ms       ] avg:     13.433 (60 samples)\n01-06-2026 10:03:36 [INFO] - [ttft_ms                  ] avg:    146.444, min:     42.829, max:   1251.320\n01-06-2026 10:03:36 [INFO] - [tpot_ms                  ] avg:     12.413, min:      0.000, max:     49.039\n01-06-2026 10:03:36 [INFO] - [latency_ms               ] avg:   3720.626, min:     44.998, max:  15439.655\n01-06-2026 10:03:36 [INFO] - [input_num_turns          ] avg:     10.256, min:      1.000, max:     47.000\n01-06-2026 10:03:36 [INFO] - [input_num_tokens         ] avg:   1585.806, min:      1.000, max:  14197.000\n01-06-2026 10:03:36 [INFO] - [output_num_tokens        ] avg:    286.137, min:      1.000, max:   1284.000\n01-06-2026 10:03:36 [INFO] - --------------------------------------------------\n01-06-2026 10:03:39 [INFO] - \u001b[93mClient 2 has no more work\u001b[0m\n01-06-2026 10:03:39 [INFO] - \u001b[96mClient 2 is done (num_successes=848, num_failures=0)\u001b[0m\n01-06-2026 10:03:39 [INFO] - \u001b[96m1 out of 4 clients finished\u001b[0m\n01-06-2026 10:03:39 [INFO] - \u001b[93mSending termination signal to clients\u001b[0m\n01-06-2026 10:03:39 [INFO] - \u001b[93mClient 1 received a termination signal\u001b[0m\n01-06-2026 10:03:39 [INFO] - \u001b[96mClient 1 is done (num_successes=828, num_failures=0)\u001b[0m\n01-06-2026 10:03:39 [INFO] - \u001b[96m2 out of 4 clients finished\u001b[0m\n01-06-2026 10:03:41 [INFO] - \u001b[93mClient 0 received a termination signal\u001b[0m\n01-06-2026 10:03:41 [INFO] - \u001b[96mClient 0 is done (num_successes=875, num_failures=0)\u001b[0m\n01-06-2026 10:03:41 [INFO] - \u001b[96m3 out of 4 clients finished\u001b[0m\n01-06-2026 10:03:44 [INFO] - \u001b[93mClient 3 received a termination signal\u001b[0m\n01-06-2026 10:03:44 [INFO] - \u001b[96mClient 3 is done (num_successes=915, num_failures=0)\u001b[0m\n01-06-2026 10:03:44 [INFO] - \u001b[96m4 out of 4 clients finished\u001b[0m\n01-06-2026 10:03:44 [INFO] - \u001b[96mAll 4 clients finished\u001b[0m\n01-06-2026 10:03:44 [INFO] - Collected 3466 samples from all the clients\n01-06-2026 10:03:44 [INFO] - \u001b[96mWaiting for client client_0 (is alive: False)\u001b[0m\n01-06-2026 10:03:44 [INFO] - \u001b[96mWaiting for client client_1 (is alive: False)\u001b[0m\n01-06-2026 10:03:44 [INFO] - \u001b[96mWaiting for client client_2 (is alive: False)\u001b[0m\n01-06-2026 10:03:44 [INFO] - \u001b[96mWaiting for client client_3 (is alive: True)\u001b[0m\n01-06-2026 10:03:44 [INFO] - All 4 clients exited (successfully finished 373 out of 500 conversations)\n01-06-2026 10:03:44 [INFO] - \u001b[92mAll clients finished, benchmark runtime: 3232.035 sec (3232034.520 ms), requests per second: 1.072\u001b[0m\n01-06-2026 10:03:44 [INFO] - Processing 3466 samples...\n01-06-2026 10:03:44 [INFO] - \u001b[92mWriting conversations file: /proj/vlt-evolve/work/orit/kv-offload-lab/benchmark/multi-turn/results/lru/sharegpt/gpu_0.5_active_128_cpu_26/benchmark_run_1.json\u001b[0m\n----------------------------------------------------------------------------------------------------\n\u001b[93mParameters:\u001b[0m\nmodel=NousResearch/Hermes-3-Llama-3.1-8B\nnum_clients=4\nnum_conversations=500\nactive_conversations=128\nseed=0\n----------------------------------------------------------------------------------------------------\n\u001b[93mStatistics summary:\u001b[0m\nruntime_sec = 3231.729\nrequests_per_sec = 1.072\n----------------------------------------------------------------------------------------------------\n                    count     mean      std  ...       99%     99.9%       max\nttft_ms            3466.0   147.18   147.15  ...    652.34   1072.98   2211.22\ntpot_ms            3466.0    12.42     1.69  ...     17.93     24.57     49.04\nlatency_ms         3466.0  3719.53  2553.60  ...  10741.41  12171.73  15439.66\ninput_num_turns    3466.0    10.27     9.11  ...     39.00     45.00     47.00\ninput_num_tokens   3466.0  1593.05  1783.51  ...   7608.75  11327.93  22208.00\noutput_num_tokens  3466.0   285.93   194.64  ...    768.00    776.53   1284.00\noutput_num_chunks  3466.0   280.69   191.03  ...    767.00    776.07   1283.00\n\n[7 rows x 11 columns]\n----------------------------------------------------------------------------------------------------\nWrote /proj/vlt-evolve/work/orit/kv-offload-lab/benchmark/multi-turn/results/lru/sharegpt/gpu_0.5_active_128_cpu_26/summary.json\nRun 1 complete.\n\n============================================================\nAll runs complete. Results in /proj/vlt-evolve/work/orit/kv-offload-lab/benchmark/multi-turn/results/lru/sharegpt/gpu_0.5_active_128_cpu_26/\n============================================================\n"
+      "raw_output": ":24 [INFO] - Using timeout of 153s based on max_tokens 766\n02-06-2026 05:02:34 [INFO] - Using timeout of 121s based on max_tokens 607\n02-06-2026 05:02:39 [INFO] - Using timeout of 140s based on max_tokens 700\n02-06-2026 05:02:49 [INFO] - Using timeout of 153s based on max_tokens 769\n02-06-2026 05:02:50 [INFO] - \u001b[96mFinished 366 out of 500 conversations (73%), 0 out of 4 clients finished, collected 3397 measurements, runtime 3095.483 sec\u001b[0m\n02-06-2026 05:02:50 [INFO] - \u001b[96mEstimated req/sec 1.097, estimated runtime left 1133.319 sec\u001b[0m\n02-06-2026 05:02:50 [INFO] - --------------------------------------------------\n02-06-2026 05:02:50 [INFO] - [moving_avg_ttft_ms       ] avg:    219.923 (60 samples)\n02-06-2026 05:02:50 [INFO] - [moving_avg_tpot_ms       ] avg:     13.369 (60 samples)\n02-06-2026 05:02:50 [INFO] - [ttft_ms                  ] avg:    131.360, min:     39.564, max:   1271.545\n02-06-2026 05:02:50 [INFO] - [tpot_ms                  ] avg:     12.241, min:      0.000, max:     30.651\n02-06-2026 05:02:50 [INFO] - [latency_ms               ] avg:   3636.363, min:     44.973, max:  15348.604\n02-06-2026 05:02:50 [INFO] - [input_num_turns          ] avg:     10.195, min:      1.000, max:     47.000\n02-06-2026 05:02:50 [INFO] - Using timeout of 146s based on max_tokens 730\n02-06-2026 05:02:50 [INFO] - [input_num_tokens         ] avg:   1572.438, min:      1.000, max:  14197.000\n02-06-2026 05:02:50 [INFO] - [output_num_tokens        ] avg:    284.824, min:      1.000, max:   1284.000\n02-06-2026 05:02:50 [INFO] - --------------------------------------------------\n02-06-2026 05:02:55 [INFO] - Using timeout of 154s based on max_tokens 770\n02-06-2026 05:03:12 [INFO] - \u001b[96mFinished 369 out of 500 conversations (74%), 0 out of 4 clients finished, collected 3415 measurements, runtime 3118.232 sec\u001b[0m\n02-06-2026 05:03:12 [INFO] - \u001b[96mEstimated req/sec 1.095, estimated runtime left 1107.015 sec\u001b[0m\n02-06-2026 05:03:12 [INFO] - --------------------------------------------------\n02-06-2026 05:03:12 [INFO] - [moving_avg_ttft_ms       ] avg:    257.971 (60 samples)\n02-06-2026 05:03:12 [INFO] - [moving_avg_tpot_ms       ] avg:     13.850 (60 samples)\n02-06-2026 05:03:12 [INFO] - [ttft_ms                  ] avg:    132.577, min:     39.564, max:   2260.702\n02-06-2026 05:03:12 [INFO] - [tpot_ms                  ] avg:     12.253, min:      0.000, max:     30.651\n02-06-2026 05:03:12 [INFO] - [latency_ms               ] avg:   3644.331, min:     44.973, max:  15348.604\n02-06-2026 05:03:12 [INFO] - [input_num_turns          ] avg:     10.239, min:      1.000, max:     49.000\n02-06-2026 05:03:12 [INFO] - [input_num_tokens         ] avg:   1581.978, min:      1.000, max:  22208.000\n02-06-2026 05:03:12 [INFO] - [output_num_tokens        ] avg:    285.064, min:      1.000, max:   1284.000\n02-06-2026 05:03:12 [INFO] - --------------------------------------------------\n02-06-2026 05:03:14 [INFO] - Using timeout of 153s based on max_tokens 767\n02-06-2026 05:03:18 [INFO] - Using timeout of 143s based on max_tokens 716\n02-06-2026 05:03:22 [INFO] - Using timeout of 126s based on max_tokens 633\n02-06-2026 05:04:04 [INFO] - \u001b[96mFinished 372 out of 500 conversations (74%), 0 out of 4 clients finished, collected 3462 measurements, runtime 3169.576 sec\u001b[0m\n02-06-2026 05:04:04 [INFO] - \u001b[96mEstimated req/sec 1.092, estimated runtime left 1090.607 sec\u001b[0m\n02-06-2026 05:04:04 [INFO] - --------------------------------------------------\n02-06-2026 05:04:04 [INFO] - [moving_avg_ttft_ms       ] avg:    204.387 (60 samples)\n02-06-2026 05:04:04 [INFO] - [moving_avg_tpot_ms       ] avg:     13.536 (60 samples)\n02-06-2026 05:04:04 [INFO] - [ttft_ms                  ] avg:    133.315, min:     39.564, max:   2260.702\n02-06-2026 05:04:04 [INFO] - [tpot_ms                  ] avg:     12.268, min:      0.000, max:     30.651\n02-06-2026 05:04:04 [INFO] - [latency_ms               ] avg:   3654.085, min:     44.973, max:  15348.604\n02-06-2026 05:04:04 [INFO] - [input_num_turns          ] avg:     10.288, min:      1.000, max:     49.000\n02-06-2026 05:04:04 [INFO] - [input_num_tokens         ] avg:   1592.650, min:      1.000, max:  22208.000\n02-06-2026 05:04:04 [INFO] - [output_num_tokens        ] avg:    285.405, min:      1.000, max:   1284.000\n02-06-2026 05:04:04 [INFO] - --------------------------------------------------\n02-06-2026 05:04:05 [INFO] - \u001b[93mClient 1 has no more work\u001b[0m\n02-06-2026 05:04:05 [INFO] - \u001b[96mClient 1 is done (num_successes=882, num_failures=0)\u001b[0m\n02-06-2026 05:04:05 [INFO] - \u001b[96m1 out of 4 clients finished\u001b[0m\n02-06-2026 05:04:05 [INFO] - \u001b[93mSending termination signal to clients\u001b[0m\n02-06-2026 05:04:05 [INFO] - \u001b[93mClient 0 received a termination signal\u001b[0m\n02-06-2026 05:04:05 [INFO] - \u001b[96mClient 0 is done (num_successes=879, num_failures=0)\u001b[0m\n02-06-2026 05:04:05 [INFO] - \u001b[96m2 out of 4 clients finished\u001b[0m\n02-06-2026 05:04:07 [INFO] - \u001b[93mClient 3 received a termination signal\u001b[0m\n02-06-2026 05:04:07 [INFO] - \u001b[96mClient 3 is done (num_successes=857, num_failures=0)\u001b[0m\n02-06-2026 05:04:07 [INFO] - \u001b[96m3 out of 4 clients finished\u001b[0m\n02-06-2026 05:04:07 [INFO] - \u001b[93mClient 2 received a termination signal\u001b[0m\n02-06-2026 05:04:07 [INFO] - \u001b[96mClient 2 is done (num_successes=849, num_failures=0)\u001b[0m\n02-06-2026 05:04:07 [INFO] - \u001b[96m4 out of 4 clients finished\u001b[0m\n02-06-2026 05:04:07 [INFO] - \u001b[96mAll 4 clients finished\u001b[0m\n02-06-2026 05:04:07 [INFO] - Collected 3467 samples from all the clients\n02-06-2026 05:04:07 [INFO] - \u001b[96mWaiting for client client_0 (is alive: False)\u001b[0m\n02-06-2026 05:04:07 [INFO] - \u001b[96mWaiting for client client_1 (is alive: False)\u001b[0m\n02-06-2026 05:04:07 [INFO] - \u001b[96mWaiting for client client_2 (is alive: True)\u001b[0m\n02-06-2026 05:04:07 [INFO] - \u001b[96mWaiting for client client_3 (is alive: False)\u001b[0m\n02-06-2026 05:04:07 [INFO] - All 4 clients exited (successfully finished 374 out of 500 conversations)\n02-06-2026 05:04:07 [INFO] - \u001b[92mAll clients finished, benchmark runtime: 3172.997 sec (3172997.217 ms), requests per second: 1.093\u001b[0m\n02-06-2026 05:04:07 [INFO] - Processing 3467 samples...\n02-06-2026 05:04:07 [INFO] - \u001b[92mWriting conversations file: /proj/vlt-evolve/work/orit/kv-offload-lab/benchmark/multi-turn/results/lru/sharegpt/gpu_0.5_active_128_cpu_26/benchmark_run_1.json\u001b[0m\n----------------------------------------------------------------------------------------------------\n\u001b[93mParameters:\u001b[0m\nmodel=NousResearch/Hermes-3-Llama-3.1-8B\nnum_clients=4\nnum_conversations=500\nactive_conversations=128\nseed=0\n----------------------------------------------------------------------------------------------------\n\u001b[93mStatistics summary:\u001b[0m\nruntime_sec = 3170.678\nrequests_per_sec = 1.093\n----------------------------------------------------------------------------------------------------\n                    count     mean      std  ...       99%     99.9%       max\nttft_ms            3467.0   133.48   123.40  ...    562.95    998.37   2260.70\ntpot_ms            3467.0    12.27     1.42  ...     16.66     23.76     30.65\nlatency_ms         3467.0  3654.07  2488.51  ...  10468.39  11840.32  15348.60\ninput_num_turns    3467.0    10.29     9.14  ...     39.00     46.07     49.00\ninput_num_tokens   3467.0  1594.19  1787.80  ...   7646.10  11330.20  22208.00\noutput_num_tokens  3467.0   285.38   194.04  ...    768.00    777.07   1284.00\noutput_num_chunks  3467.0   280.50   191.19  ...    766.00    774.53   1283.00\n\n[7 rows x 11 columns]\n----------------------------------------------------------------------------------------------------\nWrote /proj/vlt-evolve/work/orit/kv-offload-lab/benchmark/multi-turn/results/lru/sharegpt/gpu_0.5_active_128_cpu_26/summary.json\nRun 1 complete.\n\n============================================================\nAll runs complete. Results in /proj/vlt-evolve/work/orit/kv-offload-lab/benchmark/multi-turn/results/lru/sharegpt/gpu_0.5_active_128_cpu_26/\n============================================================\n"
     },
     {
       "workload_id": "default",
       "workload_class": "batch-inference",
       "script": "benchmark — multi-turn KV offload (kv-offload-lab, ARC)",
       "invoke": "bash -lc 'set -a; source \"$ROOT_DIR/kv-offload-lab/.env\"; set +a; bash \"$ROOT_DIR/kv-offload-lab/benchmark/multi-turn/run_benchmark.sh\" --workload sharegpt --policy arc --gpu-util 0.5 --num-clients 4 --max-active 128 --kv-size 26'",
+      "index": 19,
+      "priority": 1,
+      "halt_on_failure": true,
       "metrics": [
         {
           "name": "ttft_ms_mean",
-          "baseline_value": null,
-          "measured_value": 139.909,
-          "relative_change": null,
-          "regressed": false
+          "measured_value": 142.374
         },
         {
           "name": "tpot_ms_mean",
-          "baseline_value": null,
-          "measured_value": 12.369,
-          "relative_change": null,
-          "regressed": false
+          "measured_value": 12.41
         },
         {
           "name": "cpu_hit_rate",
-          "baseline_value": null,
-          "measured_value": 0.13933070445211726,
-          "relative_change": null,
-          "regressed": false
+          "measured_value": 0.15140693877677106
         },
         {
           "name": "evictions",
-          "baseline_value": null,
-          "measured_value": 236548.0,
-          "relative_change": null,
-          "regressed": false
+          "measured_value": 252944.0
         }
       ],
       "optimization_target": null,
-      "raw_output": " 11:06:22 [INFO] - [input_num_tokens         ] avg:   1564.501, min:      1.000, max:  14197.000\n01-06-2026 11:06:22 [INFO] - [output_num_tokens        ] avg:    284.127, min:      1.000, max:   1284.000\n01-06-2026 11:06:22 [INFO] - --------------------------------------------------\n01-06-2026 11:06:23 [INFO] - Using timeout of 140s based on max_tokens 700\n01-06-2026 11:06:36 [INFO] - Using timeout of 123s based on max_tokens 616\n01-06-2026 11:06:38 [INFO] - \u001b[96mFinished 366 out of 500 conversations (73%), 0 out of 4 clients finished, collected 3388 measurements, runtime 3105.415 sec\u001b[0m\n01-06-2026 11:06:38 [INFO] - \u001b[96mEstimated req/sec 1.091, estimated runtime left 1136.955 sec\u001b[0m\n01-06-2026 11:06:38 [INFO] - --------------------------------------------------\n01-06-2026 11:06:38 [INFO] - [moving_avg_ttft_ms       ] avg:    202.733 (60 samples)\n01-06-2026 11:06:38 [INFO] - [moving_avg_tpot_ms       ] avg:     13.002 (60 samples)\n01-06-2026 11:06:38 [INFO] - [ttft_ms                  ] avg:    138.626, min:     32.826, max:   1241.841\n01-06-2026 11:06:38 [INFO] - [tpot_ms                  ] avg:     12.353, min:      0.000, max:     35.998\n01-06-2026 11:06:38 [INFO] - [latency_ms               ] avg:   3658.124, min:     44.812, max:  16065.749\n01-06-2026 11:06:38 [INFO] - [input_num_turns          ] avg:     10.207, min:      1.000, max:     49.000\n01-06-2026 11:06:38 [INFO] - [input_num_tokens         ] avg:   1566.668, min:      1.000, max:  14197.000\n01-06-2026 11:06:38 [INFO] - [output_num_tokens        ] avg:    284.203, min:      1.000, max:   1284.000\n01-06-2026 11:06:38 [INFO] - --------------------------------------------------\n01-06-2026 11:06:38 [INFO] - Using timeout of 146s based on max_tokens 730\n01-06-2026 11:06:49 [INFO] - Using timeout of 132s based on max_tokens 663\n01-06-2026 11:07:01 [INFO] - \u001b[96mFinished 369 out of 500 conversations (74%), 0 out of 4 clients finished, collected 3408 measurements, runtime 3128.234 sec\u001b[0m\n01-06-2026 11:07:01 [INFO] - \u001b[96mEstimated req/sec 1.089, estimated runtime left 1110.566 sec\u001b[0m\n01-06-2026 11:07:01 [INFO] - --------------------------------------------------\n01-06-2026 11:07:01 [INFO] - [moving_avg_ttft_ms       ] avg:    212.655 (60 samples)\n01-06-2026 11:07:01 [INFO] - [moving_avg_tpot_ms       ] avg:     13.245 (60 samples)\n01-06-2026 11:07:01 [INFO] - [ttft_ms                  ] avg:    138.857, min:     32.826, max:   1241.841\n01-06-2026 11:07:01 [INFO] - [tpot_ms                  ] avg:     12.358, min:      0.000, max:     35.998\n01-06-2026 11:07:01 [INFO] - [latency_ms               ] avg:   3663.457, min:     44.812, max:  16065.749\n01-06-2026 11:07:01 [INFO] - [input_num_turns          ] avg:     10.204, min:      1.000, max:     49.000\n01-06-2026 11:07:01 [INFO] - [input_num_tokens         ] avg:   1568.002, min:      1.000, max:  14197.000\n01-06-2026 11:07:01 [INFO] - [output_num_tokens        ] avg:    284.539, min:      1.000, max:   1284.000\n01-06-2026 11:07:01 [INFO] - --------------------------------------------------\n01-06-2026 11:07:26 [INFO] - Using timeout of 154s based on max_tokens 770\n01-06-2026 11:07:27 [INFO] - \u001b[96mFinished 372 out of 500 conversations (74%), 0 out of 4 clients finished, collected 3433 measurements, runtime 3154.919 sec\u001b[0m\n01-06-2026 11:07:27 [INFO] - \u001b[96mEstimated req/sec 1.088, estimated runtime left 1085.563 sec\u001b[0m\n01-06-2026 11:07:27 [INFO] - --------------------------------------------------\n01-06-2026 11:07:27 [INFO] - [moving_avg_ttft_ms       ] avg:    223.672 (60 samples)\n01-06-2026 11:07:27 [INFO] - [moving_avg_tpot_ms       ] avg:     13.471 (60 samples)\n01-06-2026 11:07:27 [INFO] - [ttft_ms                  ] avg:    139.909, min:     32.826, max:   2182.973\n01-06-2026 11:07:27 [INFO] - [tpot_ms                  ] avg:     12.369, min:      0.000, max:     35.998\n01-06-2026 11:07:27 [INFO] - [latency_ms               ] avg:   3668.259, min:     44.812, max:  16065.749\n01-06-2026 11:07:27 [INFO] - [input_num_turns          ] avg:     10.228, min:      1.000, max:     49.000\n01-06-2026 11:07:27 [INFO] - [input_num_tokens         ] avg:   1577.750, min:      1.000, max:  22208.000\n01-06-2026 11:07:27 [INFO] - [output_num_tokens        ] avg:    284.517, min:      1.000, max:   1284.000\n01-06-2026 11:07:27 [INFO] - --------------------------------------------------\n01-06-2026 11:07:34 [INFO] - \u001b[93mClient 2 has no more work\u001b[0m\n01-06-2026 11:07:34 [INFO] - \u001b[96mClient 2 is done (num_successes=774, num_failures=0)\u001b[0m\n01-06-2026 11:07:34 [INFO] - \u001b[96m1 out of 4 clients finished\u001b[0m\n01-06-2026 11:07:34 [INFO] - \u001b[93mSending termination signal to clients\u001b[0m\n01-06-2026 11:07:36 [INFO] - \u001b[93mClient 0 received a termination signal\u001b[0m\n01-06-2026 11:07:36 [INFO] - \u001b[96mClient 0 is done (num_successes=881, num_failures=0)\u001b[0m\n01-06-2026 11:07:36 [INFO] - \u001b[96m2 out of 4 clients finished\u001b[0m\n01-06-2026 11:07:36 [INFO] - \u001b[93mClient 1 received a termination signal\u001b[0m\n01-06-2026 11:07:36 [INFO] - \u001b[96mClient 1 is done (num_successes=906, num_failures=0)\u001b[0m\n01-06-2026 11:07:36 [INFO] - \u001b[96m3 out of 4 clients finished\u001b[0m\n01-06-2026 11:07:36 [INFO] - \u001b[93mClient 3 received a termination signal\u001b[0m\n01-06-2026 11:07:36 [INFO] - \u001b[96mClient 3 is done (num_successes=881, num_failures=0)\u001b[0m\n01-06-2026 11:07:36 [INFO] - \u001b[96m4 out of 4 clients finished\u001b[0m\n01-06-2026 11:07:36 [INFO] - \u001b[96mAll 4 clients finished\u001b[0m\n01-06-2026 11:07:36 [INFO] - Collected 3442 samples from all the clients\n01-06-2026 11:07:36 [INFO] - \u001b[96mWaiting for client client_0 (is alive: False)\u001b[0m\n01-06-2026 11:07:36 [INFO] - \u001b[96mWaiting for client client_1 (is alive: False)\u001b[0m\n01-06-2026 11:07:36 [INFO] - \u001b[96mWaiting for client client_2 (is alive: False)\u001b[0m\n01-06-2026 11:07:36 [INFO] - \u001b[96mWaiting for client client_3 (is alive: True)\u001b[0m\n01-06-2026 11:07:37 [INFO] - All 4 clients exited (successfully finished 373 out of 500 conversations)\n01-06-2026 11:07:37 [INFO] - \u001b[92mAll clients finished, benchmark runtime: 3164.232 sec (3164232.354 ms), requests per second: 1.088\u001b[0m\n01-06-2026 11:07:37 [INFO] - Processing 3442 samples...\n01-06-2026 11:07:37 [INFO] - \u001b[92mWriting conversations file: /proj/vlt-evolve/work/orit/kv-offload-lab/benchmark/multi-turn/results/arc/sharegpt/gpu_0.5_active_128_cpu_26/benchmark_run_1.json\u001b[0m\n----------------------------------------------------------------------------------------------------\n\u001b[93mParameters:\u001b[0m\nmodel=NousResearch/Hermes-3-Llama-3.1-8B\nnum_clients=4\nnum_conversations=500\nactive_conversations=128\nseed=0\n----------------------------------------------------------------------------------------------------\n\u001b[93mStatistics summary:\u001b[0m\nruntime_sec = 3163.743\nrequests_per_sec = 1.088\n----------------------------------------------------------------------------------------------------\n                    count     mean      std  ...       99%     99.9%       max\nttft_ms            3442.0   140.04   138.90  ...    643.66   1001.04   2182.97\ntpot_ms            3442.0    12.37     1.76  ...     18.46     30.26     36.00\nlatency_ms         3442.0  3669.37  2508.72  ...  10484.91  11908.66  16065.75\ninput_num_turns    3442.0    10.24     9.12  ...     39.00     46.12     49.00\ninput_num_tokens   3442.0  1578.72  1772.25  ...   7591.13  11384.38  22208.00\noutput_num_tokens  3442.0   284.56   194.09  ...    768.00    776.00   1284.00\noutput_num_chunks  3442.0   279.18   190.74  ...    766.00    774.56   1283.00\n\n[7 rows x 11 columns]\n----------------------------------------------------------------------------------------------------\nWrote /proj/vlt-evolve/work/orit/kv-offload-lab/benchmark/multi-turn/results/arc/sharegpt/gpu_0.5_active_128_cpu_26/summary.json\nRun 1 complete.\n\n============================================================\nAll runs complete. Results in /proj/vlt-evolve/work/orit/kv-offload-lab/benchmark/multi-turn/results/arc/sharegpt/gpu_0.5_active_128_cpu_26/\n============================================================\n"
+      "raw_output": ":28 [INFO] - Using timeout of 153s based on max_tokens 769\n02-06-2026 06:03:40 [INFO] - Using timeout of 123s based on max_tokens 616\n02-06-2026 06:03:55 [INFO] - Using timeout of 154s based on max_tokens 770\n02-06-2026 06:03:56 [INFO] - Using timeout of 121s based on max_tokens 607\n02-06-2026 06:04:09 [INFO] - \u001b[96mFinished 366 out of 500 conversations (73%), 0 out of 4 clients finished, collected 3401 measurements, runtime 3143.462 sec\u001b[0m\n02-06-2026 06:04:09 [INFO] - \u001b[96mEstimated req/sec 1.082, estimated runtime left 1150.885 sec\u001b[0m\n02-06-2026 06:04:09 [INFO] - --------------------------------------------------\n02-06-2026 06:04:09 [INFO] - [moving_avg_ttft_ms       ] avg:    196.566 (60 samples)\n02-06-2026 06:04:09 [INFO] - [moving_avg_tpot_ms       ] avg:     13.596 (60 samples)\n02-06-2026 06:04:09 [INFO] - [ttft_ms                  ] avg:    140.861, min:     42.514, max:   1296.948\n02-06-2026 06:04:09 [INFO] - [tpot_ms                  ] avg:     12.388, min:      0.000, max:     45.063\n02-06-2026 06:04:09 [INFO] - [latency_ms               ] avg:   3689.664, min:     47.695, max:  15879.162\n02-06-2026 06:04:09 [INFO] - [input_num_turns          ] avg:     10.167, min:      1.000, max:     47.000\n02-06-2026 06:04:09 [INFO] - [input_num_tokens         ] avg:   1571.232, min:      1.000, max:  14197.000\n02-06-2026 06:04:09 [INFO] - [output_num_tokens        ] avg:    285.372, min:      1.000, max:   1259.000\n02-06-2026 06:04:09 [INFO] - Using timeout of 146s based on max_tokens 730\n02-06-2026 06:04:09 [INFO] - --------------------------------------------------\n02-06-2026 06:04:19 [INFO] - Using timeout of 153s based on max_tokens 767\n02-06-2026 06:04:20 [INFO] - \u001b[96mFinished 369 out of 500 conversations (74%), 0 out of 4 clients finished, collected 3411 measurements, runtime 3154.993 sec\u001b[0m\n02-06-2026 06:04:20 [INFO] - \u001b[96mEstimated req/sec 1.081, estimated runtime left 1120.065 sec\u001b[0m\n02-06-2026 06:04:20 [INFO] - --------------------------------------------------\n02-06-2026 06:04:20 [INFO] - [moving_avg_ttft_ms       ] avg:    230.199 (60 samples)\n02-06-2026 06:04:20 [INFO] - [moving_avg_tpot_ms       ] avg:     13.848 (60 samples)\n02-06-2026 06:04:20 [INFO] - [ttft_ms                  ] avg:    141.336, min:     42.514, max:   1296.962\n02-06-2026 06:04:20 [INFO] - [tpot_ms                  ] avg:     12.395, min:      0.000, max:     45.063\n02-06-2026 06:04:20 [INFO] - [latency_ms               ] avg:   3692.301, min:     47.695, max:  15879.162\n02-06-2026 06:04:20 [INFO] - [input_num_turns          ] avg:     10.170, min:      1.000, max:     47.000\n02-06-2026 06:04:20 [INFO] - [input_num_tokens         ] avg:   1578.009, min:      1.000, max:  22208.000\n02-06-2026 06:04:20 [INFO] - [output_num_tokens        ] avg:    285.410, min:      1.000, max:   1259.000\n02-06-2026 06:04:20 [INFO] - --------------------------------------------------\n02-06-2026 06:04:41 [INFO] - Using timeout of 145s based on max_tokens 726\n02-06-2026 06:04:49 [INFO] - Using timeout of 122s based on max_tokens 612\n02-06-2026 06:04:58 [INFO] - \u001b[96mFinished 372 out of 500 conversations (74%), 0 out of 4 clients finished, collected 3445 measurements, runtime 3193.206 sec\u001b[0m\n02-06-2026 06:04:58 [INFO] - \u001b[96mEstimated req/sec 1.079, estimated runtime left 1098.738 sec\u001b[0m\n02-06-2026 06:04:58 [INFO] - --------------------------------------------------\n02-06-2026 06:04:58 [INFO] - [moving_avg_ttft_ms       ] avg:    241.111 (60 samples)\n02-06-2026 06:04:58 [INFO] - [moving_avg_tpot_ms       ] avg:     14.160 (60 samples)\n02-06-2026 06:04:58 [INFO] - [ttft_ms                  ] avg:    142.374, min:     42.514, max:   1296.962\n02-06-2026 06:04:58 [INFO] - [tpot_ms                  ] avg:     12.410, min:      0.000, max:     45.063\n02-06-2026 06:04:58 [INFO] - [latency_ms               ] avg:   3698.591, min:     47.695, max:  15879.162\n02-06-2026 06:04:58 [INFO] - [input_num_turns          ] avg:     10.221, min:      1.000, max:     47.000\n02-06-2026 06:04:58 [INFO] - [input_num_tokens         ] avg:   1589.267, min:      1.000, max:  22208.000\n02-06-2026 06:04:58 [INFO] - [output_num_tokens        ] avg:    285.471, min:      1.000, max:   1259.000\n02-06-2026 06:04:58 [INFO] - --------------------------------------------------\n02-06-2026 06:05:01 [INFO] - Using timeout of 149s based on max_tokens 749\n02-06-2026 06:05:07 [INFO] - \u001b[93mClient 0 has no more work\u001b[0m\n02-06-2026 06:05:07 [INFO] - \u001b[96mClient 0 is done (num_successes=845, num_failures=0)\u001b[0m\n02-06-2026 06:05:07 [INFO] - \u001b[96m1 out of 4 clients finished\u001b[0m\n02-06-2026 06:05:07 [INFO] - \u001b[93mSending termination signal to clients\u001b[0m\n02-06-2026 06:05:11 [INFO] - \u001b[93mClient 2 received a termination signal\u001b[0m\n02-06-2026 06:05:11 [INFO] - \u001b[96mClient 2 is done (num_successes=894, num_failures=0)\u001b[0m\n02-06-2026 06:05:11 [INFO] - \u001b[96m2 out of 4 clients finished\u001b[0m\n02-06-2026 06:05:11 [INFO] - \u001b[93mClient 3 received a termination signal\u001b[0m\n02-06-2026 06:05:11 [INFO] - \u001b[96mClient 3 is done (num_successes=863, num_failures=0)\u001b[0m\n02-06-2026 06:05:11 [INFO] - \u001b[96m3 out of 4 clients finished\u001b[0m\n02-06-2026 06:05:12 [INFO] - \u001b[93mClient 1 received a termination signal\u001b[0m\n02-06-2026 06:05:12 [INFO] - \u001b[96mClient 1 is done (num_successes=856, num_failures=0)\u001b[0m\n02-06-2026 06:05:12 [INFO] - \u001b[96m4 out of 4 clients finished\u001b[0m\n02-06-2026 06:05:12 [INFO] - \u001b[96mAll 4 clients finished\u001b[0m\n02-06-2026 06:05:12 [INFO] - Collected 3458 samples from all the clients\n02-06-2026 06:05:12 [INFO] - \u001b[96mWaiting for client client_0 (is alive: False)\u001b[0m\n02-06-2026 06:05:12 [INFO] - \u001b[96mWaiting for client client_1 (is alive: True)\u001b[0m\n02-06-2026 06:05:12 [INFO] - \u001b[96mWaiting for client client_2 (is alive: False)\u001b[0m\n02-06-2026 06:05:12 [INFO] - \u001b[96mWaiting for client client_3 (is alive: False)\u001b[0m\n02-06-2026 06:05:12 [INFO] - All 4 clients exited (successfully finished 373 out of 500 conversations)\n02-06-2026 06:05:12 [INFO] - \u001b[92mAll clients finished, benchmark runtime: 3207.188 sec (3207188.079 ms), requests per second: 1.078\u001b[0m\n02-06-2026 06:05:12 [INFO] - Processing 3458 samples...\n02-06-2026 06:05:12 [INFO] - \u001b[92mWriting conversations file: /proj/vlt-evolve/work/orit/kv-offload-lab/benchmark/multi-turn/results/arc/sharegpt/gpu_0.5_active_128_cpu_26/benchmark_run_1.json\u001b[0m\n----------------------------------------------------------------------------------------------------\n\u001b[93mParameters:\u001b[0m\nmodel=NousResearch/Hermes-3-Llama-3.1-8B\nnum_clients=4\nnum_conversations=500\nactive_conversations=128\nseed=0\n----------------------------------------------------------------------------------------------------\n\u001b[93mStatistics summary:\u001b[0m\nruntime_sec = 3205.750\nrequests_per_sec = 1.079\n----------------------------------------------------------------------------------------------------\n                    count     mean      std  ...       99%     99.9%       max\nttft_ms            3458.0   142.83   141.08  ...    671.37    971.12   1296.96\ntpot_ms            3458.0    12.42     1.92  ...     18.39     33.40     45.06\nlatency_ms         3458.0  3701.78  2538.12  ...  10674.14  12236.81  15879.16\ninput_num_turns    3458.0    10.25     9.08  ...     39.00     45.00     47.00\ninput_num_tokens   3458.0  1594.28  1794.81  ...   7723.86  11373.59  22208.00\noutput_num_tokens  3458.0   285.60   194.39  ...    768.00    777.09   1259.00\noutput_num_chunks  3458.0   279.97   190.13  ...    766.00    773.63   1258.00\n\n[7 rows x 11 columns]\n----------------------------------------------------------------------------------------------------\nWrote /proj/vlt-evolve/work/orit/kv-offload-lab/benchmark/multi-turn/results/arc/sharegpt/gpu_0.5_active_128_cpu_26/summary.json\nRun 1 complete.\n\n============================================================\nAll runs complete. Results in /proj/vlt-evolve/work/orit/kv-offload-lab/benchmark/multi-turn/results/arc/sharegpt/gpu_0.5_active_128_cpu_26/\n============================================================\n"
     }
   ],
   "observability_context": {
     "signal_refs": []
   },
   "notes": "Plan-level skips: benchmark — multi-turn KV offload (kv-offload-lab, evolved) (baseline run: evolved policy not applied), unit tests — KV cache coordinator (tests/v1/core/test_kv_cache_coordinator.py does not exist in vllm v0.18.0 — re-enable once vllm is upgraded to a version that includes this test), benchmark — attention backends (no output_template defined yet — re-enable once metric extraction is wired up), benchmark — prefix caching throughput (no output_template defined yet — re-enable once metric extraction is wired up), benchmark — serving throughput (no output_template defined yet — re-enable once metric extraction is wired up), benchmark — long document Q&A throughput (no output_template defined yet — re-enable once metric extraction is wired up)",
-  "timestamp": "2026-06-01T18:05:06.667361"
+  "timestamp": "2026-06-02T12:34:06.114810"
 }

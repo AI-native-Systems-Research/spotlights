@@ -2,13 +2,7 @@
 
 ## Regressions (passed in baseline, failed in evolved)
 
-- **`correctness-basic`** (validation entry)
-  - RuntimeError: Engine core initialization failed. See root cause above. Failed core proc(s): {}
-  - torch.AcceleratorError: CUDA error: CUDA-capable device(s) is/are busy or unavailable
-Search for `cudaErrorDevicesUnavailable' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.
-CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
-For debugging consider passing CUDA_LAUNCH_BLOCKING=1
-Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+None
 
 ## Fixes (failed in baseline, passed in evolved)
 
@@ -16,7 +10,7 @@ None
 
 ## Tests Comparison
 
-| row | id | status | invoke | pass | failed | skipped |
+| run | id | status | invoke | pass | failed | skipped |
 | --- | --- | --- | --- | --- | --- | --- |
 | baseline | unit-kv-offload-tiering | pass | pytest -v tests/v1/kv_offload/ -k 'not test_cpu_offloading' | 22 | 0 | 0 |
 | baseline | unit-kv-connector-offloading | pass | pytest -v tests/v1/kv_connector/unit/test_offloading_connector.py | 14 | 0 | 0 |
@@ -50,15 +44,15 @@ None
 | evolved | unit-async-scheduler | pass | pytest -v tests/v1/core/test_async_scheduler.py | 8 | 0 | 0 |
 | evolved | unit-worker | pass | pytest -v tests/v1/worker/ | 62 | 0 | 1 |
 | evolved | integration-scheduler-e2e | pass | pytest -v tests/v1/core/test_scheduler_e2e.py | 2 | 0 | 0 |
-| evolved | integration-engine | fail | pytest -v tests/v1/engine/ --ignore=tests/v1/engine/test_async_llm.py --ignore=tests/v1/engine/test_engine_core_client.py --ignore=tests/v1/engine/test_abort_final_step.py --ignore=tests/v1/engine/test_output_processor.py -k 'not test_skip_tokenizer_initialization' | 0 | 1 | 0 |
-| evolved | correctness-basic | fail | pytest -v tests/basic_correctness/ -k 'not meta-llama and not tiering and not test_cumem and not test_cpu_offload and not Gemma2 and not test_prefetch_offload' | 0 | 2 | 8 |
-| evolved | integration-kv-connector-nixl | not_executed | bash tests/v1/kv_connector/nixl_integration/run_accuracy_test.sh |  |  |  |
-| evolved | stress-kv-offload-memory-pressure | not_executed | bash -lc 'bash "$ROOT_DIR/spotlights/src/spotlights_validation/examples/kvoffload/scripts/run_nixl_stress.sh"' |  |  |  |
+| evolved | integration-engine | fail | pytest -v tests/v1/engine/ --ignore=tests/v1/engine/test_async_llm.py --ignore=tests/v1/engine/test_engine_core_client.py --ignore=tests/v1/engine/test_abort_final_step.py --ignore=tests/v1/engine/test_output_processor.py -k 'not test_skip_tokenizer_initialization' | 23 | 1 | 1 |
+| evolved | correctness-basic | pass | pytest -v tests/basic_correctness/ -k 'not meta-llama and not tiering and not test_cumem and not test_cpu_offload and not Gemma2 and not test_prefetch_offload' | 2 | 0 | 8 |
+| evolved | integration-kv-connector-nixl | fail | bash tests/v1/kv_connector/nixl_integration/run_accuracy_test.sh | 0 | 1 | 0 |
+| evolved | stress-kv-offload-memory-pressure | fail | bash -lc 'bash "$ROOT_DIR/spotlights/src/spotlights_validation/examples/kvoffload/scripts/run_nixl_stress.sh"' | 0 | 1 | 0 |
 
 ## Benchmark Comparison
 
-| row | id | status | policy | ttft_ms_mean | tpot_ms_mean | cpu_hit_rate | evictions |
+| run | id | status | policy | ttft_ms_mean | tpot_ms_mean | cpu_hit_rate | evictions |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| baseline-lru | benchmark-multi-turn-kv-offload-lab-lru | pass | lru | 146.444 | 12.413 | 0.04290750951308535 | 356470.0 |
-| baseline-arc | benchmark-multi-turn-kv-offload-lab-arc | pass | arc | 139.909 | 12.369 | 0.13933070445211726 | 236548.0 |
-| evolved | benchmark-multi-turn-kv-offload-lab | pass | evolved | 131.538 | 12.48 | 0.34762372972256556 | 120870.0 |
+| baseline-lru | benchmark-multi-turn-kv-offload-lab-lru | pass | lru | 133.315 | 12.268 | 0.05419577462406333 | 326646.0 |
+| baseline-arc | benchmark-multi-turn-kv-offload-lab-arc | pass | arc | 142.374 | 12.41 | 0.15140693877677106 | 252944.0 |
+| evolved | benchmark-multi-turn-kv-offload-lab | pass | evolved | 137.957 | 12.294 | 0.34273712083248264 | 114168.0 |
