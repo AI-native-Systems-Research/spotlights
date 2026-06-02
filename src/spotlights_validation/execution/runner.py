@@ -5,6 +5,7 @@ import json
 import os
 import re
 import shlex
+import signal
 import subprocess
 import sys
 import tempfile
@@ -181,6 +182,7 @@ def _stream_subprocess(
         stderr=subprocess.STDOUT,
         text=True,
         bufsize=1,
+        start_new_session=True,
     )
 
     captured: list[str] = []
@@ -198,7 +200,7 @@ def _stream_subprocess(
     try:
         proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
-        proc.kill()
+        os.killpg(proc.pid, signal.SIGKILL)
         proc.wait()
         t.join(timeout=2.0)
         raise
