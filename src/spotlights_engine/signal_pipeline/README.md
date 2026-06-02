@@ -43,10 +43,11 @@ env -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_BASE_URL \
 The `env -u` prefix is required when running from inside a Claude Code
 session — see [Troubleshooting](#troubleshooting) below.
 
-A full pipeline run with all five stages takes **~13 min and ~$2** in
+A full pipeline run with all five stages takes **~10 min and ~$2** in
 API costs at the time of writing (see the improvements backlog for
-levers). Stages 01 + 02 are independent and could be parallelized;
-they currently run sequentially.
+levers). Stages with disjoint upstreams run **concurrently** — for the
+canonical 01..05 selection, the schedule is `{01, 02} → {03} → {04} → {05}`,
+so signal extraction and ProjectTree extraction overlap.
 
 Per-stage `model` and `cost_usd` are recorded in `status.json`, so you
 can answer "which model produced this artifact, and what did it cost?"

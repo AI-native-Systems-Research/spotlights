@@ -16,8 +16,10 @@ here that drifts from that doc is a bug.
 
 from __future__ import annotations
 
+import concurrent.futures
 import json
 import shutil
+import threading
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -767,37 +769,53 @@ def run_pipeline(
                 f"or extend the selection)"
             )
 
-    # ── Run loop ────────────────────────────────────────────────────────
+    # ── Run loop (topological, parallel) ────────────────────────────────
+    # Stages whose declared upstreams are disjoint (e.g. 01 and 02) run
+    # concurrently in the same batch; stages with dependencies on other
+    # selected stages wait for their upstreams to land. For the canonical
+    # 01..05 selection the schedule is {01, 02} → {03} → {04} → {05}.
+    #
+    # `status` mutation is protected by a lock; on-disk writes are atomic
+    # via tmp+replace already. Stage artifact paths are disjoint so file
+    # writes don't contend.
     completed: list[str] = []
     skipped: list[str] = []
     aggregate_issues: list[str] = []
+    status_lock = threading.Lock()
 
     sink: Callable[[str], None] = (
         on_event if on_event is not None else lambda s: print(s, flush=True)
     )
 
-    for stage_id in sel.selected():
+    selected = sel.selected()
+    selected_set: set[StageId] = set(selected)
+
+    def _execute_one_stage(stage_id: StageId) -> tuple[str, StageId, list[str]]:
+        """Run a single stage end-to-end: resume-check, run, status update.
+
+        Returns (`outcome`, stage_id, issues) where outcome is "skipped"
+        or "completed". Raises on failure — the scheduler catches and
+        re-raises after the rest of the batch finishes.
+        """
         spec = STAGES[stage_id]
         upstreams = _load_upstreams(spec, STAGES, layout)
 
         if resume:
             complete, issues = _is_complete(spec, layout, status, upstreams)
             if complete:
-                skipped.append(stage_id)
-                aggregate_issues.extend(issues)
                 sink(f"[{stage_id}] SKIP — already complete")
-                continue
+                return "skipped", stage_id, issues
 
-        # Mark in-progress before doing work.
-        status.set(
-            stage_id,
-            StageStatus(
-                state="in_progress",
-                started_at=_now_iso(),
-                ended_at=None,
-            ),
-        )
-        _save_status(layout, status)
+        with status_lock:
+            status.set(
+                stage_id,
+                StageStatus(
+                    state="in_progress",
+                    started_at=_now_iso(),
+                    ended_at=None,
+                ),
+            )
+            _save_status(layout, status)
 
         log_dir = layout.stage_log_dir(stage_id)
         log_dir.mkdir(parents=True, exist_ok=True)
@@ -821,7 +839,7 @@ def run_pipeline(
         try:
             if spec.shape == "single":
                 _run_single(spec, ctx_for)
-                issues: list[str] = []
+                issues = []
             else:
                 issues = _run_fanout(
                     spec,
@@ -837,16 +855,17 @@ def run_pipeline(
                 f"[{stage_id}] FAILED in {_fmt_stage_duration(stage_elapsed)}: "
                 f"{type(exc).__name__}: {str(exc)[:200]}"
             )
-            status.set(
-                stage_id,
-                StageStatus(
-                    state="failed",
-                    started_at=status.get(stage_id).started_at,
-                    ended_at=_now_iso(),
-                    error=f"{type(exc).__name__}: {exc}",
-                ),
-            )
-            _save_status(layout, status)
+            with status_lock:
+                status.set(
+                    stage_id,
+                    StageStatus(
+                        state="failed",
+                        started_at=status.get(stage_id).started_at,
+                        ended_at=_now_iso(),
+                        error=f"{type(exc).__name__}: {exc}",
+                    ),
+                )
+                _save_status(layout, status)
             raise
 
         formatter.flush()
@@ -854,23 +873,62 @@ def run_pipeline(
         meta = _aggregate_meta(log_dir)
         sink(f"[{stage_id}] STAGE DONE in {_fmt_stage_duration(stage_elapsed)}")
 
-        # Mark done.
-        status.set(
-            stage_id,
-            StageStatus(
-                state="done",
-                started_at=status.get(stage_id).started_at,
-                ended_at=_now_iso(),
-                error=None,
-                issues=issues,
-                model=meta.get("model"),
-                cost_usd=meta.get("cost_usd"),
-                duration_s=round(stage_elapsed, 3),
-            ),
-        )
-        _save_status(layout, status)
-        completed.append(stage_id)
-        aggregate_issues.extend(issues)
+        with status_lock:
+            status.set(
+                stage_id,
+                StageStatus(
+                    state="done",
+                    started_at=status.get(stage_id).started_at,
+                    ended_at=_now_iso(),
+                    error=None,
+                    issues=issues,
+                    model=meta.get("model"),
+                    cost_usd=meta.get("cost_usd"),
+                    duration_s=round(stage_elapsed, 3),
+                ),
+            )
+            _save_status(layout, status)
+        return "completed", stage_id, issues
+
+    settled: set[StageId] = set()  # selected stages already completed/skipped this run
+    max_workers = min(len(selected_set), 4) if selected_set else 1
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
+        while len(settled) < len(selected_set):
+            ready = [
+                sid for sid in selected
+                if sid not in settled
+                and all(
+                    up not in selected_set or up in settled
+                    for up in STAGES[sid].upstream
+                )
+            ]
+            if not ready:
+                # Should be unreachable: STAGES is a DAG and selection is
+                # contiguous over a topological order. Defensive guard.
+                raise PipelineLayoutError(
+                    f"scheduler deadlock: no runnable stage in {sorted(selected_set - settled)}"
+                )
+
+            futures = {ex.submit(_execute_one_stage, sid): sid for sid in ready}
+            first_error: BaseException | None = None
+            for fut in concurrent.futures.as_completed(futures):
+                try:
+                    outcome, stage_id, issues = fut.result()
+                except BaseException as e:  # noqa: BLE001 — re-raise after batch drains
+                    if first_error is None:
+                        first_error = e
+                    continue
+                settled.add(stage_id)
+                if outcome == "completed":
+                    completed.append(stage_id)
+                else:
+                    skipped.append(stage_id)
+                aggregate_issues.extend(issues)
+            if first_error is not None:
+                # Sibling stages in the batch were allowed to finish so their
+                # work isn't lost; preserve "stop on first error" semantics
+                # by re-raising once the batch drains.
+                raise first_error
 
     # Best-effort findings rollup — joins stage 03 candidates with stage 04
     # change specs into a single human-readable view. Skipped silently if the
@@ -880,10 +938,14 @@ def run_pipeline(
     except Exception as exc:  # noqa: BLE001 — never fail the pipeline on rollup
         aggregate_issues.append(f"findings rollup failed: {exc}")
 
+    # Sort to keep the result deterministic across runs — under the
+    # parallel scheduler these lists' append order depends on which
+    # future finishes first, but the stage IDs are zero-padded so
+    # lexicographic == declaration order.
     return SignalPipelineResult(
         run_dir=layout.root,
-        completed_stages=completed,
-        skipped_stages=skipped,
+        completed_stages=sorted(completed),
+        skipped_stages=sorted(skipped),
         issues=aggregate_issues,
     )
 

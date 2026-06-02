@@ -503,3 +503,66 @@ def test_inject_then_run_downstream(tmp_path):
     assert (run_dir / "05_results" / "cand-0001.json").exists()
     # No cand-0002 anywhere — the injected upstream had only one candidate.
     assert not (run_dir / "04_changes" / "cand-0002.json").exists()
+
+
+# ── Parallel scheduler ─────────────────────────────────────────────────
+
+
+@pytest.mark.no_stub_stages
+def test_stages_01_and_02_overlap_in_wall_clock(tmp_path, monkeypatch):
+    """01 and 02 declare disjoint upstreams (both `()`); they should run
+    concurrently. Stub each with a 0.5s sleep and assert the run finishes
+    in < 0.9s — sequential execution would take >= 1.0s.
+    """
+    import time as _time
+
+    from spotlights_engine.schemas.project import Module, ProjectTree, Repository
+    from spotlights_engine.signal_pipeline.schemas import (
+        AnomalyLite,
+        Signals,
+        TraceSummaryLite,
+        WorkloadProfileLite,
+    )
+    from spotlights_engine.signal_pipeline.stages import (
+        s01_signal_extraction,
+        s02_projecttree,
+    )
+
+    SLEEP = 0.5
+
+    def slow_synthetic_signals():
+        _time.sleep(SLEEP)
+        return Signals(
+            workload=WorkloadProfileLite(workload_id="w"),
+            traces=[TraceSummaryLite(trace_id="t", summary="")],
+            anomalies=[AnomalyLite(anomaly_id="a", type="x", description="")],
+        )
+
+    def slow_extract_project_tree(subject_root, log_dir, on_event=None):
+        _time.sleep(SLEEP)
+        return ProjectTree(
+            repository=Repository(name="r", summary=""),
+            modules=[Module(name="m", path="m", description="")],
+        )
+
+    monkeypatch.setattr(
+        s01_signal_extraction, "_synthetic_signals", slow_synthetic_signals
+    )
+    monkeypatch.setattr(
+        s02_projecttree, "_extract_project_tree", slow_extract_project_tree
+    )
+
+    run_dir = tmp_path / "run"
+    t0 = _time.monotonic()
+    res = run_pipeline(
+        _input(tmp_path),
+        run_dir=run_dir,
+        stages=StageSelection(from_stage="01", to_stage="02"),
+    )
+    dt = _time.monotonic() - t0
+
+    assert res.completed_stages == ["01", "02"]
+    assert dt < 0.9, (
+        f"expected < 0.9s under parallel execution; got {dt:.3f}s "
+        f"(sequential baseline would be >= {2 * SLEEP:.1f}s)"
+    )

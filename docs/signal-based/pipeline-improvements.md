@@ -18,31 +18,7 @@ Numbers below are grounded in the live smoke run on
 
 ---
 
-## 1. Parallelize stages 01 and 02
-
-**What.** Run signal extraction (stage 01) and ProjectTree extraction
-(stage 02) concurrently. They have disjoint declared upstreams
-(`s01.upstream=()`, `s02.upstream=()`) — neither needs the other's
-output. Candidate generation (stage 03) waits for both.
-
-**How.** [runner.py:run_pipeline](../../src/spotlights_engine/signal_pipeline/runner.py)
-walks `selected()` in declared order today. Build a small dependency
-graph from `STAGES[s].upstream`, find stages whose upstreams are all
-complete, launch in parallel via `concurrent.futures.ThreadPoolExecutor`.
-Guard `status.json` writes with a lock (or have each stage own its
-slot atomically).
-
-**Saves.** ~3 min off every full pipeline run. Bounded by
-`min(s01_time, s02_time)`. **Zero cost saving** — same tokens billed.
-
-**Effort.** ~80 LoC plus one test asserting wall-clock ≈ `max(s01, s02)`.
-
-**Risk.** Low. Two `claude -p` subprocesses concurrent on the same API
-key; CLI is rate-limit-aware. Log dirs already separate.
-
----
-
-## 2. Sonnet (instead of Opus) for stages 02 and 04
+## 1. Sonnet (instead of Opus) for stages 02 and 04
 
 **What.** ProjectTree extraction (stage 02) and change generation
 (stage 04) are transformation/structuring tasks, not reasoning-heavy.
@@ -79,7 +55,7 @@ stage 05 produces worse edits. A/B before committing.
 
 ---
 
-## 3. Cross-run ProjectTree cache
+## 2. Cross-run ProjectTree cache
 
 **What.** Within a run, `--resume` skips stage 02 if
 `02_projecttree.json` exists. Across runs (different `--artifacts-dir`), it
@@ -112,53 +88,11 @@ version in the cache filename.
 
 ---
 
-## 4. Tighten signal-extraction prompt with concrete file hints
-
-**What.** [prompts/signal_extraction.md](../../src/spotlights_engine/signal_pipeline/prompts/signal_extraction.md)
-lists likely files (`traces.jsonl`, `metrics.jsonl`, `vllm_server.log`,
-`otelcol.log`) as guidance, explicitly noted as "not a contract."
-That's the right design for telemetry-format flexibility, but it cost
-us 29 turns on the LRU smoke because the agent re-explored from
-scratch (ls → head → wc → jq → repeat per file). Adding a
-**recommended exploration order with concrete `jq`/`awk` invocations**
-for known patterns lets the agent skip ahead.
-
-**How.** Edit the markdown, no code change. Add a section like:
-
-> If `traces.jsonl` is present with OTel `resourceSpans` shape, your
-> first pass should be: count spans by name with this exact `jq`
-> invocation, then for each span name compute `count` and duration
-> percentiles in ms. If the file's structure differs, fall back to
-> exploration.
-
-**Saves.** ~2–3 min off signal extraction (29 turns → ~12–15).
-Roughly proportional cost saving (~$0.30–$0.40).
-
-**Effort.** ~15 min.
-
-**Risk.** Medium-low. The flexibility goal slips a bit — if the next
-telemetry capture's `traces.jsonl` has a different shape, the
-suggested `jq` will fail. The agent should fall back to exploration on
-error, but might confidently follow stale guidance. Mitigation: phrase
-recommendations as "if these files exist with this structure, here's
-the fast path; otherwise explore freely."
-
-**Recommendation.** Hold off until telemetry-capture format stabilizes
-across team captures. Right now it's still in flux per the project
-state — better to keep the prompt flexible at the cost of extra turns
-than risk it going stale on the next capture.
-
 ---
 
 ## Combined picture
 
 | Lever | Wall saved | Cost saved | Effort | Risk |
 |---|---|---|---|---|
-| Parallelize 01+02 | ~3 min | $0 | 90 min | low |
 | Sonnet for 02/04 | ~3 min | ~$1 | half day | medium |
 | Cross-run PT cache | ~3 min on 2nd+ runs | ~$0.62 on 2nd+ runs | half day | low |
-| Tighten BA prompt | ~2–3 min | ~$0.35 | 15 min | medium-low |
-| **All four (first run)** | **~6–8 min off 13 min** | **~$1.4 off $2** | ~1.5 days | |
-| **All four (subsequent runs against same subject)** | **~9–10 min off 13 min** | **~$2 off $2** (PT cached, only 01+03+04+05 fire) | | |
-
-Cheapest, highest-impact pair to start with: **parallelize 01+02** + **tighten signal-extraction prompt**. ~2 hours total, ~5 min off every run, both low-risk. Sonnet routing and the ProjectTree cache pay off later when iterating frequently.
