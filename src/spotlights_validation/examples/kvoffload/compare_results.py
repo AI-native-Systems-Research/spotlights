@@ -103,31 +103,27 @@ def test_comparison_table():
         if entry["harness_entry"]["kind"] in test_kinds:
             all_ids.append(hid)
 
-    headers = ["run", "id", "status",
-               "invoke", "pass", "failed", "skipped"]
+    headers = ["run", "id", "status", "pass", "failed", "skipped"]
     rows = []
 
     for hid in all_ids:
         plan_entry = baseline_plan.get(hid)
         result_entry = baseline_result.get(hid)
         status = determine_test_status(plan_entry, result_entry)
-        invoke = plan_entry["harness_entry"]["invoke"] if plan_entry else ""
         passed = result_entry.get("passed", "") if result_entry else ""
         failed = result_entry.get("failed", "") if result_entry else ""
         skipped_count = result_entry.get("skipped", "") if result_entry else ""
         rows.append(["baseline", hid, status,
-                     invoke, passed, failed, skipped_count])
+                     passed, failed, skipped_count])
 
-    for hid in all_ids:
         plan_entry = change_plan.get(hid)
         result_entry = change_result.get(hid)
         status = determine_test_status(plan_entry, result_entry)
-        invoke = plan_entry["harness_entry"]["invoke"] if plan_entry else ""
         passed = result_entry.get("passed", "") if result_entry else ""
         failed = result_entry.get("failed", "") if result_entry else ""
         skipped_count = result_entry.get("skipped", "") if result_entry else ""
         rows.append(["evolved", hid, status,
-                     invoke, passed, failed, skipped_count])
+                     passed, failed, skipped_count])
 
     return headers, rows
 
