@@ -1,3 +1,21 @@
+# Validation Results Comparison
+
+## Regressions (passed in baseline, failed in evolved)
+
+- **correctness-basic**
+  - RuntimeError: Engine core initialization failed. See root cause above. Failed core proc(s): {}
+  - torch.AcceleratorError: CUDA error: CUDA-capable device(s) is/are busy or unavailable
+Search for `cudaErrorDevicesUnavailable' in https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html for more information.
+CUDA kernel errors might be asynchronously reported at some other API call, so the stacktrace below might be incorrect.
+For debugging consider passing CUDA_LAUNCH_BLOCKING=1
+Compile with `TORCH_USE_CUDA_DSA` to enable device-side assertions.
+
+## Fixes (failed in baseline, passed in evolved)
+
+None
+
+## Tests Comparison
+
 | row | index | id | status | priority | halt_on_failure | invoke | pass | failed | skipped |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | baseline | 1 | unit-kv-offload-tiering | pass | 1 | True | pytest -v tests/v1/kv_offload/ -k 'not test_cpu_offloading' | 22 | 0 | 0 |
@@ -36,3 +54,11 @@
 | evolved | 16 | correctness-basic | fail | 6 | True | pytest -v tests/basic_correctness/ -k 'not meta-llama and not tiering and not test_cumem and not test_cpu_offload and not Gemma2 and not test_prefetch_offload' | 0 | 2 | 8 |
 | evolved | 20 | integration-kv-connector-nixl | not_executed | 6 | False | bash tests/v1/kv_connector/nixl_integration/run_accuracy_test.sh |  |  |  |
 | evolved | 21 | stress-kv-offload-memory-pressure | not_executed | 7 | False | bash -lc 'bash "$ROOT_DIR/spotlights/src/spotlights_validation/examples/kvoffload/scripts/run_nixl_stress.sh"' |  |  |  |
+
+## Benchmark Comparison
+
+| row | index | id | status | priority | halt_on_failure | invoke | ttft_ms_mean | tpot_ms_mean | cpu_hit_rate | evictions |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| baseline-lru | 18 | benchmark-multi-turn-kv-offload-lab-lru | pass | 1 | True | bash -lc 'set -a; source "$ROOT_DIR/kv-offload-lab/.env"; set +a; bash "$ROOT_DIR/kv-offload-lab/benchmark/multi-turn/run_benchmark.sh" --workload sharegpt --policy lru --gpu-util 0.5 --num-clients 4 --max-active 128 --kv-size 26' | 146.444 | 12.413 | 0.04290750951308535 | 356470.0 |
+| baseline-arc | 19 | benchmark-multi-turn-kv-offload-lab-arc | pass | 1 | True | bash -lc 'set -a; source "$ROOT_DIR/kv-offload-lab/.env"; set +a; bash "$ROOT_DIR/kv-offload-lab/benchmark/multi-turn/run_benchmark.sh" --workload sharegpt --policy arc --gpu-util 0.5 --num-clients 4 --max-active 128 --kv-size 26' | 139.909 | 12.369 | 0.13933070445211726 | 236548.0 |
+| evolved | 17 | benchmark-multi-turn-kv-offload-lab | pass | 1 | True | bash -lc 'set -a; source "$ROOT_DIR/kv-offload-lab/.env"; set +a; bash "$ROOT_DIR/kv-offload-lab/benchmark/multi-turn/run_benchmark.sh" --workload sharegpt --policy evolved --gpu-util 0.5 --num-clients 4 --max-active 128 --kv-size 26' | 131.538 | 12.48 | 0.34762372972256556 | 120870.0 |

@@ -187,27 +187,101 @@ def benchmark_comparison_table():
     return headers, rows
 
 
+def get_failure_reasons(result_entry):
+    if not result_entry:
+        return []
+    return [err.get("message", "unknown") for err in result_entry.get("errors", [])]
+
+
+def regressions_and_fixes_section():
+    baseline_plan = build_plan_index(load_json(BASELINE_PLAN))
+    change_plan = build_plan_index(load_json(CHANGE_PLAN))
+    baseline_result = build_test_result_index(load_json(BASELINE_RESULT))
+    change_result = build_test_result_index(load_json(CHANGE_RESULT))
+
+    test_kinds = {"unit", "integration", "correctness", "stress"}
+    all_ids = []
+    for entry in load_json(BASELINE_PLAN).get("entries", []):
+        hid = entry["harness_entry"]["id"]
+        if entry["harness_entry"]["kind"] in test_kinds:
+            all_ids.append(hid)
+
+    regressions = []
+    fixes = []
+
+    for hid in all_ids:
+        baseline_status = determine_test_status(baseline_plan.get(hid), baseline_result.get(hid))
+        change_status = determine_test_status(change_plan.get(hid), change_result.get(hid))
+
+        if baseline_status == "pass" and change_status == "fail":
+            reasons = get_failure_reasons(change_result.get(hid))
+            regressions.append((hid, reasons))
+        elif baseline_status == "fail" and change_status == "pass":
+            reasons = get_failure_reasons(baseline_result.get(hid))
+            fixes.append((hid, reasons))
+
+    lines = []
+    lines.append("## Regressions (passed in baseline, failed in evolved)\n")
+    if regressions:
+        for hid, reasons in regressions:
+            lines.append(f"- **{hid}**")
+            for reason in reasons:
+                lines.append(f"  - {reason}")
+    else:
+        lines.append("None")
+    lines.append("")
+
+    lines.append("## Fixes (failed in baseline, passed in evolved)\n")
+    if fixes:
+        for hid, reasons in fixes:
+            lines.append(f"- **{hid}**")
+            lines.append("  - Baseline failure reason:")
+            for reason in reasons:
+                lines.append(f"    - {reason}")
+    else:
+        lines.append("None")
+    lines.append("")
+
+    return "\n".join(lines)
+
+
+def write_combined_md(test_headers, test_rows, bench_headers, bench_rows, path):
+    with open(path, "w") as f:
+        f.write("# Validation Results Comparison\n\n")
+
+        f.write(regressions_and_fixes_section())
+        f.write("\n")
+
+        f.write("## Tests Comparison\n\n")
+        f.write("| " + " | ".join(test_headers) + " |\n")
+        f.write("| " + " | ".join("---" for _ in test_headers) + " |\n")
+        for row in test_rows:
+            f.write("| " + " | ".join(str(v) for v in row) + " |\n")
+        f.write("\n")
+
+        f.write("## Benchmark Comparison\n\n")
+        f.write("| " + " | ".join(bench_headers) + " |\n")
+        f.write("| " + " | ".join("---" for _ in bench_headers) + " |\n")
+        for row in bench_rows:
+            f.write("| " + " | ".join(str(v) for v in row) + " |\n")
+
+
 def main():
     output_path = OUTPUT_DIR / "comparison"
     output_path.mkdir(parents=True, exist_ok=True)
 
     test_headers, test_rows = test_comparison_table()
     write_csv(test_rows, test_headers, output_path / "tests_comparison.csv")
-    write_md(test_rows, test_headers, output_path / "tests_comparison.md")
 
     bench_headers, bench_rows = benchmark_comparison_table()
     write_csv(bench_rows, bench_headers, output_path / "benchmark_comparison.csv")
-    write_md(bench_rows, bench_headers, output_path / "benchmark_comparison.md")
+
+    md_path = output_path / "summary.md"
+    write_combined_md(test_headers, test_rows, bench_headers, bench_rows, md_path)
 
     print(f"Output written to {output_path}/")
     print()
-    print("=== Tests Comparison ===")
-    print()
-    with open(output_path / "tests_comparison.md") as f:
-        print(f.read())
-    print("=== Benchmark Comparison ===")
-    print()
-    with open(output_path / "benchmark_comparison.md") as f:
+    with open(md_path) as f:
         print(f.read())
 
 
