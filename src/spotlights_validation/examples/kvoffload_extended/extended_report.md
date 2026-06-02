@@ -12,9 +12,13 @@ discovered from vllm GitHub issues and PRs. All paths were verified against the
 
 ## Added entries
 
-7 entries were added on top of the base plan, plus `unit-kv-cache-coordinator`
-was promoted from "excluded" to a skipped entry in the plan itself (see index 12
-below). The added entries are grouped below by kind and priority.
+18 harness entries, 10 workloads, and 18 plan entries were added on top of the
+base plan across two discovery passes. `unit-kv-cache-coordinator` was promoted
+from "excluded" to a skipped entry in the plan itself (see index 12).
+
+The entries from the **first discovery pass** are grouped below by kind and
+priority. See [Second discovery pass](#second-discovery-pass-2026-06-01) for
+entries added on 2026-06-01.
 
 ---
 
@@ -176,6 +180,114 @@ evictions does not regress throughput.
 
 ---
 
+## Second discovery pass (2026-06-01)
+
+A second discovery pass was run with expanded search terms (`kv_connector offload`,
+`SimpleCPUOffload`, `OffloadingConnector`, `swap_blocks kv`, `cpu_kv_cache`).
+Maintainer engagement was verified on all source issues via the GitHub comments API.
+
+### New entries added
+
+#### index 33 — `gh_basic_cpu_offload_correctness` (Priority 2, halt on failure)
+
+**Name:** correctness tests — CPU offload output determinism under concurrency
+**Source:** issue [vllm-project/vllm#31210](https://github.com/vllm-project/vllm/issues/31210)
+**Components:** `kv_offload`, `kv_cache`, `worker`
+**Invoke:** `pytest -v tests/basic_correctness/test_cpu_offload.py`
+**Estimated duration:** 900 s
+
+Validates that KV blocks restored from CPU memory contain correct data under
+high concurrency. Issue #31210 reports wrong/garbled generation output with
+OffloadingConnector + chunked prefill under 7 concurrent clients with 96
+max_num_seqs. Confirmed by `robertgshaw2-redhat` (maintainer) and `orozery`
+(core contributor). Currently excluded from `correctness-basic` due to
+`cudaErrorDevicesUnavailable` on exclusive-process GPU hosts — this entry
+enables it as a separate, selectively-runnable test.
+
+**Workload — `gh_wl_high_concurrency_correctness`** (batch-inference, source: [#31210](https://github.com/vllm-project/vllm/issues/31210))
+96 seqs, 4000-token input, 180-token output, OffloadingConnector with 50000
+CPU blocks, `VLLM_BATCH_INVARIANT=1` for determinism. Same prompt must
+produce identical output across runs.
+
+---
+
+#### index 34 — `gh_prefetch_offload_correctness` (Priority 3, skipped)
+
+**Name:** correctness tests — prefetch KV offload path
+**Source:** issue [vllm-project/vllm#33689](https://github.com/vllm-project/vllm/issues/33689)
+**Components:** `kv_offload`, `kv_cache`
+**Invoke:** `pytest -v tests/basic_correctness/test_prefetch_offload.py`
+**Estimated duration:** 600 s
+**Status:** skipped — requires gated `meta-llama/Llama-3.2-1B-Instruct` model access
+
+Exercises the prefetch offload path where KV blocks are speculatively loaded
+from CPU before the scheduler needs them. Currently excluded from
+`correctness-basic` due to HF token gating.
+
+---
+
+#### index 35 — `gh_cpu_offloading_e2e` (Priority 2, halt on failure)
+
+**Name:** integration tests — CPU offloading end-to-end (full model path)
+**Source:** issue [vllm-project/vllm#31210](https://github.com/vllm-project/vllm/issues/31210)
+**Components:** `kv_offload`, `kv_cache`, `scheduler`, `worker`
+**Invoke:** `pytest -v tests/v1/kv_offload/test_cpu_offloading.py`
+**Estimated duration:** 1200 s
+
+End-to-end CPU offloading test that runs a full model forward pass with the
+offloading connector active. Deselected from the base `unit-kv-offload-tiering`
+entry (which uses `-k 'not test_cpu_offloading'`). Exercises the complete
+store→evict→reload cycle including GPU→CPU transfer, CPU block management,
+and CPU→GPU reload. Relevant to issues #31210 (wrong generation), #41515
+(HMA fails on subsequent request), and PR #36636 (hybrid model fix).
+
+**Workload — `gh_wl_hma_hybrid_model_offload`** (agentic, source: [#41515](https://github.com/vllm-project/vllm/issues/41515))
+Hybrid attention model (Qwen3.5-27B style) with HMA + KV offload. Multi-turn
+chat where subsequent requests fail. Validates SupportsHMA correctness.
+
+---
+
+#### index 36 — `gh_nixl_edge_cases` (Priority 5, no halt)
+
+**Name:** stress tests — NixL integration edge cases (memory pressure, error recovery)
+**Source:** issue [vllm-project/vllm#42085](https://github.com/vllm-project/vllm/issues/42085)
+**Components:** `kv_offload`, `distributed.kv_transfer`, `kv_cache`
+**Invoke:** `pytest -v tests/v1/kv_connector/nixl_integration/test_edge_cases.py`
+**Estimated duration:** 1800 s
+
+Stress tests targeting edge cases in the NixL KV transfer integration: memory
+pressure (GPU block pool exhaustion), error recovery (transfer failures
+mid-flight), and concurrent access patterns. Relevant to multiple bugs:
+#42085 (block pool exhaustion), #42371 (requests stuck), #40259 (CUDA crash).
+
+**Workload — `wl-large-kv-decode`** (batch-inference)
+Decode under memory pressure: 128 concurrent requests with 16K KV cache.
+
+**Workload — `gh_wl_dcp_offloading`** (batch-inference, source: [#41549](https://github.com/vllm-project/vllm/pull/41549))
+DCP + OffloadingConnector: validates num_blocks accounting with
+`decode_context_parallel_size > 1` (TP=4, DCP=2).
+
+---
+
+### Annotations added to existing entries
+
+- **`unit-kv-connector-offloading`** (`test_offloading_connector.py`): added
+  `source_refs` for PR [#36636](https://github.com/vllm-project/vllm/pull/36636)
+  (HMA support), issue [#41515](https://github.com/vllm-project/vllm/issues/41515)
+  (HMA subsequent request failure), issue [#35507](https://github.com/vllm-project/vllm/issues/35507)
+  (block_hashes assertion), and PR [#41549](https://github.com/vllm-project/vllm/pull/41549)
+  (DCP/PCP support).
+
+### New workload entries
+
+| workload_id | class | source | description |
+|---|---|---|---|
+| `gh_wl_high_concurrency_correctness` | batch-inference | [#31210](https://github.com/vllm-project/vllm/issues/31210) | 96 seqs, 4K input, OffloadingConnector, VLLM_BATCH_INVARIANT=1 determinism check |
+| `gh_wl_hma_hybrid_model_offload` | agentic | [#41515](https://github.com/vllm-project/vllm/issues/41515) | Hybrid model (Qwen3.5-27B) + HMA + multi-turn chat |
+| `gh_wl_dcp_offloading` | batch-inference | [#41549](https://github.com/vllm-project/vllm/pull/41549) | DCP (TP=4, DCP=2) + OffloadingConnector + prefix caching |
+
+---
+
 ## Base-plan sync (2026-06-01)
 
 The following changes were propagated from the base `kvoffload/validation_plan.json`
@@ -211,6 +323,10 @@ to keep the extended plan consistent:
 
 ## Excluded entries
 
+No entries were excluded because of non-trustable author or content. All issues
+used as primary sources had maintainer or core-contributor engagement verified
+via the GitHub comments API.
+
 8 entries were identified during initial discovery but excluded because their
 test paths do not exist in the vllm `v0.18.0` tag. (`unit-kv-cache-coordinator`
 was previously in this list but is now included as a skipped entry at index 12.)
@@ -227,9 +343,38 @@ was previously in this list but is now included as a skipped entry at index 12.)
 | `gh_nixl_multi_connector_edge_cases` | `tests/v1/kv_connector/nixl_integration/test_multi_connector_edge_cases.py` | path absent; only `test_multi_connector.py` exists at unit level |
 | `gh_hybrid_prefix_cache_eviction` | *(no test file)* | issue [#42948](https://github.com/vllm-project/vllm/issues/42948): `_maybe_evict_cached_block` destroys single-storage cache keys for hybrid MLA+SWA groups unconditionally; no test exists in v0.18.0 — the closest coverage is `test_maybe_evict_cached_block` in `tests/v1/core/test_prefix_caching.py` (PR #21400) which only exercises the basic two-block-same-hash case |
 
+### Version-gated entries (second discovery pass, 2026-06-01)
+
+The following bug fixes and features have relevant test files that were added
+**after** the v0.18.0 release. They are documented here for future reference
+when upgrading past v0.18.0.
+
+| PR/Issue | Title | Missing path | Notes |
+|---|---|---|---|
+| [#42959](https://github.com/vllm-project/vllm/pull/42959) | Prevent offloading stale sliding window blocks | `tests/v1/kv_connector/unit/offloading_connector/test_scheduler.py` | By `orozery` (core contributor). Fixes wrongful KV data offloading when SWA block is freed and re-allocated before store completes. |
+| [#41777](https://github.com/vllm-project/vllm/pull/41777) | Flush final KV block on request finish | `tests/v1/simple_kv_offload/test_scheduler.py` | Eager mode silently drops last full KV block when computed in same step as request finish. |
+| [#42612](https://github.com/vllm-project/vllm/pull/42612) | Deduplicate blocks in BlockPool.free_blocks() | `tests/v1/core/test_block_pool_double_free.py` | Merged fix for SWA double-free causing `num_free_blocks` over-count. |
+| [#43946](https://github.com/vllm-project/vllm/pull/43946) | Eviction-triggered store for OffloadingConnector | `tests/v1/kv_offload/cpu/test_manager.py` | Opt-in lazy store mode (`KV_OFFLOAD_LAZY_STORE=1`); test paths all post-v0.18.0. |
+| [#43689](https://github.com/vllm-project/vllm/pull/43689) | SharedOffloadRegion align blocks to page-size | `tests/v1/kv_offload/test_fs_tier.py` | Required for O_DIRECT filesystem offloading. |
+| [#41228](https://github.com/vllm-project/vllm/pull/41228) | Scheduler-side sliding window group support | `tests/v1/kv_connector/unit/offloading_connector/` | Part of HMA+offloading series; tests in follow-up PRs. |
+
 ---
 
 ## Conclusions
+
+### Coverage summary
+
+The extended plan now contains **36 plan entries** (vs. 25 in base), **42 harness
+entries** (vs. 24), and **15 workload definitions** (vs. 6). The additions cover:
+
+- **Correctness under concurrency** (#31210, #40259): CPU offload output
+  determinism when KV blocks are actively being evicted/restored.
+- **HMA + offloading** (#36636, #41515): hybrid attention models where
+  OffloadingConnector must implement SupportsHMA correctly.
+- **DCP/PCP compatibility** (#41549): decode context parallelism with offloading.
+- **Prefetch offload** (#33689): speculative KV block preloading path.
+- **NixL edge cases** (#42085, #42371): memory pressure and error recovery in
+  disaggregated prefill/decode setups.
 
 ### Issue #42948 — no test coverage at v0.18.0
 
@@ -244,3 +389,10 @@ the v0.18.0 repo references issue #42948.
 The gap entry `gh_hybrid_prefix_cache_eviction` and the associated workload
 `gh_wl_deepseek_v4_multi_turn_prefix` are therefore correctly flagged as
 unmet — there is no test to point them at yet.
+
+### Upgrade path
+
+6 version-gated entries (listed in the table above) will become available when
+upgrading past v0.18.0. The most impactful are #42959 (stale SWA blocks) and
+#42612 (BlockPool double-free), both of which fix data-corruption paths that
+are exercisable but untestable at the current pin.

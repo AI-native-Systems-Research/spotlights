@@ -1,36 +1,48 @@
-Working folder: /Users/oritp/Dev/Repositories/spotlight
-Create and save mvp artifacts as explained in spotlights-validation/docs/mvp_plan.md, and spotlights-validation/docs/design.md:
+Artifacts folder: src/spotlights_validation/examples/kvoffload
+Validation artifacts:
+- harness_map.json
+- workload_matrix.json
+- validation_plan.json
 
-- spotlights-validation/artifacts/kvoffload/harness_map.json
-- spotlights-validation/artifacts/kvoffload/workload_matrix.json
-- spotlights-validation/artifacts/kvoffload/validation_plan.json
-
-The target system is cloned here under: vllm
-The proposed change is cloned under kv-offload-lab
-Follow the requirements detailed at spotlights-validation/docs/design.md to decide about the full validation plan and the priorities.
-
-At the current the code that generates these artifacts can be kept specific (hard coded) for vllm.
-
----
-
-## Extended discovery: enrich artifacts from vllm GitHub issues and PRs
-
-After producing the base artifacts above, perform an additional discovery pass against the vllm GitHub repository to find test cases, workloads, and benchmarks that are not present in the local clone but are relevant to KV-cache offloading.
+Extend the existing validation artifacts by discovering additional resources in vLLM issues and PRs.
+Perform a discovery pass against the vllm GitHub repository to find test cases, workloads, and benchmarks that are not present in the existing artifacts but are relevant to KV-cache offloading.
 
 ### Step 1 — Search GitHub for relevant issues and PRs
 
-Query https://github.com/vllm-project/vllm using the GitHub CLI (`gh`) or the GitHub REST API. Search for issues and pull requests that are related to KV-cache offloading, CPU offload, disk offload, swap, paged attention, or prefix caching. Suggested queries:
+Query https://github.com/vllm-project/vllm using the **GitHub REST API** (via `curl`). The `gh` CLI may not be available in all environments; the REST API is the reliable fallback. Search for issues and pull requests that are related to KV-cache offloading, CPU offload, disk offload, swap, paged attention, or prefix caching. Suggested queries:
 
 ```bash
-gh issue list --repo vllm-project/vllm --state all --search "kv cache offload" --limit 50 --json number,title,body,labels,state
-gh pr list   --repo vllm-project/vllm --state all --search "kv cache offload" --limit 50 --json number,title,body,labels,state,files
-gh issue list --repo vllm-project/vllm --state all --search "cpu offload swap"  --limit 30 --json number,title,body,labels,state
-gh pr list   --repo vllm-project/vllm --state all --search "prefix cache evict"  --limit 30 --json number,title,body,labels,state,files
+# GitHub Search API — issues and PRs are both returned via the issues endpoint
+curl -s -H "Accept: application/vnd.github+json" \
+  "https://api.github.com/search/issues?q=repo:vllm-project/vllm+kv+cache+offload+in:title,body&per_page=30&sort=updated&order=desc"
+
+curl -s -H "Accept: application/vnd.github+json" \
+  "https://api.github.com/search/issues?q=repo:vllm-project/vllm+cpu+offload+swap+in:title,body&per_page=30&sort=updated&order=desc"
+
+curl -s -H "Accept: application/vnd.github+json" \
+  "https://api.github.com/search/issues?q=repo:vllm-project/vllm+prefix+cache+evict+in:title,body&per_page=30&sort=updated&order=desc"
+
+# Additional recommended search terms for broader coverage:
+#   "kv_connector offload", "SimpleCPUOffload", "OffloadingConnector",
+#   "swap_blocks kv", "cpu_kv_cache OR kv_cache_dtype offload"
+
+# Fetch individual issue/PR details:
+curl -s -H "Accept: application/vnd.github+json" \
+  "https://api.github.com/repos/vllm-project/vllm/issues/<NUMBER>"
+
+# Fetch comments (for trustworthiness verification):
+curl -s -H "Accept: application/vnd.github+json" \
+  "https://api.github.com/repos/vllm-project/vllm/issues/<NUMBER>/comments?per_page=10"
 ```
 
-Run additional queries as needed to get broad coverage.
+Run additional queries as needed to get broad coverage. If a `GITHUB_TOKEN` environment variable is available, include `-H "Authorization: Bearer $GITHUB_TOKEN"` to increase rate limits from 10 to 30 requests/minute.
 
-### Step 2 — Extract test cases, workloads, and benchmarks
+### Step 2 - Filter out non-trustable issues 
+Filtering Conditions:
+- No maintainer commented on the issue and approved this is a real problem
+- The issue author did not submit many issues, and his few issues were not processed and\or not approved by maintainers
+
+### Step 3 — Extract test cases, workloads, and benchmarks
 
 For each issue or PR found, extract the following if present:
 
@@ -42,11 +54,11 @@ For each issue or PR found, extract the following if present:
 
 Prefer concrete, runnable entries. Skip items that are purely conceptual or lack enough detail to construct a harness entry or workload config.
 
-### Step 3 — Merge into extended artifacts
+### Step 4 — Merge into extended artifacts
 
-Produce three new artifact files under `spotlights-validation/artifacts/kvoffload_extended/`:
+Produce three new artifact files under `src/spotlights_validation/examples/kvoffload_extended/`:
 
-**harness_map.json** — start from the base `artifacts/kvoffload/harness_map.json` and add new entries discovered from GitHub. Each new entry must follow the `TestHarnessMap` schema (see design.md). Set `source` to `"github_issue"` or `"github_pr"` and add a `source_ref` field with the URL of the issue or PR it was extracted from. Example entry shape:
+**harness_map.json** — start from the base `src/spotlights_validation/examples/kvoffload/harness_map.json` and add new entries discovered from GitHub. Each new entry must follow the `TestHarnessMap` schema (see design.md). Set `source` to `"github_issue"` or `"github_pr"` and add a `source_ref` field with the URL of the issue or PR it was extracted from. Example entry shape:
 
 ```json
 {
@@ -63,7 +75,7 @@ Produce three new artifact files under `spotlights-validation/artifacts/kvoffloa
 }
 ```
 
-**workload_matrix.json** — start from the base `artifacts/kvoffload/workload_matrix.json` and add new workload entries extracted from GitHub. Each entry follows the `ValidationWorkloadMatrix` schema. Add a `source_ref` field. Example:
+**workload_matrix.json** — start from the base `src/spotlights_validation/examples/kvoffload/workload_matrix.json` and add new workload entries extracted from GitHub. Each entry follows the `ValidationWorkloadMatrix` schema. Add a `source_ref` field. Example:
 
 ```json
 {
@@ -85,11 +97,11 @@ Produce three new artifact files under `spotlights-validation/artifacts/kvoffloa
 }
 ```
 
-**validation_plan.json** — start from the base `artifacts/kvoffload/validation_plan.json` and add plan entries for the newly discovered harness entries and workloads. Assign priorities using the same rules as design.md: entries that directly exercise the KV offload path get higher priority; entries derived from regression reports get `halt_on_failure: true` when the regression was severe (data loss, OOM crash, correctness failure).
+**validation_plan.json** — start from the base `src/spotlights_validation/examples/kvoffload/validation_plan.json` and add plan entries for the newly discovered harness entries and workloads. Assign priorities using the same rules as design.md: entries that directly exercise the KV offload path get higher priority; entries derived from regression reports get `halt_on_failure: true` when the regression was severe (data loss, OOM crash, correctness failure).
 
-### Step 4 — Write a discovery summary
+### Step 5 — Write a discovery summary
 
-Append a `_discovery_summary.json` file to `spotlights-validation/artifacts/kvoffload_extended/` that records:
+Append a `_discovery_summary.json` file to `src/spotlights_validation/examples/kvoffload_extended/` that records:
 
 ```json
 {
@@ -105,7 +117,7 @@ Append a `_discovery_summary.json` file to `spotlights-validation/artifacts/kvof
 
 ### Constraints
 
-- Do not modify the files under `artifacts/kvoffload/` — only write to `artifacts/kvoffload_extended/`.
+- Do not modify the files under `src/spotlights_validation/examples/kvoffload/` — only write to `src/spotlights_validation/examples/kvoffload_extended/`.
 - All new artifact files must be valid JSON and conform to the schemas in design.md.
 - If a GitHub API rate limit is reached, pause and resume; do not discard partial results.
 - If a test path referenced in an issue does not exist in the local `vllm/` clone, still include the entry but set `"path_verified": false`.

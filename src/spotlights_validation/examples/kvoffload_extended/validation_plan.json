@@ -879,6 +879,156 @@
           "description": "Long document Q&A: 32K–128K input tokens testing KV block management for very long sequences."
         }
       ]
+    },
+    {
+      "priority": 2,
+      "halt_on_failure": true,
+      "index": 33,
+      "harness_entry": {
+        "id": "gh_basic_cpu_offload_correctness",
+        "name": "correctness tests — CPU offload output determinism under concurrency",
+        "kind": "correctness",
+        "path": "tests/basic_correctness/test_cpu_offload.py",
+        "invoke": "pytest -v tests/basic_correctness/test_cpu_offload.py",
+        "components": [
+          "kv_offload",
+          "kv_cache",
+          "worker"
+        ],
+        "output_format": "pytest-json",
+        "estimated_duration": 900,
+        "path_verified": true,
+        "source": "github_issue",
+        "source_ref": "https://github.com/vllm-project/vllm/issues/31210"
+      },
+      "workloads": [
+        {
+          "workload_id": "gh_wl_high_concurrency_correctness",
+          "workload_class": "batch-inference",
+          "source": "github_issue",
+          "source_ref": "https://github.com/vllm-project/vllm/issues/31210",
+          "config_path": null,
+          "components_exercised": [
+            "kv_offload",
+            "kv_cache",
+            "scheduler",
+            "worker"
+          ],
+          "description": "High-concurrency correctness: validates KV blocks restored from CPU are not corrupted under sustained concurrent load (96 seqs, chunked prefill, OffloadingConnector)."
+        }
+      ]
+    },
+    {
+      "priority": 3,
+      "halt_on_failure": false,
+      "index": 34,
+      "skipped": true,
+      "skip_reason": "requires gated meta-llama/Llama-3.2-1B-Instruct model access — re-enable once HF token is authorized",
+      "harness_entry": {
+        "id": "gh_prefetch_offload_correctness",
+        "name": "correctness tests — prefetch KV offload path",
+        "kind": "correctness",
+        "path": "tests/basic_correctness/test_prefetch_offload.py",
+        "invoke": "pytest -v tests/basic_correctness/test_prefetch_offload.py",
+        "components": [
+          "kv_offload",
+          "kv_cache"
+        ],
+        "output_format": "pytest-json",
+        "estimated_duration": 600,
+        "path_verified": true,
+        "source": "github_issue",
+        "source_ref": "https://github.com/vllm-project/vllm/issues/33689"
+      },
+      "workloads": []
+    },
+    {
+      "priority": 2,
+      "halt_on_failure": true,
+      "index": 35,
+      "harness_entry": {
+        "id": "gh_cpu_offloading_e2e",
+        "name": "integration tests — CPU offloading end-to-end (full model path)",
+        "kind": "integration",
+        "path": "tests/v1/kv_offload/test_cpu_offloading.py",
+        "invoke": "pytest -v tests/v1/kv_offload/test_cpu_offloading.py",
+        "components": [
+          "kv_offload",
+          "kv_cache",
+          "scheduler",
+          "worker"
+        ],
+        "output_format": "pytest-json",
+        "estimated_duration": 1200,
+        "path_verified": true,
+        "source": "github_issue",
+        "source_ref": "https://github.com/vllm-project/vllm/issues/31210"
+      },
+      "workloads": [
+        {
+          "workload_id": "gh_wl_hma_hybrid_model_offload",
+          "workload_class": "agentic",
+          "source": "github_issue",
+          "source_ref": "https://github.com/vllm-project/vllm/issues/41515",
+          "config_path": null,
+          "components_exercised": [
+            "kv_offload",
+            "kv_cache",
+            "scheduler"
+          ],
+          "description": "Hybrid attention model (FullAttention + Mamba) with HMA + KV offload: multi-turn chat pattern validating SupportsHMA correctness across turns."
+        }
+      ]
+    },
+    {
+      "priority": 5,
+      "halt_on_failure": false,
+      "index": 36,
+      "harness_entry": {
+        "id": "gh_nixl_edge_cases",
+        "name": "stress tests — NixL integration edge cases (memory pressure, error recovery)",
+        "kind": "stress",
+        "path": "tests/v1/kv_connector/nixl_integration/test_edge_cases.py",
+        "invoke": "pytest -v tests/v1/kv_connector/nixl_integration/test_edge_cases.py",
+        "components": [
+          "kv_offload",
+          "distributed.kv_transfer",
+          "kv_cache"
+        ],
+        "output_format": "pytest-json",
+        "estimated_duration": 1800,
+        "path_verified": true,
+        "source": "github_issue",
+        "source_ref": "https://github.com/vllm-project/vllm/issues/42085"
+      },
+      "workloads": [
+        {
+          "workload_id": "wl-large-kv-decode",
+          "workload_class": "batch-inference",
+          "source": "curated",
+          "config_path": null,
+          "components_exercised": [
+            "kv_offload",
+            "kv_cache",
+            "scheduler",
+            "worker"
+          ],
+          "description": "Decode under memory pressure: 128 concurrent requests with 16K KV cache per request."
+        },
+        {
+          "workload_id": "gh_wl_dcp_offloading",
+          "workload_class": "batch-inference",
+          "source": "github_pr",
+          "source_ref": "https://github.com/vllm-project/vllm/pull/41549",
+          "config_path": null,
+          "components_exercised": [
+            "kv_offload",
+            "distributed.kv_transfer",
+            "scheduler"
+          ],
+          "description": "DCP + OffloadingConnector: validates num_blocks accounting with decode_context_parallel_size > 1 (TP=4, DCP=2)."
+        }
+      ]
     }
   ]
 }
