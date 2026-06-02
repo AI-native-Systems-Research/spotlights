@@ -88,6 +88,7 @@ Each `Candidate` must match this schema:
 | `evolve_rationale` | Why this is worth changing — observation-grounded, not speculative. Cite the anomaly id when relevant. |
 | `estimated_impact` | `high` \| `medium` \| `low`. |
 | `estimated_impact_explanation` | One sentence justifying the rating. |
+| `anomaly_refs` | List of `Anomaly.anomaly_id` strings from `Signals.anomalies` that motivated this candidate. **Required when an anomaly drove the finding** — set to `[]` only if the candidate is not anomaly-rooted. Use the exact `anomaly_id` values; do not paraphrase. |
 
 Set `state` to `"DISCOVERED"`. Leave `deep_research_proposals` and
 `agent_proposals` as empty lists — those are downstream fields.

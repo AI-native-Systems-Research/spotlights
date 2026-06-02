@@ -48,6 +48,11 @@ class Candidate(BaseModel):
     evolve_rationale: str = Field(min_length=1)
     estimated_impact: EstimatedImpact
     estimated_impact_explanation: str = Field(min_length=1)
+    # IDs of `Anomaly` records (from `Signals.anomalies`) that motivated
+    # this candidate. Free-form strings to keep `Candidate` decoupled from
+    # the Bundle A schema. Empty list when the candidate is technique-driven
+    # or otherwise not anomaly-rooted.
+    anomaly_refs: list[str] = Field(default_factory=list)
     state: CandidateState = "DISCOVERED"
     deep_research_proposals: list[DeepResearchProposal] = Field(default_factory=list)
     agent_proposals: list[AgentProposal] = Field(default_factory=list)
