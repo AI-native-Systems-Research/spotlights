@@ -6,7 +6,7 @@ and read them back into `ExecutionResult.file_edits`.
 
 ⚠ This stage runs claude with `permission_mode="bypassPermissions"` so
 edits land without per-file prompts. The cwd is the user's
-`--subject-root` directory — the user authorized this when invoking the
+`--repo` directory — the user authorized this when invoking the
 pipeline. Real-world usage should run this against a clean git checkout
 (or a worktree / sandbox) so reverting / inspecting diffs is easy.
 

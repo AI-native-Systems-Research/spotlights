@@ -6,11 +6,11 @@ real work lives in `runner.run_pipeline`.
 
 Examples (from the approved plan):
 
-    signal-pipeline --run-dir runs/skel --subject-root . --no-resume
-    signal-pipeline --run-dir runs/x --subject-root ../vllm --only-stage 02
-    signal-pipeline --run-dir runs/x --subject-root ../vllm --from-stage 03 \\
+    signal-pipeline --artifacts-dir runs/skel --repo . --no-resume
+    signal-pipeline --artifacts-dir runs/x --repo ../vllm --only-stage 02
+    signal-pipeline --artifacts-dir runs/x --repo ../vllm --from-stage 03 \\
         --inject 03=path/to/candidates.json
-    signal-pipeline --run-dir runs/x --subject-root ../vllm \\
+    signal-pipeline --artifacts-dir runs/x --repo ../vllm \\
         --inject 04/cand-0001=path/to/change.json
 """
 
@@ -58,15 +58,17 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
-        "--run-dir",
+        "--artifacts-dir",
         type=Path,
         required=True,
         help="Directory holding this run's stage artifacts (created if missing).",
     )
     p.add_argument(
-        "--subject-root",
+        "--repo",
         type=Path,
         required=True,
+        dest="subject_root",
+        metavar="REPO",
         help="Path to the subject system's repo (the system being analyzed).",
     )
     p.add_argument(
@@ -156,7 +158,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         result = run_pipeline(
             sp_input,
-            run_dir=args.run_dir,
+            run_dir=args.artifacts_dir,
             stages=sel,
             resume=resume,
             inject=args.inject,
@@ -173,7 +175,7 @@ def main(argv: list[str] | None = None) -> int:
 
     # Compact summary on stdout — useful for CI / scripting.
     summary = {
-        "run_dir": str(result.run_dir),
+        "artifacts_dir": str(result.run_dir),
         "completed_stages": result.completed_stages,
         "skipped_stages": result.skipped_stages,
         "issues": result.issues,

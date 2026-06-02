@@ -7,7 +7,7 @@ State-machine concerns (resume, inject, etc.) are covered in
 timestamp-named under `log_dir`, and that the returned `ProjectTree`
 round-trips into `02_projecttree.json` cleanly.
 
-The `--only-stage 02 --subject-root <real_repo>` smoke test that fires
+The `--only-stage 02 --repo <real_repo>` smoke test that fires
 the real claude subprocess is a manual verification step (per the plan)
 — don't add it here.
 """

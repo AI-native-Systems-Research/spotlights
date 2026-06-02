@@ -35,8 +35,8 @@ doc and aren't implemented here.
 # directory of raw OTel files (the agent figures out which).
 env -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_BASE_URL \
   uv run signal-pipeline \
-    --run-dir runs/my-first-run \
-    --subject-root ../vllm \
+    --artifacts-dir runs/my-first-run \
+    --repo ../vllm \
     --telemetry-from data/20260525T202105Z_util0.4_mem16_lru
 ```
 
@@ -50,9 +50,9 @@ they currently run sequentially.
 
 ---
 
-## Run-dir layout
+## Artifacts-dir layout
 
-Each invocation writes to a single `--run-dir`. Single-artifact stages
+Each invocation writes to a single `--artifacts-dir`. Single-artifact stages
 write one file; per-candidate fan-out stages write a directory plus a
 manifest:
 
@@ -74,7 +74,7 @@ runs/<run-id>/
                                #  prompts, parsed events
 ```
 
-`runs/` is gitignored. The same `--run-dir` can be re-used: `--resume`
+`runs/` is gitignored. The same `--artifacts-dir` can be re-used: `--resume`
 (default) skips stages whose canonical artifact (or fan-out manifest)
 is already complete; `--no-resume` re-runs everything from the
 requested start.
@@ -87,7 +87,7 @@ requested start.
 
 ```bash
 # Re-run only candidate generation (stage 03), keep upstream as-is.
-uv run signal-pipeline --run-dir runs/x --subject-root ../vllm --only-stage 03
+uv run signal-pipeline --artifacts-dir runs/x --repo ../vllm --only-stage 03
 ```
 
 `--only-stage NN` is `--from-stage NN --to-stage NN --no-resume`. Stage
@@ -97,7 +97,7 @@ stages 01 and 02 to be on disk and complete.
 ### Run a range
 
 ```bash
-uv run signal-pipeline --run-dir runs/x --subject-root ../vllm \
+uv run signal-pipeline --artifacts-dir runs/x --repo ../vllm \
   --from-stage 03 --to-stage 04
 ```
 
@@ -106,7 +106,7 @@ uv run signal-pipeline --run-dir runs/x --subject-root ../vllm \
 Single-artifact stage:
 
 ```bash
-uv run signal-pipeline --run-dir runs/x --subject-root ../vllm \
+uv run signal-pipeline --artifacts-dir runs/x --repo ../vllm \
   --inject 03=path/to/my_candidates.json \
   --from-stage 04
 ```
@@ -114,14 +114,14 @@ uv run signal-pipeline --run-dir runs/x --subject-root ../vllm \
 Fan-out stage (whole directory replace, all per-candidate files):
 
 ```bash
-uv run signal-pipeline --run-dir runs/x --subject-root ../vllm \
+uv run signal-pipeline --artifacts-dir runs/x --repo ../vllm \
   --inject 04=path/to/changes_dir/
 ```
 
 Fan-out stage (single per-id replacement):
 
 ```bash
-uv run signal-pipeline --run-dir runs/x --subject-root ../vllm \
+uv run signal-pipeline --artifacts-dir runs/x --repo ../vllm \
   --inject 04/cand-0001=path/to/one_change.json
 ```
 

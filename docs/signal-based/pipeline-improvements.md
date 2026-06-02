@@ -82,7 +82,7 @@ stage 05 produces worse edits. A/B before committing.
 ## 3. Cross-run ProjectTree cache
 
 **What.** Within a run, `--resume` skips stage 02 if
-`02_projecttree.json` exists. Across runs (different `--run-dir`), it
+`02_projecttree.json` exists. Across runs (different `--artifacts-dir`), it
 re-extracts every time even when the subject repo's HEAD hasn't
 moved. Adding a cache keyed by `(subject_root, git rev-parse HEAD)`
 makes ProjectTree extraction free on every subsequent run against the
