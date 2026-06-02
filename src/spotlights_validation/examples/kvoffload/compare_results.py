@@ -154,32 +154,31 @@ def benchmark_comparison_table():
                 all_metric_names.append(m["name"])
 
     headers = ["row", "index", "id", "status", "priority", "halt_on_failure",
-               "invoke"] + all_metric_names
+               "policy"] + all_metric_names
     rows = []
 
     configs = [
         ("baseline-lru", "benchmark-multi-turn-kv-offload-lab-lru",
-         baseline_plan, baseline_benchmarks.get("lru")),
+         baseline_plan, baseline_benchmarks.get("lru"), "lru"),
         ("baseline-arc", "benchmark-multi-turn-kv-offload-lab-arc",
-         baseline_plan, baseline_benchmarks.get("arc")),
+         baseline_plan, baseline_benchmarks.get("arc"), "arc"),
         ("evolved", "benchmark-multi-turn-kv-offload-lab",
-         change_plan, change_benchmarks.get("evolved")),
+         change_plan, change_benchmarks.get("evolved"), "evolved"),
     ]
 
-    for row_label, hid, plan, result_entry in configs:
+    for row_label, hid, plan, result_entry, policy in configs:
         plan_entry = plan.get(hid)
         status = determine_benchmark_status(plan_entry, result_entry)
         idx = plan_entry["index"] if plan_entry else ""
         priority = plan_entry["priority"] if plan_entry else ""
         halt = plan_entry["halt_on_failure"] if plan_entry else ""
-        invoke = plan_entry["harness_entry"]["invoke"] if plan_entry else ""
 
         metric_values = {}
         if result_entry:
             for m in result_entry.get("metrics", []):
                 metric_values[m["name"]] = m["measured_value"]
 
-        row = [row_label, idx, hid, status, priority, halt, invoke]
+        row = [row_label, idx, hid, status, priority, halt, policy]
         for mn in all_metric_names:
             row.append(metric_values.get(mn, ""))
         rows.append(row)
