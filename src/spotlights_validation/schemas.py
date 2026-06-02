@@ -150,6 +150,9 @@ class TestResult(BaseModel):
     script: str
     kind: str
     invoke: str = ""
+    index: int | None = None
+    priority: int | None = None
+    halt_on_failure: bool = False
     passed: int = 0
     failed: int = 0
     skipped: int = 0
@@ -164,6 +167,9 @@ class BenchmarkResult(BaseModel):
     workload_class: str
     script: str
     invoke: str = ""
+    index: int | None = None
+    priority: int | None = None
+    halt_on_failure: bool = False
     metrics: list[MetricResult] = Field(default_factory=list)
     optimization_target: float | None = None
     raw_output: str = ""

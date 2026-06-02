@@ -271,6 +271,9 @@ def _run_test(
         script=h.name,
         kind=h.kind,
         invoke=h.invoke,
+        index=entry.index,
+        priority=entry.priority,
+        halt_on_failure=entry.halt_on_failure,
         passed=passed,
         failed=failed,
         skipped=skipped,
@@ -337,6 +340,9 @@ def _run_benchmark(
         workload_class=results[-1].workload_class,
         script=h.name,
         invoke=h.invoke,
+        index=entry.index,
+        priority=entry.priority,
+        halt_on_failure=entry.halt_on_failure,
         metrics=combined_metrics,
         raw_output=combined_raw,
     )
@@ -722,6 +728,9 @@ def _record_dry_run(
                     workload_class=wl.workload_class if wl else "batch-inference",
                     script=h.name,
                     invoke=h.invoke,
+                    index=entry.index,
+                    priority=entry.priority,
+                    halt_on_failure=entry.halt_on_failure,
                     raw_output="[dry-run]",
                 )
             )
@@ -732,6 +741,9 @@ def _record_dry_run(
                 script=h.name,
                 kind=h.kind,
                 invoke=h.invoke,
+                index=entry.index,
+                priority=entry.priority,
+                halt_on_failure=entry.halt_on_failure,
                 passed=1,
                 duration_seconds=0.0,
             )
