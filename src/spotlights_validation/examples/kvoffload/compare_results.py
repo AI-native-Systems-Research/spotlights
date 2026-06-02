@@ -103,7 +103,7 @@ def test_comparison_table():
         if entry["harness_entry"]["kind"] in test_kinds:
             all_ids.append(hid)
 
-    headers = ["row", "id", "status",
+    headers = ["run", "id", "status",
                "invoke", "pass", "failed", "skipped"]
     rows = []
 
@@ -147,7 +147,7 @@ def benchmark_comparison_table():
             if m["name"] not in all_metric_names:
                 all_metric_names.append(m["name"])
 
-    headers = ["row", "id", "status",
+    headers = ["run", "id", "status",
                "policy"] + all_metric_names
     rows = []
 
