@@ -12,9 +12,9 @@ discovered from vllm GitHub issues and PRs. All paths were verified against the
 
 ## Added entries
 
-18 harness entries, 10 workloads, and 18 plan entries were added on top of the
-base plan across two discovery passes. `unit-kv-cache-coordinator` was promoted
-from "excluded" to a skipped entry in the plan itself (see index 12).
+18 harness entries, 9 workloads, and 11 plan entries were added on top of the
+base plan across two discovery passes (appended as indices 26–36). `unit-kv-cache-coordinator` was promoted
+from "excluded" to a skipped entry in the plan itself (see index 9).
 
 The entries from the **first discovery pass** are grouped below by kind and
 priority. See [Second discovery pass](#second-discovery-pass-2026-06-01) for
@@ -24,7 +24,7 @@ entries added on 2026-06-01.
 
 ### Correctness — Priority 2 (halt on failure)
 
-#### index 3 — `gh_cache_pollution_prevention`
+#### index 26 — `gh_cache_pollution_prevention`
 
 **Name:** correctness tests — prefix-cache pollution prevention (invalid block eviction)
 **Source:** PR [vllm-project/vllm#26813](https://github.com/vllm-project/vllm/pull/26813)
@@ -56,7 +56,7 @@ pending creation of a dedicated #42948 test entry.
 
 ---
 
-#### index 4 — `gh_invalid_blocks_correctness`
+#### index 27 — `gh_invalid_blocks_correctness`
 
 **Name:** correctness tests — invalid block handling (sync recompute, sync fail, async recompute)
 **Source:** issue [vllm-project/vllm#42085](https://github.com/vllm-project/vllm/issues/42085)
@@ -75,7 +75,7 @@ still offloading.
 
 ### Unit — Priority 3 (halt on failure)
 
-#### index 8 — `gh_error_propagation`
+#### index 28 — `gh_error_propagation`
 
 **Name:** unit tests — KV connector error propagation
 **Source:** issue [vllm-project/vllm#39491](https://github.com/vllm-project/vllm/issues/39491)
@@ -92,7 +92,7 @@ the worker process.
 
 ### Correctness — Priority 3 (no halt)
 
-#### index 13 — `gh_reset_prefix_cache_e2e`
+#### index 29 — `gh_reset_prefix_cache_e2e`
 
 **Name:** correctness tests — prefix cache reset end-to-end
 **Source:** PR [vllm-project/vllm#41956](https://github.com/vllm-project/vllm/pull/41956)
@@ -114,7 +114,7 @@ over multiple eviction cycles, run against `benchmarks/benchmark_prefix_caching.
 
 ### Integration — Priority 6 (no halt)
 
-#### index 25 — `gh_nixl_disagg_accuracy`
+#### index 30 — `gh_nixl_disagg_accuracy`
 
 **Name:** integration tests — NixL disaggregated prefill/decode accuracy
 **Source:** issue [vllm-project/vllm#33689](https://github.com/vllm-project/vllm/issues/33689)
@@ -138,7 +138,7 @@ correctness validation (large KV blocks, multiple concurrent requests).
 Both benchmark entries are currently skipped pending `output_template`
 configuration. They will be re-enabled once metric extraction is wired up.
 
-#### index 29 — `gh_benchmark_latency`
+#### index 31 — `gh_benchmark_latency`
 
 **Name:** benchmark — latency (TTFT and TPOT vs. baseline pre-change)
 **Source:** issue [vllm-project/vllm#32604](https://github.com/vllm-project/vllm/issues/32604)
@@ -157,7 +157,7 @@ regress by more than 10% vs. the no-offload baseline.
 
 ---
 
-#### index 31 — `gh_benchmark_throughput`
+#### index 32 — `gh_benchmark_throughput`
 
 **Name:** benchmark — throughput (tokens/s vs. baseline pre-change)
 **Source:** issue [vllm-project/vllm#32604](https://github.com/vllm-project/vllm/issues/32604)
@@ -189,7 +189,6 @@ Maintainer engagement was verified on all source issues via the GitHub comments 
 ### New entries added
 
 #### index 33 — `gh_basic_cpu_offload_correctness` (Priority 2, halt on failure)
-
 **Name:** correctness tests — CPU offload output determinism under concurrency
 **Source:** issue [vllm-project/vllm#31210](https://github.com/vllm-project/vllm/issues/31210)
 **Components:** `kv_offload`, `kv_cache`, `worker`
@@ -295,14 +294,14 @@ to keep the extended plan consistent:
 
 - **Hardcoded paths removed:** all `/proj/...` absolute paths replaced with
   `$ROOT_DIR`-relative references (benchmark invoke, output_template source).
-- **`before_run` hooks added:** benchmark entries (indices 21–23) and the NixL
-  integration entry (index 24) now run `kill_vllm.sh` before starting to avoid
+- **`before_run` hooks added:** benchmark entries (indices 17–19) and the NixL
+  integration entry (index 20) now run `kill_vllm.sh` before starting to avoid
   port conflicts with stale vLLM processes.
-- **LRU/ARC baseline benchmarks added:** two new entries (indices 22–23) run the
+- **LRU/ARC baseline benchmarks added:** two new entries (indices 18–19) run the
   multi-turn benchmark with `--policy lru` and `--policy arc` respectively,
   providing baselines for the evolved-policy comparison.
 - **`unit-kv-cache-coordinator` promoted:** moved from the Excluded table to a
-  skipped entry (index 12) with an explicit `skip_reason`, matching the base plan.
+  skipped entry (index 9) with an explicit `skip_reason`, matching the base plan.
 - **`integration-engine` invoke updated:** added `--ignore` flags for
   `test_abort_final_step.py` and `test_output_processor.py`, plus
   `-k 'not test_skip_tokenizer_initialization'` to exclude tests requiring gated
@@ -316,8 +315,8 @@ to keep the extended plan consistent:
   `collect_summary.py`-generated `summary.json` (flat keys: `ttft_ms_mean`,
   `tpot_ms_mean`, `cpu_hit_rate`, `evictions`) instead of the old nested
   `best_program_info.json` structure.
-- **All indices renumbered** to account for the 3 inserted entries (coordinator,
-  LRU, ARC). Total entry count: 32.
+- **Extended entries appended** after the base plan (indices 26–36). Base-plan
+  entries retain their original indices (1–25). Total entry count: 36.
 
 ---
 
@@ -329,7 +328,7 @@ via the GitHub comments API.
 
 8 entries were identified during initial discovery but excluded because their
 test paths do not exist in the vllm `v0.18.0` tag. (`unit-kv-cache-coordinator`
-was previously in this list but is now included as a skipped entry at index 12.)
+was previously in this list but is now included as a skipped entry at index 9.)
 
 | id | missing path | reason |
 |---|---|---|
