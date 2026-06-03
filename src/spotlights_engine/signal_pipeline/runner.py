@@ -18,13 +18,16 @@ from __future__ import annotations
 
 import json
 import shutil
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from spotlights_engine.signal_pipeline.event_formatter import StageEventFormatter
+from spotlights_engine.signal_pipeline.findings import emit_findings
 from spotlights_engine.signal_pipeline.layout import (
     ALL_STAGES,
     RunDirLayout,
@@ -173,6 +176,14 @@ class InjectSpec:
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _fmt_stage_duration(seconds: float) -> str:
+    seconds = max(0.0, float(seconds))
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    m, s = divmod(int(round(seconds)), 60)
+    return f"{m}:{s:02d}"
 
 
 class StageStatus(BaseModel):
@@ -600,9 +611,16 @@ def _run_fanout(
 
     # Run missing ids.
     ctx = ctx_factory(spec)
+    # Each fan-out item is a separate `claude -p` invocation, so flush the
+    # progress formatter between items to prevent burst dedup from collapsing
+    # cross-item events that happen to share a signature.
+    on_event = ctx.on_event
+    flush = getattr(on_event, "flush", None) if on_event is not None else None
     for id_ in expected_ids:
         if id_ in keep:
             continue
+        if flush is not None:
+            flush()
         payload = spec.run_one(ctx, id_)
         raw = (
             payload.model_dump(mode="json", by_alias=True, exclude_none=False)
@@ -634,6 +652,7 @@ def run_pipeline(
     stages: StageSelection | None = None,
     resume: bool = True,
     inject: Iterable[InjectSpec] | None = None,
+    on_event: Callable[[str], None] | None = None,
 ) -> SignalPipelineResult:
     """Run (a subset of) the signal-based discovery pipeline.
 
@@ -708,6 +727,10 @@ def run_pipeline(
     skipped: list[str] = []
     aggregate_issues: list[str] = []
 
+    sink: Callable[[str], None] = (
+        on_event if on_event is not None else lambda s: print(s, flush=True)
+    )
+
     for stage_id in sel.selected():
         spec = STAGES[stage_id]
         upstreams = _load_upstreams(spec, STAGES, layout)
@@ -717,6 +740,7 @@ def run_pipeline(
             if complete:
                 skipped.append(stage_id)
                 aggregate_issues.extend(issues)
+                sink(f"[{stage_id}] SKIP — already complete")
                 continue
 
         # Mark in-progress before doing work.
@@ -732,27 +756,57 @@ def run_pipeline(
 
         log_dir = layout.stage_log_dir(stage_id)
         log_dir.mkdir(parents=True, exist_ok=True)
-        ctx_for = lambda s, _layout=layout, _input=input, _ups=upstreams, _log=log_dir: (
-            StageContext(
+
+        formatter = StageEventFormatter(stage_id, sink=sink)
+        sink(f"[{stage_id}] START — {spec.name} ({spec.shape})")
+        stage_t0 = time.monotonic()
+
+        ctx_for = (
+            lambda s, _layout=layout, _input=input, _ups=upstreams,
+            _log=log_dir, _on=formatter: StageContext(
                 stage_id=s.stage_id,
                 layout=_layout,
                 signal_input=_input,
                 upstream=_ups,
                 log_dir=_log,
+                on_event=_on,
             )
         )
 
-        if spec.shape == "single":
-            _run_single(spec, ctx_for)
-            issues: list[str] = []
-        else:
-            issues = _run_fanout(
-                spec,
-                layout,
-                ctx_for,
-                upstream_payload=upstreams[spec.upstream_for_hash],
-                no_resume=not resume,
+        try:
+            if spec.shape == "single":
+                _run_single(spec, ctx_for)
+                issues: list[str] = []
+            else:
+                issues = _run_fanout(
+                    spec,
+                    layout,
+                    ctx_for,
+                    upstream_payload=upstreams[spec.upstream_for_hash],
+                    no_resume=not resume,
+                )
+        except Exception as exc:
+            formatter.flush()
+            stage_elapsed = time.monotonic() - stage_t0
+            sink(
+                f"[{stage_id}] FAILED in {_fmt_stage_duration(stage_elapsed)}: "
+                f"{type(exc).__name__}: {str(exc)[:200]}"
             )
+            status.set(
+                stage_id,
+                StageStatus(
+                    state="failed",
+                    started_at=status.get(stage_id).started_at,
+                    ended_at=_now_iso(),
+                    error=f"{type(exc).__name__}: {exc}",
+                ),
+            )
+            _save_status(layout, status)
+            raise
+
+        formatter.flush()
+        stage_elapsed = time.monotonic() - stage_t0
+        sink(f"[{stage_id}] STAGE DONE in {_fmt_stage_duration(stage_elapsed)}")
 
         # Mark done.
         status.set(
@@ -768,6 +822,14 @@ def run_pipeline(
         _save_status(layout, status)
         completed.append(stage_id)
         aggregate_issues.extend(issues)
+
+    # Best-effort findings rollup — joins stage 03 candidates with stage 04
+    # change specs into a single human-readable view. Skipped silently if the
+    # candidates artifact isn't on disk yet (e.g. selection ended before 03).
+    try:
+        emit_findings(layout)
+    except Exception as exc:  # noqa: BLE001 — never fail the pipeline on rollup
+        aggregate_issues.append(f"findings rollup failed: {exc}")
 
     return SignalPipelineResult(
         run_dir=layout.root,

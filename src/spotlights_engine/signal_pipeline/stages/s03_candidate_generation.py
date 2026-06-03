@@ -77,6 +77,7 @@ def _run_candidate_generation(
     project_tree: ProjectTree,
     subject_root: Path,
     log_dir: Path,
+    on_event=None,
 ) -> list[Candidate]:
     """Real path. Test-monkeypatch seam.
 
@@ -98,6 +99,7 @@ def _run_candidate_generation(
         timeout_s=_TIMEOUT_S,
         permission_mode="plan",
         allowed_tools=("Read",),
+        on_event=on_event,
     )
     if result.error is not None or result.structured_output is None:
         raise CandidateGenerationError(
@@ -118,6 +120,7 @@ def run(ctx: StageContext) -> list[Candidate]:
         project_tree=project_tree,
         subject_root=subject_root,
         log_dir=ctx.log_dir,
+        on_event=ctx.on_event,
     )
 
 

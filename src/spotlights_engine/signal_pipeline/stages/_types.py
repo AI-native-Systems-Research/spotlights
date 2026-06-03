@@ -24,6 +24,11 @@ class StageContext:
     via each upstream stage's `parse_artifact` / `parse_item`), and return
     their output. The runner persists outputs atomically — stages should
     not write to `layout` directly.
+
+    `on_event`, when set, is the per-stage formatter the runner installed
+    for live progress lines. Stages forward it to their `claude -p`
+    helpers so subprocess events get a `[NN]` prefix and burst-dedupe;
+    pass `None` to stay silent.
     """
 
     stage_id: StageId
@@ -31,6 +36,7 @@ class StageContext:
     signal_input: "SignalPipelineInput"
     upstream: dict[StageId, Any]
     log_dir: Path
+    on_event: Callable[[str], None] | None = None
 
 
 # Callable types for stage entry points.

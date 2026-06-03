@@ -6,19 +6,26 @@ JSON schema derived from `ProjectTree`. The single terminal `result` event
 from `stream-json` carries the validated object on `structured_output`,
 which we parse back into a `ProjectTree`.
 
-Permission mode is `plan`, which allows reads of the target repo but blocks
-mutations — exactly what we need for a structural map.
+Permission mode is `plan`, which pre-approves the read/list tools (Bash,
+Read, Glob, Grep) needed for a structural map and blocks mutations. Older
+CLIs (≤ 2.1.87) auto-denied `ExitPlanMode` in non-interactive `-p` runs,
+sending the agent into a retry loop until `--max-turns` was exhausted; CLI
+2.1.140 fixes that, so plan mode is once again the right choice here.
+
+Subprocess plumbing — argv resolution (Windows shim bypass), live streaming
+via reader threads, deadline-based kill — lives in
+`signal_pipeline._subprocess_util`. This file is the parts specific to the
+ProjectTree extraction: schema, prompt delivery, and result parsing.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import shutil
-import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 from pydantic import ValidationError
 
@@ -28,6 +35,13 @@ from spotlights_engine.modules_extractor.errors import (
     ExtractorValidationError,
 )
 from spotlights_engine.schemas.project import ProjectTree
+from spotlights_engine.signal_pipeline._subprocess_util import (
+    ClaudeResolutionError,
+    StreamingTimeout,
+    default_on_event,
+    resolve_claude_argv0,
+    run_streaming_claude,
+)
 
 
 _DROP_EXACT = frozenset(
@@ -82,6 +96,7 @@ def run_extraction(
     max_turns: int = 60,
     timeout_s: int = 1800,
     artifacts_dir: Path | None = None,
+    on_event: Callable[[str], None] | None = default_on_event,
 ) -> ExtractionRunResult:
     """Invoke Claude Code over `repo_path` and return a validated `ProjectTree`.
 
@@ -89,12 +104,15 @@ def run_extraction(
     schema handed to the CLI, the raw stdout/stderr, and the final structured
     payload. The caller owns directory creation and uniqueness; this function
     writes into the directory as-is.
+
+    `on_event` is called with a one-line summary of each stream-json event as
+    it arrives. Default is `print(..., flush=True)`. Pass `None` to silence.
     """
-    if shutil.which(claude_bin) is None:
-        raise ExtractorSetupError(
-            f"required CLI not on PATH: {claude_bin}",
-            executable=claude_bin,
-        )
+    try:
+        argv0 = resolve_claude_argv0(claude_bin)
+    except ClaudeResolutionError as e:
+        raise ExtractorSetupError(str(e), executable=claude_bin) from e
+
     if not repo_path.exists() or not repo_path.is_dir():
         raise ExtractorSetupError(
             f"repo_path does not exist or is not a directory: {repo_path}",
@@ -115,8 +133,7 @@ def run_extraction(
         (artifacts_dir / "prompt.md").write_text(prompt, encoding="utf-8")
         (artifacts_dir / "schema.json").write_text(schema_text, encoding="utf-8")
 
-    argv = [
-        claude_bin,
+    argv = argv0 + [
         "-p",
         "--output-format",
         "stream-json",
@@ -129,42 +146,37 @@ def run_extraction(
         str(max_turns),
     ]
 
-    start = time.monotonic()
     try:
-        completed = subprocess.run(
-            argv,
-            input=prompt.encode("utf-8"),
-            capture_output=True,
+        result = run_streaming_claude(
+            argv=argv,
+            prompt=prompt,
             env=_clean_env(),
-            cwd=str(repo_path),
-            timeout=timeout_s,
-            check=False,
+            cwd=repo_path,
+            timeout_s=timeout_s,
+            on_event=on_event,
         )
-    except subprocess.TimeoutExpired as exc:
-        duration = time.monotonic() - start
+    except StreamingTimeout as exc:
         if artifacts_dir is not None:
-            _write_streams(artifacts_dir, exc.stdout or b"", exc.stderr or b"")
+            _write_streams(artifacts_dir, exc.stdout, exc.stderr)
         raise ExtractorAgentError(
-            f"claude timed out after {duration:.1f}s",
+            f"claude timed out after {exc.duration_s:.1f}s",
             timeout_s=timeout_s,
         ) from exc
 
-    duration = time.monotonic() - start
-
     if artifacts_dir is not None:
-        _write_streams(artifacts_dir, completed.stdout, completed.stderr)
+        _write_streams(artifacts_dir, result.stdout, result.stderr)
 
-    if completed.returncode != 0:
-        stderr_tail = (completed.stderr or b"")[-500:].decode("utf-8", "replace")
-        stdout_tail = (completed.stdout or b"")[-500:].decode("utf-8", "replace")
+    if result.returncode != 0:
+        stderr_tail = result.stderr[-500:].decode("utf-8", "replace")
+        stdout_tail = result.stdout[-500:].decode("utf-8", "replace")
         raise ExtractorAgentError(
-            f"claude exit={completed.returncode}",
-            returncode=completed.returncode,
+            f"claude exit={result.returncode}",
+            returncode=result.returncode,
             stderr_tail=stderr_tail,
             stdout_tail=stdout_tail,
         )
 
-    result_event = _extract_result_event(completed.stdout)
+    result_event = _extract_result_event(result.stdout)
     if result_event is None:
         raise ExtractorAgentError(
             "claude stream-json had no terminal result event",
@@ -192,7 +204,7 @@ def run_extraction(
     reported_duration = _duration_seconds(result_event)
     invocation = ExtractionInvocation(
         session_id=result_event.get("session_id"),
-        duration_s=reported_duration if reported_duration is not None else duration,
+        duration_s=reported_duration if reported_duration is not None else result.duration_s,
         cost_usd=_as_float(result_event.get("total_cost_usd")),
         input_tokens=_as_int(usage.get("input_tokens")),
         output_tokens=_as_int(usage.get("output_tokens")),

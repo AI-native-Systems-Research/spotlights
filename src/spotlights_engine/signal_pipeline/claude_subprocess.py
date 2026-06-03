@@ -15,18 +15,28 @@ Claude Code session, that token leaks into the spawned subprocess and
 overrides keychain credentials → `401 Invalid bearer token`. We drop
 both. (The same fix on main is a separate cleanup; reproducing here
 keeps the signal pipeline self-sufficient.)
+
+Subprocess plumbing — argv resolution (Windows shim bypass), live
+streaming via reader threads, deadline-based kill — lives in
+`_subprocess_util.py`. This file is just the parameterised CLI wrapper
+and result parsing.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import shutil
-import subprocess
-import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Literal
+from typing import Callable, Iterable, Literal
+
+from spotlights_engine.signal_pipeline._subprocess_util import (
+    ClaudeResolutionError,
+    StreamingTimeout,
+    default_on_event,
+    resolve_claude_argv0,
+    run_streaming_claude,
+)
 
 
 _DROP_EXACT = frozenset(
@@ -76,10 +86,15 @@ class ClaudeRunResult:
 
 
 def ensure_claude_available(claude_bin: str = "claude") -> None:
-    if shutil.which(claude_bin) is None:
-        raise ClaudeNotAvailableError(
-            f"required CLI not on PATH: {claude_bin}"
-        )
+    """Verify `claude` resolves to a usable (non-shim) binary on this platform.
+
+    Raises `ClaudeNotAvailableError` if the resolved path is missing or
+    would force-fall-back to the buffering `claude.CMD` shim on Windows.
+    """
+    try:
+        resolve_claude_argv0(claude_bin)
+    except ClaudeResolutionError as e:
+        raise ClaudeNotAvailableError(str(e)) from e
 
 
 def run_claude(
@@ -93,20 +108,26 @@ def run_claude(
     permission_mode: Literal["plan", "default", "acceptEdits", "bypassPermissions"] = "plan",
     allowed_tools: Iterable[str] | None = None,
     claude_bin: str = "claude",
+    on_event: Callable[[str], None] | None = default_on_event,
 ) -> ClaudeRunResult:
     """Spawn one `claude -p` session and return its parsed structured_output.
 
     The prompt is fed on stdin; output is `stream-json`. Streams + the
-    prompt itself are persisted to `log_dir` for post-mortem.
+    prompt itself are persisted to `log_dir` for post-mortem. `on_event` is
+    invoked with a one-line summary of each stream-json event as it arrives;
+    pass `None` to silence.
     """
-    ensure_claude_available(claude_bin)
+    try:
+        argv0 = resolve_claude_argv0(claude_bin)
+    except ClaudeResolutionError as e:
+        raise ClaudeNotAvailableError(str(e)) from e
+
     log_dir.mkdir(parents=True, exist_ok=True)
     (log_dir / "prompt.md").write_text(prompt, encoding="utf-8")
     if json_schema is not None:
         (log_dir / "schema.json").write_text(json_schema, encoding="utf-8")
 
-    argv: list[str] = [
-        claude_bin,
+    argv: list[str] = argv0 + [
         "-p",
         "--output-format",
         "stream-json",
@@ -121,60 +142,55 @@ def run_claude(
     if allowed_tools is not None:
         argv += ["--allowed-tools", ",".join(allowed_tools)]
 
-    env = _clean_env()
-    start = time.monotonic()
     try:
-        completed = subprocess.run(
-            argv,
-            input=prompt.encode("utf-8"),
-            capture_output=True,
-            env=env,
-            cwd=str(cwd) if cwd is not None else None,
-            timeout=timeout_s,
-            check=False,
+        result = run_streaming_claude(
+            argv=argv,
+            prompt=prompt,
+            env=_clean_env(),
+            cwd=cwd,
+            timeout_s=timeout_s,
+            on_event=on_event,
         )
-    except subprocess.TimeoutExpired as exc:
-        duration = time.monotonic() - start
-        _persist_streams(log_dir, exc.stdout or b"", exc.stderr or b"")
+    except StreamingTimeout as exc:
+        _persist_streams(log_dir, exc.stdout, exc.stderr)
         return ClaudeRunResult(
             structured_output=None,
-            duration_s=duration,
-            error=f"claude timed out after {duration:.1f}s",
+            duration_s=exc.duration_s,
+            error=f"claude timed out after {exc.duration_s:.1f}s",
         )
 
-    duration = time.monotonic() - start
-    _persist_streams(log_dir, completed.stdout or b"", completed.stderr or b"")
+    _persist_streams(log_dir, result.stdout, result.stderr)
 
-    if completed.returncode != 0:
-        stderr_tail = (completed.stderr or b"")[-500:].decode("utf-8", "replace")
+    if result.returncode != 0:
+        stderr_tail = result.stderr[-500:].decode("utf-8", "replace")
         return ClaudeRunResult(
             structured_output=None,
-            duration_s=duration,
+            duration_s=result.duration_s,
             error=(
-                f"claude exit={completed.returncode}: stderr={stderr_tail!r} "
+                f"claude exit={result.returncode}: stderr={stderr_tail!r} "
                 f"(see {log_dir / 'raw_stderr.log'})"
             ),
         )
 
     try:
-        result_event = _extract_result_event(completed.stdout)
+        result_event = _extract_result_event(result.stdout)
     except _ResultEventError as e:
         return ClaudeRunResult(
             structured_output=None,
-            duration_s=duration,
+            duration_s=result.duration_s,
             error=str(e),
         )
     if result_event is None:
         return ClaudeRunResult(
             structured_output=None,
-            duration_s=duration,
+            duration_s=result.duration_s,
             error="claude stream-json had no terminal result event",
         )
 
     structured = result_event.get("structured_output")
     if isinstance(structured, (dict, list)):
         return ClaudeRunResult(
-            structured_output=structured, duration_s=duration
+            structured_output=structured, duration_s=result.duration_s
         )
 
     # Older CLI versions: the JSON payload may live in `result` as text.
@@ -185,17 +201,17 @@ def run_claude(
         except json.JSONDecodeError as e:
             return ClaudeRunResult(
                 structured_output=None,
-                duration_s=duration,
+                duration_s=result.duration_s,
                 error=f"claude result text not JSON: {e}",
             )
         if isinstance(parsed, (dict, list)):
             return ClaudeRunResult(
-                structured_output=parsed, duration_s=duration
+                structured_output=parsed, duration_s=result.duration_s
             )
 
     return ClaudeRunResult(
         structured_output=None,
-        duration_s=duration,
+        duration_s=result.duration_s,
         error="claude produced no structured_output and no usable fallback",
     )
 
@@ -210,11 +226,7 @@ class _ResultEventError(Exception):
 
 
 def _extract_result_event(stdout: bytes) -> dict | None:
-    """Parse stream-json stdout; return the final event iff it's a `result`.
-
-    Same behavior as `agent_proposals.claude_exec._extract_result_event`,
-    duplicated here to keep the signal pipeline self-contained.
-    """
+    """Parse stream-json stdout; return the final event iff it's a `result`."""
     last_event: dict | None = None
     for raw_line in stdout.splitlines():
         line = raw_line.strip()

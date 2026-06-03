@@ -78,7 +78,12 @@ def _build_prompt(candidate: Candidate, subject_root: Path) -> str:
     )
 
 
-def _generate_change(candidate: Candidate, subject_root: Path, log_dir: Path) -> Change:
+def _generate_change(
+    candidate: Candidate,
+    subject_root: Path,
+    log_dir: Path,
+    on_event=None,
+) -> Change:
     """Real path. Test-monkeypatch seam.
 
     `claude_subprocess` is lazy-imported to keep the safety order
@@ -97,6 +102,7 @@ def _generate_change(candidate: Candidate, subject_root: Path, log_dir: Path) ->
         timeout_s=_TIMEOUT_S,
         permission_mode="plan",  # spec only — no edits
         allowed_tools=("Read",),
+        on_event=on_event,
     )
     if result.error is not None or result.structured_output is None:
         raise ChangeGenerationError(
@@ -130,7 +136,7 @@ def run_one(ctx: StageContext, id_: str) -> Change:
     subject_root = ctx.signal_input.subject_root.resolve()
     # One log dir per candidate, so per-candidate raw streams don't collide.
     per_id_log_dir = ctx.log_dir / id_
-    return _generate_change(candidate, subject_root, per_id_log_dir)
+    return _generate_change(candidate, subject_root, per_id_log_dir, ctx.on_event)
 
 
 SPEC = StageSpec(
