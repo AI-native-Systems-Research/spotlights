@@ -12,9 +12,11 @@ discovered from vllm GitHub issues and PRs. All paths were verified against the
 
 ## Added entries
 
-18 harness entries, 9 workloads, and 11 plan entries were added on top of the
-base plan across two discovery passes (appended as indices 26–36). `unit-kv-cache-coordinator` was promoted
-from "excluded" to a skipped entry in the plan itself (see index 9).
+18 harness entries, 9 workloads, and 11 plan entries were initially added on
+top of the base plan across two discovery passes (appended as indices 26–36).
+Entry 30 (`gh_nixl_disagg_accuracy`) was subsequently removed as redundant with
+entry 20 — see below. `unit-kv-cache-coordinator` was promoted from "excluded"
+to a skipped entry in the plan itself (see index 9).
 
 The entries from the **first discovery pass** are grouped below by kind and
 priority. See [Second discovery pass](#second-discovery-pass-2026-06-01) for
@@ -112,24 +114,19 @@ over multiple eviction cycles, run against `benchmarks/benchmark_prefix_caching.
 
 ---
 
-### Integration — Priority 6 (no halt)
+### ~~Integration — Priority 6 (no halt)~~ — REMOVED
 
-#### index 30 — `gh_nixl_disagg_accuracy`
+#### ~~index 30 — `gh_nixl_disagg_accuracy`~~ — removed (2026-06-03)
 
-**Name:** integration tests — NixL disaggregated prefill/decode accuracy
-**Source:** issue [vllm-project/vllm#33689](https://github.com/vllm-project/vllm/issues/33689)
-**Components:** `kv_offload`, `distributed.kv_transfer`
-**Invoke:** `pytest -v tests/v1/kv_connector/nixl_integration/test_disagg_accuracy.py`
-**Estimated duration:** 1800 s
-
-Validates output correctness in a PD-disaggregated setup where KV blocks are
-transferred from a prefill node to a decode node via NixL. The linked issue
-reports output divergence between disaggregated and non-disaggregated mode
-under sustained load.
-
-**Workload — `wl-large-kv-decode`** (batch-inference)
-Decode under memory pressure: core scenario for disaggregated offload
-correctness validation (large KV blocks, multiple concurrent requests).
+**Reason:** Redundant with existing entry **index 20** (`integration-kv-connector-nixl`).
+Entry 20 invokes `run_accuracy_test.sh`, which spins up the full NixL
+disaggregated stack (prefill + decode instances, proxy server) and runs
+`pytest test_accuracy.py` — covering the same PD-disaggregated accuracy
+validation. Entry 30's target file (`test_disagg_accuracy.py`) is a standalone
+CLI script with no `def test_*` functions; invoking it with `pytest -v` would
+collect 0 tests and exit with code 5 (no tests collected). Even if invoked
+correctly as `python test_disagg_accuracy.py --service_url ... --model_name ...`,
+it requires a pre-running server and duplicates entry 20's coverage.
 
 ---
 
@@ -315,8 +312,9 @@ to keep the extended plan consistent:
   `collect_summary.py`-generated `summary.json` (flat keys: `ttft_ms_mean`,
   `tpot_ms_mean`, `cpu_hit_rate`, `evictions`) instead of the old nested
   `best_program_info.json` structure.
-- **Extended entries appended** after the base plan (indices 26–36). Base-plan
-  entries retain their original indices (1–25). Total entry count: 36.
+- **Extended entries appended** after the base plan (indices 26–36, with index 30
+  subsequently removed as redundant). Base-plan entries retain their original
+  indices (1–25). Total entry count: 35.
 
 ---
 
@@ -363,8 +361,8 @@ when upgrading past v0.18.0.
 
 ### Coverage summary
 
-The extended plan now contains **36 plan entries** (vs. 25 in base), **42 harness
-entries** (vs. 24), and **15 workload definitions** (vs. 6). The additions cover:
+The extended plan now contains **35 plan entries** (vs. 25 in base), **41 harness
+entries** (vs. 24), and **14 workload definitions** (vs. 6). The additions cover:
 
 - **Correctness under concurrency** (#31210, #40259): CPU offload output
   determinism when KV blocks are actively being evicted/restored.

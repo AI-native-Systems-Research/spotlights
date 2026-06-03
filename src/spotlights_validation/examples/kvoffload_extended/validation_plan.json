@@ -754,42 +754,6 @@
       ]
     },
     {
-      "priority": 6,
-      "halt_on_failure": false,
-      "index": 30,
-      "harness_entry": {
-        "id": "gh_nixl_disagg_accuracy",
-        "name": "integration tests \u2014 NixL disaggregated prefill/decode accuracy",
-        "kind": "integration",
-        "path": "tests/v1/kv_connector/nixl_integration/test_disagg_accuracy.py",
-        "invoke": "pytest -v tests/v1/kv_connector/nixl_integration/test_disagg_accuracy.py",
-        "components": [
-          "kv_offload",
-          "distributed.kv_transfer"
-        ],
-        "output_format": "pytest-json",
-        "estimated_duration": 1800,
-        "path_verified": true,
-        "source": "github_issue",
-        "source_ref": "https://github.com/vllm-project/vllm/issues/33689"
-      },
-      "workloads": [
-        {
-          "workload_id": "wl-large-kv-decode",
-          "workload_class": "batch-inference",
-          "source": "curated",
-          "config_path": null,
-          "components_exercised": [
-            "kv_offload",
-            "kv_cache",
-            "scheduler",
-            "worker"
-          ],
-          "description": "Decode under memory pressure: core scenario for validating PD disaggregated offload correctness."
-        }
-      ]
-    },
-    {
       "priority": 8,
       "halt_on_failure": false,
       "index": 31,
