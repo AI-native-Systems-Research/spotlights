@@ -40,8 +40,8 @@ None
 | evolved | unit-worker | pass | 62 | 0 | 1 |
 | baseline | integration-scheduler-e2e | pass | 2 | 0 | 0 |
 | evolved | integration-scheduler-e2e | pass | 2 | 0 | 0 |
-| baseline | integration-engine | fail | 23 | 1 | 1 |
-| evolved | integration-engine | fail | 23 | 1 | 1 |
+| baseline | integration-engine | fail | 13 | 11 | 1 |
+| evolved | integration-engine | fail | 13 | 11 | 1 |
 | baseline | correctness-basic | pass | 2 | 0 | 8 |
 | evolved | correctness-basic | pass | 2 | 0 | 8 |
 | baseline | integration-kv-connector-nixl | fail | 0 | 1 | 0 |
@@ -53,6 +53,6 @@ None
 
 | run | id | status | policy | ttft_ms_mean | tpot_ms_mean | cpu_hit_rate | evictions |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| baseline-lru | benchmark-multi-turn-kv-offload-lab-lru | pass | lru | 133.315 | 12.268 | 0.05419577462406333 | 326646.0 |
-| baseline-arc | benchmark-multi-turn-kv-offload-lab-arc | pass | arc | 142.374 | 12.41 | 0.15140693877677106 | 252944.0 |
-| evolved | benchmark-multi-turn-kv-offload-lab | pass | evolved | 137.957 | 12.294 | 0.34273712083248264 | 114168.0 |
+| baseline-lru | benchmark-multi-turn-kv-offload-lab-lru | pass | lru | 146.642 | 12.395 | 0.05017457689135302 | 354688.0 |
+| baseline-arc | benchmark-multi-turn-kv-offload-lab-arc | pass | arc | 142.829 | 12.362 | 0.13696339198976895 | 271294.0 |
+| evolved | benchmark-multi-turn-kv-offload-lab | pass | evolved | 129.996 | 12.269 | 0.3296662150198481 | 132417.0 |

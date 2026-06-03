@@ -27,8 +27,8 @@ baseline,unit-worker,pass,62,0,1
 evolved,unit-worker,pass,62,0,1
 baseline,integration-scheduler-e2e,pass,2,0,0
 evolved,integration-scheduler-e2e,pass,2,0,0
-baseline,integration-engine,fail,23,1,1
-evolved,integration-engine,fail,23,1,1
+baseline,integration-engine,fail,13,11,1
+evolved,integration-engine,fail,13,11,1
 baseline,correctness-basic,pass,2,0,8
 evolved,correctness-basic,pass,2,0,8
 baseline,integration-kv-connector-nixl,fail,0,1,0
