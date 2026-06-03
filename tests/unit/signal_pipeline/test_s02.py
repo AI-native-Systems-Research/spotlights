@@ -44,7 +44,9 @@ def test_run_calls_extract_with_subject_root_and_log_subdir(monkeypatch, tmp_pat
     log_dir (so re-runs don't trip main's pre-existing-dir guard)."""
     captured: dict = {}
 
-    def fake_extract(subject_root: Path, log_dir: Path, on_event=None) -> ProjectTree:
+    def fake_extract(
+        subject_root: Path, log_dir: Path, on_event=None, use_cache: bool = True
+    ) -> ProjectTree:
         captured["subject_root"] = subject_root
         captured["log_dir"] = log_dir
         return _custom_tree()
@@ -139,3 +141,152 @@ def test_artifacts_dir_is_a_fresh_subdir_of_log_dir(monkeypatch, tmp_path):
 
     assert seen == [log_dir / "A", log_dir / "B"]
     assert seen[0] != seen[1]
+
+
+# ── Cross-run ProjectTree cache ─────────────────────────────────────────
+
+
+def _init_git_repo(repo_path: Path) -> str:
+    """Initialize a git repo with one commit; return the HEAD SHA."""
+    import subprocess
+
+    repo_path.mkdir(parents=True, exist_ok=True)
+    env = {
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_SYSTEM": "/dev/null",
+        "PATH": "/usr/bin:/bin",
+    }
+    subprocess.run(["git", "init", "-q", "-b", "main"], cwd=repo_path, check=True, env=env)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t", "-c", "user.name=t",
+         "commit", "--allow-empty", "-qm", "init"],
+        cwd=repo_path, check=True, env=env,
+    )
+    sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repo_path, check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    return sha
+
+
+@pytest.fixture
+def redirect_cache(monkeypatch, tmp_path):
+    """Point the cross-run cache at tmp_path/cache so tests don\u2019t touch
+    the user\u2019s real ~/.cache."""
+    cache_root = tmp_path / "cache"
+    monkeypatch.setattr(s02_projecttree, "_cache_root", lambda: cache_root)
+    return cache_root
+
+
+@pytest.mark.no_stub_stages
+def test_projecttree_cache_hits_on_second_call(monkeypatch, tmp_path, redirect_cache):
+    """Same git repo at the same SHA should short-circuit modules_extractor."""
+    repo = tmp_path / "subject"
+    _init_git_repo(repo)
+
+    extract_calls = []
+
+    def fake_inner_extract(_input, *, config, on_event=None):
+        extract_calls.append(config.artifacts_dir)
+        return _custom_tree()
+
+    import spotlights_engine.modules_extractor as me
+    monkeypatch.setattr(me, "extract", fake_inner_extract)
+
+    log_dir = tmp_path / "log"
+    log_dir.mkdir()
+
+    first = s02_projecttree._extract_project_tree(repo, log_dir)
+    second = s02_projecttree._extract_project_tree(repo, log_dir)
+
+    assert len(extract_calls) == 1, "second call should hit the cache"
+    assert first.repository.name == second.repository.name
+    cached_files = list(redirect_cache.iterdir())
+    assert len(cached_files) == 1
+    assert cached_files[0].name.endswith(".v1.json")
+
+
+@pytest.mark.no_stub_stages
+def test_projecttree_cache_force_bypass_re_extracts(monkeypatch, tmp_path, redirect_cache):
+    """use_cache=False should always extract, even on second call."""
+    repo = tmp_path / "subject"
+    _init_git_repo(repo)
+
+    extract_calls = []
+
+    def fake_inner_extract(_input, *, config, on_event=None):
+        extract_calls.append(config.artifacts_dir)
+        return _custom_tree()
+
+    import spotlights_engine.modules_extractor as me
+    monkeypatch.setattr(me, "extract", fake_inner_extract)
+
+    log_dir = tmp_path / "log"
+    log_dir.mkdir()
+
+    s02_projecttree._extract_project_tree(repo, log_dir, use_cache=False)
+    s02_projecttree._extract_project_tree(repo, log_dir, use_cache=False)
+
+    assert len(extract_calls) == 2, "use_cache=False must always re-extract"
+
+
+@pytest.mark.no_stub_stages
+def test_projecttree_cache_skipped_for_non_git_dir(monkeypatch, tmp_path, redirect_cache):
+    """Non-git subject_root: no cache key, both calls extract, no cache file written."""
+    subject = tmp_path / "subject"
+    subject.mkdir()  # not a git repo
+
+    extract_calls = []
+
+    def fake_inner_extract(_input, *, config, on_event=None):
+        extract_calls.append(config.artifacts_dir)
+        return _custom_tree()
+
+    import spotlights_engine.modules_extractor as me
+    monkeypatch.setattr(me, "extract", fake_inner_extract)
+
+    log_dir = tmp_path / "log"
+    log_dir.mkdir()
+
+    s02_projecttree._extract_project_tree(subject, log_dir)
+    s02_projecttree._extract_project_tree(subject, log_dir)
+
+    assert len(extract_calls) == 2
+    assert not redirect_cache.exists() or list(redirect_cache.iterdir()) == []
+
+
+@pytest.mark.no_stub_stages
+def test_projecttree_cache_invalidated_by_dirty_tree_change(
+    monkeypatch, tmp_path, redirect_cache
+):
+    """Uncommitted edits change the porcelain hash, so the cache key shifts
+    and the next call re-extracts."""
+    import subprocess
+
+    repo = tmp_path / "subject"
+    _init_git_repo(repo)
+
+    extract_calls = []
+
+    def fake_inner_extract(_input, *, config, on_event=None):
+        extract_calls.append(config.artifacts_dir)
+        return _custom_tree()
+
+    import spotlights_engine.modules_extractor as me
+    monkeypatch.setattr(me, "extract", fake_inner_extract)
+
+    log_dir = tmp_path / "log"
+    log_dir.mkdir()
+
+    # Clean tree → cache miss → extract.
+    s02_projecttree._extract_project_tree(repo, log_dir)
+    assert len(extract_calls) == 1
+
+    # Dirty the tree → porcelain output non-empty → different cache key.
+    (repo / "new_file.txt").write_text("hello")
+    s02_projecttree._extract_project_tree(repo, log_dir)
+    assert len(extract_calls) == 2, "dirty tree must invalidate the clean-tree cache"
+
+    # Same dirty state again → hits the dirty cache.
+    s02_projecttree._extract_project_tree(repo, log_dir)
+    assert len(extract_calls) == 2, "second call with same dirty state should hit cache"

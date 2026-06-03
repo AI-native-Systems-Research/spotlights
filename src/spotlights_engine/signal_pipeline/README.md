@@ -54,6 +54,14 @@ can answer "which model produced this artifact, and what did it cost?"
 after the fact. Stage 02 currently goes through main's
 `modules_extractor` and doesn't surface model/cost yet.
 
+**ProjectTree cache.** Stage 02 caches its output across runs at
+`~/.cache/spotlights-engine/projecttree/pt-<repo-hash>-<git-sha>[-<dirty>].v1.json`,
+keyed by `(resolved subject path, git HEAD, working-tree porcelain hash)`.
+Re-running against the same checkout short-circuits stage 02 entirely
+(saves ~3 min and ~$0.62 per run). Bypass with `--no-projecttree-cache`
+to force a fresh extraction (the result still updates the cache).
+Non-git subject directories don't cache — no stable identity to key on.
+
 ---
 
 ## Artifacts-dir layout

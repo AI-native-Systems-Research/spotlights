@@ -116,6 +116,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Re-run all stages in the selection from scratch (default: resume).",
     )
     p.add_argument(
+        "--no-projecttree-cache",
+        dest="projecttree_cache",
+        action="store_false",
+        default=True,
+        help=(
+            "Force stage 02 to re-extract instead of reading the cross-run "
+            "ProjectTree cache at ~/.cache/spotlights-engine/projecttree/. "
+            "The fresh extraction still updates the cache."
+        ),
+    )
+    p.add_argument(
         "--inject",
         type=_inject_arg,
         action="append",
@@ -153,6 +164,7 @@ def main(argv: list[str] | None = None) -> int:
         subject_root=args.subject_root,
         telemetry_from=args.telemetry_from,
         backend_id=args.backend_id,
+        projecttree_cache=args.projecttree_cache,
     )
 
     try:

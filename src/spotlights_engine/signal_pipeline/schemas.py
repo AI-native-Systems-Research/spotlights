@@ -122,6 +122,11 @@ class SignalPipelineInput(BaseModel):
     telemetry_from: Path | None = None
     # Backend id forwarded to stage 05. Default mirrors `mvp_module_apis.md` §"MVP backend".
     backend_id: str = "claude_code"
+    # When True (default), stage 02 may short-circuit using the cross-run
+    # ProjectTree cache keyed by (subject_root, git HEAD, dirty hash).
+    # Set False to force a fresh extraction (the result still updates the
+    # cache). CLI: `--no-projecttree-cache`.
+    projecttree_cache: bool = True
 
 
 class SignalPipelineResult(BaseModel):

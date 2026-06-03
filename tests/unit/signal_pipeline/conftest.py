@@ -87,7 +87,9 @@ def _default_stage_stubs(request, monkeypatch):
     # ── Stage 02 ─────────────────────────────────────────────────────
     from spotlights_engine.signal_pipeline.stages import s02_projecttree
 
-    def _fake_extract(subject_root: Path, log_dir: Path, on_event=None) -> ProjectTree:
+    def _fake_extract(
+        subject_root: Path, log_dir: Path, on_event=None, use_cache: bool = True
+    ) -> ProjectTree:
         # Tests don't depend on this exact shape — only that it
         # round-trips through `02_projecttree.json` and parses back.
         return ProjectTree(

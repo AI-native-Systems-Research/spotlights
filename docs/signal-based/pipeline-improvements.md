@@ -55,39 +55,6 @@ stage 05 produces worse edits. A/B before committing.
 
 ---
 
-## 2. Cross-run ProjectTree cache
-
-**What.** Within a run, `--resume` skips stage 02 if
-`02_projecttree.json` exists. Across runs (different `--artifacts-dir`), it
-re-extracts every time even when the subject repo's HEAD hasn't
-moved. Adding a cache keyed by `(subject_root, git rev-parse HEAD)`
-makes ProjectTree extraction free on every subsequent run against the
-same subject checkout.
-
-**How.** Cache at `~/.cache/spotlights-engine/projecttree/<sha>.json`
-or in-repo `.projecttree-cache/<sha>.json` (`runs/` is already
-gitignored; this would live alongside).
-[s02_projecttree.py:run](../../src/spotlights_engine/signal_pipeline/stages/s02_projecttree.py)
-checks the cache before calling `_extract_project_tree`. Hit →
-return cached `ProjectTree`. Miss → extract, write, return.
-
-Cache invalidates automatically by SHA change. Manual `rm` to force
-re-extract. Optionally include a hash of `git status --porcelain`
-output in the key so uncommitted edits also invalidate.
-
-**Saves.** ~3 min and ~$0.62 off every run-after-the-first against
-the same subject checkout.
-
-**Effort.** Half day, plus one test asserting cache hits return
-byte-identical ProjectTree.
-
-**Risk.** Low. Stale cache only if subject working tree changes
-locally without HEAD moving — mitigated by hashing `git status` into
-the key. Schema drift over time mitigated by including a schema
-version in the cache filename.
-
----
-
 ---
 
 ## Combined picture
@@ -95,4 +62,3 @@ version in the cache filename.
 | Lever | Wall saved | Cost saved | Effort | Risk |
 |---|---|---|---|---|
 | Sonnet for 02/04 | ~3 min | ~$1 | half day | medium |
-| Cross-run PT cache | ~3 min on 2nd+ runs | ~$0.62 on 2nd+ runs | half day | low |

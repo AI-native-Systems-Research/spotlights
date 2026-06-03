@@ -5,10 +5,6 @@ rather than monkeypatching anything. As real stages land in later steps,
 these tests should keep passing because the stubs remain swappable
 fallbacks (each `run` / `run_one` only needs to return a schema-valid
 payload).
-
-Plan reference: `/Users/idanfr/.claude/plans/humble-plotting-cook.md`
-Phase 2 (run-dir layout + resume rules), Phase 3 (orchestrator + inject
-validation tables).
 """
 
 from __future__ import annotations
@@ -538,7 +534,7 @@ def test_stages_01_and_02_overlap_in_wall_clock(tmp_path, monkeypatch):
             anomalies=[AnomalyLite(anomaly_id="a", type="x", description="")],
         )
 
-    def slow_extract_project_tree(subject_root, log_dir, on_event=None):
+    def slow_extract_project_tree(subject_root, log_dir, on_event=None, use_cache=True):
         _time.sleep(SLEEP)
         return ProjectTree(
             repository=Repository(name="r", summary=""),
