@@ -23,7 +23,24 @@ from spotlights_engine.signal_pipeline.runner import (
     run_pipeline,
 )
 
+#: Project-wide default model for stages whose `SPEC.model` is None and
+#: whose run didn't pass `--model` / `SignalPipelineInput.model`. None
+#: means "let `claude -p` pick its own default" (currently Opus).
+#:
+#: Precedence (highest first):
+#:   1. `StageSpec.model` — pinned per-stage in `stages/sNN.py`
+#:   2. `SignalPipelineInput.model` — set by `--model <id>` on the CLI
+#:   3. `DEFAULT_MODEL` — this constant
+#:   4. `claude -p` default
+#:
+#: To set the project default to e.g. Sonnet 4.6, change this to
+#: `"claude-sonnet-4-6"`. The runner reads the value via attribute
+#: lookup at stage-execution time, so monkeypatching this in tests
+#: behaves as expected.
+DEFAULT_MODEL: str | None = None
+
 __all__ = [
+    "DEFAULT_MODEL",
     "InjectSpec",
     "SignalPipelineInput",
     "SignalPipelineResult",

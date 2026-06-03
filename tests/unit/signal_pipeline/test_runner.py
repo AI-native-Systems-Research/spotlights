@@ -562,3 +562,62 @@ def test_stages_01_and_02_overlap_in_wall_clock(tmp_path, monkeypatch):
         f"expected < 0.9s under parallel execution; got {dt:.3f}s "
         f"(sequential baseline would be >= {2 * SLEEP:.1f}s)"
     )
+
+
+# ── Effective model precedence ─────────────────────────────────────────
+
+
+def test_resolve_stage_model_returns_none_by_default():
+    """No SPEC pin, no run-level model, no project default \u2192 None
+    (claude-p uses its own default)."""
+    from spotlights_engine import signal_pipeline
+    from spotlights_engine.signal_pipeline.runner import _resolve_stage_model
+    from spotlights_engine.signal_pipeline.stages._types import StageSpec
+
+    assert signal_pipeline.DEFAULT_MODEL is None  # baseline
+    spec = StageSpec(stage_id="01", name="x", shape="single",
+                     upstream=(), parse_artifact=lambda r: r)
+    inp = SignalPipelineInput(subject_root=Path("/tmp"))
+    assert _resolve_stage_model(spec, inp) is None
+
+
+def test_resolve_stage_model_picks_project_default(monkeypatch):
+    """DEFAULT_MODEL fills in when neither SPEC nor run-level is set."""
+    from spotlights_engine import signal_pipeline
+    from spotlights_engine.signal_pipeline.runner import _resolve_stage_model
+    from spotlights_engine.signal_pipeline.stages._types import StageSpec
+
+    monkeypatch.setattr(signal_pipeline, "DEFAULT_MODEL", "claude-sonnet-4-6")
+    spec = StageSpec(stage_id="01", name="x", shape="single",
+                     upstream=(), parse_artifact=lambda r: r)
+    inp = SignalPipelineInput(subject_root=Path("/tmp"))
+    assert _resolve_stage_model(spec, inp) == "claude-sonnet-4-6"
+
+
+def test_resolve_stage_model_run_override_beats_default(monkeypatch):
+    """SignalPipelineInput.model (set via --model) wins over DEFAULT_MODEL."""
+    from spotlights_engine import signal_pipeline
+    from spotlights_engine.signal_pipeline.runner import _resolve_stage_model
+    from spotlights_engine.signal_pipeline.stages._types import StageSpec
+
+    monkeypatch.setattr(signal_pipeline, "DEFAULT_MODEL", "claude-sonnet-4-6")
+    spec = StageSpec(stage_id="01", name="x", shape="single",
+                     upstream=(), parse_artifact=lambda r: r)
+    inp = SignalPipelineInput(subject_root=Path("/tmp"), model="claude-opus-4-7")
+    assert _resolve_stage_model(spec, inp) == "claude-opus-4-7"
+
+
+def test_resolve_stage_model_spec_pin_wins_over_run_override(monkeypatch):
+    """A stage that pins its own model in SPEC ignores both --model and the
+    project default. Use this when one stage really must run on a specific
+    model regardless of the run-level choice."""
+    from spotlights_engine import signal_pipeline
+    from spotlights_engine.signal_pipeline.runner import _resolve_stage_model
+    from spotlights_engine.signal_pipeline.stages._types import StageSpec
+
+    monkeypatch.setattr(signal_pipeline, "DEFAULT_MODEL", "claude-sonnet-4-6")
+    spec = StageSpec(stage_id="01", name="x", shape="single",
+                     upstream=(), parse_artifact=lambda r: r,
+                     model="claude-opus-4-7")
+    inp = SignalPipelineInput(subject_root=Path("/tmp"), model="claude-haiku-4-5")
+    assert _resolve_stage_model(spec, inp) == "claude-opus-4-7"

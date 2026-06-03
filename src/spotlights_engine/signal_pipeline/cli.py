@@ -139,6 +139,18 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--model",
+        type=str,
+        default=None,
+        metavar="ID",
+        help=(
+            "Model id forwarded as `--model` to every claude-p invocation in "
+            "this run, except for stages that pin their own model in code. "
+            "Overrides the project-default constant `signal_pipeline.DEFAULT_MODEL`. "
+            "Examples: claude-opus-4-7, claude-sonnet-4-6."
+        ),
+    )
+    p.add_argument(
         "--inject",
         type=_inject_arg,
         action="append",
@@ -178,6 +190,7 @@ def main(argv: list[str] | None = None) -> int:
         backend_id=args.backend_id,
         projecttree_cache=args.projecttree_cache,
         max_candidates=args.max_candidates,
+        model=args.model,
     )
 
     try:

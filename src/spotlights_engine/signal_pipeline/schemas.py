@@ -133,6 +133,11 @@ class SignalPipelineInput(BaseModel):
     # strength × significance. Not a hard schema cap — the model may still
     # exceed it; intent is to nudge concise outputs. CLI: `--max-candidates N`.
     max_candidates: int | None = Field(default=None, ge=1)
+    # Run-level model override. None = fall back to the project default
+    # (`signal_pipeline.DEFAULT_MODEL`) and finally to `claude -p`'s own
+    # default. A stage's pinned `SPEC.model` still wins over this — pin
+    # there if you want the choice durable across runs. CLI: `--model <id>`.
+    model: str | None = None
 
 
 class SignalPipelineResult(BaseModel):

@@ -231,6 +231,30 @@ def _save_status(layout: RunDirLayout, status: PipelineStatus) -> None:
     )
 
 
+# ── Effective model resolution ───────────────────────────────────────────
+
+
+def _resolve_stage_model(spec: Any, signal_input: SignalPipelineInput) -> str | None:
+    """Pick the model id for one stage's `claude -p` invocation.
+
+    Precedence (highest first):
+      1. `StageSpec.model` — pinned per-stage in `stages/sNN.py`.
+      2. `SignalPipelineInput.model` — set via `--model <id>` for this run.
+      3. `signal_pipeline.DEFAULT_MODEL` — project-wide constant.
+      4. None → `claude -p` falls back to its own default (Opus today).
+
+    Reads `DEFAULT_MODEL` via attribute lookup so monkeypatching the
+    package attribute in tests behaves as expected.
+    """
+    if spec.model is not None:
+        return spec.model
+    if signal_input.model is not None:
+        return signal_input.model
+    from spotlights_engine import signal_pipeline as _sp_pkg
+
+    return getattr(_sp_pkg, "DEFAULT_MODEL", None)
+
+
 # ── Meta aggregation (model + cost from claude_subprocess) ───────────────
 
 
@@ -825,7 +849,7 @@ def run_pipeline(
                 upstream=_ups,
                 log_dir=_log,
                 on_event=_on,
-                model=s.model,
+                model=_resolve_stage_model(s, _input),
             )
         )
 

@@ -68,6 +68,23 @@ strength × significance. Soft cap — the prompt asks the model to keep
 the top-N; not enforced as a hard schema cap. Default is no cap (the
 model decides based on signal richness, typically 3–8 for the LRU smoke).
 
+**Picking a model.** Three layers, highest precedence first:
+
+1. **Per-stage SPEC pin** — set `SPEC.model = "claude-sonnet-4-6"` in
+   the relevant `stages/sNN.py`. Stage always runs on that model
+   regardless of run-level / project-level config. Use this when one
+   stage needs a specific model regardless of the user's choice.
+2. **Per-run CLI override** — `--model claude-sonnet-4-6` on the
+   command line. Applies to every stage that doesn't pin its own model.
+3. **Project default constant** — `DEFAULT_MODEL` in
+   [`signal_pipeline/__init__.py`](__init__.py). Single line edit, sets
+   the project-wide default. None (today) means "let `claude -p` pick"
+   — currently Opus.
+
+If all three are unset, `claude -p` uses its own configured default.
+The actual model that ran each stage is recorded in
+`status.json[stages].<id>.model` and `_logs/<NN>_<name>/meta.json`.
+
 ---
 
 ## Artifacts-dir layout
