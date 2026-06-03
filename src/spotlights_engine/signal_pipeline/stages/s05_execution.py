@@ -136,6 +136,7 @@ def _execute_change(
     log_dir: Path,
     backend_id: str,
     on_event=None,
+    model: str | None = None,
 ) -> ExecutionResult:
     """Real path. Test-monkeypatch seam.
 
@@ -158,6 +159,7 @@ def _execute_change(
         permission_mode="bypassPermissions",
         allowed_tools=("Read", "Write", "Edit", "Bash"),
         on_event=on_event,
+        model=model,
     )
     if result.error is not None or result.structured_output is None:
         raise ExecutionError(
@@ -200,6 +202,7 @@ def run_one(ctx: StageContext, id_: str) -> ExecutionResult:
         log_dir=per_id_log_dir,
         backend_id=ctx.signal_input.backend_id,
         on_event=ctx.on_event,
+        model=ctx.model,
     )
 
 

@@ -83,6 +83,7 @@ def _generate_change(
     subject_root: Path,
     log_dir: Path,
     on_event=None,
+    model: str | None = None,
 ) -> Change:
     """Real path. Test-monkeypatch seam.
 
@@ -103,6 +104,7 @@ def _generate_change(
         permission_mode="plan",  # spec only — no edits
         allowed_tools=("Read",),
         on_event=on_event,
+        model=model,
     )
     if result.error is not None or result.structured_output is None:
         raise ChangeGenerationError(
@@ -136,7 +138,9 @@ def run_one(ctx: StageContext, id_: str) -> Change:
     subject_root = ctx.signal_input.subject_root.resolve()
     # One log dir per candidate, so per-candidate raw streams don't collide.
     per_id_log_dir = ctx.log_dir / id_
-    return _generate_change(candidate, subject_root, per_id_log_dir, ctx.on_event)
+    return _generate_change(
+        candidate, subject_root, per_id_log_dir, ctx.on_event, ctx.model
+    )
 
 
 SPEC = StageSpec(

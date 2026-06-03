@@ -132,7 +132,9 @@ def test_generate_change_uses_per_candidate_log_dir(monkeypatch, tmp_path):
     threads candidates through to our capture."""
     seen: list[Path] = []
 
-    def fake_generate_change(candidate, subject_root, log_dir, on_event=None):
+    def fake_generate_change(
+        candidate, subject_root, log_dir, on_event=None, model=None
+    ):
         seen.append(log_dir)
         return Change(
             change_id=f"chg-{candidate.id}",

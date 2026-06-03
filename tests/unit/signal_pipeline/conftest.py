@@ -59,7 +59,7 @@ def _default_stage_stubs(request, monkeypatch):
     )
     from spotlights_engine.signal_pipeline.stages import s01_signal_extraction
 
-    def _fake_extract_signals(target_dir, log_dir, on_event=None):
+    def _fake_extract_signals(target_dir, log_dir, on_event=None, model=None):
         return Signals(
             workload=WorkloadProfileLite(
                 workload_id="conftest-stub-workload",
@@ -110,7 +110,9 @@ def _default_stage_stubs(request, monkeypatch):
     from spotlights_engine.schemas.candidate import Candidate
     from spotlights_engine.signal_pipeline.stages import s03_candidate_generation
 
-    def _fake_candidates(*, signals, project_tree, subject_root, log_dir, on_event=None):
+    def _fake_candidates(
+        *, signals, project_tree, subject_root, log_dir, on_event=None, model=None
+    ):
         return [
             Candidate(
                 id="cand-0001",
@@ -148,7 +150,7 @@ def _default_stage_stubs(request, monkeypatch):
     from spotlights_engine.signal_pipeline.schemas import Change
     from spotlights_engine.signal_pipeline.stages import s04_change_generation
 
-    def _fake_change(candidate, subject_root, log_dir, on_event=None):
+    def _fake_change(candidate, subject_root, log_dir, on_event=None, model=None):
         return Change(
             change_id=f"chg-{candidate.id}",
             candidate_ref=candidate.id,
@@ -165,7 +167,9 @@ def _default_stage_stubs(request, monkeypatch):
     from spotlights_engine.signal_pipeline.schemas import ExecutionResult
     from spotlights_engine.signal_pipeline.stages import s05_execution
 
-    def _fake_execute(*, change, subject_root, log_dir, backend_id, on_event=None):
+    def _fake_execute(
+        *, change, subject_root, log_dir, backend_id, on_event=None, model=None
+    ):
         return ExecutionResult(
             result_id=f"res-{change.candidate_ref}",
             change_ref=change.change_id,

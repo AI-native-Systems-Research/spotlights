@@ -10,7 +10,7 @@ Implements the run loop:
 5. Return `SignalPipelineResult`.
 
 Resume rules and `--inject` validation tables are pinned in the approved
-plan at `/Users/idanfr/.claude/plans/humble-plotting-cook.md`. Anything
+plan at `~/.claude/plans/humble-plotting-cook.md`. Anything
 here that drifts from that doc is a bug.
 """
 
@@ -703,7 +703,7 @@ def run_pipeline(
 ) -> SignalPipelineResult:
     """Run (a subset of) the signal-based discovery pipeline.
 
-    See `/Users/idanfr/.claude/plans/humble-plotting-cook.md` Phase 3 for
+    See `~/.claude/plans/humble-plotting-cook.md` Phase 3 for
     the resume / inject / stage-selection semantics.
     """
     _check_layout()
@@ -833,6 +833,7 @@ def run_pipeline(
                 upstream=_ups,
                 log_dir=_log,
                 on_event=_on,
+                model=s.model,
             )
         )
 

@@ -29,6 +29,11 @@ class StageContext:
     for live progress lines. Stages forward it to their `claude -p`
     helpers so subprocess events get a `[NN]` prefix and burst-dedupe;
     pass `None` to stay silent.
+
+    `model`, when set, overrides the `claude -p` default (Opus). The
+    runner populates this from `StageSpec.model` so each stage can pin
+    its preferred model in code. Stage 02 ignores it for now —
+    `modules_extractor` (on main) doesn't accept a model arg yet.
     """
 
     stage_id: StageId
@@ -37,6 +42,7 @@ class StageContext:
     upstream: dict[StageId, Any]
     log_dir: Path
     on_event: Callable[[str], None] | None = None
+    model: str | None = None
 
 
 # Callable types for stage entry points.
@@ -76,6 +82,14 @@ class StageSpec:
     upstream_hash_field: str | None = None  # e.g. "upstream_candidates_hash"
     ids_from_upstream: IdsFromUpstream | None = None
     run_one: FanoutRunOne | None = None
+
+    # Pinned per-stage model. None = inherit `claude -p` default (Opus).
+    # Surfaces to the stage's helpers via `StageContext.model`, then to
+    # `claude_subprocess.run_claude(model=...)` which emits `--model <id>`.
+    # Reasoning-heavy stages (signal extraction, candidate generation,
+    # execution) should stay None; transformation/structuring stages are
+    # candidates for cheaper/faster models like Sonnet.
+    model: str | None = None
 
 
 __all__ = [

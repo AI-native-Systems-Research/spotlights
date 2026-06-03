@@ -116,13 +116,15 @@ def run_claude(
     allowed_tools: Iterable[str] | None = None,
     claude_bin: str = "claude",
     on_event: Callable[[str], None] | None = default_on_event,
+    model: str | None = None,
 ) -> ClaudeRunResult:
     """Spawn one `claude -p` session and return its parsed structured_output.
 
     The prompt is fed on stdin; output is `stream-json`. Streams + the
     prompt itself are persisted to `log_dir` for post-mortem. `on_event` is
     invoked with a one-line summary of each stream-json event as it arrives;
-    pass `None` to silence.
+    pass `None` to silence. `model`, when set, is forwarded as
+    `--model <id>` to the subprocess; otherwise the CLI's default applies.
     """
     try:
         argv0 = resolve_claude_argv0(claude_bin)
@@ -144,6 +146,8 @@ def run_claude(
         "--max-turns",
         str(max_turns),
     ]
+    if model is not None:
+        argv += ["--model", model]
     if json_schema is not None:
         argv += ["--json-schema", json_schema]
     if allowed_tools is not None:

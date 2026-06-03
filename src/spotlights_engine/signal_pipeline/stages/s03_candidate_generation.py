@@ -78,6 +78,7 @@ def _run_candidate_generation(
     subject_root: Path,
     log_dir: Path,
     on_event=None,
+    model: str | None = None,
 ) -> list[Candidate]:
     """Real path. Test-monkeypatch seam.
 
@@ -100,6 +101,7 @@ def _run_candidate_generation(
         permission_mode="plan",
         allowed_tools=("Read",),
         on_event=on_event,
+        model=model,
     )
     if result.error is not None or result.structured_output is None:
         raise CandidateGenerationError(
@@ -121,6 +123,7 @@ def run(ctx: StageContext) -> list[Candidate]:
         subject_root=subject_root,
         log_dir=ctx.log_dir,
         on_event=ctx.on_event,
+        model=ctx.model,
     )
 
 
