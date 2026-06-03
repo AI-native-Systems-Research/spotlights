@@ -63,12 +63,31 @@ def parse_artifact(raw: Any) -> list[Candidate]:
     return [Candidate.model_validate(item) for item in raw]
 
 
-def _build_prompt(signals: Signals, project_tree: ProjectTree, subject_root: Path) -> str:
+def _build_prompt(
+    signals: Signals,
+    project_tree: ProjectTree,
+    subject_root: Path,
+    max_candidates: int | None = None,
+) -> str:
     template = _PROMPT_TEMPLATE_PATH.read_text(encoding="utf-8")
+    if max_candidates is None:
+        clause = (
+            "Multiple candidates are allowed (and expected for rich workloads). "
+            "A single anomaly may yield zero, one, or several candidates."
+        )
+    else:
+        clause = (
+            f"**Produce at most {max_candidates} candidates.** If the signals "
+            f"support more than {max_candidates} worth flagging, keep the "
+            f"{max_candidates} with the strongest signal × significance "
+            f"(use `estimated_impact` to discriminate). A single anomaly "
+            f"may yield zero, one, or several candidates."
+        )
     return template.format(
         signals_json=signals.model_dump_json(indent=2),
         project_tree_json=project_tree.model_dump_json(indent=2),
         subject_root=str(subject_root),
+        max_candidates_clause=clause,
     )
 
 
@@ -79,6 +98,7 @@ def _run_candidate_generation(
     log_dir: Path,
     on_event=None,
     model: str | None = None,
+    max_candidates: int | None = None,
 ) -> list[Candidate]:
     """Real path. Test-monkeypatch seam.
 
@@ -88,7 +108,7 @@ def _run_candidate_generation(
     """
     from spotlights_engine.signal_pipeline.claude_subprocess import run_claude
 
-    prompt = _build_prompt(signals, project_tree, subject_root)
+    prompt = _build_prompt(signals, project_tree, subject_root, max_candidates)
     schema_text = json.dumps(CandidateList.model_json_schema())
 
     result = run_claude(
@@ -124,6 +144,7 @@ def run(ctx: StageContext) -> list[Candidate]:
         log_dir=ctx.log_dir,
         on_event=ctx.on_event,
         model=ctx.model,
+        max_candidates=ctx.signal_input.max_candidates,
     )
 
 

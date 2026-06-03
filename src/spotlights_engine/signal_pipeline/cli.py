@@ -127,6 +127,18 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--max-candidates",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Soft cap on the number of candidates stage 03 produces. "
+            "When set, the prompt asks the model to keep the top-N by signal "
+            "strength × significance. Not enforced as a hard schema cap. "
+            "Default: no cap (the model decides)."
+        ),
+    )
+    p.add_argument(
         "--inject",
         type=_inject_arg,
         action="append",
@@ -165,6 +177,7 @@ def main(argv: list[str] | None = None) -> int:
         telemetry_from=args.telemetry_from,
         backend_id=args.backend_id,
         projecttree_cache=args.projecttree_cache,
+        max_candidates=args.max_candidates,
     )
 
     try:

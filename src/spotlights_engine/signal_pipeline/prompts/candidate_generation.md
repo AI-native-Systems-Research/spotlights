@@ -61,8 +61,7 @@ For each anomaly that warrants further investigation:
    spell out *why this is worth optimizing* (`evolve_rationale`,
    `estimated_impact`, `estimated_impact_explanation`).
 
-Multiple candidates are allowed (and expected for rich workloads).
-A single anomaly may yield zero, one, or several candidates.
+{max_candidates_clause}
 
 ## Output
 

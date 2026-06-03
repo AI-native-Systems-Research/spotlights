@@ -82,6 +82,24 @@ def test_build_prompt_substitutes_inputs(tmp_path):
     assert "{signals_json}" not in prompt
     assert "{project_tree_json}" not in prompt
     assert "{subject_root}" not in prompt
+    assert "{max_candidates_clause}" not in prompt
+
+
+def test_build_prompt_default_says_multiple_allowed(tmp_path):
+    """Without max_candidates, the prompt keeps the open-ended language."""
+    prompt = s03_candidate_generation._build_prompt(_signals(), _tree(), tmp_path / "subject")
+    assert "Multiple candidates are allowed" in prompt
+    assert "at most" not in prompt.split("## Output")[0]
+
+
+def test_build_prompt_caps_count_when_max_candidates_set(tmp_path):
+    """max_candidates=N injects an `at most N` instruction into the prompt."""
+    prompt = s03_candidate_generation._build_prompt(
+        _signals(), _tree(), tmp_path / "subject", max_candidates=5
+    )
+    assert "at most 5 candidates" in prompt
+    # The default open-ended sentence should be replaced, not duplicated.
+    assert "Multiple candidates are allowed" not in prompt
 
 
 def test_candidate_list_schema_is_closed():

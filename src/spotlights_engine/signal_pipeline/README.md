@@ -62,6 +62,12 @@ Re-running against the same checkout short-circuits stage 02 entirely
 to force a fresh extraction (the result still updates the cache).
 Non-git subject directories don't cache — no stable identity to key on.
 
+**Capping the candidate count.** Pass `--max-candidates N` to nudge
+stage 03 toward producing at most N candidates, prioritized by signal
+strength × significance. Soft cap — the prompt asks the model to keep
+the top-N; not enforced as a hard schema cap. Default is no cap (the
+model decides based on signal richness, typically 3–8 for the LRU smoke).
+
 ---
 
 ## Artifacts-dir layout

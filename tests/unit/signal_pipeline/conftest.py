@@ -113,7 +113,8 @@ def _default_stage_stubs(request, monkeypatch):
     from spotlights_engine.signal_pipeline.stages import s03_candidate_generation
 
     def _fake_candidates(
-        *, signals, project_tree, subject_root, log_dir, on_event=None, model=None
+        *, signals, project_tree, subject_root, log_dir,
+        on_event=None, model=None, max_candidates=None,
     ):
         return [
             Candidate(

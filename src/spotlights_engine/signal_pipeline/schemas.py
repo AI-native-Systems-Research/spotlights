@@ -127,6 +127,12 @@ class SignalPipelineInput(BaseModel):
     # Set False to force a fresh extraction (the result still updates the
     # cache). CLI: `--no-projecttree-cache`.
     projecttree_cache: bool = True
+    # Soft cap on the number of candidates stage 03 should produce. None =
+    # the prompt's default ("multiple expected for rich workloads"). When
+    # set, the prompt instructs the model to keep the top-N by signal
+    # strength × significance. Not a hard schema cap — the model may still
+    # exceed it; intent is to nudge concise outputs. CLI: `--max-candidates N`.
+    max_candidates: int | None = Field(default=None, ge=1)
 
 
 class SignalPipelineResult(BaseModel):
