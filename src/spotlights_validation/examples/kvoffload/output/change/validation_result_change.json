@@ -23,7 +23,7 @@
       "failed": 0,
       "skipped": 0,
       "errors": [],
-      "duration_seconds": 211.78,
+      "duration_seconds": 280.23,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-kv-offload-tiering.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-kv-offload-tiering.report.json"
     },
@@ -39,7 +39,7 @@
       "failed": 0,
       "skipped": 0,
       "errors": [],
-      "duration_seconds": 258.03,
+      "duration_seconds": 263.92,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-kv-connector-offloading.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-kv-connector-offloading.report.json"
     },
@@ -55,7 +55,7 @@
       "failed": 0,
       "skipped": 0,
       "errors": [],
-      "duration_seconds": 348.34,
+      "duration_seconds": 251.3,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-kv-connector-lifecycle.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-kv-connector-lifecycle.report.json"
     },
@@ -71,7 +71,7 @@
       "failed": 0,
       "skipped": 0,
       "errors": [],
-      "duration_seconds": 280.83,
+      "duration_seconds": 237.82,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-kv-cache-layout.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-kv-cache-layout.report.json"
     },
@@ -87,7 +87,7 @@
       "failed": 0,
       "skipped": 0,
       "errors": [],
-      "duration_seconds": 295.66,
+      "duration_seconds": 247.67,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-kv-load-failure-recovery.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-kv-load-failure-recovery.report.json"
     },
@@ -103,7 +103,7 @@
       "failed": 0,
       "skipped": 0,
       "errors": [],
-      "duration_seconds": 245.44,
+      "duration_seconds": 216.64,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-kv-cache-manager.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-kv-cache-manager.report.json"
     },
@@ -119,7 +119,7 @@
       "failed": 0,
       "skipped": 0,
       "errors": [],
-      "duration_seconds": 258.25,
+      "duration_seconds": 202.78,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-single-type-kv-cache-manager.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-single-type-kv-cache-manager.report.json"
     },
@@ -135,7 +135,7 @@
       "failed": 0,
       "skipped": 0,
       "errors": [],
-      "duration_seconds": 282.5,
+      "duration_seconds": 247.64,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-kv-cache-utils.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-kv-cache-utils.report.json"
     },
@@ -160,7 +160,7 @@
           "longrepr": "no tests collected (collected=1 deselected=1 passed=0 failed=0 skipped=0)"
         }
       ],
-      "duration_seconds": 201.43,
+      "duration_seconds": 245.14,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-cache-kernels.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-cache-kernels.report.json"
     },
@@ -185,7 +185,7 @@
           "longrepr": "def test_async_scheduling_pp_allows_rescheduling_with_output_placeholders():\n        \"\"\"Async scheduling + PP: allow multi-step in-flight scheduling per request\"\"\"\n>       scheduler = create_scheduler(async_scheduling=True, pipeline_parallel_size=2)\n                    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n\ntests/v1/core/test_scheduler.py:132: \n_ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ \n\nmodel = 'facebook/opt-125m', max_num_seqs = 16, max_num_batched_tokens = 8192\nenable_chunked_prefill = True, enable_prefix_caching = False\nlong_prefill_token_threshold = 0, disable_chunked_mm_input = False\nuse_kv_connector = None, num_blocks = 10000, block_size = 16\nmax_model_len = 8192, num_speculative_tokens = None, skip_tokenizer_init = False\nasync_scheduling = True, pipeline_parallel_size = 2, use_ec_connector = False\nec_role = None\n\n    def create_scheduler(\n        model: str = \"facebook/opt-125m\",\n        max_num_seqs: int = 16,\n        max_num_batched_tokens: int = 8192,\n        enable_chunked_prefill: bool = True,\n        enable_prefix_caching: bool = False,\n        long_prefill_token_threshold: int = 0,\n        disable_chunked_mm_input: bool = False,\n        use_kv_connector: None | bool | MockKVConfig = None,\n        num_blocks: int = 10000,\n        block_size: int = 16,\n        max_model_len: int | None = None,\n        num_speculative_tokens: int | None = None,\n        skip_tokenizer_init: bool = False,\n        async_scheduling: bool = False,\n        pipeline_parallel_size: int = 1,\n        use_ec_connector: bool = False,\n        ec_role: str | None = None,\n    ) -> Scheduler | AsyncScheduler:\n        \"\"\"Create scheduler under test.\n    \n        Args:\n          model: model under test\n          max_num_seqs: max sequences to schedule\n          max_num_batch_tokens: max num tokens to batch\n          enable_prefix_caching: optionally force APC config\n                                 (True/False) or use default\n                                 (False)\n    \n        Returns:\n          {class}`Scheduler` instance\n        \"\"\"\n        model_config = ModelConfig(\n            model=model,\n            trust_remote_code=True,\n            dtype=\"float16\",\n            seed=42,\n            skip_tokenizer_init=skip_tokenizer_init,\n        )\n        if max_model_len is None:\n            max_model_len = max_num_batched_tokens\n        scheduler_config = SchedulerConfig(\n            max_num_seqs=max_num_seqs,\n            max_num_batched_tokens=max_num_batched_tokens,\n            max_model_len=max_model_len,\n            long_prefill_token_threshold=long_prefill_token_threshold,\n            disable_chunked_mm_input=disable_chunked_mm_input,\n            enable_chunked_prefill=enable_chunked_prefill,\n            async_scheduling=async_scheduling,\n            is_encoder_decoder=model_config.is_encoder_decoder,\n        )\n        # Cache config, optionally force APC\n        cache_config = CacheConfig(\n            block_size=block_size,\n            gpu_memory_utilization=0.9,\n            cache_dtype=\"auto\",\n            enable_prefix_caching=enable_prefix_caching,\n        )\n        kv_transfer_config = None\n        if isinstance(use_kv_connector, MockKVConfig):\n            kv_transfer_config = KVTransferConfig(\n                kv_connector=\"MockKVConnector\",\n                kv_role=\"kv_both\",\n                kv_connector_extra_config={\n                    \"matched_tokens\": use_kv_connector.matched_tokens,\n                    \"is_async\": use_kv_connector.is_async,\n                },\n            )\n        elif use_kv_connector:\n            kv_transfer_config = KVTransferConfig(\n                kv_connector=\"ExampleConnector\",\n                kv_role=\"kv_both\",\n                kv_connector_extra_config={\"shared_storage_path\": \"local_storage\"},\n            )\n    \n        speculative_config: SpeculativeConfig | None = None\n        if num_speculative_tokens is not None:\n            speculative_config "
         }
       ],
-      "duration_seconds": 296.66,
+      "duration_seconds": 283.62,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-scheduler.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-scheduler.report.json"
     },
@@ -201,7 +201,7 @@
       "failed": 0,
       "skipped": 0,
       "errors": [],
-      "duration_seconds": 365.38,
+      "duration_seconds": 226.39,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-async-scheduler.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-async-scheduler.report.json"
     },
@@ -217,7 +217,7 @@
       "failed": 0,
       "skipped": 1,
       "errors": [],
-      "duration_seconds": 450.6,
+      "duration_seconds": 307.05,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-worker.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/unit-worker.report.json"
     },
@@ -233,7 +233,7 @@
       "failed": 0,
       "skipped": 0,
       "errors": [],
-      "duration_seconds": 612.0,
+      "duration_seconds": 464.06,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/integration-scheduler-e2e.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/integration-scheduler-e2e.report.json"
     },
@@ -245,20 +245,100 @@
       "index": 15,
       "priority": 5,
       "halt_on_failure": false,
-      "passed": 23,
-      "failed": 1,
+      "passed": 13,
+      "failed": 11,
       "skipped": 1,
       "errors": [
+        {
+          "nodeid": "tests/v1/engine/test_engine_core.py::test_engine_core",
+          "phase": "call",
+          "message": "PermissionError: [Errno 1] Operation not permitted",
+          "file": "/proj/vlt-evolve/work/orit/vllm/tests/utils.py",
+          "lineno": 1198,
+          "longrepr": "args = (), kwargs = {}\n\n    @functools.wraps(func)\n    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> None:\n        # Make the process the leader of its own process group\n        # to avoid sending SIGTERM to the parent process\n>       os.setpgrp()\nE       PermissionError: [Errno 1] Operation not permitted\n\ntests/utils.py:1198: PermissionError"
+        },
+        {
+          "nodeid": "tests/v1/engine/test_engine_core.py::test_engine_core_advanced_sampling",
+          "phase": "call",
+          "message": "PermissionError: [Errno 1] Operation not permitted",
+          "file": "/proj/vlt-evolve/work/orit/vllm/tests/utils.py",
+          "lineno": 1198,
+          "longrepr": "args = (), kwargs = {}\n\n    @functools.wraps(func)\n    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> None:\n        # Make the process the leader of its own process group\n        # to avoid sending SIGTERM to the parent process\n>       os.setpgrp()\nE       PermissionError: [Errno 1] Operation not permitted\n\ntests/utils.py:1198: PermissionError"
+        },
+        {
+          "nodeid": "tests/v1/engine/test_engine_core.py::test_engine_core_concurrent_batches",
+          "phase": "call",
+          "message": "PermissionError: [Errno 1] Operation not permitted",
+          "file": "/proj/vlt-evolve/work/orit/vllm/tests/utils.py",
+          "lineno": 1198,
+          "longrepr": "args = (), kwargs = {}\n\n    @functools.wraps(func)\n    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> None:\n        # Make the process the leader of its own process group\n        # to avoid sending SIGTERM to the parent process\n>       os.setpgrp()\nE       PermissionError: [Errno 1] Operation not permitted\n\ntests/utils.py:1198: PermissionError"
+        },
+        {
+          "nodeid": "tests/v1/engine/test_engine_core.py::test_engine_core_invalid_request_id_type",
+          "phase": "call",
+          "message": "PermissionError: [Errno 1] Operation not permitted",
+          "file": "/proj/vlt-evolve/work/orit/vllm/tests/utils.py",
+          "lineno": 1198,
+          "longrepr": "args = (), kwargs = {}\n\n    @functools.wraps(func)\n    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> None:\n        # Make the process the leader of its own process group\n        # to avoid sending SIGTERM to the parent process\n>       os.setpgrp()\nE       PermissionError: [Errno 1] Operation not permitted\n\ntests/utils.py:1198: PermissionError"
+        },
+        {
+          "nodeid": "tests/v1/engine/test_engine_core.py::test_encoder_instance_zero_kv_cache[False-ec_producer-0.01-False]",
+          "phase": "call",
+          "message": "PermissionError: [Errno 1] Operation not permitted",
+          "file": "/proj/vlt-evolve/work/orit/vllm/tests/utils.py",
+          "lineno": 1198,
+          "longrepr": "args = ()\nkwargs = {'ec_role': 'ec_producer', 'enable_prefix_caching': False, 'gpu_memory_utilization': 0.01, 'use_kv_connector': False}\n\n    @functools.wraps(func)\n    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> None:\n        # Make the process the leader of its own process group\n        # to avoid sending SIGTERM to the parent process\n>       os.setpgrp()\nE       PermissionError: [Errno 1] Operation not permitted\n\ntests/utils.py:1198: PermissionError"
+        },
+        {
+          "nodeid": "tests/v1/engine/test_engine_core.py::test_encoder_instance_zero_kv_cache[False-ec_consumer-0.7-True]",
+          "phase": "call",
+          "message": "PermissionError: [Errno 1] Operation not permitted",
+          "file": "/proj/vlt-evolve/work/orit/vllm/tests/utils.py",
+          "lineno": 1198,
+          "longrepr": "args = ()\nkwargs = {'ec_role': 'ec_consumer', 'enable_prefix_caching': True, 'gpu_memory_utilization': 0.7, 'use_kv_connector': False}\n\n    @functools.wraps(func)\n    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> None:\n        # Make the process the leader of its own process group\n        # to avoid sending SIGTERM to the parent process\n>       os.setpgrp()\nE       PermissionError: [Errno 1] Operation not permitted\n\ntests/utils.py:1198: PermissionError"
+        },
+        {
+          "nodeid": "tests/v1/engine/test_engine_core.py::test_encoder_instance_zero_kv_cache[False-ec_consumer-0.7-False]",
+          "phase": "call",
+          "message": "PermissionError: [Errno 1] Operation not permitted",
+          "file": "/proj/vlt-evolve/work/orit/vllm/tests/utils.py",
+          "lineno": 1198,
+          "longrepr": "args = ()\nkwargs = {'ec_role': 'ec_consumer', 'enable_prefix_caching': False, 'gpu_memory_utilization': 0.7, 'use_kv_connector': False}\n\n    @functools.wraps(func)\n    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> None:\n        # Make the process the leader of its own process group\n        # to avoid sending SIGTERM to the parent process\n>       os.setpgrp()\nE       PermissionError: [Errno 1] Operation not permitted\n\ntests/utils.py:1198: PermissionError"
+        },
+        {
+          "nodeid": "tests/v1/engine/test_engine_core.py::test_encoder_instance_zero_kv_cache[True-ec_producer-0.01-False]",
+          "phase": "call",
+          "message": "PermissionError: [Errno 1] Operation not permitted",
+          "file": "/proj/vlt-evolve/work/orit/vllm/tests/utils.py",
+          "lineno": 1198,
+          "longrepr": "args = ()\nkwargs = {'ec_role': 'ec_producer', 'enable_prefix_caching': False, 'gpu_memory_utilization': 0.01, 'use_kv_connector': True}\n\n    @functools.wraps(func)\n    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> None:\n        # Make the process the leader of its own process group\n        # to avoid sending SIGTERM to the parent process\n>       os.setpgrp()\nE       PermissionError: [Errno 1] Operation not permitted\n\ntests/utils.py:1198: PermissionError"
+        },
+        {
+          "nodeid": "tests/v1/engine/test_engine_core.py::test_encoder_instance_zero_kv_cache[True-ec_consumer-0.7-True]",
+          "phase": "call",
+          "message": "PermissionError: [Errno 1] Operation not permitted",
+          "file": "/proj/vlt-evolve/work/orit/vllm/tests/utils.py",
+          "lineno": 1198,
+          "longrepr": "args = ()\nkwargs = {'ec_role': 'ec_consumer', 'enable_prefix_caching': True, 'gpu_memory_utilization': 0.7, 'use_kv_connector': True}\n\n    @functools.wraps(func)\n    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> None:\n        # Make the process the leader of its own process group\n        # to avoid sending SIGTERM to the parent process\n>       os.setpgrp()\nE       PermissionError: [Errno 1] Operation not permitted\n\ntests/utils.py:1198: PermissionError"
+        },
+        {
+          "nodeid": "tests/v1/engine/test_engine_core.py::test_encoder_instance_zero_kv_cache[True-ec_consumer-0.7-False]",
+          "phase": "call",
+          "message": "PermissionError: [Errno 1] Operation not permitted",
+          "file": "/proj/vlt-evolve/work/orit/vllm/tests/utils.py",
+          "lineno": 1198,
+          "longrepr": "args = ()\nkwargs = {'ec_role': 'ec_consumer', 'enable_prefix_caching': False, 'gpu_memory_utilization': 0.7, 'use_kv_connector': True}\n\n    @functools.wraps(func)\n    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> None:\n        # Make the process the leader of its own process group\n        # to avoid sending SIGTERM to the parent process\n>       os.setpgrp()\nE       PermissionError: [Errno 1] Operation not permitted\n\ntests/utils.py:1198: PermissionError"
+        },
         {
           "nodeid": "tests/v1/engine/test_preprocess_error_handling.py::test_preprocess_error_handling",
           "phase": "call",
           "message": "AssertionError: assert 10 == 0\n +  where 10 = len([16440, 15197, 15377, 24174, 10224, 12929, ...])\n +    where [16440, 15197, 15377, 24174, 10224, 12929, ...] = CompletionOutput(index=0, text='hd Business pleasure canción Stock Mohból vieрюści', token_ids=[16440, 15197, 15377, 24174, 10224, 12929, 26976, 6316, 17087, 4255], routed_experts=None, cumulative_logprob=None, logprobs=None, finish_reason=length, stop_reason=None).token_ids",
           "file": "/proj/vlt-evolve/work/orit/vllm/tests/v1/engine/test_preprocess_error_handling.py",
           "lineno": 55,
-          "longrepr": "monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x1521c4f5fda0>\n\n    def test_preprocess_error_handling(monkeypatch: pytest.MonkeyPatch):\n        \"\"\"Test that preprocessing errors are handled gracefully.\"\"\"\n    \n        if current_platform.is_rocm() or current_platform.is_xpu():\n            pytest.skip(\n                \"Skipped on ROCm/XPU: this test only works with 'fork', \"\n                \"but ROCm/XPU uses 'spawn'.\"\n            )\n    \n        assert not torch.cuda.is_initialized(), (\n            \"fork needs to be used for the engine \"\n            \"core process and this isn't possible if cuda is already initialized\"\n        )\n    \n        # Store original method to call for non-failing requests\n        original_preprocess = EngineCore.preprocess_add_request\n    \n        # Monkeypatch to make preprocess_add_request raise an exception\n        # only for requests with \"FAIL\" in the first token\n        def conditional_failing_preprocess(self, request: EngineCoreRequest):\n            # Fail if the first token id is 333\n            if request.prompt_token_ids and request.prompt_token_ids[0] == 333:\n                raise ValueError(\"Simulated preprocessing error!\")\n            return original_preprocess(self, request)\n    \n        monkeypatch.setattr(\n            EngineCore, \"preprocess_add_request\", conditional_failing_preprocess\n        )\n    \n        llm = LLM(model=MODEL_NAME)\n    \n        # Create a failing request by crafting a request with an invalid token\n        # We need to use a direct approach since LLM.generate tokenizes for us\n        from vllm.inputs import TokensPrompt\n    \n        # This should raise an exception due to the preprocessing failure\n        # Special token id to trigger the failure\n        failing_prompt = TokensPrompt(prompt_token_ids=[333])\n        outputs = llm.generate(failing_prompt, SamplingParams(max_tokens=10))  # type: ignore\n        assert len(outputs) == 1\n>       assert len(outputs[0].outputs[0].token_ids) == 0\nE       AssertionError: assert 10 == 0\nE        +  where 10 = len([16440, 15197, 15377, 24174, 10224, 12929, ...])\nE        +    where [16440, 15197, 15377, 24174, 10224, 12929, ...] = CompletionOutput(index=0, text='hd Business pleasure canción Stock Mohból vieрюści', token_ids=[16440, 15197, 15377, 24174, 10224, 12929, 26976, 6316, 17087, 4255], routed_experts=None, cumulative_logprob=None, logprobs=None, finish_reason=length, stop_reason=None).token_ids\n\ntests/v1/engine/test_preprocess_error_handling.py:55: AssertionError"
+          "longrepr": "monkeypatch = <_pytest.monkeypatch.MonkeyPatch object at 0x151875c9ecf0>\n\n    def test_preprocess_error_handling(monkeypatch: pytest.MonkeyPatch):\n        \"\"\"Test that preprocessing errors are handled gracefully.\"\"\"\n    \n        if current_platform.is_rocm() or current_platform.is_xpu():\n            pytest.skip(\n                \"Skipped on ROCm/XPU: this test only works with 'fork', \"\n                \"but ROCm/XPU uses 'spawn'.\"\n            )\n    \n        assert not torch.cuda.is_initialized(), (\n            \"fork needs to be used for the engine \"\n            \"core process and this isn't possible if cuda is already initialized\"\n        )\n    \n        # Store original method to call for non-failing requests\n        original_preprocess = EngineCore.preprocess_add_request\n    \n        # Monkeypatch to make preprocess_add_request raise an exception\n        # only for requests with \"FAIL\" in the first token\n        def conditional_failing_preprocess(self, request: EngineCoreRequest):\n            # Fail if the first token id is 333\n            if request.prompt_token_ids and request.prompt_token_ids[0] == 333:\n                raise ValueError(\"Simulated preprocessing error!\")\n            return original_preprocess(self, request)\n    \n        monkeypatch.setattr(\n            EngineCore, \"preprocess_add_request\", conditional_failing_preprocess\n        )\n    \n        llm = LLM(model=MODEL_NAME)\n    \n        # Create a failing request by crafting a request with an invalid token\n        # We need to use a direct approach since LLM.generate tokenizes for us\n        from vllm.inputs import TokensPrompt\n    \n        # This should raise an exception due to the preprocessing failure\n        # Special token id to trigger the failure\n        failing_prompt = TokensPrompt(prompt_token_ids=[333])\n        outputs = llm.generate(failing_prompt, SamplingParams(max_tokens=10))  # type: ignore\n        assert len(outputs) == 1\n>       assert len(outputs[0].outputs[0].token_ids) == 0\nE       AssertionError: assert 10 == 0\nE        +  where 10 = len([16440, 15197, 15377, 24174, 10224, 12929, ...])\nE        +    where [16440, 15197, 15377, 24174, 10224, 12929, ...] = CompletionOutput(index=0, text='hd Business pleasure canción Stock Mohból vieрюści', token_ids=[16440, 15197, 15377, 24174, 10224, 12929, 26976, 6316, 17087, 4255], routed_experts=None, cumulative_logprob=None, logprobs=None, finish_reason=length, stop_reason=None).token_ids\n\ntests/v1/engine/test_preprocess_error_handling.py:55: AssertionError"
         }
       ],
-      "duration_seconds": 2309.66,
+      "duration_seconds": 2003.18,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/integration-engine.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/integration-engine.report.json"
     },
@@ -274,7 +354,7 @@
       "failed": 0,
       "skipped": 8,
       "errors": [],
-      "duration_seconds": 561.74,
+      "duration_seconds": 764.97,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/correctness-basic.log",
       "json_report_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/correctness-basic.report.json"
     },
@@ -293,13 +373,13 @@
         {
           "nodeid": "<exit-code-2>",
           "phase": "call",
-          "message": "(APIServer pid=2936996) TypeError: expected str, bytes or os.PathLike object, not NoneType",
+          "message": "(APIServer pid=697057) TypeError: expected str, bytes or os.PathLike object, not NoneType",
           "file": null,
           "lineno": null,
-          "longrepr": "(APIServer pid=2936996) TypeError: expected str, bytes or os.PathLike object, not NoneType\n(APIServer pid=2936990) TypeError: expected str, bytes or os.PathLike object, not NoneType"
+          "longrepr": "(APIServer pid=697057) TypeError: expected str, bytes or os.PathLike object, not NoneType\n(APIServer pid=697063) TypeError: expected str, bytes or os.PathLike object, not NoneType"
         }
       ],
-      "duration_seconds": 1200.61,
+      "duration_seconds": 1200.51,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/integration-kv-connector-nixl.log",
       "json_report_path": null
     },
@@ -318,13 +398,13 @@
         {
           "nodeid": "<exit-code-2>",
           "phase": "call",
-          "message": "(APIServer pid=3086760) TypeError: expected str, bytes or os.PathLike object, not NoneType",
+          "message": "(APIServer pid=1012082) TypeError: expected str, bytes or os.PathLike object, not NoneType",
           "file": null,
           "lineno": null,
-          "longrepr": "(APIServer pid=3086760) TypeError: expected str, bytes or os.PathLike object, not NoneType\n(APIServer pid=3086761) TypeError: expected str, bytes or os.PathLike object, not NoneType"
+          "longrepr": "(APIServer pid=1012082) TypeError: expected str, bytes or os.PathLike object, not NoneType\n(APIServer pid=1012081) TypeError: expected str, bytes or os.PathLike object, not NoneType"
         }
       ],
-      "duration_seconds": 1203.43,
+      "duration_seconds": 1203.38,
       "log_path": "/proj/vlt-evolve/work/orit/spotlights/src/spotlights_validation/examples/kvoffload/output/change/logs/stress-kv-offload-memory-pressure.log",
       "json_report_path": null
     }
@@ -341,28 +421,28 @@
       "metrics": [
         {
           "name": "ttft_ms_mean",
-          "measured_value": 137.957
+          "measured_value": 129.996
         },
         {
           "name": "tpot_ms_mean",
-          "measured_value": 12.294
+          "measured_value": 12.269
         },
         {
           "name": "cpu_hit_rate",
-          "measured_value": 0.34273712083248264
+          "measured_value": 0.3296662150198481
         },
         {
           "name": "evictions",
-          "measured_value": 114168.0
+          "measured_value": 132417.0
         }
       ],
       "optimization_target": null,
-      "raw_output": " Using timeout of 140s based on max_tokens 700\n02-06-2026 05:02:41 [INFO] - \u001b[96mFinished 366 out of 500 conversations (73%), 0 out of 4 clients finished, collected 3379 measurements, runtime 3087.040 sec\u001b[0m\n02-06-2026 05:02:41 [INFO] - \u001b[96mEstimated req/sec 1.095, estimated runtime left 1130.228 sec\u001b[0m\n02-06-2026 05:02:41 [INFO] - --------------------------------------------------\n02-06-2026 05:02:41 [INFO] - [moving_avg_ttft_ms       ] avg:    221.313 (60 samples)\n02-06-2026 05:02:41 [INFO] - [moving_avg_tpot_ms       ] avg:     13.183 (60 samples)\n02-06-2026 05:02:41 [INFO] - [ttft_ms                  ] avg:    135.632, min:     37.445, max:   1300.818\n02-06-2026 05:02:41 [INFO] - [tpot_ms                  ] avg:     12.268, min:      0.000, max:     32.471\n02-06-2026 05:02:41 [INFO] - [latency_ms               ] avg:   3647.813, min:     54.590, max:  15233.829\n02-06-2026 05:02:41 [INFO] - [input_num_turns          ] avg:     10.139, min:      1.000, max:     49.000\n02-06-2026 05:02:41 [INFO] - [input_num_tokens         ] avg:   1559.302, min:      1.000, max:  14197.000\n02-06-2026 05:02:41 [INFO] - [output_num_tokens        ] avg:    285.059, min:      1.000, max:   1281.000\n02-06-2026 05:02:41 [INFO] - --------------------------------------------------\n02-06-2026 05:02:41 [INFO] - Using timeout of 146s based on max_tokens 730\n02-06-2026 05:03:15 [INFO] - \u001b[96mFinished 369 out of 500 conversations (74%), 0 out of 4 clients finished, collected 3409 measurements, runtime 3120.772 sec\u001b[0m\n02-06-2026 05:03:15 [INFO] - \u001b[96mEstimated req/sec 1.092, estimated runtime left 1107.916 sec\u001b[0m\n02-06-2026 05:03:15 [INFO] - --------------------------------------------------\n02-06-2026 05:03:15 [INFO] - [moving_avg_ttft_ms       ] avg:    231.489 (60 samples)\n02-06-2026 05:03:15 [INFO] - [moving_avg_tpot_ms       ] avg:     13.497 (60 samples)\n02-06-2026 05:03:15 [INFO] - [ttft_ms                  ] avg:    136.754, min:     37.445, max:   2246.104\n02-06-2026 05:03:15 [INFO] - [tpot_ms                  ] avg:     12.282, min:      0.000, max:     32.471\n02-06-2026 05:03:15 [INFO] - [latency_ms               ] avg:   3655.412, min:     54.590, max:  15233.829\n02-06-2026 05:03:15 [INFO] - [input_num_turns          ] avg:     10.160, min:      1.000, max:     49.000\n02-06-2026 05:03:15 [INFO] - [input_num_tokens         ] avg:   1569.740, min:      1.000, max:  22208.000\n02-06-2026 05:03:15 [INFO] - [output_num_tokens        ] avg:    285.279, min:      1.000, max:   1281.000\n02-06-2026 05:03:15 [INFO] - --------------------------------------------------\n02-06-2026 05:03:16 [INFO] - Using timeout of 153s based on max_tokens 766\n02-06-2026 05:03:19 [INFO] - Using timeout of 137s based on max_tokens 689\n02-06-2026 05:03:26 [INFO] - Using timeout of 143s based on max_tokens 716\n02-06-2026 05:03:35 [INFO] - Using timeout of 136s based on max_tokens 683\n02-06-2026 05:03:36 [INFO] - Using timeout of 153s based on max_tokens 767\n02-06-2026 05:03:59 [INFO] - Using timeout of 121s based on max_tokens 607\n02-06-2026 05:04:01 [INFO] - \u001b[96mFinished 372 out of 500 conversations (74%), 0 out of 4 clients finished, collected 3450 measurements, runtime 3167.294 sec\u001b[0m\n02-06-2026 05:04:01 [INFO] - \u001b[96mEstimated req/sec 1.089, estimated runtime left 1089.821 sec\u001b[0m\n02-06-2026 05:04:01 [INFO] - --------------------------------------------------\n02-06-2026 05:04:01 [INFO] - [moving_avg_ttft_ms       ] avg:    265.960 (60 samples)\n02-06-2026 05:04:01 [INFO] - [moving_avg_tpot_ms       ] avg:     13.751 (60 samples)\n02-06-2026 05:04:01 [INFO] - [ttft_ms                  ] avg:    137.957, min:     37.445, max:   2246.104\n02-06-2026 05:04:01 [INFO] - [tpot_ms                  ] avg:     12.294, min:      0.000, max:     32.471\n02-06-2026 05:04:01 [INFO] - [latency_ms               ] avg:   3664.300, min:     54.590, max:  15233.829\n02-06-2026 05:04:01 [INFO] - [input_num_turns          ] avg:     10.238, min:      1.000, max:     51.000\n02-06-2026 05:04:01 [INFO] - [input_num_tokens         ] avg:   1584.129, min:      1.000, max:  22208.000\n02-06-2026 05:04:01 [INFO] - [output_num_tokens        ] avg:    285.623, min:      1.000, max:   1281.000\n02-06-2026 05:04:01 [INFO] - --------------------------------------------------\n02-06-2026 05:04:08 [INFO] - Using timeout of 122s based on max_tokens 612\n02-06-2026 05:04:08 [INFO] - \u001b[93mClient 1 has no more work\u001b[0m\n02-06-2026 05:04:08 [INFO] - \u001b[96mClient 1 is done (num_successes=906, num_failures=0)\u001b[0m\n02-06-2026 05:04:08 [INFO] - \u001b[96m1 out of 4 clients finished\u001b[0m\n02-06-2026 05:04:08 [INFO] - \u001b[93mSending termination signal to clients\u001b[0m\n02-06-2026 05:04:08 [INFO] - \u001b[93mClient 2 received a termination signal\u001b[0m\n02-06-2026 05:04:08 [INFO] - \u001b[96mClient 2 is done (num_successes=864, num_failures=0)\u001b[0m\n02-06-2026 05:04:08 [INFO] - \u001b[96m2 out of 4 clients finished\u001b[0m\n02-06-2026 05:04:08 [INFO] - \u001b[93mClient 0 received a termination signal\u001b[0m\n02-06-2026 05:04:08 [INFO] - \u001b[96mClient 0 is done (num_successes=847, num_failures=0)\u001b[0m\n02-06-2026 05:04:08 [INFO] - \u001b[96m3 out of 4 clients finished\u001b[0m\n02-06-2026 05:04:10 [INFO] - \u001b[93mClient 3 received a termination signal\u001b[0m\n02-06-2026 05:04:10 [INFO] - \u001b[96mClient 3 is done (num_successes=845, num_failures=0)\u001b[0m\n02-06-2026 05:04:10 [INFO] - \u001b[96m4 out of 4 clients finished\u001b[0m\n02-06-2026 05:04:10 [INFO] - \u001b[96mAll 4 clients finished\u001b[0m\n02-06-2026 05:04:10 [INFO] - Collected 3462 samples from all the clients\n02-06-2026 05:04:10 [INFO] - \u001b[96mWaiting for client client_0 (is alive: False)\u001b[0m\n02-06-2026 05:04:10 [INFO] - \u001b[96mWaiting for client client_1 (is alive: False)\u001b[0m\n02-06-2026 05:04:10 [INFO] - \u001b[96mWaiting for client client_2 (is alive: False)\u001b[0m\n02-06-2026 05:04:10 [INFO] - \u001b[96mWaiting for client client_3 (is alive: True)\u001b[0m\n02-06-2026 05:04:10 [INFO] - All 4 clients exited (successfully finished 374 out of 500 conversations)\n02-06-2026 05:04:10 [INFO] - \u001b[92mAll clients finished, benchmark runtime: 3175.950 sec (3175949.507 ms), requests per second: 1.090\u001b[0m\n02-06-2026 05:04:10 [INFO] - Processing 3462 samples...\n02-06-2026 05:04:10 [INFO] - \u001b[92mWriting conversations file: /proj/vlt-evolve/work/orit/kv-offload-lab/benchmark/multi-turn/results/evolved/sharegpt/gpu_0.5_active_128_cpu_26/benchmark_run_1.json\u001b[0m\n----------------------------------------------------------------------------------------------------\n\u001b[93mParameters:\u001b[0m\nmodel=NousResearch/Hermes-3-Llama-3.1-8B\nnum_clients=4\nnum_conversations=500\nactive_conversations=128\nseed=0\n----------------------------------------------------------------------------------------------------\n\u001b[93mStatistics summary:\u001b[0m\nruntime_sec = 3175.518\nrequests_per_sec = 1.090\n----------------------------------------------------------------------------------------------------\n                    count     mean      std  ...       99%     99.9%       max\nttft_ms            3462.0   138.21   136.50  ...    620.09    965.02   2246.10\ntpot_ms            3462.0    12.30     1.64  ...     17.65     24.75     40.93\nlatency_ms         3462.0  3662.75  2496.45  ...  10354.28  11984.70  15233.83\ninput_num_turns    3462.0    10.27     9.13  ...     39.00     47.00     51.00\ninput_num_tokens   3462.0  1588.05  1773.61  ...   7596.41  11324.84  22208.00\noutput_num_tokens  3462.0   285.40   194.11  ...    768.00    776.00   1281.00\noutput_num_chunks  3462.0   279.44   190.77  ...    766.00    773.62   1279.00\n\n[7 rows x 11 columns]\n----------------------------------------------------------------------------------------------------\nWrote /proj/vlt-evolve/work/orit/kv-offload-lab/benchmark/multi-turn/results/evolved/sharegpt/gpu_0.5_active_128_cpu_26/summary.json\nRun 1 complete.\n\n============================================================\nAll runs complete. Results in /proj/vlt-evolve/work/orit/kv-offload-lab/benchmark/multi-turn/results/evolved/sharegpt/gpu_0.5_active_128_cpu_26/\n============================================================\n"
+      "raw_output": "- Using timeout of 143s based on max_tokens 716\n03-06-2026 01:46:56 [INFO] - \u001b[96mFinished 366 out of 500 conversations (73%), 0 out of 4 clients finished, collected 3383 measurements, runtime 3083.861 sec\u001b[0m\n03-06-2026 01:46:56 [INFO] - \u001b[96mEstimated req/sec 1.097, estimated runtime left 1129.064 sec\u001b[0m\n03-06-2026 01:46:56 [INFO] - --------------------------------------------------\n03-06-2026 01:46:56 [INFO] - [moving_avg_ttft_ms       ] avg:    239.713 (60 samples)\n03-06-2026 01:46:56 [INFO] - [moving_avg_tpot_ms       ] avg:     13.605 (60 samples)\n03-06-2026 01:46:56 [INFO] - [ttft_ms                  ] avg:    128.260, min:     43.802, max:   2254.313\n03-06-2026 01:46:56 [INFO] - [tpot_ms                  ] avg:     12.245, min:      0.000, max:     27.867\n03-06-2026 01:46:56 [INFO] - [latency_ms               ] avg:   3638.148, min:     45.623, max:  15254.020\n03-06-2026 01:46:56 [INFO] - [input_num_turns          ] avg:     10.064, min:      1.000, max:     49.000\n03-06-2026 01:46:56 [INFO] - [input_num_tokens         ] avg:   1559.025, min:      1.000, max:  22208.000\n03-06-2026 01:46:56 [INFO] - [output_num_tokens        ] avg:    285.329, min:      1.000, max:   1284.000\n03-06-2026 01:46:56 [INFO] - --------------------------------------------------\n03-06-2026 01:46:56 [INFO] - Using timeout of 146s based on max_tokens 730\n03-06-2026 01:46:56 [INFO] - Using timeout of 153s based on max_tokens 769\n03-06-2026 01:47:07 [INFO] - Using timeout of 121s based on max_tokens 607\n03-06-2026 01:47:24 [INFO] - Using timeout of 146s based on max_tokens 733\n03-06-2026 01:47:31 [INFO] - \u001b[96mFinished 369 out of 500 conversations (74%), 0 out of 4 clients finished, collected 3415 measurements, runtime 3118.526 sec\u001b[0m\n03-06-2026 01:47:31 [INFO] - \u001b[96mEstimated req/sec 1.095, estimated runtime left 1107.119 sec\u001b[0m\n03-06-2026 01:47:31 [INFO] - --------------------------------------------------\n03-06-2026 01:47:31 [INFO] - [moving_avg_ttft_ms       ] avg:    239.766 (60 samples)\n03-06-2026 01:47:31 [INFO] - [moving_avg_tpot_ms       ] avg:     14.080 (60 samples)\n03-06-2026 01:47:31 [INFO] - [ttft_ms                  ] avg:    129.147, min:     43.802, max:   2254.313\n03-06-2026 01:47:31 [INFO] - [tpot_ms                  ] avg:     12.260, min:      0.000, max:     27.867\n03-06-2026 01:47:31 [INFO] - [latency_ms               ] avg:   3644.487, min:     45.623, max:  15254.020\n03-06-2026 01:47:31 [INFO] - [input_num_turns          ] avg:     10.142, min:      1.000, max:     49.000\n03-06-2026 01:47:31 [INFO] - [input_num_tokens         ] avg:   1570.387, min:      1.000, max:  22208.000\n03-06-2026 01:47:31 [INFO] - [output_num_tokens        ] avg:    285.461, min:      1.000, max:   1284.000\n03-06-2026 01:47:31 [INFO] - --------------------------------------------------\n03-06-2026 01:47:38 [INFO] - Using timeout of 153s based on max_tokens 768\n03-06-2026 01:47:43 [INFO] - Using timeout of 123s based on max_tokens 616\n03-06-2026 01:47:46 [INFO] - Using timeout of 136s based on max_tokens 683\n03-06-2026 01:48:09 [INFO] - Using timeout of 126s based on max_tokens 633\n03-06-2026 01:48:19 [INFO] - \u001b[96mFinished 372 out of 500 conversations (74%), 0 out of 4 clients finished, collected 3461 measurements, runtime 3166.243 sec\u001b[0m\n03-06-2026 01:48:19 [INFO] - \u001b[96mEstimated req/sec 1.093, estimated runtime left 1089.46 sec\u001b[0m\n03-06-2026 01:48:19 [INFO] - --------------------------------------------------\n03-06-2026 01:48:19 [INFO] - [moving_avg_ttft_ms       ] avg:    195.485 (60 samples)\n03-06-2026 01:48:19 [INFO] - [moving_avg_tpot_ms       ] avg:     13.147 (60 samples)\n03-06-2026 01:48:19 [INFO] - [ttft_ms                  ] avg:    129.996, min:     43.802, max:   2254.313\n03-06-2026 01:48:19 [INFO] - [tpot_ms                  ] avg:     12.269, min:      0.000, max:     27.867\n03-06-2026 01:48:19 [INFO] - [latency_ms               ] avg:   3650.705, min:     45.623, max:  15254.020\n03-06-2026 01:48:19 [INFO] - [input_num_turns          ] avg:     10.192, min:      1.000, max:     49.000\n03-06-2026 01:48:19 [INFO] - [input_num_tokens         ] avg:   1575.958, min:      1.000, max:  22208.000\n03-06-2026 01:48:19 [INFO] - [output_num_tokens        ] avg:    285.695, min:      1.000, max:   1284.000\n03-06-2026 01:48:19 [INFO] - --------------------------------------------------\n03-06-2026 01:48:21 [INFO] - \u001b[93mClient 2 has no more work\u001b[0m\n03-06-2026 01:48:21 [INFO] - \u001b[96mClient 2 is done (num_successes=828, num_failures=0)\u001b[0m\n03-06-2026 01:48:21 [INFO] - \u001b[96m1 out of 4 clients finished\u001b[0m\n03-06-2026 01:48:21 [INFO] - \u001b[93mSending termination signal to clients\u001b[0m\n03-06-2026 01:48:21 [INFO] - \u001b[93mClient 0 received a termination signal\u001b[0m\n03-06-2026 01:48:21 [INFO] - \u001b[96mClient 0 is done (num_successes=924, num_failures=0)\u001b[0m\n03-06-2026 01:48:21 [INFO] - \u001b[96m2 out of 4 clients finished\u001b[0m\n03-06-2026 01:48:22 [INFO] - \u001b[93mClient 1 received a termination signal\u001b[0m\n03-06-2026 01:48:22 [INFO] - \u001b[96mClient 1 is done (num_successes=814, num_failures=0)\u001b[0m\n03-06-2026 01:48:22 [INFO] - \u001b[96m3 out of 4 clients finished\u001b[0m\n03-06-2026 01:48:27 [INFO] - \u001b[93mClient 3 received a termination signal\u001b[0m\n03-06-2026 01:48:27 [INFO] - \u001b[96mClient 3 is done (num_successes=901, num_failures=0)\u001b[0m\n03-06-2026 01:48:27 [INFO] - \u001b[96m4 out of 4 clients finished\u001b[0m\n03-06-2026 01:48:27 [INFO] - \u001b[96mAll 4 clients finished\u001b[0m\n03-06-2026 01:48:27 [INFO] - Collected 3467 samples from all the clients\n03-06-2026 01:48:27 [INFO] - \u001b[96mWaiting for client client_0 (is alive: False)\u001b[0m\n03-06-2026 01:48:27 [INFO] - \u001b[96mWaiting for client client_1 (is alive: False)\u001b[0m\n03-06-2026 01:48:27 [INFO] - \u001b[96mWaiting for client client_2 (is alive: False)\u001b[0m\n03-06-2026 01:48:27 [INFO] - \u001b[96mWaiting for client client_3 (is alive: True)\u001b[0m\n03-06-2026 01:48:27 [INFO] - All 4 clients exited (successfully finished 373 out of 500 conversations)\n03-06-2026 01:48:27 [INFO] - \u001b[92mAll clients finished, benchmark runtime: 3174.637 sec (3174637.033 ms), requests per second: 1.092\u001b[0m\n03-06-2026 01:48:27 [INFO] - Processing 3467 samples...\n03-06-2026 01:48:27 [INFO] - \u001b[92mWriting conversations file: /proj/vlt-evolve/work/orit/kv-offload-lab/benchmark/multi-turn/results/evolved/sharegpt/gpu_0.5_active_128_cpu_26/benchmark_run_1.json\u001b[0m\n----------------------------------------------------------------------------------------------------\n\u001b[93mParameters:\u001b[0m\nmodel=NousResearch/Hermes-3-Llama-3.1-8B\nnum_clients=4\nnum_conversations=500\nactive_conversations=128\nseed=0\n----------------------------------------------------------------------------------------------------\n\u001b[93mStatistics summary:\u001b[0m\nruntime_sec = 3174.188\nrequests_per_sec = 1.092\n----------------------------------------------------------------------------------------------------\n                    count     mean      std  ...       99%     99.9%       max\nttft_ms            3467.0   130.08   113.85  ...    521.28    865.22   2254.31\ntpot_ms            3467.0    12.27     1.35  ...     17.01     22.34     27.87\nlatency_ms         3467.0  3651.64  2478.58  ...  10153.02  11234.14  15254.02\ninput_num_turns    3467.0    10.19     9.02  ...     39.00     46.07     49.00\ninput_num_tokens   3467.0  1576.48  1765.75  ...   7590.72  11395.44  22208.00\noutput_num_tokens  3467.0   285.77   194.32  ...    768.00    777.07   1284.00\noutput_num_chunks  3467.0   280.83   191.42  ...    766.00    773.60   1283.00\n\n[7 rows x 11 columns]\n----------------------------------------------------------------------------------------------------\nWrote /proj/vlt-evolve/work/orit/kv-offload-lab/benchmark/multi-turn/results/evolved/sharegpt/gpu_0.5_active_128_cpu_26/summary.json\nRun 1 complete.\n\n============================================================\nAll runs complete. Results in /proj/vlt-evolve/work/orit/kv-offload-lab/benchmark/multi-turn/results/evolved/sharegpt/gpu_0.5_active_128_cpu_26/\n============================================================\n"
     }
   ],
   "observability_context": {
     "signal_refs": []
   },
   "notes": "Plan-level skips: benchmark — multi-turn KV offload (kv-offload-lab, LRU) (change validation run: only evolved policy tested), benchmark — multi-turn KV offload (kv-offload-lab, ARC) (change validation run: only evolved policy tested), unit tests — KV cache coordinator (tests/v1/core/test_kv_cache_coordinator.py does not exist in vllm v0.18.0 — re-enable once vllm is upgraded to a version that includes this test), benchmark — attention backends (no output_template defined yet — re-enable once metric extraction is wired up), benchmark — prefix caching throughput (no output_template defined yet — re-enable once metric extraction is wired up), benchmark — serving throughput (no output_template defined yet — re-enable once metric extraction is wired up), benchmark — long document Q&A throughput (no output_template defined yet — re-enable once metric extraction is wired up)",
-  "timestamp": "2026-06-02T11:33:05.403821"
+  "timestamp": "2026-06-03T08:03:49.157233"
 }
