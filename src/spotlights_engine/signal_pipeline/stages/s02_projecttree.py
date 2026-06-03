@@ -6,9 +6,7 @@ its modules-extractor working tree under a fresh timestamped subdir of the
 stage's `log_dir`, sidestepping main's "pre-existing run dir is unsupported"
 guard so re-runs don't collide.
 
-⚠ Doc divergence flagged in the plan
-(`/Users/idanfr/.claude/plans/humble-plotting-cook.md` "Known doc/code
-divergences §1"): the flow doc labels this stage "deterministic, no LLM"
+⚠ Doc divergence: the flow doc labels this stage "deterministic, no LLM"
 but the schema's `description` / `role` fields require an LLM. Resolution
 belongs to the flow-doc owner.
 

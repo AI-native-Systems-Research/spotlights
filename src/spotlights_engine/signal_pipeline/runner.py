@@ -8,10 +8,6 @@ Implements the run loop:
 4. For each stage in the requested selection: skip if complete (per-shape rule)
    under `--resume`, else run.
 5. Return `SignalPipelineResult`.
-
-Resume rules and `--inject` validation tables are pinned in the approved
-plan at `~/.claude/plans/humble-plotting-cook.md`. Anything
-here that drifts from that doc is a bug.
 """
 
 from __future__ import annotations
@@ -701,11 +697,7 @@ def run_pipeline(
     inject: Iterable[InjectSpec] | None = None,
     on_event: Callable[[str], None] | None = None,
 ) -> SignalPipelineResult:
-    """Run (a subset of) the signal-based discovery pipeline.
-
-    See `~/.claude/plans/humble-plotting-cook.md` Phase 3 for
-    the resume / inject / stage-selection semantics.
-    """
+    """Run (a subset of) the signal-based discovery pipeline."""
     _check_layout()
 
     # Imported here, after `_check_layout`, so the registry's stage modules

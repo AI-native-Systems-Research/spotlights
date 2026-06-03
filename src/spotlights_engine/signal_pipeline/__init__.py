@@ -1,8 +1,7 @@
 """Signal-based discovery pipeline — MVP runner + stages.
 
 See `docs/signal-based/` for the design (flow doc, mvp module APIs, human
-overview). The plan that introduced this package is at
-`/Users/idanfr/.claude/plans/humble-plotting-cook.md`.
+overview).
 
 Entry points:
 - `run_pipeline(...)` — programmatic
