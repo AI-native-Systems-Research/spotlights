@@ -1,7 +1,7 @@
 
 # Charter — Validation (Bundle E)
 
-This document describes the design for Bundle E, which is one of the bundles detailed in [bundle_charters.md](https://github.ibm.com/Video-AI/discovery-docs/blob/main/plans/bundle_charters.md)
+This document describes the design for Bundle E, which is one of the bundles detailed in [spotlighs_design](spotlighs_design)
 
 **Repo:** `spotlights-validation`
 
