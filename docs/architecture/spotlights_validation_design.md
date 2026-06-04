@@ -3,9 +3,6 @@
 
 This document describes the design for Bundle E, which is one of the bundles detailed in [spotlighs_design](spotlighs_design)
 
-**Repo:** `spotlights-validation`
-
-> **MVP:** See [mvp_plan.md](mvp_plan.md) — discovery and validation plan steps are run manually with saved output; the automated pipeline starts from those artifacts.
 
 # Mission
 
