@@ -1,13 +1,11 @@
 # `signal_pipeline`
 
-Signal-based discovery pipeline (MVP). In: a captured workload's telemetry
-+ a subject system's repository. Out: a list of evidence-backed code
-changes with rationales and applied diffs.
-
-This README covers **how to run it and iterate on it**. The architecture
-("why these five stages") lives in
-[`docs/signal-based/signal_discovery_flow.md`](../../../docs/signal-based/signal_discovery_flow.md);
-the data contracts in
+How to run, iterate on, and debug the signal-based discovery pipeline.
+The path is introduced in the
+[root README](../../../README.md#telemetry-driven-discovery-preview);
+architecture lives in
+[`docs/signal-based/signal_discovery_flow.md`](../../../docs/signal-based/signal_discovery_flow.md)
+and data contracts in
 [`docs/signal-based/mvp_module_apis.md`](../../../docs/signal-based/mvp_module_apis.md).
 
 ---
