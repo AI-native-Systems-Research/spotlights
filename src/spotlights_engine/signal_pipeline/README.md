@@ -270,5 +270,4 @@ Tests live at [`tests/unit/signal_pipeline/`](../../../tests/unit/signal_pipelin
 - [`docs/signal-based/signal_discovery_flow.md`](../../../docs/signal-based/signal_discovery_flow.md) — architecture (mermaid + demo stories).
 - [`docs/signal-based/signal_discovery_overview.md`](../../../docs/signal-based/signal_discovery_overview.md) — 5-min human-friendly read.
 - [`docs/signal-based/mvp_module_apis.md`](../../../docs/signal-based/mvp_module_apis.md) — per-module schemas + interaction walks.
-- [`docs/signal-based/pipeline-improvements.md`](../../../docs/signal-based/pipeline-improvements.md) — deferred perf / cost backlog. When you implement an item, remove it from that file.
 - [`docs/projecttree/`](../../../docs/projecttree/) — schema and HTTP API for the structural map stage 02 produces.
