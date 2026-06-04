@@ -11,23 +11,35 @@ Confirm that changes flowing through the discovery loop preserve correctness, im
 # Control flow
 
 ```
-Phase 1 — parallel to Bundle D (Change Generation and Execution):
+Validation Discovery Phase — parallel to Bundle D (Change Generation and Execution):
 
   E starts as soon as the source tree is available:
   1. Queries B for historical outcomes on similar candidates/components.
   2. Runs test harness discovery on the source tree (CI configs, test dirs, benchmark
-     scripts, workload configs) to produce the TestHarnessMap and seed the workload
-     matrix (skipped if cached from a prior run on the same target version).
-  3. Produces a full validation plan — all harness entries and workloads, ranked by
-     historical failure signal, specific change, and halt conditions. Create the baseline results.
+     scripts, workload configs, issues, pull requests) to produce the TestHarnessMap and seed the workload matrix (skipped if cached from a prior run on the same target version).
+  3. Produces a base validation plan — all harness entries and workloads, ranked by
+     historical failure signal and halt conditions. 
   └─→ Produces: ValidationPreparation
 
-Phase 2 — triggered when Bundle D delivers Change + ExecutionResult:
+Change Validation Discovery (optional) — triggered when Change becomes available:
 
-  F hands Change + ExecutionResult + ValidationPreparation to E: "validate this"
-  4. Executes the validation plan according to the rank (priorities) values set at 3.
-  5. Assembles ValidationResult from test/benchmark output.
-  6. Writes the complete record (Candidate + Change + ExecutionResult + ValidationResult)
+  May run before the Validation Execution, as soon as the Change object is delivered from Bundle D:
+  4. Inspects the Change for embedded test cases, specific benchmarks, or other
+     validation artifacts provided by the change author or generation mechanism.
+  5. Scans the source tree for additional validation entries highly specific to the
+     components and code paths affected by this Change (e.g., narrowly scoped tests
+     or micro-benchmarks covering the exact function modified).
+  6. Appends discovered change-specific entries to the base validation plan, producing
+     an augmented ValidationPlan with updated priorities.
+  └─→ Produces: augmented ValidationPlan (extends ValidationPreparation)
+
+Validation Execution — triggered when Bundle D delivers Change + ExecutionResult:
+
+  F hands Change + ExecutionResult + ValidationPreparation (possibly augmented) to E:
+  "validate this"
+  7. Executes the validation plan according to the rank (priorities) values.
+  8. Assembles ValidationResult from test/benchmark output.
+  9. Writes the complete record (Candidate + Change + ExecutionResult + ValidationResult)
      to archive (B).
   │
   ▼
@@ -61,14 +73,13 @@ Bundle E owns the full validation process end-to-end. It runs the target's own t
 
 # Contracts
 
+## Validation Discovery Phase (parallel to Bundle D)
+
 *In:*
 
 | Source | Object | Description |
 |---|---|---|
 | Target repo | Source tree | The target system's source code, scanned to discover test and benchmark scripts. |
-| Bundle D | `Change` | The proposed modification, including `candidate_ref`, `change_type`, `mechanism`, `expected_effect`, `evaluation_metric`. |
-| Bundle D | `ExecutionResult` | Raw output from the execution backend: whether it compiled/ran, any errors, artifacts produced. |
-| Bundle A (via Candidate) | `TraceSummary` / `Anomaly` IDs | References to the observability signals that originally motivated the candidate. Passed through for traceability in the archive record; not consumed by E's validation logic. |
 | Bundle B | Past `ValidationResult` entries | Historical outcomes for the same components or similar change types, used to select regression checks. |
 
 *Out:*
@@ -77,6 +88,39 @@ Bundle E owns the full validation process end-to-end. It runs the target's own t
 |---|---|---|
 | Internal | `TestHarnessMap` | Structured map of the target's available validation scripts (see shape below). Produced once per target version; reused across validation runs. |
 | Internal | `ValidationWorkloadMatrix` | The set of workloads validation tests against, discovered from the target and curated. Bundle E selects from this per change. |
+| Internal | `ValidationPlan` | Base validation plan covering all harness entries and workloads, ranked by historical failure signal. Used as input to subsequent phases. |
+
+## Change Validation Discovery (optional — triggered when Change becomes available)
+
+*In:*
+
+| Source | Object | Description |
+|---|---|---|
+| Bundle D | `Change` | The proposed modification — used to identify affected components, embedded test cases, and specific benchmarks bundled with the change. |
+| Internal (Validation Discovery Phase) | `ValidationPreparation` | The base preparation including `TestHarnessMap`, `ValidationWorkloadMatrix`, and `ValidationPlan`. |
+| Target repo | Source tree | Re-scanned for validation entries specific to the code paths affected by this Change. |
+
+*Out:*
+
+| Consumer | Object | Description |
+|---|---|---|
+| Internal | Augmented `ValidationPlan` | The base plan extended with change-specific entries (embedded tests, targeted micro-benchmarks, narrowly scoped correctness checks). New entries are ranked and merged into the existing priority order. |
+
+## Validation Execution (triggered by Bundle D delivery)
+
+*In:*
+
+| Source | Object | Description |
+|---|---|---|
+| Bundle D | `Change` | The proposed modification, including `candidate_ref`, `change_type`, `mechanism`, `expected_effect`, `evaluation_metric`. |
+| Bundle D | `ExecutionResult` | Raw output from the execution backend: whether it compiled/ran, any errors, artifacts produced. |
+| Bundle A (via Candidate) | `TraceSummary` / `Anomaly` IDs | References to the observability signals that originally motivated the candidate. Passed through for traceability in the archive record; not consumed by E's validation logic. |
+| Internal (Validation Discovery Phase + optional Change Validation Discovery) | `ValidationPreparation` | The completed preparation (possibly augmented with change-specific entries): `TestHarnessMap`, `ValidationWorkloadMatrix`, `ValidationPlan`, and archive context. |
+
+*Out:*
+
+| Consumer | Object | Description |
+|---|---|---|
 | Bundle F | `ValidationResult` | Structured verdict with measurements (see shape below). |
 | Bundle B | Archive write | The complete record: `Candidate` + `Change` + `ExecutionResult` + `ValidationResult`, persisted for future reference. |
 
@@ -191,11 +235,12 @@ from spotlights_validation import (
 )
 from spotlights_engine.schemas import Change
 
-# Phase 1 — fire and forget, runs in background parallel to Bundle D
+# Validation Discovery Phase — fire and forget, runs in background parallel to Bundle D
 prep: PreparationRun = await prepare(source_tree=target_repo_path)
 
-# Phase 2 — triggered when Change + ExecutionResult arrive from Bundle D
+# Validation Execution — triggered when Change + ExecutionResult arrive from Bundle D
 # start_validation awaits the preparation internally if it is still running
+# and runs Change Validation Discovery to augment the plan before executing
 run: ValidationRun = await start_validation(
     change=change,
     execution_result=execution_result,
@@ -207,14 +252,15 @@ result: ValidationResult = await run.result()
 
 ```python
 async def prepare(source_tree: Path) -> PreparationRun: ...
-# Returns immediately; Phase 1 work runs in the background.
+# Returns immediately; Validation Discovery Phase work runs in the background.
 
 async def start_validation(
     change: Change,
     execution_result: ExecutionResult,
     preparation: PreparationRun,
 ) -> ValidationRun: ...
-# Awaits preparation internally before starting Phase 2.
+# Awaits preparation internally, then runs Change Validation Discovery (optional)
+# to augment the plan with change-specific entries before starting Validation Execution.
 
 async def get_validation_status(run_id: str) -> ValidationStatus: ...
 ```
@@ -225,17 +271,17 @@ async def get_validation_status(run_id: str) -> ValidationStatus: ...
 class PreparationRun(BaseModel):
     prep_id: str
 
-    async def result(self) -> ValidationPreparation: ...  # waits for Phase 1 to complete
+    async def result(self) -> ValidationPreparation: ...  # waits for Validation Discovery Phase to complete
 ```
 
-`ValidationPreparation` — the completed Phase 1 output, held inside `PreparationRun`:
+`ValidationPreparation` — the completed Validation Discovery Phase output, held inside `PreparationRun`:
 
 ```python
 class ValidationPreparation(BaseModel):
     source_tree:      Path
     harness_map:      TestHarnessMap
     workload_matrix:  ValidationWorkloadMatrix
-    full_plan:        ValidationPlan           # covers all components, no ranking
+    base_plan:        ValidationPlan           # covers all components, ranked by historical signal
     archive_context:  list[str]                # ValidationResult IDs queried from B
 ```
 
@@ -254,14 +300,14 @@ class ValidationRun(BaseModel):
 ```python
 class ValidationStatus(BaseModel):
     run_id:            str
-    phase:             Literal["discovery", "planning", "executing", "archiving", "complete", "failed"]
-    completed_entries: int        # harness entries finished so far (Phase 2 only)
+    phase:             Literal["discovery", "planning", "change_discovery", "executing", "archiving", "complete", "failed"]
+    completed_entries: int        # harness entries finished so far (Validation Execution only)
     total_entries:     int        # 0 until validation plan is ready
     current_entry:     str | None # name of the harness entry currently executing
     timestamp:         datetime
 ```
 
-`phase` splits across the two phases: `discovery → planning` run in Phase 1; `executing → archiving → complete` run in Phase 2. It moves to `failed` from any phase if a halt condition is triggered.
+`phase` splits across the phases: `discovery → planning` run in the Validation Discovery Phase; `change_discovery` runs in the optional Change Validation Discovery phase (skipped if no change-specific entries are found); `executing → archiving → complete` run in the Validation Execution phase. It moves to `failed` from any phase if a halt condition is triggered.
 
 `ExecutionResult` — Bundle E defines this interface until Bundle D firms it up:
 
@@ -285,12 +331,23 @@ def discover_test_harness(source_tree: Path, target_version: str) -> TestHarness
 # discovery/workload_discovery.py
 def seed_workload_matrix(source_tree: Path, target_version: str) -> ValidationWorkloadMatrix: ...
 
-# planning/planner.py  (Phase 1)
+# planning/planner.py  (Validation Discovery Phase)
 def build_validation_plan(
     harness_map: TestHarnessMap,
     workload_matrix: ValidationWorkloadMatrix,
     archive_context: list[ValidationResult],
 ) -> ValidationPlan: ...
+
+# planning/change_discovery.py  (Change Validation Discovery — optional)
+def discover_change_specific_entries(
+    change: Change,
+    base_plan: ValidationPlan,
+    source_tree: Path,
+    harness_map: TestHarnessMap,
+) -> ValidationPlan: ...
+# Inspects the Change for embedded tests/benchmarks and scans affected code paths
+# in the source tree. Returns the augmented plan (base + change-specific entries).
+# Returns the base plan unchanged if no change-specific entries are found.
 
 # execution/runner.py
 def run_validation_plan(plan: ValidationPlan, source_tree: Path) -> ValidationResult: ...
@@ -304,11 +361,12 @@ class ValidationPlanEntry(BaseModel):
     workloads: list[WorkloadEntry]
     priority: int
     halt_on_failure: bool
+    source: Literal["base", "change_specific"] = "base"  # origin of this entry
 
 class ValidationPlan(BaseModel):
     entries: list[ValidationPlanEntry]
     archive_context: list[str]  # ValidationResult IDs used to build this plan
-    change_ref: str | None = None  # set after build_validation_plan; None for the full Phase 1 plan
+    change_ref: str | None = None  # set when Change Validation Discovery augments the plan; None for the base plan
 ```
 
 `TestHarnessMap` and `ValidationWorkloadMatrix` are Pydantic `BaseModel`s (matching the `ProjectTree` pattern in `spotlights-engine`) with `to_json`/`from_json` methods and filter helpers:
@@ -336,7 +394,7 @@ class ValidationWorkloadMatrix(BaseModel):
     def from_json(cls, path: Path) -> "ValidationWorkloadMatrix": ...
 ```
 
-The public API (`validate`) is asynchronous. Internal flows inside (discovery, planning, runner) might also be asynchronous. The `phase` states advance strictly in order — `discovery → planning → executing → archiving → complete` (or `failed` from any state) — each state must finish before the next begins. Within a single state, however, the work may itself be asynchronous: concurrent LLM calls during discovery, parallel harness executions during executing, etc. The blocking is at the state boundary, not inside it.
+The public API (`validate`) is asynchronous. Internal flows inside (discovery, planning, runner) might also be asynchronous. The `phase` states advance strictly in order — `discovery → planning → change_discovery → executing → archiving → complete` (or `failed` from any state) — each state must finish before the next begins. The `change_discovery` phase is optional and skipped when no change-specific entries are discovered. Within a single state, however, the work may itself be asynchronous: concurrent LLM calls during discovery, parallel harness executions during executing, etc. The blocking is at the state boundary, not inside it.
 
 # Success criteria for Stage 1
 - Test harness discovery runs on the target repo and produces a `TestHarnessMap` with at least 3 entries covering distinct components and kinds. For the demo, the entries should include: (1) unit tests targeting the specific component a change touches, (2) integration/correctness tests verifying the component works within the broader system, and (3) a benchmark measuring performance delta (e.g., throughput/latency under a representative workload).
