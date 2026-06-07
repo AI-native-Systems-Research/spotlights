@@ -178,6 +178,7 @@ async def verify_artifacts(
 2. **Runnability** — The `invoke` command references an executable that exists (test runner binary, script file, Makefile target). Does not execute the command, only verifies the entry point.
 3. **Duplicate detection** — No two entries run the same underlying check via different wrappers. Compare by normalized invoke command and path.
 4. **Version match** — `harness_map.target_version` and `workload_matrix.target_version` match the expected `target_version`.
+5. **Candidate relevance** — Each entry must be relevant to the `Candidate` (covers the candidate's component, file, or symbol). If a `Change` object is available, entries must also be relevant to the change's affected code paths. Entries with no demonstrable connection to the candidate (or change) are flagged as irrelevant.
 
 Entries that fail verification are flagged but not automatically removed — the caller decides whether to filter them out or surface them for manual review.
 
