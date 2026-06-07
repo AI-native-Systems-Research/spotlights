@@ -244,6 +244,30 @@ def write_discovery_cache(
 
 **File:** `src/spotlights_validation/cli.py` (extend existing)
 
+### Generic API
+
+```bash
+# Discovery command
+python -m spotlights_validation.cli discover \
+    --source-tree <PATH_TO_TARGET_REPO> \
+    --target-version <COMMIT_SHA_OR_TAG> \
+    --repo-url <GITHUB_REPO_URL> \
+    --candidate <PATH_TO_CANDIDATE_JSON> \
+    --out-dir <OUTPUT_DIRECTORY> \
+    [--include-github] \
+    [--scope-keywords <COMMA_SEPARATED_KEYWORDS>]
+
+# Plan creation command
+python -m spotlights_validation.cli plan \
+    --harness-map <PATH_TO_HARNESS_MAP_JSON> \
+    --workload-matrix <PATH_TO_WORKLOAD_MATRIX_JSON> \
+    --candidate <PATH_TO_CANDIDATE_JSON> \
+    [--change-repo <PATH_TO_CHANGE_REPO>] \
+    --out <PATH_TO_OUTPUT_PLAN_JSON>
+```
+
+### Example usage
+
 ```bash
 # Full automated discovery
 python -m spotlights_validation.cli discover \
