@@ -104,6 +104,10 @@ runs/<run-id>/
 ├── 05_results/
 │   ├── _manifest.json         # upstream_changes_hash, covered_ids
 │   └── <candidate_id>.json    # one ExecutionResult per candidate
+├── report/                    # default --output-folder target
+│   ├── findings.json          # 03 candidates joined with 04 changes
+│   └── findings.md            # human-readable rollup, stamped with
+│                              #  source run + render time
 └── _logs/
     └── <NN>_<name>/           # raw stdout/stderr from claude -p,
                                #  prompts, parsed events, meta.json
@@ -115,6 +119,14 @@ runs/<run-id>/
 (default) skips stages whose canonical artifact (or fan-out manifest)
 is already complete; `--no-resume` re-runs everything from the
 requested start.
+
+**Output folder.** The rollup (`findings.{json,md}`) lives in
+`--output-folder`, default `<artifacts-dir>/report/`. Same two-flag
+contract as `spotlights_manager` (`--artifacts-dir` for state,
+`--output-folder` for the rendered report). Default keeps the whole
+run as one tar-able directory; point `--output-folder` elsewhere when
+publishing the report independently. The rendered `findings.md` stamps
+the source run path + UTC render time so a stale render is obvious.
 
 ---
 

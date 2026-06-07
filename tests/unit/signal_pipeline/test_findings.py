@@ -45,41 +45,53 @@ def _change(id_: str, **overrides) -> dict:
 
 @pytest.fixture
 def layout(tmp_path: Path) -> RunDirLayout:
-    layout = RunDirLayout(tmp_path)
+    layout = RunDirLayout(tmp_path / "run")
     layout.root.mkdir(parents=True, exist_ok=True)
     return layout
 
 
-def test_no_op_when_candidates_missing(layout: RunDirLayout) -> None:
+@pytest.fixture
+def output_folder(layout: RunDirLayout) -> Path:
+    """Default rollup target — sibling of the run dir, mirroring runner default."""
+    return layout.root / "report"
+
+
+def test_no_op_when_candidates_missing(
+    layout: RunDirLayout, output_folder: Path
+) -> None:
     """If stage 03 didn't run, rollup is a silent no-op (no files written)."""
-    emit_findings(layout)
-    assert not (layout.root / "findings.json").exists()
-    assert not (layout.root / "findings.md").exists()
+    emit_findings(layout, output_folder)
+    assert not (output_folder / "findings.json").exists()
+    assert not (output_folder / "findings.md").exists()
 
 
-def test_emits_findings_with_candidates_only(layout: RunDirLayout) -> None:
+def test_emits_findings_with_candidates_only(
+    layout: RunDirLayout, output_folder: Path
+) -> None:
     """Stage 03 ran but stage 04 didn't — change column is None."""
     candidates = [_candidate("cand-0001"), _candidate("cand-0002")]
     layout.stage_artifact("03", shape="single").write_text(
         json.dumps({"candidates": candidates}), encoding="utf-8"
     )
 
-    emit_findings(layout)
+    emit_findings(layout, output_folder)
 
-    findings = json.loads((layout.root / "findings.json").read_text(encoding="utf-8"))
+    findings = json.loads((output_folder / "findings.json").read_text(encoding="utf-8"))
     assert len(findings) == 2
     assert findings[0]["candidate"]["id"] == "cand-0001"
     assert findings[0]["change"] is None
     assert findings[1]["change"] is None
 
-    md = (layout.root / "findings.md").read_text(encoding="utf-8")
+    md = (output_folder / "findings.md").read_text(encoding="utf-8")
     assert "cand-0001" in md
     assert "cand-0002" in md
     # Both candidates should announce missing change spec
     assert md.count("_(stage 04 not run for this candidate)_") == 2
 
 
-def test_joins_candidates_and_changes(layout: RunDirLayout) -> None:
+def test_joins_candidates_and_changes(
+    layout: RunDirLayout, output_folder: Path
+) -> None:
     """Each candidate joined with its matching cand-XXXX.json change spec."""
     candidates = [_candidate("cand-0001"), _candidate("cand-0002")]
     layout.stage_artifact("03", shape="single").write_text(
@@ -95,17 +107,19 @@ def test_joins_candidates_and_changes(layout: RunDirLayout) -> None:
         json.dumps(_change("cand-0002")), encoding="utf-8"
     )
 
-    emit_findings(layout)
+    emit_findings(layout, output_folder)
 
-    findings = json.loads((layout.root / "findings.json").read_text(encoding="utf-8"))
+    findings = json.loads((output_folder / "findings.json").read_text(encoding="utf-8"))
     assert findings[0]["change"]["mechanism"] == "UNIQUE-MECH-1"
     assert findings[1]["change"]["candidate_ref"] == "cand-0002"
 
-    md = (layout.root / "findings.md").read_text(encoding="utf-8")
+    md = (output_folder / "findings.md").read_text(encoding="utf-8")
     assert "UNIQUE-MECH-1" in md
 
 
-def test_partial_changes_some_missing(layout: RunDirLayout) -> None:
+def test_partial_changes_some_missing(
+    layout: RunDirLayout, output_folder: Path
+) -> None:
     """Mixing: cand-0001 has a change spec, cand-0002 doesn't."""
     candidates = [_candidate("cand-0001"), _candidate("cand-0002")]
     layout.stage_artifact("03", shape="single").write_text(
@@ -117,47 +131,53 @@ def test_partial_changes_some_missing(layout: RunDirLayout) -> None:
         json.dumps(_change("cand-0001")), encoding="utf-8"
     )
 
-    emit_findings(layout)
+    emit_findings(layout, output_folder)
 
-    findings = json.loads((layout.root / "findings.json").read_text(encoding="utf-8"))
+    findings = json.loads((output_folder / "findings.json").read_text(encoding="utf-8"))
     assert findings[0]["change"] is not None
     assert findings[1]["change"] is None
 
-    md = (layout.root / "findings.md").read_text(encoding="utf-8")
+    md = (output_folder / "findings.md").read_text(encoding="utf-8")
     assert md.count("_(stage 04 not run for this candidate)_") == 1
 
 
-def test_idempotent_overwrite(layout: RunDirLayout) -> None:
+def test_idempotent_overwrite(
+    layout: RunDirLayout, output_folder: Path
+) -> None:
     """Calling twice with different stage 03 contents overwrites cleanly."""
     layout.stage_artifact("03", shape="single").write_text(
         json.dumps({"candidates": [_candidate("cand-0001")]}), encoding="utf-8"
     )
-    emit_findings(layout)
-    first_md = (layout.root / "findings.md").read_text(encoding="utf-8")
+    emit_findings(layout, output_folder)
+    first_md = (output_folder / "findings.md").read_text(encoding="utf-8")
     assert "cand-0001" in first_md
     assert "cand-0002" not in first_md
 
     layout.stage_artifact("03", shape="single").write_text(
         json.dumps({"candidates": [_candidate("cand-0002")]}), encoding="utf-8"
     )
-    emit_findings(layout)
-    second_md = (layout.root / "findings.md").read_text(encoding="utf-8")
+    emit_findings(layout, output_folder)
+    second_md = (output_folder / "findings.md").read_text(encoding="utf-8")
     assert "cand-0002" in second_md
     assert "cand-0001" not in second_md  # no leftover from first run
 
 
-def test_handles_bare_array_candidates(layout: RunDirLayout) -> None:
+def test_handles_bare_array_candidates(
+    layout: RunDirLayout, output_folder: Path
+) -> None:
     """`03_candidates.json` may be `[...]` directly, not `{candidates: [...]}`."""
     layout.stage_artifact("03", shape="single").write_text(
         json.dumps([_candidate("cand-0001")]), encoding="utf-8"
     )
-    emit_findings(layout)
-    findings = json.loads((layout.root / "findings.json").read_text(encoding="utf-8"))
+    emit_findings(layout, output_folder)
+    findings = json.loads((output_folder / "findings.json").read_text(encoding="utf-8"))
     assert len(findings) == 1
     assert findings[0]["candidate"]["id"] == "cand-0001"
 
 
-def test_summary_table_renders_one_row_per_candidate(layout: RunDirLayout) -> None:
+def test_summary_table_renders_one_row_per_candidate(
+    layout: RunDirLayout, output_folder: Path
+) -> None:
     candidates = [
         _candidate("cand-0001", estimated_impact="high"),
         _candidate("cand-0002", estimated_impact="medium"),
@@ -166,8 +186,8 @@ def test_summary_table_renders_one_row_per_candidate(layout: RunDirLayout) -> No
     layout.stage_artifact("03", shape="single").write_text(
         json.dumps({"candidates": candidates}), encoding="utf-8"
     )
-    emit_findings(layout)
-    md = (layout.root / "findings.md").read_text(encoding="utf-8")
+    emit_findings(layout, output_folder)
+    md = (output_folder / "findings.md").read_text(encoding="utf-8")
     # Summary section is a single 4-row Markdown table (header + sep + 3 entries)
     summary_lines = [
         line for line in md.splitlines()
@@ -177,3 +197,37 @@ def test_summary_table_renders_one_row_per_candidate(layout: RunDirLayout) -> No
     assert "high" in summary_lines[0]
     assert "medium" in summary_lines[1]
     assert "low" in summary_lines[2]
+
+
+def test_writes_to_external_folder(
+    layout: RunDirLayout, tmp_path: Path
+) -> None:
+    """`output_folder` can point outside the run dir; folder is created if missing."""
+    candidates = [_candidate("cand-0001")]
+    layout.stage_artifact("03", shape="single").write_text(
+        json.dumps({"candidates": candidates}), encoding="utf-8"
+    )
+    external = tmp_path / "published" / "report"
+    assert not external.exists()
+    emit_findings(layout, external)
+    assert (external / "findings.json").exists()
+    assert (external / "findings.md").exists()
+    # Nothing written into the run dir itself.
+    assert not (layout.root / "findings.json").exists()
+    assert not (layout.root / "findings.md").exists()
+
+
+def test_markdown_stamps_source_run_and_render_time(
+    layout: RunDirLayout, output_folder: Path
+) -> None:
+    """The rendered markdown stamps the source run path + a UTC timestamp."""
+    layout.stage_artifact("03", shape="single").write_text(
+        json.dumps({"candidates": [_candidate("cand-0001")]}), encoding="utf-8"
+    )
+    emit_findings(layout, output_folder)
+    md = (output_folder / "findings.md").read_text(encoding="utf-8")
+    assert "_Source run:_" in md
+    assert str(layout.root) in md
+    assert "_Rendered:_" in md
+    # ISO-8601 UTC timestamp ends in `+00:00`
+    assert "+00:00" in md

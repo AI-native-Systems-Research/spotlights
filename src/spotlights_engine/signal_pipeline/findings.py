@@ -1,13 +1,16 @@
 """Roll up stage 03 candidates + stage 04 change specs into `findings.{json,md}`.
 
 Called best-effort by the runner at the end of a pipeline invocation. Writes
-two artifacts next to the run dir's stage outputs:
+two artifacts to the run's output folder (`--output-folder`, defaulting to
+`<artifacts-dir>/report/`):
 
 - `findings.json` — single JSON array, one entry per candidate, each
   shaped `{"candidate": <stage 03 candidate>, "change": <stage 04 spec>|None}`.
   Stable, machine-friendly join of the two stages.
 - `findings.md` — same data, rendered as a summary table + per-candidate
-  sections suitable for sharing with humans.
+  sections suitable for sharing with humans. Stamped with the source
+  run-dir name + UTC timestamp so a stale render against a different run
+  is obvious at a glance.
 
 Idempotent: every call overwrites both files. No-ops if `03_candidates.json`
 is missing (e.g. the run was scoped to stages 01-02). Stage 04 is optional
@@ -20,6 +23,8 @@ issues — they never abort the run.
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from spotlights_engine.signal_pipeline.layout import (
@@ -32,11 +37,11 @@ from spotlights_engine.signal_pipeline.layout import (
 __all__ = ["emit_findings"]
 
 
-def emit_findings(layout: RunDirLayout) -> None:
+def emit_findings(layout: RunDirLayout, output_folder: Path) -> None:
     """Write `findings.json` + `findings.md` joining 03 candidates with 04 changes.
 
     Idempotent — overwrites on every invocation. No-ops if 03_candidates.json
-    is missing.
+    is missing. Creates `output_folder` if it doesn't exist.
     """
     candidates_path = layout.stage_artifact("03", shape="single")
     if not candidates_path.exists():
@@ -59,13 +64,20 @@ def emit_findings(layout: RunDirLayout) -> None:
         )
         findings.append({"candidate": c, "change": change})
 
-    atomic_write_json(layout.root / "findings.json", findings)
-    atomic_write_text(layout.root / "findings.md", _render_markdown(layout, findings))
+    output_folder.mkdir(parents=True, exist_ok=True)
+    atomic_write_json(output_folder / "findings.json", findings)
+    atomic_write_text(
+        output_folder / "findings.md", _render_markdown(layout, findings)
+    )
 
 
 def _render_markdown(layout: RunDirLayout, findings: list[dict[str, Any]]) -> str:
     md: list[str] = []
     md.append(f"# Findings — `{layout.root.name}`\n")
+    rendered_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    md.append(
+        f"_Source run:_ `{layout.root}`  \n_Rendered:_ {rendered_at}\n"
+    )
     md.append(f"_{len(findings)} candidates_ from this pipeline run.\n")
     md.append("## Summary\n")
     md.append("| ID | Impact | File:Lines | Symbol | One-line |")

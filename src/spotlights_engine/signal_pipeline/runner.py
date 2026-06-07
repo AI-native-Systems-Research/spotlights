@@ -716,12 +716,19 @@ def run_pipeline(
     input: SignalPipelineInput,
     *,
     run_dir: Path,
+    output_folder: Path | None = None,
     stages: StageSelection | None = None,
     resume: bool = True,
     inject: Iterable[InjectSpec] | None = None,
     on_event: Callable[[str], None] | None = None,
 ) -> SignalPipelineResult:
-    """Run (a subset of) the signal-based discovery pipeline."""
+    """Run (a subset of) the signal-based discovery pipeline.
+
+    `output_folder` is where the human-readable rollup (`findings.{json,md}`)
+    lands. Defaults to `<run_dir>/report/` so the whole run still tars/shares
+    as a single directory; pass an external path when publishing the rollup
+    independently of the artifacts.
+    """
     _check_layout()
 
     # Imported here, after `_check_layout`, so the registry's stage modules
@@ -733,6 +740,9 @@ def run_pipeline(
     sel = stages or StageSelection.all()
     layout = RunDirLayout(run_dir.resolve())
     layout.root.mkdir(parents=True, exist_ok=True)
+    resolved_output_folder = (
+        output_folder.resolve() if output_folder is not None else layout.root / "report"
+    )
 
     # Persist the input contract (idempotent).
     if not layout.input_path.exists():
@@ -951,7 +961,7 @@ def run_pipeline(
     # change specs into a single human-readable view. Skipped silently if the
     # candidates artifact isn't on disk yet (e.g. selection ended before 03).
     try:
-        emit_findings(layout)
+        emit_findings(layout, resolved_output_folder)
     except Exception as exc:  # noqa: BLE001 — never fail the pipeline on rollup
         aggregate_issues.append(f"findings rollup failed: {exc}")
 
@@ -961,6 +971,7 @@ def run_pipeline(
     # lexicographic == declaration order.
     return SignalPipelineResult(
         run_dir=layout.root,
+        output_folder=resolved_output_folder,
         completed_stages=sorted(completed),
         skipped_stages=sorted(skipped),
         issues=aggregate_issues,
