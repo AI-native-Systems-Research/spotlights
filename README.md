@@ -159,6 +159,28 @@ cd spotlights
 uv sync --all-extras
 ```
 
+### Install the Spotlights skill
+
+The engine ships Claude Code slash commands (currently `/spotlights-objective-setting`) as bundled markdown templates. They are not active until you install them into a Claude Code commands directory — same model as [spec-kit](https://github.com/github/spec-kit). From the project you want to optimize:
+
+```bash
+spotlights-engine init           # writes .claude/commands/spotlights-*.md
+```
+
+Or install once, system-wide:
+
+```bash
+spotlights-engine init --scope user   # writes ~/.claude/commands/spotlights-*.md
+```
+
+`init` records what it installed in `<scope-root>/.spotlights/manifest.json` (sha256 per file). Re-running `spotlights-engine init` is a no-op for existing files. To pick up new bundled versions after a package upgrade, use `--force` — files the user has edited (hash differs from the manifest) are preserved.
+
+Open Claude Code in the same directory and the slash commands appear:
+
+```
+/spotlights-objective-setting
+```
+
 ## Quickstart on a vLLM subset
 
 Clone vLLM next to this repo, then:

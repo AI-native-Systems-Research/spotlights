@@ -27,7 +27,7 @@ Source        = "https://github.com/AI-native-Systems-Research/spotlights"
 
 [project.scripts]
 spotlights-engine = "spotlights_engine.cli:main"
-spotlights-validation = "spotlights_validation.cli:cli"
+spotlights-objectives = "spotlights_engine.objectives.cli:main"
 signal-pipeline = "spotlights_engine.signal_pipeline.cli:main"
 
 [project.optional-dependencies]
@@ -51,7 +51,14 @@ build-backend = "hatchling.build"
 # those overrides in a personal `uv.toml` or a separate `pyproject.dev.toml`.
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/spotlights_engine", "src/spotlights_validation"]
+packages = ["src/spotlights_engine"]
+
+# Repo-root `templates/` ships inside the wheel under
+# `spotlights_engine/_templates/`. For editable installs (`uv sync` /
+# `pip install -e`) this directive is a no-op; the runtime falls back to
+# `<repo-root>/templates/` via `init_skills._bundled_templates()`.
+[tool.hatch.build.targets.wheel.force-include]
+"templates" = "spotlights_engine/_templates"
 
 [tool.hatch.build.targets.sdist]
 exclude = [
