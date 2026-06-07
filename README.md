@@ -12,7 +12,7 @@ Most code-research tools either scan broadly and return shallow hits, or dive de
 
 The core philosophy behind the project: execution tooling — coding agents, evolutionary search, experiment harnesses — is abundant and improving fast. The harder, less-solved problem is knowing **where to point it**. Spotlights treats that as a first-class discovery problem: build a map of the codebase, converge independent signal sources onto that map, and let the places where evidence piles up — the *spots that light up* — surface as candidates worth optimizing.
 
-> **Current Status:** today Spotlights runs on two signal sources — **code structure** and the **deep research literature**. Runtime telemetry, repository history, and paper-driven discovery are in active development. See [Signal sources & roadmap](#signal-sources--roadmap).
+> **Current Status:** today Spotlights runs on two signal sources — **code structure** and the **deep research literature** — plus a **preview** of a third path driven by **runtime telemetry** (see [Telemetry-driven discovery (preview)](#telemetry-driven-discovery-preview)). Repository history and paper-driven discovery are in active development. See [Signal sources & roadmap](#signal-sources--roadmap).
 
 ## How it works
 
@@ -36,7 +36,7 @@ The module map is a shared coordinate system: every signal source projects onto 
 |---|---|---|
 | **Code structure** | Static analysis builds the module tree that grounds every candidate in a specific code region. | **Live** |
 | **Research literature** | A deep-research engine retrieves findings from the web, arXiv, blogs, and docs, and derives evidence-backed proposals for each candidate. | **Live** |
-| **Runtime telemetry** | OpenTelemetry traces, logs, and profiles surface bottlenecks visible only under load, not in the source. | In development |
+| **Runtime telemetry** | OpenTelemetry traces, logs, and profiles surface bottlenecks visible only under load, not in the source. Wired through the [`signal-pipeline`](#telemetry-driven-discovery-preview) flow. | **Live (preview)** |
 | **Repository history** | Issues, pull requests, and commit history capture known limitations, past reasoning, and undocumented benchmarks that never reach code comments. | In development |
 | **Technique-driven discovery** | Start from a paper or technique and search the codebase for where it could apply — the inverse of starting from a bottleneck. | Exploring |
 | *…and more* | *The list isn't closed — if you have a signal source in mind, propose one via [Contributing](#contributing).* | *Open* |
@@ -197,6 +197,22 @@ spotlights-engine --include v1.kv_offload --include v1.attention.paged_kv ...
 ### Example output
 
 A sample run on this subset is checked in under `examples/vllm_subset/`: browse the rendered `index.md` and per-module pages under `modules/`, or inspect the raw `result.json`.
+
+## Telemetry-driven discovery (preview)
+
+A second entry point. Given a captured workload's OpenTelemetry traces and the subject repo, the `signal-pipeline` CLI runs five stages — signal extraction, ProjectTree extraction, candidate generation, change generation, execution — to produce evidence-backed code changes with rationales and applied diffs. A canonical run on a vLLM/LRU OTel capture takes ~10 min and ~$2 in API costs and yields a handful of candidates anchored to the captured anomalies.
+
+```bash
+env -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_BASE_URL \
+  uv run signal-pipeline \
+    --artifacts-dir runs/my-first-run \
+    --repo ../vllm \
+    --telemetry-from <path-to-otel-capture-or-signals.json>
+```
+
+`--telemetry-from` accepts either a directory of raw OTel files or a pre-cooked `01_signals.json`. For stage-by-stage details, prompt iteration, the artifacts-dir layout, the `--inject` workflow for hand-edited intermediates, model selection, and troubleshooting, see [`src/spotlights_engine/signal_pipeline/README.md`](src/spotlights_engine/signal_pipeline/README.md). Architecture and contracts live in [`docs/signal-based/`](docs/signal-based/).
+
+**Status:** MVP. Knowledge retrieval, validation, and archive are deferred per the design doc.
 
 ## Configuration
 

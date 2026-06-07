@@ -14,6 +14,10 @@ dist/
 venv/
 env/
 
+# Local secrets / pipeline-only claude config (proxy creds + model pin)
+.env
+.claude-pipeline/
+
 # Tooling caches
 .ruff_cache/
 .mypy_cache/
@@ -35,3 +39,6 @@ uv.lock
 tmp/
 
 .omx/
+
+# Signal-pipeline run artifacts
+runs/
