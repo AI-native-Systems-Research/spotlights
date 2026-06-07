@@ -31,9 +31,9 @@ doc and aren't implemented here.
 # One-shot: signal extraction → projecttree → candidates → changes → results.
 # `--telemetry-from` accepts either a pre-cooked `01_signals.json` or a
 # directory of raw OTel files (the agent figures out which).
-env -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_BASE_URL \
-  uv run signal-pipeline \
-    --artifacts-dir runs/my-first-run \
+signal-pipeline \
+    --output-folder ./spotlights-out \
+    --artifacts-dir ./artifacts \
     --repo ../vllm \
     --telemetry-from data/20260525T202105Z_util0.4_mem16_lru
 ```

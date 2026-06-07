@@ -159,6 +159,28 @@ cd spotlights
 uv sync --all-extras
 ```
 
+### Install the Spotlights skill
+
+The engine ships Claude Code slash commands (currently `/spotlights-objective-setting`) as bundled markdown templates. They are not active until you install them into a Claude Code commands directory — same model as [spec-kit](https://github.com/github/spec-kit). From the project you want to optimize:
+
+```bash
+spotlights-engine init           # writes .claude/commands/spotlights-*.md
+```
+
+Or install once, system-wide:
+
+```bash
+spotlights-engine init --scope user   # writes ~/.claude/commands/spotlights-*.md
+```
+
+`init` records what it installed in `<scope-root>/.spotlights/manifest.json` (sha256 per file). Re-running `spotlights-engine init` is a no-op for existing files. To pick up new bundled versions after a package upgrade, use `--force` — files the user has edited (hash differs from the manifest) are preserved.
+
+Open Claude Code in the same directory and the slash commands appear:
+
+```
+/spotlights-objective-setting
+```
+
 ## Quickstart on a vLLM subset
 
 Clone vLLM next to this repo, then:
@@ -203,9 +225,9 @@ A sample run on this subset is checked in under `examples/vllm_subset/`: browse 
 A second entry point. Given a captured workload's OpenTelemetry traces and the subject repo, the `signal-pipeline` CLI runs five stages — signal extraction, ProjectTree extraction, candidate generation, change generation, execution — to produce evidence-backed code changes with rationales and applied diffs. A canonical run on a vLLM/LRU OTel capture takes ~10 min and ~$2 in API costs and yields a handful of candidates anchored to the captured anomalies.
 
 ```bash
-env -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_BASE_URL \
-  uv run signal-pipeline \
-    --artifacts-dir runs/my-first-run \
+signal-pipeline \
+    --output-folder ./spotlights-out \
+    --artifacts-dir ./artifacts \
     --repo ../vllm \
     --telemetry-from <path-to-otel-capture-or-signals.json>
 ```
