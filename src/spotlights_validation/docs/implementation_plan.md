@@ -214,27 +214,96 @@ When neither candidate component matching nor change context applies to an entry
 
 ---
 
-## 6. Caching Layer
+## 6. Caching Layer (via Bundle B Archive)
 
 **File:** `src/spotlights_validation/discovery/cache.py`
 
-Prevents re-running expensive discovery (especially LLM calls and GitHub API queries) when the target hasn't changed.
+Prevents re-running expensive discovery (especially LLM calls and GitHub API queries) when valid artifacts already exist for the same candidate at the same target version. The cache is designed against Bundle B's planned archive query interface, with a filesystem fallback until Bundle B is implemented.
+
+### Interface
 
 ```python
-def load_discovery_cache(
-    source_tree: Path,
-    target_version: str,
-    cache_dir: Path,
-) -> DiscoveryOutput | None:
+class DiscoveryArchive(Protocol):
+    """Bundle B archive interface for discovery artifact retrieval."""
 
-def write_discovery_cache(
-    output: DiscoveryOutput,
-    target_version: str,
-    cache_dir: Path,
-) -> None:
+    async def query_discovery_artifacts(
+        self,
+        repo_url: str,
+        candidate: Candidate,
+        target_version: str,
+    ) -> DiscoveryOutput | None:
+        """Retrieve cached discovery artifacts for a candidate at a version."""
+        ...
+
+    async def store_discovery_artifacts(
+        self,
+        repo_url: str,
+        candidate: Candidate,
+        target_version: str,
+        output: DiscoveryOutput,
+    ) -> None:
+        """Persist discovery artifacts keyed by repo + candidate + version."""
+        ...
+
+
+class FilesystemDiscoveryArchive:
+    """Filesystem fallback implementing DiscoveryArchive until Bundle B lands."""
+
+    def __init__(self, cache_dir: Path):
+        self.cache_dir = cache_dir
+
+    async def query_discovery_artifacts(
+        self,
+        repo_url: str,
+        candidate: Candidate,
+        target_version: str,
+    ) -> DiscoveryOutput | None: ...
+
+    async def store_discovery_artifacts(
+        self,
+        repo_url: str,
+        candidate: Candidate,
+        target_version: str,
+        output: DiscoveryOutput,
+    ) -> None: ...
 ```
 
-**Cache key:** `{cache_dir}/{target_version}/`. A different `target_version` = cache miss.
+### Cache key (mirrors Bundle B archive key structure)
+
+The real Bundle B archive keys records on `(repo, Candidate.file, Candidate.symbol, Candidate.kind, target_version)` as the primary lookup, with `anomaly_refs` used as a signal-driven filter to narrow results. The filesystem fallback mirrors this structure:
+
+```
+{cache_dir}/{repo_name}/{target_version}/{file_path_normalized}/{symbol}/{kind}/
+```
+
+Where `repo_name` is derived from the target repository URL (e.g., `vllm-project/vllm` from `https://github.com/vllm-project/vllm`).
+
+Within a keyed directory, multiple discovery outputs may exist if different `anomaly_refs` or `evolve_rationale` produced them. On query:
+
+1. **Primary lookup** — Match on `(file, symbol, kind, target_version)`. This mirrors Bundle B's `query(query, mode="signal_driven")` semantics.
+2. **Signal-driven filter** — Among matching entries, select the one whose `anomaly_refs` overlap with the query candidate's `anomaly_refs`. If no overlap exists, treat as cache miss.
+3. **Rationale check** — If `evolve_rationale` differs from the cached entry, treat as cache miss (different rationale may produce different search keywords and prioritization).
+
+This means the filesystem fallback stores metadata alongside artifacts:
+
+```
+{cache_dir}/{target_version}/{file_path_normalized}/{symbol}/{kind}/
+  metadata.json       # { anomaly_refs, evolve_rationale, stored_at }
+  harness_map.json
+  workload_matrix.json
+  discovery_summary.json
+  verification_report.json
+```
+
+When Bundle B is implemented, it replaces the filesystem walk with its native index — the query semantics (primary key + signal filter + rationale match) remain identical.
+
+### Validity check on cache hit
+
+When artifacts are found in the archive:
+1. **Structural** — Files deserialize into `TestHarnessMap` / `ValidationWorkloadMatrix` via `from_json()`.
+2. **Semantic** — Run `verify_artifacts()` on loaded artifacts to check path existence, version match, and candidate relevance.
+
+Structural failure → cache miss (fall through to live discovery). Verification failure → return artifacts with attached `VerificationReport` (caller decides).
 
 **Default `cache_dir`:** `source_tree / ".spotlights_validation_cache"`.
 
@@ -295,14 +364,22 @@ python -m spotlights_validation.cli plan \
 **File:** `src/spotlights_validation/__init__.py`
 
 ```python
-async def prepare(source_tree: Path, candidate: Candidate, artifacts_dir: Path | None = None) -> PreparationRun:
+async def prepare(
+    source_tree: Path,
+    candidate: Candidate,
+    archive: DiscoveryArchive | None = None,
+) -> PreparationRun:
 ```
 
-1. If `artifacts_dir` is provided and contains valid cached artifacts, load them (MVP path — manual artifacts).
-2. Otherwise, run `run_discovery()` with the `candidate` to produce artifacts live. The candidate's component info focuses GitHub search and informs prioritization.
-3. Run `build_validation_plan()` to produce the base plan, prioritized toward the candidate's component.
-4. Store `ValidationPreparation` (including the `candidate`) with all outputs.
-5. Return `PreparationRun` immediately; background task handles the work.
+1. **Query Bundle B archive** — Call `archive.query_discovery_artifacts(candidate, target_version)`. Uses the full Candidate identity (file, symbol, kind, anomaly_refs, evolve_rationale) as the cache key. If no `archive` is provided, instantiate `FilesystemDiscoveryArchive` with the default cache dir.
+2. **Validate cached artifacts** — If the archive returns artifacts:
+   - Structural check: deserialize into `TestHarnessMap` / `ValidationWorkloadMatrix`.
+   - Semantic check: run `verify_artifacts()` against the current source tree.
+   - Structural failure → treat as cache miss; semantic failure → use artifacts with `VerificationReport` attached.
+3. **On cache miss** — Run `run_discovery()` with the `candidate` to produce artifacts live. Store results back via `archive.store_discovery_artifacts()`.
+4. **Build plan** — Run `build_validation_plan()` to produce the base plan, prioritized toward the candidate's component.
+5. **Persist state** — Store `ValidationPreparation` (including the `candidate`) with all outputs.
+6. Return `PreparationRun` immediately; background task handles the work.
 
 Phase transitions: `discovery → planning` after both harness map and workload matrix are produced and verified.
 
