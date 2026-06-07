@@ -330,6 +330,12 @@ def _print_summary(result: SpotlightsManagerResult) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
+    if raw_argv and raw_argv[0] == "init":
+        from spotlights_engine.init_skills import main as init_main
+
+        return init_main(raw_argv[1:])
+
     args = _build_argparser().parse_args(argv)
 
     # Resolve to absolute up-front: codex runs subprocesses with `-C <repo_path>`,

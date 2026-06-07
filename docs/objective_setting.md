@@ -4,10 +4,10 @@ The objective-setting skill is the starting point of a Discovery Engine session.
 
 ## How to use
 
-From within the `spotlights-engine` directory in Claude Code, run:
+After installing the package and running `spotlights-engine init` (see [README → Install the Spotlights skill](../README.md#install-the-spotlights-skill)), the slash command is available in Claude Code:
 
 ```
-/objective-setting
+/spotlights-objective-setting
 ```
 
 Claude will walk you through a short interview (typically 2-3 minutes). You'll be asked:
@@ -80,5 +80,5 @@ objective = finalize_objective(proposal, session_id="sess-001", approved_by="ali
 Or via CLI:
 
 ```bash
-uv run python -m spotlights_engine.objectives.cli build-intent '{"target_metric": "request_latency_p99", "target_direction": "minimize", "workload_classes": ["agentic"]}'
+spotlights-objectives build-intent '{"target_metric": "request_latency_p99", "target_direction": "minimize", "workload_classes": ["agentic"]}'
 ```

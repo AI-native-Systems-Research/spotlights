@@ -114,16 +114,16 @@ Walk through these questions one at a time. Use `AskUserQuestion` for any questi
 
 ## After collecting responses (both paths)
 
-Call the Python module to build the intent and assemble a proposal:
+Call the objectives CLI to build the intent and assemble a proposal:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m spotlights_engine.objectives.cli build-intent '<json with role, target_metric, target_direction, workload_classes, target_components, priorities, notes>'
+spotlights-objectives build-intent '<json with role, target_metric, target_direction, workload_classes, target_components, priorities, notes>'
 ```
 
 Then:
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m spotlights_engine.objectives.cli assemble-proposal '{"intent": <the intent JSON from above>}'
+spotlights-objectives assemble-proposal '{"intent": <the intent JSON from above>}'
 ```
 
 ## Present the proposal
@@ -145,7 +145,7 @@ Ask for the user's name (for the `approved_by` field). Generate a session ID (us
 Then finalize (do NOT pass `output_path` — the CLI auto-generates a unique filename using datetime, approver name, and role under `output/objectives/`):
 
 ```bash
-PYTHONPATH=src .venv/bin/python -m spotlights_engine.objectives.cli finalize '{"proposal": <proposal JSON>, "session_id": "<uuid>", "approved_by": "<name>"}'
+spotlights-objectives finalize '{"proposal": <proposal JSON>, "session_id": "<uuid>", "approved_by": "<name>"}'
 ```
 
 Report the location of the output file and confirm the objective is locked for this session. Then print the closing marker:
