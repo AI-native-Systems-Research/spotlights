@@ -564,6 +564,87 @@ def test_stages_01_and_02_overlap_in_wall_clock(tmp_path, monkeypatch):
     )
 
 
+# ── Fan-out fault isolation + parallelism ──────────────────────────────
+
+
+def test_fanout_continues_past_failed_item(tmp_path, monkeypatch):
+    """One failing candidate must not kill its siblings.
+
+    Override stage 04's stub to raise on `cand-0001`. The runner should
+    record the failure in `status.json` `issues`, persist `cand-0002`,
+    and report stage 04 as `done` (binary state — failure detail lives
+    in `issues`).
+    """
+    from spotlights_engine.signal_pipeline.schemas import Change
+    from spotlights_engine.signal_pipeline.stages import s04_change_generation
+
+    def _failing_change(candidate, subject_root, log_dir, on_event=None, model=None):
+        if candidate.id == "cand-0001":
+            raise RuntimeError("simulated stage 04 failure for cand-0001")
+        return Change(
+            change_id=f"chg-{candidate.id}",
+            candidate_ref=candidate.id,
+            change_type="other",
+            mechanism="overridden stub change",
+            expected_effect="stub effect",
+            required_changes="stub changes",
+            evaluation_metric="stub metric",
+        )
+
+    # Conftest's autouse fixture installs a passing stub; this overrides it.
+    monkeypatch.setattr(s04_change_generation, "_generate_change", _failing_change)
+
+    run_dir = tmp_path / "run"
+    run_pipeline(_input(tmp_path), run_dir=run_dir)
+
+    assert not (run_dir / "04_changes" / "cand-0001.json").exists()
+    assert (run_dir / "04_changes" / "cand-0002.json").exists()
+
+    status = _read_status(RunDirLayout(run_dir))
+    assert status["stages"]["04"]["state"] == "done"
+    issues = status["stages"]["04"]["issues"]
+    assert any("cand-0001" in i for i in issues), issues
+    assert not any("cand-0002" in i for i in issues), issues
+
+
+def test_fanout_runs_items_in_parallel(tmp_path, monkeypatch):
+    """Stage 04 fan-out items should run concurrently, not serially.
+
+    Stub each candidate's change generation with a SLEEP-second sleep.
+    Two candidates serial would be >= 2*SLEEP; parallel finishes near SLEEP.
+    """
+    import time as _time
+
+    from spotlights_engine.signal_pipeline.schemas import Change
+    from spotlights_engine.signal_pipeline.stages import s04_change_generation
+
+    SLEEP = 0.5
+
+    def _slow_change(candidate, subject_root, log_dir, on_event=None, model=None):
+        _time.sleep(SLEEP)
+        return Change(
+            change_id=f"chg-{candidate.id}",
+            candidate_ref=candidate.id,
+            change_type="other",
+            mechanism="slow stub change",
+            expected_effect="stub effect",
+            required_changes="stub changes",
+            evaluation_metric="stub metric",
+        )
+
+    monkeypatch.setattr(s04_change_generation, "_generate_change", _slow_change)
+
+    run_dir = tmp_path / "run"
+    t0 = _time.monotonic()
+    run_pipeline(_input(tmp_path), run_dir=run_dir)
+    dt = _time.monotonic() - t0
+
+    assert dt < 0.9, (
+        f"expected fan-out parallelism (< 0.9s for 2 items @ {SLEEP}s each); "
+        f"got {dt:.3f}s — serial baseline is {2 * SLEEP:.1f}s"
+    )
+
+
 # ── Effective model precedence ─────────────────────────────────────────
 
 

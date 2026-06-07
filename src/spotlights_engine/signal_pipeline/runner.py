@@ -55,6 +55,15 @@ __all__ = [
 ]
 
 
+# ── Tuning ───────────────────────────────────────────────────────────────
+
+
+# Cap on concurrent `claude -p` subprocesses launched within a single
+# fan-out stage. Each item already gets its own log dir, so file writes
+# don't contend; the cap exists only to keep API-side concurrency sane.
+_FANOUT_MAX_WORKERS = 16
+
+
 # ── Errors ───────────────────────────────────────────────────────────────
 
 
@@ -676,31 +685,38 @@ def _run_fanout(
                 # Corrupt entry — drop it and re-run.
                 entry_path.unlink()
 
-    # Run missing ids.
+    # Run missing ids in parallel. Each item is its own `claude -p`
+    # subprocess, so threads suffice (the GIL releases on subprocess wait).
+    # Per-item exceptions are caught and surfaced via `issues`; one bad
+    # candidate must not poison its siblings.
     ctx = ctx_factory(spec)
-    # Each fan-out item is a separate `claude -p` invocation, so flush the
-    # progress formatter between items to prevent burst dedup from collapsing
-    # cross-item events that happen to share a signature.
-    on_event = ctx.on_event
-    flush = getattr(on_event, "flush", None) if on_event is not None else None
-    for id_ in expected_ids:
-        if id_ in keep:
-            continue
-        if flush is not None:
-            flush()
-        payload = spec.run_one(ctx, id_)
+    issues: list[str] = []
+    to_run = [id_ for id_ in expected_ids if id_ not in keep]
+
+    def _run_and_persist(id_: str) -> tuple[str, str | None]:
+        try:
+            payload = spec.run_one(ctx, id_)
+        except Exception as exc:
+            return id_, f"{type(exc).__name__}: {exc}"
         raw = (
             payload.model_dump(mode="json", by_alias=True, exclude_none=False)
             if isinstance(payload, BaseModel)
             else _coerce_for_json(payload)
         )
         atomic_write_json(layout.fanout_entry(spec.stage_id, id_), raw)
+        return id_, None
+
+    if to_run:
+        max_workers = min(len(to_run), _FANOUT_MAX_WORKERS)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
+            for id_, err in ex.map(_run_and_persist, to_run):
+                if err is not None:
+                    issues.append(f"fan-out item {id_!r} failed: {err}")
 
     # Manifest written last per the atomicity discipline (per-entry first).
     _refresh_fanout_manifest(spec, layout, upstream_payload)
 
     # Surface orphans as issues (we don't auto-delete).
-    issues: list[str] = []
     for entry in fanout_dir.iterdir():
         if entry.name == "_manifest.json" or entry.suffix != ".json":
             continue
