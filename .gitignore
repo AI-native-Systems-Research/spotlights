@@ -14,6 +14,10 @@ dist/
 venv/
 env/
 
+# Local secrets / pipeline-only claude config (proxy creds + model pin)
+.env
+.claude-pipeline/
+
 # Tooling caches
 .ruff_cache/
 .mypy_cache/
@@ -50,3 +54,6 @@ commands.txt
 
 # Package caches
 *.spotlights_validation_cache/
+
+# Signal-pipeline run artifacts
+runs/
