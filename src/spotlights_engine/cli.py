@@ -1,4 +1,4 @@
-"""Public CLI for `spotlight-engine`.
+"""Public CLI for `spotlights-engine`.
 
 Thin shim over `spotlights_manager.run_with_telemetry`. Architectural inputs
 (`--repo`, `--objective`, `--hint`, `--max-findings-per-module`) bind to
@@ -11,6 +11,9 @@ directly.
 from __future__ import annotations
 
 import argparse
+import dataclasses
+import json
+import logging
 import sys
 from pathlib import Path
 
@@ -29,14 +32,14 @@ from spotlights_engine.spotlights_manager import (
 
 
 _DEFAULT_REPO = Path("../vllm")
-_DEFAULT_OUTPUT = Path("./spotlight-out")
+_DEFAULT_OUTPUT = Path("./spotlights-out")
 _DEFAULT_ARTIFACTS = Path("./artifacts")
 _DEFAULT_OBJECTIVE = "reduce hot-path latency on common workloads"
 
 
 def _build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="spotlight-engine",
+        prog="spotlights-engine",
         description=(
             "Propose evidence-backed, high-leverage code changes for a target "
             "repo. Runs structural extraction, candidate discovery, deep "
@@ -57,9 +60,10 @@ def _build_argparser() -> argparse.ArgumentParser:
         nargs="+",
         metavar="QN",
         help=(
-            "Restrict to one or more dot-form leaf qualified names "
-            "(e.g. v1.kv_offload). Repeat the flag or pass multiple values "
-            "after one flag. Default: all modules."
+            "Restrict to one or more dot-form qualified names (e.g. "
+            "v1.kv_offload). A parent name expands to all leaves beneath "
+            "it (e.g. v1.worker matches v1.worker.gpu). Repeat the flag "
+            "or pass multiple values after one flag. Default: all modules."
         ),
     )
     p.add_argument(
@@ -125,7 +129,7 @@ def _build_argparser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "Cap on findings produced by step 3 per module. "
-            "Default: SpotlightsManagerInput default (10)."
+            "Default: SpotlightsManagerInput default (30)."
         ),
     )
     p.add_argument(
@@ -148,7 +152,68 @@ def _build_argparser() -> argparse.ArgumentParser:
         help="Debug-only: cap step 5 to the first N candidates.",
     )
 
+    verbosity = p.add_mutually_exclusive_group()
+    verbosity.add_argument(
+        "--quiet",
+        "-q",
+        action="store_true",
+        help="Only show warnings and errors on stderr.",
+    )
+    verbosity.add_argument(
+        "--verbose",
+        "-v",
+        action="store_true",
+        help="Show DEBUG-level progress (per-pair / per-candidate completions).",
+    )
+    p.add_argument(
+        "--log-file",
+        type=Path,
+        default=None,
+        help="Tee progress logs to this file at the same level as stderr.",
+    )
+
     return p
+
+
+_LOG_FORMAT = "%(asctime)s %(levelname)-5s %(message)s"
+_LOG_DATEFMT = "%H:%M:%S"
+_HANDLER_TAG = "_spotlights_cli_handler"
+
+
+def _configure_logging(args: argparse.Namespace) -> None:
+    """Install stderr (and optional file) handlers on the spotlights_engine
+    root logger. Idempotent — repeated calls do not duplicate handlers."""
+    if args.quiet:
+        level = logging.WARNING
+    elif args.verbose:
+        level = logging.DEBUG
+    else:
+        level = logging.INFO
+
+    root = logging.getLogger("spotlights_engine")
+    root.setLevel(level)
+
+    # Drop any handlers a previous in-process call to main() installed.
+    for h in list(root.handlers):
+        if getattr(h, _HANDLER_TAG, False):
+            root.removeHandler(h)
+            h.close()
+
+    formatter = logging.Formatter(_LOG_FORMAT, datefmt=_LOG_DATEFMT)
+
+    stderr_handler = logging.StreamHandler(sys.stderr)
+    stderr_handler.setFormatter(formatter)
+    stderr_handler.setLevel(level)
+    setattr(stderr_handler, _HANDLER_TAG, True)
+    root.addHandler(stderr_handler)
+
+    if args.log_file is not None:
+        args.log_file.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(args.log_file, encoding="utf-8")
+        file_handler.setFormatter(formatter)
+        file_handler.setLevel(level)
+        setattr(file_handler, _HANDLER_TAG, True)
+        root.addHandler(file_handler)
 
 
 def _flatten_include(raw: list[list[str]] | None) -> list[str]:
@@ -208,6 +273,19 @@ def _build_config(args: argparse.Namespace) -> SpotlightsManagerConfig:
     )
 
 
+def _write_result_json(result: SpotlightsManagerResult, output_folder: Path) -> Path:
+    """Persist the full SpotlightsManagerResult as JSON next to index.md.
+
+    `extractor_invocation` is a dataclass (not a pydantic model), so we
+    serialize it via `dataclasses.asdict` and splice it into the dump.
+    """
+    payload = result.model_dump(mode="json", exclude={"extractor_invocation"})
+    payload["extractor_invocation"] = dataclasses.asdict(result.extractor_invocation)
+    path = output_folder / "result.json"
+    path.write_text(json.dumps(payload, indent=2, default=str) + "\n", encoding="utf-8")
+    return path
+
+
 def _print_summary(result: SpotlightsManagerResult) -> None:
     """Render the §2 stdout shape from a completed run."""
     qns = list(result.module_runs.keys())
@@ -254,14 +332,26 @@ def _print_summary(result: SpotlightsManagerResult) -> None:
 def main(argv: list[str] | None = None) -> int:
     args = _build_argparser().parse_args(argv)
 
+    # Resolve to absolute up-front: codex runs subprocesses with `-C <repo_path>`,
+    # so any relative path baked into a config (schema, last_message, artifacts)
+    # would resolve under the target repo, not this project's CWD.
+    args.artifacts_dir = args.artifacts_dir.resolve()
+    args.output_folder = args.output_folder.resolve()
+    if args.repo is not None:
+        args.repo = args.repo.resolve()
+
     args.artifacts_dir.mkdir(parents=True, exist_ok=True)
     args.output_folder.mkdir(parents=True, exist_ok=True)
+
+    _configure_logging(args)
 
     inp = _build_input(args)
     cfg = _build_config(args)
 
     result = run_with_telemetry(inp, config=cfg)
+    json_path = _write_result_json(result, args.output_folder)
     _print_summary(result)
+    print(f"result json: {json_path}")
 
     any_unrecoverable = any(
         any(not iss.recoverable for iss in run.issues)

@@ -257,15 +257,18 @@ class CodexRunner(AgentRunner):
     _executable = "codex"
 
     def _build_argv(self, schema_path: Path, iter_dir: Path) -> list[str]:
+        # Codex runs with `-C <repo_path>`, so any relative path here would
+        # resolve under the target repo. Pass absolutes for both schema and
+        # last_message outputs.
         return [
             self._executable,
             "exec",
             "-",
             "--json",
             "--output-last-message",
-            str(iter_dir / "last_message.json"),
+            str((iter_dir / "last_message.json").resolve()),
             "--output-schema",
-            str(schema_path),
+            str(schema_path.resolve()),
             "--sandbox",
             "read-only",
             "-C",

@@ -416,6 +416,13 @@ async def _run_one_candidate(
         _CLAUDE_PASS: claude_duration,
         _CODEX_PASS: codex_duration,
     }
+    _log.debug(
+        "[%s] agent_proposals: candidate %s done in %.1fs — %d proposals",
+        input.candidates.module_qualified_name,
+        candidate.id,
+        claude_duration + codex_duration,
+        len(proposals),
+    )
     return candidate.id, proposals, issues, durations
 
 

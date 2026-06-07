@@ -269,6 +269,14 @@ async def _run_one_pair(
     for warn in parsed.warnings:
         issues.append(_issue(warn, severity="warning", recoverable=True))
 
+    _log.debug(
+        "[%s] proposal_from_finding: pair %s done in %.1fs — %d proposals",
+        input.candidates.module_qualified_name,
+        pair_key,
+        run_result.duration_s,
+        len(proposals),
+    )
+
     return pair_key, proposals, issues, run_result.duration_s
 
 

@@ -18,6 +18,7 @@ Two entrypoints, mirroring `candidate_discovery`:
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -58,7 +59,10 @@ class ExtractorResult(BaseModel):
 
 
 def extract_with_telemetry(
-    input: ModulesExtractorInput, *, config: ExtractorConfig | None = None
+    input: ModulesExtractorInput,
+    *,
+    config: ExtractorConfig | None = None,
+    on_event: Callable[[str], None] | None = None,
 ) -> ExtractorResult:
     """Runtime-rich extraction. Persists artifacts when `artifacts_dir` is set."""
     cfg = config or ExtractorConfig()
@@ -93,7 +97,7 @@ def extract_with_telemetry(
     else:
         run_dir = None
 
-    run: ExtractionRunResult = run_extraction(
+    run_kwargs: dict = dict(
         repo_path=repo,
         prompt=EXTRACTION_PROMPT,
         claude_bin=cfg.claude_bin,
@@ -101,20 +105,31 @@ def extract_with_telemetry(
         timeout_s=cfg.timeout_s,
         artifacts_dir=run_dir,
     )
+    if on_event is not None:
+        run_kwargs["on_event"] = on_event
+    run: ExtractionRunResult = run_extraction(**run_kwargs)
 
     return ExtractorResult(project_tree=run.project_tree, invocation=run.invocation)
 
 
 def extract(
-    input: ModulesExtractorInput, *, config: ExtractorConfig | None = None
+    input: ModulesExtractorInput,
+    *,
+    config: ExtractorConfig | None = None,
+    on_event: Callable[[str], None] | None = None,
 ) -> ProjectTree:
     """Architecture-shaped entrypoint for step 1 (`ModulesExtractor`).
 
     Mirrors the per-step contract: input is `ModulesExtractorInput`, output is
     the structural `ProjectTree`. Telemetry flows through `extract_with_telemetry`
     for callers that want it.
+
+    `on_event`, when given, is forwarded to the underlying `claude -p` reader
+    thread (one summary line per stream-json event). Default is silent.
     """
-    return extract_with_telemetry(input, config=config).project_tree
+    return extract_with_telemetry(
+        input, config=config, on_event=on_event
+    ).project_tree
 
 
 __all__ = [

@@ -2,7 +2,7 @@
 
 ## Project
 
-`spotlight-engine` proposes high-leverage code changes for a target repo. The
+`spotlights-engine` proposes high-leverage code changes for a target repo. The
 deep-research path takes a repo, extracts its module tree, and runs candidate
 discovery for each **target module**. For target modules with discovered
 candidates, it runs a literature/web survey, then considers each

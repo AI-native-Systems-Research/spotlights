@@ -10,6 +10,7 @@ truth; in-memory state is only there to drive the scheduling.
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -78,6 +79,9 @@ from spotlights_engine.spotlights_manager.persistence import (
     ModuleCheckpoint,
     ModulePaths,
 )
+
+
+_log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -316,6 +320,11 @@ def _run_extractor_if_needed(
     tree, invocation = P.read_extractor_outputs(paths)
 
     if completed and tree is not None and invocation is not None:
+        prev_dur = extractor_state.get("duration_s")
+        if isinstance(prev_dur, (int, float)):
+            _log.info("extractor: cached (%.1fs on previous run)", prev_dur)
+        else:
+            _log.info("extractor: cached")
         return tree, invocation
 
     # Anything other than "fully complete with both sidecars on disk" forces a
@@ -327,6 +336,7 @@ def _run_extractor_if_needed(
         update={"artifacts_dir": paths.root}
     )
 
+    _log.info("extractor: start")
     start = time.monotonic()
     try:
         result = extract_with_telemetry(
@@ -341,12 +351,17 @@ def _run_extractor_if_needed(
             "error": f"{type(exc).__name__}: {exc}",
         }
         P.write_manifest(paths, manifest)
+        _log.error("extractor: failed: %s: %s", type(exc).__name__, exc)
         raise
     duration = time.monotonic() - start
 
     P.write_extractor_outputs(paths, result.project_tree, result.invocation)
     manifest["extractor"] = {"completed": True, "duration_s": duration}
     P.write_manifest(paths, manifest)
+    n_leaves = sum(1 for _ in result.project_tree.leaves())
+    _log.info(
+        "extractor: complete in %.1fs — kept %d leaf modules", duration, n_leaves
+    )
     return result.project_tree, result.invocation
 
 
@@ -679,7 +694,13 @@ async def _run_module(
 
     if plan.skip_module:
         assert state.checkpoint is not None
+        _log.info("[%s] skipping (already %s)", qn, state.checkpoint.status)
         return state.checkpoint
+
+    if state.checkpoint is not None and state.checkpoint.last_step is not None:
+        _log.info("[%s] resuming from %s", qn, state.checkpoint.last_step)
+
+    module_start = time.monotonic()
 
     if (
         cancel_event is not None
@@ -727,6 +748,7 @@ async def _run_module(
             )
             P.write_checkpoint(module_paths, cp)
 
+            _log.info("[%s] discovery: start", qn)
             try:
                 candidates, iters, dur, cost = await _do_step2(
                     qn=qn,
@@ -764,10 +786,27 @@ async def _run_module(
                 await _update_module_in_manifest(
                     paths, manifest, manifest_lock, qn, cp
                 )
+                _log.error(
+                    "[%s] discovery: failed: %s: %s", qn, type(e).__name__, e
+                )
+                _log.debug("[%s] discovery: traceback", qn, exc_info=True)
+                _log.info(
+                    "[%s] module FAILED in %.1fs",
+                    qn,
+                    time.monotonic() - module_start,
+                )
                 return cp
 
             P.write_candidates(module_paths, candidates)
             P.write_discovery_telemetry(module_paths, iters, dur, cost)
+            cost_str = f" ${cost:.2f}" if cost is not None else ""
+            _log.info(
+                "[%s] discovery: complete in %.1fs — %d candidates%s",
+                qn,
+                dur,
+                len(candidates.candidates),
+                cost_str,
+            )
             cp = _now_checkpoint(
                 qn=qn,
                 status="DISCOVERED",
@@ -809,6 +848,12 @@ async def _run_module(
             )
             P.write_checkpoint(module_paths, cp)
             await _update_module_in_manifest(paths, manifest, manifest_lock, qn, cp)
+            _log.info("[%s] discovery: 0 candidates → SKIPPED", qn)
+            _log.info(
+                "[%s] module SKIPPED in %.1fs",
+                qn,
+                time.monotonic() - module_start,
+            )
             return cp
 
         # ------------------------- step 3 -----------------------------------
@@ -819,6 +864,7 @@ async def _run_module(
             P.clear_agent_proposals_artifacts(module_paths)
 
         if run_step3:
+            _log.info("[%s] deep_research: start (Codex session)", qn)
             try:
                 research_output, dr_duration = await _do_step3(
                     qn=qn,
@@ -848,8 +894,30 @@ async def _run_module(
                 await _update_module_in_manifest(
                     paths, manifest, manifest_lock, qn, cp
                 )
+                _log.error(
+                    "[%s] deep_research: failed: %s: %s",
+                    qn,
+                    type(e).__name__,
+                    e,
+                )
+                _log.debug("[%s] deep_research: traceback", qn, exc_info=True)
+                _log.info(
+                    "[%s] module FAILED in %.1fs",
+                    qn,
+                    time.monotonic() - module_start,
+                )
                 return cp
 
+            _log.info(
+                "[%s] deep_research: complete in %.1fs — %d findings",
+                qn,
+                dr_duration,
+                len(research_output.findings),
+            )
+            for iss in research_output.issues:
+                _log.warning(
+                    "[%s] deep_research: %s: %s", qn, iss.severity, iss.message
+                )
             P.write_deep_research(module_paths, research_output, dr_duration)
             cp = _now_checkpoint(
                 qn=qn,
@@ -882,6 +950,11 @@ async def _run_module(
                 # Architecture-mandated short-circuit: every candidate
                 # advances to FINDING_PROPOSALS_CREATED with no proposals,
                 # no Claude session is scheduled.
+                _log.info(
+                    "[%s] proposal_from_finding: skipped (no findings) — "
+                    "synthetic empty output",
+                    qn,
+                )
                 proposal_output = _synthetic_step4_output_for_zero_findings(
                     candidates
                 )
@@ -892,6 +965,12 @@ async def _run_module(
                     per_pair_durations_s={},
                 )
             else:
+                n_pairs = len(candidates.candidates) * len(research_output.findings)
+                _log.info(
+                    "[%s] proposal_from_finding: start — %d (candidate, finding) pairs",
+                    qn,
+                    n_pairs,
+                )
                 try:
                     proposal_output, pf_duration, per_pair = await _do_step4(
                         candidates=candidates,
@@ -932,8 +1011,42 @@ async def _run_module(
                     await _update_module_in_manifest(
                         paths, manifest, manifest_lock, qn, cp
                     )
+                    _log.error(
+                        "[%s] proposal_from_finding: failed: %s: %s",
+                        qn,
+                        type(e).__name__,
+                        e,
+                    )
+                    _log.debug(
+                        "[%s] proposal_from_finding: traceback",
+                        qn,
+                        exc_info=True,
+                    )
+                    _log.info(
+                        "[%s] module FAILED in %.1fs",
+                        qn,
+                        time.monotonic() - module_start,
+                    )
                     return cp
 
+                n_proposals = sum(
+                    len(c.deep_research_proposals)
+                    for c in proposal_output.candidates.candidates
+                )
+                _log.info(
+                    "[%s] proposal_from_finding: complete in %.1fs — "
+                    "%d proposals attached",
+                    qn,
+                    pf_duration,
+                    n_proposals,
+                )
+                for iss in proposal_output.issues:
+                    _log.warning(
+                        "[%s] proposal_from_finding: %s: %s",
+                        qn,
+                        iss.severity,
+                        iss.message,
+                    )
                 P.write_proposal_from_finding(
                     module_paths,
                     proposal_output,
@@ -969,6 +1082,10 @@ async def _run_module(
 
         agent_output: AgentProposalsOutput | None = None
         if run_step5:
+            n_candidates = len(proposal_output.candidates.candidates)
+            _log.info(
+                "[%s] agent_proposals: start — %d candidates", qn, n_candidates
+            )
             try:
                 agent_output, ap_duration, per_cand = await _do_step5(
                     candidates=proposal_output.candidates,
@@ -1009,8 +1126,40 @@ async def _run_module(
                 await _update_module_in_manifest(
                     paths, manifest, manifest_lock, qn, cp
                 )
+                _log.error(
+                    "[%s] agent_proposals: failed: %s: %s",
+                    qn,
+                    type(e).__name__,
+                    e,
+                )
+                _log.debug(
+                    "[%s] agent_proposals: traceback", qn, exc_info=True
+                )
+                _log.info(
+                    "[%s] module FAILED in %.1fs",
+                    qn,
+                    time.monotonic() - module_start,
+                )
                 return cp
 
+            n_agent_proposals = sum(
+                len(c.agent_proposals)
+                for c in agent_output.candidates.candidates
+            )
+            _log.info(
+                "[%s] agent_proposals: complete in %.1fs — "
+                "%d agent proposals attached",
+                qn,
+                ap_duration,
+                n_agent_proposals,
+            )
+            for iss in agent_output.issues:
+                _log.warning(
+                    "[%s] agent_proposals: %s: %s",
+                    qn,
+                    iss.severity,
+                    iss.message,
+                )
             P.write_agent_proposals(
                 module_paths,
                 agent_output,
@@ -1084,6 +1233,12 @@ async def _run_module(
         )
         P.write_checkpoint(module_paths, cp)
         await _update_module_in_manifest(paths, manifest, manifest_lock, qn, cp)
+        _log.info(
+            "[%s] module %s in %.1fs",
+            qn,
+            final_status,
+            time.monotonic() - module_start,
+        )
         return cp
 
 
@@ -1116,8 +1271,22 @@ def run(
 async def _run_async(
     input: SpotlightsManagerInput, *, config: SpotlightsManagerConfig
 ) -> SpotlightsManagerResult:
+    run_start = time.monotonic()
     paths = ManagerPaths(config.artifacts_dir)
     _validate_setup(input, paths)
+
+    filter_label = (
+        "include"
+        if config.module_filter is not None and config.module_filter.include
+        else "all"
+    )
+    _log.info(
+        "run start: repo=%s objective=%r modules_filter=%s max_parallel=%d",
+        input.repo_path,
+        input.context.objective,
+        filter_label,
+        config.max_parallel_sessions,
+    )
 
     input_fp = P.build_input_fingerprint(
         repo_path=input.repo_path,
@@ -1254,6 +1423,27 @@ async def _run_async(
         output_folder=config.output_folder,
     )
 
+    counts = {"SUCCEEDED": 0, "DEGRADED": 0, "FAILED": 0, "SKIPPED": 0}
+    for run_record in module_runs.values():
+        counts[run_record.status] = counts.get(run_record.status, 0) + 1
+    total_cost = sum(
+        (
+            t.discovery_total_cost_usd or 0.0
+            for t in per_module_telemetry.values()
+        )
+    )
+    cost_str = f", discovery cost ${total_cost:.2f}" if total_cost else ""
+    _log.info(
+        "run complete: %d succeeded / %d degraded / %d failed / %d skipped "
+        "in %.1fs%s",
+        counts["SUCCEEDED"],
+        counts["DEGRADED"],
+        counts["FAILED"],
+        counts["SKIPPED"],
+        time.monotonic() - run_start,
+        cost_str,
+    )
+
     return SpotlightsManagerResult(
         project_tree=tree,
         context=input.context,
@@ -1279,6 +1469,7 @@ def _render_results(
     )
 
     issues: list[StepIssue] = []
+    _log.info("renderer: start")
     try:
         result = render(
             RendererInput(
@@ -1286,6 +1477,7 @@ def _render_results(
                 output_folder=output_folder,
             )
         )
+        _log.info("renderer: complete — %s", result.index_path)
         return result, issues
     except RendererSetupError as exc:
         issues.append(
@@ -1295,6 +1487,9 @@ def _render_results(
                 recoverable=True,
                 severity="warning",
             )
+        )
+        _log.warning(
+            "renderer: skipped: %s: %s", type(exc).__name__, exc
         )
         return None, issues
     except Exception as exc:  # noqa: BLE001
@@ -1306,6 +1501,8 @@ def _render_results(
                 severity="error",
             )
         )
+        _log.error("renderer: failed: %s: %s", type(exc).__name__, exc)
+        _log.debug("renderer: traceback", exc_info=True)
         return None, issues
 
 

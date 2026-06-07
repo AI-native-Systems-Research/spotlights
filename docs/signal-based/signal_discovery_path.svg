@@ -1,0 +1,203 @@
+<svg viewBox="0 0 900 1410" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Inter, system-ui, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4a4a4a"/>
+    </marker>
+    <style>
+      .title  { font-weight:600; font-size:15px; fill:#1a1a1a; }
+      .body   { font-weight:400; font-size:12px; fill:#4a4a4a; }
+      .small  { font-weight:400; font-size:11px; fill:#6b7280; }
+      .mono   { font-family: ui-monospace, Menlo, monospace; font-weight:500; font-size:13px; fill:#1a1a1a; }
+      .monosm { font-family: ui-monospace, Menlo, monospace; font-weight:400; font-size:11px; fill:#374151; }
+      .line   { stroke:#4a4a4a; stroke-width:1.6; fill:none; }
+      .panel  { fill:#fff; stroke:#1a1a1a; stroke-width:1.4; }
+      .det    { fill:#ecfdf5; stroke:#059669; stroke-width:1.6; }
+      .llm    { fill:#fff7e6; stroke:#d97706; stroke-width:1.6; }
+      .llm2   { fill:#f3edff; stroke:#7c3aed; stroke-width:1.6; }
+      .backend{ fill:#eef6ff; stroke:#2563eb; stroke-width:1.8; }
+      .deferred{ fill:#f9fafb; stroke:#9ca3af; stroke-width:1.4; stroke-dasharray:5 4; }
+      .artifact{ fill:#ffffff; stroke:#525252; stroke-width:1.3; }
+      .out    { fill:#fffbe6; stroke:#a16207; stroke-width:1.6; }
+      .label  { font-weight:600; font-size:11px; fill:#666; letter-spacing:0.08em; }
+      .loop   { fill:none; stroke:#1a1a1a; stroke-width:1.2; stroke-dasharray:5 5; }
+      .legendbox { fill:#ffffff; stroke:#d1d5db; stroke-width:1; }
+    </style>
+  </defs>
+
+  <rect width="900" height="1410" fill="#fafafa"/>
+
+  <!-- TITLE -->
+  <text x="40" y="36" class="title" font-size="18">Signal-Based Discovery — MVP one-shot pipeline</text>
+  <text x="40" y="56" class="small">Telemetry + repo in. (Change spec, ExecutionResult) pairs out. Validation and archive close the loop later (out of scope).</text>
+
+  <!-- INPUTS -->
+  <g transform="translate(80,90)">
+    <rect width="260" height="48" rx="8" class="panel"/>
+    <text x="130" y="22" text-anchor="middle" class="mono">RawTelemetry</text>
+    <text x="130" y="38" text-anchor="middle" class="small">profiles + traces from a live run</text>
+  </g>
+  <g transform="translate(560,90)">
+    <rect width="260" height="48" rx="8" class="panel"/>
+    <text x="130" y="22" text-anchor="middle" class="mono">subject_root</text>
+    <text x="130" y="38" text-anchor="middle" class="small">path to the subject system's repo</text>
+  </g>
+
+  <!-- arrows down -->
+  <path class="line" marker-end="url(#arr)" d="M210 138 V 175"/>
+  <path class="line" marker-end="url(#arr)" d="M690 138 V 175"/>
+
+  <!-- STAGE 1A: Signal extraction -->
+  <g transform="translate(40,175)">
+    <rect width="380" height="100" rx="10" class="det"/>
+    <text x="20" y="24" class="label">STAGE 1 · DETERMINISTIC</text>
+    <text x="20" y="46" class="title">Signal extraction</text>
+    <text x="20" y="64" class="small">a.k.a. Bundle A · spotlights-observability</text>
+    <text x="20" y="84" class="body">Heuristics + summarization over telemetry.</text>
+    <text x="20" y="98" class="body">No LLM. No interpretation.</text>
+  </g>
+
+  <!-- STAGE 1B: ProjectTree extractor -->
+  <g transform="translate(480,175)">
+    <rect width="380" height="100" rx="10" class="det"/>
+    <text x="20" y="24" class="label">STAGE 1 · DETERMINISTIC</text>
+    <text x="20" y="46" class="title">ProjectTree extractor</text>
+    <text x="20" y="64" class="small">spotlights-engine.modules_extractor</text>
+    <text x="20" y="84" class="body">Walks the repo, builds a structural map of</text>
+    <text x="20" y="98" class="body">modules + main files + dependencies.</text>
+  </g>
+
+  <!-- artifacts row -->
+  <path class="line" marker-end="url(#arr)" d="M230 275 V 310"/>
+  <path class="line" marker-end="url(#arr)" d="M670 275 V 310"/>
+
+  <g transform="translate(60,310)">
+    <rect width="340" height="92" rx="6" class="artifact"/>
+    <text x="14" y="20" class="label">ARTIFACTS · LOCKED SCHEMA</text>
+    <text x="14" y="40" class="mono">WorkloadProfile</text>
+    <text x="170" y="40" class="small">workload class, hardware, sw version</text>
+    <text x="14" y="58" class="mono">TraceSummary[]</text>
+    <text x="170" y="58" class="small">stalls, hot components, raw_trace_pointer</text>
+    <text x="14" y="76" class="mono">Anomaly[]</text>
+    <text x="170" y="76" class="small">typed observations w/ magnitude + evidence</text>
+  </g>
+
+  <g transform="translate(500,310)">
+    <rect width="340" height="92" rx="6" class="artifact"/>
+    <text x="14" y="20" class="label">ARTIFACT · LOCKED SCHEMA</text>
+    <text x="14" y="40" class="mono">ProjectTree</text>
+    <text x="14" y="58" class="small">repository · modules[name, path, depends_on,</text>
+    <text x="14" y="74" class="small">main_files[path, role], submodules]</text>
+  </g>
+
+  <!-- arrows down to candidate gen -->
+  <path class="line" marker-end="url(#arr)" d="M230 402 V 455"/>
+  <path class="line" marker-end="url(#arr)" d="M670 402 V 455"/>
+
+  <!-- Knowledge retrieval (deferred) — tucked between artifact row and Stage 2 -->
+  <g transform="translate(330,408)">
+    <rect width="240" height="42" rx="8" class="deferred"/>
+    <text x="12" y="16" class="label">DEFERRED · POST-MVP</text>
+    <text x="12" y="34" class="title" fill="#6b7280" font-size="13">Knowledge retrieval (Bundle B)</text>
+  </g>
+  <path class="line" stroke-dasharray="4 3" marker-end="url(#arr)" d="M450 450 V 455"/>
+
+  <!-- STAGE 2: Candidate generation -->
+  <g transform="translate(180,455)">
+    <rect width="540" height="190" rx="10" class="llm"/>
+    <text x="20" y="24" class="label">STAGE 2 · LLM (~2 CALLS)</text>
+    <text x="20" y="46" class="title">Candidate generation</text>
+    <text x="20" y="64" class="small">a.k.a. Bundle C · spotlights-engine.candidates</text>
+    <text x="20" y="86" class="body">Reasons over signals + structural map. Findings only — no fixes yet.</text>
+    <text x="20" y="116" class="label">INTERNAL STAGES (BUNDLE C OWNER'S CALL)</text>
+    <text x="20" y="136" class="monosm">1.  form_insight       — LLM over signals + tree → internal hypothesis</text>
+    <text x="20" y="154" class="monosm">2.  drill_module       — by_path + read main_files from subject_root</text>
+    <text x="20" y="172" class="monosm">3.  build_candidate    — LLM over insight + drilled context → Candidate</text>
+  </g>
+
+  <!-- side channel: get_raw_trace -->
+  <path class="line" stroke-dasharray="3 3" d="M180 540 Q 130 540 130 420 Q 130 360 230 360"/>
+  <text x="50" y="540" class="small">get_raw_trace()</text>
+  <text x="50" y="552" class="small">on demand</text>
+
+  <!-- arrow down to Candidate[] -->
+  <path class="line" marker-end="url(#arr)" d="M450 645 V 685"/>
+
+  <!-- Candidate[] artifact -->
+  <g transform="translate(230,685)">
+    <rect width="440" height="76" rx="6" class="artifact"/>
+    <text x="14" y="20" class="label">ARTIFACT · CONTRACT (PROPOSED)</text>
+    <text x="14" y="40" class="mono">Candidate[]</text>
+    <text x="14" y="58" class="small">candidate_id · locations · observation</text>
+    <text x="14" y="72" class="small">evidence[] · significance · workload_ref</text>
+  </g>
+
+  <!-- per-candidate loop frame -->
+  <path class="line" marker-end="url(#arr)" d="M450 761 V 800"/>
+  <text x="460" y="788" class="label">FOR EACH CANDIDATE</text>
+  <rect x="60" y="800" width="780" height="490" rx="12" class="loop"/>
+
+  <!-- STAGE 3: Change generation -->
+  <g transform="translate(170,840)">
+    <rect width="560" height="100" rx="10" class="llm2"/>
+    <text x="20" y="24" class="label">STAGE 3 · LLM (1 CALL PER CANDIDATE)</text>
+    <text x="20" y="46" class="title">Change generation</text>
+    <text x="20" y="64" class="small">a.k.a. Bundle D (part 1) · spotlights-engine.changes</text>
+    <text x="20" y="86" class="body">Drafts a structured Change spec from the Candidate. Spec only — no edits yet.</text>
+  </g>
+
+  <path class="line" marker-end="url(#arr)" d="M450 940 V 975"/>
+
+  <!-- Change spec artifact -->
+  <g transform="translate(230,975)">
+    <rect width="440" height="68" rx="6" class="artifact"/>
+    <text x="14" y="20" class="label">ARTIFACT · CONTRACT (PROPOSED)</text>
+    <text x="14" y="40" class="mono">Change</text>
+    <text x="14" y="58" class="small">change_type · mechanism · expected_effect · evaluation_metric</text>
+  </g>
+
+  <path class="line" marker-end="url(#arr)" d="M450 1043 V 1080"/>
+
+  <!-- STAGE 4: Execution backend -->
+  <g transform="translate(170,1080)">
+    <rect width="560" height="100" rx="10" class="backend"/>
+    <text x="20" y="24" class="label">STAGE 4 · EXTERNAL AGENT</text>
+    <text x="20" y="46" class="title">Execution backend</text>
+    <text x="20" y="64" class="small">handoff() · MVP backend = Claude Code · OpenEvolve / Shinka / Nous later</text>
+    <text x="20" y="86" class="body">Receives the Change spec, produces concrete file edits + a rationale.</text>
+  </g>
+
+  <path class="line" marker-end="url(#arr)" d="M450 1180 V 1212"/>
+
+  <!-- ExecutionResult artifact -->
+  <g transform="translate(230,1212)">
+    <rect width="440" height="68" rx="6" class="artifact"/>
+    <text x="14" y="20" class="label">ARTIFACT · CONTRACT (PROPOSED)</text>
+    <text x="14" y="40" class="mono">ExecutionResult</text>
+    <text x="14" y="58" class="small">file_edits[] (unified_diff or after_content) · rationale · status</text>
+  </g>
+
+  <!-- exit arrow + final output -->
+  <path class="line" marker-end="url(#arr)" d="M450 1280 V 1305"/>
+  <g transform="translate(270,1305)">
+    <rect width="360" height="48" rx="8" class="out"/>
+    <text x="180" y="22" text-anchor="middle" class="mono">list[(Change, ExecutionResult)]</text>
+    <text x="180" y="38" text-anchor="middle" class="small">handed to Validation + Archive (post-MVP)</text>
+  </g>
+
+  <!-- LEGEND -->
+  <g transform="translate(40,1370)">
+    <rect width="820" height="28" rx="6" class="legendbox"/>
+    <rect x="10" y="8" width="14" height="12" rx="2" class="det"/>
+    <text x="30" y="19" class="small">deterministic (no LLM)</text>
+    <rect x="170" y="8" width="14" height="12" rx="2" class="llm"/>
+    <text x="190" y="19" class="small">LLM stage</text>
+    <rect x="270" y="8" width="14" height="12" rx="2" class="llm2"/>
+    <text x="290" y="19" class="small">LLM stage (per candidate)</text>
+    <rect x="450" y="8" width="14" height="12" rx="2" class="backend"/>
+    <text x="470" y="19" class="small">external agent</text>
+    <rect x="570" y="8" width="14" height="12" rx="2" class="deferred"/>
+    <text x="590" y="19" class="small">deferred · post-MVP</text>
+    <rect x="700" y="8" width="14" height="12" rx="2" class="artifact"/>
+    <text x="720" y="19" class="small">data artifact</text>
+  </g>
+</svg>
