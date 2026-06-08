@@ -1,0 +1,32 @@
+# Repo bench run — {run_id}
+
+> **Status**: {final_status}
+> **Started**:  {started_at}
+> **Finished**: {finished_at} ({duration_s:.0f}s elapsed)
+> Canonical source: `report.json` next to this file.
+
+## Summary
+
+| What | Value |
+|---|---|
+| Window | `{window_id}` |
+| View | `{view_id}` |
+{summary_table_extras}
+
+## Stages
+
+| # | Stage | Status | Detail |
+|---:|---|---|---|
+{stage_rows}
+
+## Snapshot pin
+
+{snapshot_block}
+
+## Bench spec
+
+{bench_spec_block}
+
+## Next steps
+
+{next_steps_block}

@@ -1,0 +1,173 @@
+<svg viewBox="0 0 900 1180" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system, Inter, system-ui, sans-serif">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#4a4a4a"/>
+    </marker>
+    <style>
+      .title  { font-weight:600; font-size:15px; fill:#1a1a1a; }
+      .body   { font-weight:400; font-size:12px; fill:#4a4a4a; }
+      .small  { font-weight:400; font-size:11px; fill:#6b7280; }
+      .mono   { font-family: ui-monospace, Menlo, monospace; font-weight:500; font-size:13px; fill:#1a1a1a; }
+      .monosm { font-family: ui-monospace, Menlo, monospace; font-weight:400; font-size:11px; fill:#374151; }
+      .line   { stroke:#4a4a4a; stroke-width:1.6; fill:none; }
+      .det    { fill:#ecfdf5; stroke:#059669; stroke-width:1.6; }      /* deterministic: green */
+      .llm2   { fill:#f3edff; stroke:#7c3aed; stroke-width:1.6; }      /* LLM judge: purple */
+      .input  { fill:#eef6ff; stroke:#2563eb; stroke-width:1.6; }      /* input from outside */
+      .artifact{ fill:#ffffff; stroke:#525252; stroke-width:1.3; }
+      .out    { fill:#fffbe6; stroke:#a16207; stroke-width:1.6; }       /* handoff artifact */
+      .label  { font-weight:600; font-size:11px; fill:#666; letter-spacing:0.08em; }
+      .legendbox { fill:#ffffff; stroke:#d1d5db; stroke-width:1; }
+    </style>
+  </defs>
+
+  <rect width="900" height="1180" fill="#fafafa"/>
+
+  <!-- TITLE -->
+  <text x="40" y="36" class="title" font-size="18">Repo bench — end-to-end pipeline</text>
+  <text x="40" y="56" class="body">A `repo-bench run` invocation drives stages 1–6. The `match` command runs separately, after a findings.json exists.</text>
+
+  <!-- SECTION LABEL: BUILD ANSWER KEY + SPEC -->
+  <text x="40" y="92" class="label">BUILD ANSWER KEY + BENCH SPEC (single command)</text>
+  <line x1="40" y1="100" x2="860" y2="100" class="line" stroke="#d1d5db" stroke-width="1"/>
+
+  <!-- 1. AGGREGATE -->
+  <rect x="40" y="120" width="280" height="80" rx="8" class="det"/>
+  <text x="60" y="146" class="title">1 · aggregate</text>
+  <text x="60" y="166" class="body">GitHub scrape: every merged PR in the</text>
+  <text x="60" y="180" class="body">date window. Cached after first run.</text>
+  <text x="60" y="194" class="small">deterministic · ~hour first run, skip on re-run</text>
+
+  <!-- arrow -->
+  <path d="M180 200 L180 230" class="line" marker-end="url(#arr)"/>
+
+  <!-- artifact: prs.jsonl -->
+  <rect x="60" y="232" width="240" height="50" rx="4" class="artifact"/>
+  <text x="80" y="252" class="mono">data/.../raw/&lt;w&gt;/prs.jsonl</text>
+  <text x="80" y="270" class="small" font-size="10">(every merged PR, e.g. 5,329)</text>
+
+  <!-- arrow -->
+  <path d="M180 282 L180 298" class="line" marker-end="url(#arr)"/>
+
+  <!-- 2. FILTER -->
+  <rect x="40" y="300" width="280" height="80" rx="8" class="det"/>
+  <text x="60" y="326" class="title">2 · filter</text>
+  <text x="60" y="346" class="body">Predicates (NotBot / NotRevert / NotChore /</text>
+  <text x="60" y="360" class="body">AnyPerfSignal) + ranker.</text>
+  <text x="60" y="374" class="small">deterministic · ~1s</text>
+
+  <!-- arrow -->
+  <path d="M180 380 L180 410" class="line" marker-end="url(#arr)"/>
+
+  <!-- artifact: <run_dir>/view/prs.jsonl -->
+  <rect x="60" y="412" width="240" height="50" rx="4" class="artifact"/>
+  <text x="80" y="432" class="mono">&lt;run_dir&gt;/view/prs.jsonl</text>
+  <text x="80" y="450" class="small" font-size="10">(filtered, ranked, e.g. 201 PRs)</text>
+
+  <!-- arrow -->
+  <path d="M180 462 L180 478" class="line" marker-end="url(#arr)"/>
+
+  <!-- 3. FETCH-DIFFS -->
+  <rect x="40" y="480" width="280" height="80" rx="8" class="det"/>
+  <text x="60" y="506" class="title">3 · fetch-diffs</text>
+  <text x="60" y="526" class="body">GitHub: per-PR unified diff for each</text>
+  <text x="60" y="540" class="body">PR in the view.</text>
+  <text x="60" y="554" class="small">deterministic · ~3 min for 200 PRs</text>
+
+  <!-- arrow -->
+  <path d="M180 560 L180 590" class="line" marker-end="url(#arr)"/>
+
+  <!-- artifact: diffs -->
+  <rect x="60" y="592" width="240" height="50" rx="4" class="artifact"/>
+  <text x="80" y="612" class="mono">data/.../raw/&lt;w&gt;/diffs/&lt;n&gt;.diff</text>
+  <text x="80" y="630" class="small" font-size="10">(unified diffs, one per view PR)</text>
+
+  <!-- arrow over to snapshot -->
+  <path d="M180 642 L180 658" class="line" marker-end="url(#arr)"/>
+
+  <!-- 4. SNAPSHOT -->
+  <rect x="40" y="660" width="280" height="80" rx="8" class="det"/>
+  <text x="60" y="686" class="title">4 · snapshot</text>
+  <text x="60" y="706" class="body">Pick target-repo SHA at least</text>
+  <text x="60" y="720" class="body">buffer hours before earliest filtered PR.</text>
+  <text x="60" y="734" class="small">deterministic · &lt;1s</text>
+
+  <!-- arrow to workloads -->
+  <path d="M180 740 L180 770" class="line" marker-end="url(#arr)"/>
+
+  <!-- 5. WORKLOADS -->
+  <rect x="40" y="772" width="280" height="80" rx="8" class="det"/>
+  <text x="60" y="798" class="title">5 · workloads</text>
+  <text x="60" y="818" class="body">Regex extraction: models / features /</text>
+  <text x="60" y="832" class="body">hardware / file categories across view.</text>
+  <text x="60" y="846" class="small">deterministic · ~10s</text>
+
+  <!-- arrow to bench-spec -->
+  <path d="M180 852 L180 882" class="line" marker-end="url(#arr)"/>
+
+  <!-- 6. BENCH-SPEC -->
+  <rect x="40" y="884" width="280" height="80" rx="8" class="det"/>
+  <text x="60" y="910" class="title">6 · bench-spec</text>
+  <text x="60" y="930" class="body">Render cross-module contract: SHA +</text>
+  <text x="60" y="944" class="body">reference config + workload signals §6.</text>
+  <text x="60" y="958" class="small">deterministic · &lt;1s</text>
+
+  <!-- arrow over to run-dir column -->
+  <path d="M320 924 L380 924" class="line" marker-end="url(#arr)"/>
+
+  <!-- run-dir bundle on right -->
+  <rect x="380" y="660" width="280" height="304" rx="8" class="out"/>
+  <text x="395" y="684" class="title">runs/repo_bench/</text>
+  <text x="395" y="702" class="title">  bench-&lt;run_id&gt;/</text>
+  <text x="395" y="720" class="small">all per-run artifacts in one self-contained dir</text>
+  <text x="400" y="746" class="mono">view/prs.jsonl</text>
+  <text x="400" y="762" class="small">filtered + ranked PRs (n_kept)</text>
+  <text x="400" y="784" class="mono">snapshot.json</text>
+  <text x="400" y="800" class="small">SHA + rationale + buffer</text>
+  <text x="400" y="822" class="mono">workload_analysis.json</text>
+  <text x="400" y="838" class="mono">workload_summary.md</text>
+  <text x="400" y="854" class="small">model / feature / hardware signals</text>
+  <text x="400" y="876" class="mono">bench_spec.json</text>
+  <text x="400" y="892" class="mono">OBSERVABILITY_BENCH_SPEC.md</text>
+  <text x="400" y="908" class="small">contract → handed to bench module (workloads inlined §6)</text>
+  <text x="400" y="930" class="mono">run_report.{json,md}</text>
+  <text x="400" y="946" class="small">per-stage status, counts, paths</text>
+
+  <!-- ===== HANDOFF DIVIDER ===== -->
+  <text x="40" y="1004" class="label">HAND OFF · WAIT FOR RawTelemetry + findings.json · THEN MATCH</text>
+  <line x1="40" y1="1012" x2="860" y2="1012" class="line" stroke="#d1d5db" stroke-width="1"/>
+
+  <!-- External: observability bench -->
+  <rect x="40" y="1032" width="240" height="64" rx="8" class="input"/>
+  <text x="60" y="1056" class="title">Observability bench module</text>
+  <text x="60" y="1074" class="body">reads spec, runs target repo at the SHA</text>
+  <text x="60" y="1088" class="body">against the chosen workload → bundle</text>
+
+  <path d="M280 1064 L320 1064" class="line" marker-end="url(#arr)"/>
+
+  <!-- External: discovery method -->
+  <rect x="320" y="1032" width="240" height="64" rx="8" class="input"/>
+  <text x="340" y="1056" class="title">Discovery method</text>
+  <text x="340" y="1074" class="body">signal pipeline / deep research / etc.</text>
+  <text x="340" y="1088" class="body">consumes bundle + source → findings.json</text>
+
+  <path d="M560 1064 L600 1064" class="line" marker-end="url(#arr)"/>
+
+  <!-- 7 (separate). MATCH -->
+  <rect x="600" y="1032" width="240" height="64" rx="8" class="llm2"/>
+  <text x="620" y="1056" class="title">match · LLM (Sonnet judge)</text>
+  <text x="620" y="1074" class="body">file-overlap gate · Tier 1 / Tier 2 ·</text>
+  <text x="620" y="1088" class="body">same_idea / related / neighborhood</text>
+
+  <!-- ===== LEGEND ===== -->
+  <rect x="40" y="1118" width="820" height="44" rx="6" class="legendbox"/>
+  <rect x="56" y="1130" width="14" height="14" rx="2" class="det"/>
+  <text x="78" y="1141" class="small">deterministic</text>
+  <rect x="190" y="1130" width="14" height="14" rx="2" class="llm2"/>
+  <text x="212" y="1141" class="small">LLM step (match judge)</text>
+  <rect x="360" y="1130" width="14" height="14" rx="2" class="input"/>
+  <text x="382" y="1141" class="small">external module</text>
+  <rect x="500" y="1130" width="14" height="14" rx="2" class="artifact"/>
+  <text x="522" y="1141" class="small">artifact (cache)</text>
+  <rect x="630" y="1130" width="14" height="14" rx="2" class="out"/>
+  <text x="652" y="1141" class="small">artifact (per-run, handoff)</text>
+</svg>
