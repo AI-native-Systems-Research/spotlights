@@ -159,6 +159,7 @@ If either command is not found, re-open your terminal so shell PATH updates from
 git clone https://github.com/AI-native-Systems-Research/spotlights.git
 cd spotlights
 uv sync --all-extras
+source .venv/bin/activate
 ```
 
 ### Install the Spotlights skill
