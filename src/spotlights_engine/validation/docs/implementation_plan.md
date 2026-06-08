@@ -1,289 +1,426 @@
 # Discovery Phase — Implementation Plan
 
-The discovery phase (the `discovery` state in `ValidationStatus.phase`) produces two artifacts: `TestHarnessMap` and `ValidationWorkloadMatrix`. Both run inside `prepare()` before any change arrives.
+The discovery phase (the `discovery` state in `ValidationStatus.phase`) produces two artifacts: `TestHarnessMap` and `ValidationWorkloadMatrix`. These feed into the validation plan that determines what tests and benchmarks to run against a change.
+
+This branch implements discovery as an **LLM-driven process using a template prompt**, not a hardcoded static scanner. The approach generalizes across target systems and languages, and incorporates multiple discovery sources including GitHub issues and pull requests.
 
 ---
 
-## 0. Package Bootstrap
+## 0. Existing Foundation
 
-**Deliverable:** A working Python package that can be imported.
+The following are already implemented and inform this plan:
 
-- Create `pyproject.toml` following the same structure as `spotlights-engine`: `hatchling` builder, `src/` layout, `pydantic>=2` + `spotlights-engine` as runtime deps, `anthropic` for LLM calls, `pytest`/`ruff`/`mypy` as dev deps.
-- `src/spotlights_engine/validation/__init__.py` — exports `prepare`, `start_validation`, `get_validation_status` as stubs (raise `NotImplementedError`) so the public contract exists before the internals are filled in.
-- `src/spotlights_engine/validation/schemas.py` — all Pydantic models (see Step 1).
+- **Schemas** (`src/spotlights_validation/schemas.py`): `TestHarnessMap`, `TestHarnessEntry`, `ValidationWorkloadMatrix`, `WorkloadEntry`, `ValidationPlan`, `ValidationPlanEntry`, and all result types.
+- **MVP examples** (`examples/kvoffload/`, `examples/kvoffload_extended/`): Manually-produced artifacts demonstrating the expected output shape, including entries discovered from GitHub issues/PRs.
+- **Runner** (`execution/runner.py`): Consumes the artifacts produced by discovery.
+- **Public API contract** (`__init__.py`): `prepare()`, `start_validation()`, `get_validation_status()`.
 
----
-
-## 1. Schema Layer
-
-**File:** `src/spotlights_engine/validation/schemas.py`
-
-Define all models needed by discovery. Follow the `ProjectTree` pattern from `spotlights_engine/schemas/modules.py` exactly — Pydantic `BaseModel`, `to_json(path)`, `from_json(path)`, and filter helpers.
-
-```python
-class TestHarnessEntry(BaseModel):
-    id: str                        # stable slug, e.g. "buildkite-basic-correctness"
-    name: str                      # human label
-    kind: Literal["unit", "integration", "benchmark", "correctness", "stress"]
-    path: str                      # repo-relative path to script or test dir
-    invoke: str                    # full shell command
-    components: list[str]          # same vocabulary as TraceSummary.top_components
-    output_format: Literal["pytest-json", "custom", "exit-code-only"]
-    estimated_duration: int | None # seconds
-
-class TestHarnessMap(BaseModel):
-    target_version: str
-    entries: list[TestHarnessEntry] = Field(default_factory=list)
-
-    def for_components(self, components: list[str]) -> "TestHarnessMap": ...
-    def of_kind(self, kind: str) -> "TestHarnessMap": ...
-    def to_json(self, path: Path) -> None: ...
-    @classmethod
-    def from_json(cls, path: Path) -> "TestHarnessMap": ...
-
-class WorkloadEntry(BaseModel):
-    workload_id: str
-    workload_class: Literal["agentic", "batch-inference", "long-context", "mixed", "stress"]
-    source: Literal["discovered", "curated"]
-    config_path: str | None        # repo-relative, None for curated entries
-    components_exercised: list[str]
-
-class ValidationWorkloadMatrix(BaseModel):
-    target_version: str
-    workloads: list[WorkloadEntry] = Field(default_factory=list)
-
-    def for_components(self, components: list[str]) -> "ValidationWorkloadMatrix": ...
-    def to_json(self, path: Path) -> None: ...
-    @classmethod
-    def from_json(cls, path: Path) -> "ValidationWorkloadMatrix": ...
-```
-
-`ExecutionResult`, `ValidationPlanEntry`, `ValidationPlan`, `ValidationPreparation`, `PreparationRun`, `ValidationRun`, `ValidationStatus`, and `ValidationResult` also live here — define them all now as stubs so the type system is consistent from day one.
+The goal of this implementation is to automate what the MVP examples do manually: produce `TestHarnessMap`, `ValidationWorkloadMatrix`, and `ValidationPlan` given a target repo and version.
 
 ---
 
-## 2. Static Scanner
+## 1. Discovery Prompt Template
 
-**File:** `src/spotlights_engine/validation/discovery/_scanner.py`
+**File:** `src/spotlights_validation/discovery/prompt_template.py`
 
-Pure filesystem scanning — no LLM, no I/O beyond reading files. Returns raw unclassified candidates; classification happens later. Each function is independently testable with synthetic fixture trees.
+The core of discovery is an LLM prompt that receives structured context about the target system and produces validation artifacts conforming to our schemas. This replaces a hardcoded scanner approach — the LLM reads the repo structure and available sources, then produces entries directly.
+
+### Template placeholders
+
+| Placeholder | Source | Description |
+|---|---|---|
+| `{target_repo_url}` | CLI argument | GitHub URL of the target repository |
+| `{target_version}` | CLI argument or `git rev-parse HEAD` | Commit SHA, tag, or branch to validate against |
+| `{source_tree_summary}` | Built at runtime | Directory listing, CI configs, test directories, benchmark scripts |
+| `{component_vocabulary}` | From `ProjectTree` if available | Known components of the target system |
+| `{candidate_context}` | From Candidate object | The optimization candidate: target file, symbol, kind, anomaly_refs, and evolve_rationale. Used to focus discovery on the candidate's component and inform archive queries. |
+| `{change_context}` | Optional, from Change object | Affected components and code paths (for change-specific discovery) |
+| `{output_artifacts_path}` | CLI argument | Where to write the produced JSON artifacts |
+| `{existing_artifacts}` | Loaded from prior run if present | Base harness map and workload matrix to extend (not duplicate) |
+| `{github_discovery_results}` | From GitHub search step | Issues and PRs relevant to the discovery scope |
+
+### Template structure
+
+The prompt instructs the LLM to:
+
+1. **Scan the source tree** for test infrastructure: CI configs (any CI system — not limited to BuildKite), test directories, benchmark scripts, workload configs, `__main__` entry points.
+2. **Identify invocation commands** without assuming pytest or Python — support any executable test script, Makefile target, shell script, or language-specific test runner.
+3. **Map components** from path heuristics and file content.
+4. **Produce structured JSON** conforming to `TestHarnessEntry` and `WorkloadEntry` schemas.
+
+### Output format
+
+The LLM returns JSON matching the `TestHarnessMap` and `ValidationWorkloadMatrix` schemas. The template includes the schema shapes inline as output format instructions.
+
+---
+
+## 2. GitHub Discovery (Issues & PRs)
+
+**File:** `src/spotlights_validation/discovery/github_discovery.py`
+
+Searches GitHub for test cases, workloads, benchmarks, and regression signals relevant to the discovery scope. This extends the base discovery with entries that exist in the project's issue tracker but may not be obvious from the source tree alone.
+
+### Interface
 
 ```python
 @dataclass
-class RawHarnessCandidate:
-    source: str       # "buildkite", "pytest", "script"
-    name: str
-    path: str
-    invoke: str
-    inferred_kind: str | None   # inferred heuristically, None = unknown
+class GitHubDiscoveryResult:
+    issues_inspected: list[dict]      # number, url, title
+    prs_inspected: list[dict]
+    harness_candidates: list[dict]    # raw entries extracted from issues/PRs
+    workload_candidates: list[dict]
+    skipped: list[dict]               # ref + reason
 
-@dataclass
-class RawWorkloadCandidate:
-    config_path: str
-    parameters: dict[str, Any]   # raw parsed YAML/JSON content
-    inferred_class: str | None
-```
-
-Four scanners:
-
-### 2a. BuildKite CI scanner (primary for vLLM)
-
-- Walk `.buildkite/test_areas/*.yaml`. For each file, extract the YAML `group` (name) and each step's `command` list. This produces ~30 candidates directly mapping to BuildKite test areas (e.g., `basic_correctness.yaml` → `"pytest -v -s basic_correctness/"`).
-- Key detail: BuildKite YAML uses `commands:` or `command:` keys; the scanner normalizes both.
-
-### 2b. Benchmark script scanner
-
-- Walk `benchmarks/*.py` (not subdirs). For each file, the invoke is `python3 {path}`. Inferred kind: `benchmark`.
-- Walk `benchmarks/attention_benchmarks/configs/*.yaml`. Each config is a separate entry; invoke is `python3 benchmarks/attention_benchmarks/benchmark.py --config {config_path}`.
-
-### 2c. Pytest root scanner (fallback / cross-check)
-
-- Check for `pyproject.toml [tool.pytest.ini_options]` — extract `testpaths` if set, otherwise default to `tests/`.
-- Walk `tests/` one level deep; each subdirectory with a `conftest.py` or `test_*.py` files becomes a candidate. Assign inferred kind from directory name: `unit` if name contains "unit", `integration` if "integration", `distributed` if "distributed", else `None`.
-- This produces coarser entries (whole subdirs) as fallback when BuildKite entries are not available.
-
-### 2d. Workload config scanner
-
-- Walk `benchmarks/attention_benchmarks/configs/*.yaml` → parse each, capture batch_specs and backends.
-- Walk `benchmarks/multi_turn/*.json` → multi-turn workload configs.
-- Check `benchmarks/benchmark_latency.py`, `benchmark_throughput.py`, `benchmark_long_document_qa_throughput.py` for argparse defaults (`request_rate`, `max_tokens`) via a lightweight regex scan of the file (no import/exec).
-- Infer workload class by filename keyword:
-  - `throughput` → `batch-inference`
-  - `long_document` / `long_context` → `long-context`
-  - `multi_turn` / `agentic` → `agentic`
-  - mixed batch specs (prefill+decode together) → `mixed`
-  - `stress` / `adversarial` → `stress`
-  - fallback → `None` (to be classified by LLM)
-
-**Unit tests for Step 2:** Create a minimal fixture tree under `tests/fixtures/fake_vllm/` with a handful of fake `.yaml` and `.py` files. Assert the scanner produces the expected `RawHarnessCandidate` list without any real filesystem access to the actual vLLM repo.
-
----
-
-## 3. Component Mapper (LLM pass)
-
-**File:** `src/spotlights_engine/validation/discovery/_component_mapper.py`
-
-Takes raw candidates + a `ProjectTree` (from `modules_extractor`) and assigns the `components` field to each entry. Pure path heuristics can't reliably map `tests/kernels/` to `["attention_backend", "scheduler"]` without understanding the code structure; the `ProjectTree` provides the component vocabulary and the LLM does the mapping.
-
-**Interface:**
-
-```python
-def map_components(
-    candidates: list[RawHarnessCandidate],
-    project_tree: ProjectTree,
-    llm_client: anthropic.Anthropic,
-) -> dict[str, list[str]]:  # candidate.name → list[component_name]
-```
-
-**Strategy:**
-
-1. Build the component vocabulary by calling `project_tree.walk()` — get all module names as the allowed component set.
-2. Batch candidates into groups of ~10 (to keep prompt size manageable).
-3. For each batch, construct a prompt:
-   - System: "You are mapping test scripts to software components. Respond only with JSON."
-   - User: "Given these vLLM components: `{component_list}`. For each test entry, list which components it primarily tests. If none match, return an empty list."
-   - Include each candidate's `name`, `path`, `invoke` as context.
-4. Parse the structured JSON response. Use `claude-sonnet-4-6` with `max_tokens=1024`.
-5. Fallback: if a candidate's path contains a directory name that exactly matches a component name, use that as the component without an LLM call.
-
-**Caching:** Cache the component mapping alongside the `TestHarnessMap` (same cache key). Don't re-run the LLM pass if the cache is valid.
-
-**Unit tests:** Mock `anthropic.Anthropic` and a fixture `ProjectTree`. Verify the function returns the expected component lists and handles partial/invalid LLM responses gracefully (return `[]` on parse failure, log a warning).
-
----
-
-## 4. Harness Discovery
-
-**File:** `src/spotlights_engine/validation/discovery/harness_discovery.py`
-
-Assembles Steps 2 and 3 into the public internal function.
-
-```python
-async def discover_test_harness(source_tree: Path, target_version: str) -> TestHarnessMap:
-```
-
-**Algorithm:**
-
-1. Run all four static scanners from Step 2 against `source_tree`. Deduplicate by invoke command.
-2. Heuristically assign `output_format`:
-   - invoke contains `pytest` → `pytest-json`
-   - invoke contains `python3 benchmarks/` → `custom`
-   - shell scripts (`.sh`) → `exit-code-only`
-3. Heuristically estimate `estimated_duration` from BuildKite YAML `timeout_in_minutes` field if present; otherwise use kind-based defaults (unit: 300s, integration: 900s, benchmark: 1800s, stress: None).
-4. Call `map_components()` from Step 3 to fill in the `components` field. Pass `ProjectTree` loaded from `modules_extractor` output (or derive it on the fly if not cached).
-5. Assign stable `id` slugs: lowercase, hyphenated, unique. E.g., `buildkite-basic-correctness`, `benchmark-throughput`, `attention-benchmark-mla-decode`.
-6. Assemble and return `TestHarnessMap(target_version=target_version, entries=[...])`.
-
-**Concurrency:** The LLM batch calls in Step 4 are parallelized with `asyncio.gather`. The function is `async` to allow this; the state boundary blocking happens in `prepare()`.
-
----
-
-## 5. Workload Discovery
-
-**File:** `src/spotlights_engine/validation/discovery/workload_discovery.py`
-
-```python
-async def seed_workload_matrix(source_tree: Path, target_version: str) -> ValidationWorkloadMatrix:
-```
-
-**Algorithm:**
-
-1. Run workload config scanner from Step 2d.
-2. For candidates with `inferred_class = None`, run a lightweight LLM classification call (single batch): "Given these benchmark files and their parameters, classify each into one of: agentic, batch-inference, long-context, mixed, stress."
-3. Map `components_exercised` using heuristics first:
-   - attention backend configs → `["attention_backend"]`
-   - throughput scripts → `["scheduler", "engine"]`
-   - long-context scripts → `["kv_cache", "chunked_prefill"]`
-   - Use `map_components()` for any that aren't obvious from name.
-4. Add curated entries for workload classes that must exist but aren't discovered. For vLLM Stage 1: curated entries for `agentic` (multi-turn serving) and `batch-inference` (offline batch throughput) ensure the Stage 1 minimum of 2 distinct classes.
-5. Assemble and return `ValidationWorkloadMatrix(target_version=target_version, workloads=[...])`.
-
----
-
-## 6. Caching Layer
-
-**File:** `src/spotlights_engine/validation/discovery/_cache.py`
-
-Prevents re-running expensive discovery (especially LLM calls) when the target hasn't changed.
-
-```python
-def load_discovery_cache(
-    source_tree: Path,
+async def discover_from_github(
+    repo_url: str,
     target_version: str,
-    cache_dir: Path,
-) -> tuple[TestHarnessMap, ValidationWorkloadMatrix] | None:
-    # Returns None on cache miss
+    scope_keywords: list[str],
+    source_tree: Path | None = None,
+) -> GitHubDiscoveryResult:
+```
 
-def write_discovery_cache(
+### Algorithm
+
+1. **Search** — Query GitHub REST API (or `gh` CLI) for issues and PRs matching scope keywords. Multiple queries for coverage (e.g., component names, feature names, known failure modes).
+2. **Filter** — Apply trustworthiness heuristics:
+   - Skip issues with no maintainer engagement.
+   - Skip authors with no track record of accepted issues.
+   - Prefer merged PRs over open issues.
+3. **Extract** — For each qualifying issue/PR, extract:
+   - Test cases: reproduction scripts, pytest invocations, test file paths.
+   - Workloads: model names, request patterns, concurrency levels, sequence lengths.
+   - Benchmarks: script invocations, reported metric values, measurement conditions.
+   - Regression signals: metric worsening → becomes `halt_on_failure: true` candidate.
+   - Environment constraints: hardware requirements, flags.
+4. **Version gate** — Verify that referenced paths exist at `target_version` using `git ls-tree`. Entries referencing code that doesn't exist at the target version are omitted.
+5. **Deduplicate** — Entries already present in base artifacts get `source_refs` annotation rather than a new entry.
+
+---
+
+## 3. Discovery Orchestrator
+
+**File:** `src/spotlights_validation/discovery/orchestrator.py`
+
+Coordinates the full discovery flow: source tree analysis, GitHub search, LLM-based artifact generation, and verification.
+
+### Interface
+
+```python
+async def run_discovery(
+    target_repo_url: str,
+    target_version: str,
+    source_tree: Path,
+    output_path: Path,
+    candidate: Candidate,
+    change_context: dict | None = None,
+    existing_artifacts_path: Path | None = None,
+) -> DiscoveryOutput:
+```
+
+```python
+@dataclass
+class DiscoveryOutput:
+    harness_map: TestHarnessMap
+    workload_matrix: ValidationWorkloadMatrix
+    discovery_summary: dict             # queries run, entries found, sources
+    verification_report: VerificationReport
+```
+
+### Algorithm
+
+1. **Build source tree summary** — List CI config files, test directories, benchmark scripts, workload configs, `__main__` executables. Language-agnostic: look for any recognizable test/CI patterns.
+2. **Load component vocabulary** — From `ProjectTree` if available, otherwise derive from directory structure.
+3. **Extract candidate context** — From the `Candidate` object, extract the target component (`file`, `symbol`, `kind`), `anomaly_refs`, and `evolve_rationale`. This focuses GitHub search keywords and informs plan prioritization.
+4. **Run GitHub discovery** (Step 2) — Produce `GitHubDiscoveryResult`. Scope keywords include the candidate's file path, symbol name, and component.
+5. **Assemble prompt context** — Fill the template (Step 1) with all gathered context including `{candidate_context}`.
+6. **Call LLM** — Send the assembled prompt. Parse structured JSON response into `TestHarnessMap` and `ValidationWorkloadMatrix`.
+7. **Verify artifacts** (Step 4) — Run the verification pass on produced entries.
+8. **Write outputs** — Save artifacts to `output_path`.
+
+### Concurrency
+
+GitHub search and source tree scanning run in parallel (`asyncio.gather`). The LLM call happens after both complete since it needs their outputs as context.
+
+---
+
+## 4. Artifact Verification
+
+**File:** `src/spotlights_validation/discovery/verification.py`
+
+After artifacts are generated (whether by LLM or manually), verify they are sound before use. This implements the approval process described in the design.
+
+### Checks
+
+```python
+@dataclass
+class VerificationReport:
+    entries_verified: int
+    entries_failed: int
+    issues: list[VerificationIssue]
+
+@dataclass
+class VerificationIssue:
+    entry_id: str
+    issue_type: Literal["path_missing", "not_runnable", "duplicate", "version_mismatch"]
+    detail: str
+
+async def verify_artifacts(
     harness_map: TestHarnessMap,
     workload_matrix: ValidationWorkloadMatrix,
+    source_tree: Path,
     target_version: str,
-    cache_dir: Path,
-) -> None:
+) -> VerificationReport:
 ```
 
-**Cache structure:** `{cache_dir}/{sha256(str(source_tree))}/{target_version}/harness_map.json` and `workload_matrix.json`. A different `target_version` = cache miss. Uses `TestHarnessMap.to_json()` / `from_json()`.
+### Verification rules
 
-**Default `cache_dir`:** `source_tree / ".spotlights_engine.validation_cache"` — lives inside the target repo, gitignored.
+1. **Path existence** — Every `TestHarnessEntry.path` must exist at `source_tree` at `target_version`. Use `git ls-tree` for version-gated verification, or filesystem check for local trees.
+2. **Runnability** — The `invoke` command references an executable that exists (test runner binary, script file, Makefile target). Does not execute the command, only verifies the entry point.
+3. **Duplicate detection** — No two entries run the same underlying check via different wrappers. Compare by normalized invoke command and path.
+4. **Version match** — `harness_map.target_version` and `workload_matrix.target_version` match the expected `target_version`.
+5. **Candidate relevance** — Each entry must be relevant to the `Candidate` (covers the candidate's component, file, or symbol). If a `Change` object is available, entries must also be relevant to the change's affected code paths. Entries with no demonstrable connection to the candidate (or change) are flagged as irrelevant.
+
+Entries that fail verification are flagged but not automatically removed — the caller decides whether to filter them out or surface them for manual review.
 
 ---
 
-## 7. Wiring into `prepare()`
+## 5. Validation Plan Creation
+
+**File:** `src/spotlights_validation/discovery/plan_builder.py`
+
+Takes verified discovery artifacts and produces a `ValidationPlan`. This step bridges discovery and execution.
+
+### Interface
+
+```python
+async def build_validation_plan(
+    harness_map: TestHarnessMap,
+    workload_matrix: ValidationWorkloadMatrix,
+    archive_context: list[str] | None = None,
+    change: Change | None = None,
+) -> ValidationPlan:
+```
+
+### Strategy
+
+The plan is always prioritized based on the candidate's component (from `Candidate.file` and `Candidate.symbol`):
+- Entries covering the candidate's component get higher priority.
+- Entries derived from regression reports on that component get `halt_on_failure: true`.
+- Workloads exercising the candidate's component are paired with relevant harness entries.
+
+When `change` is additionally provided (Change Validation Discovery phase), the plan is further refined based on the specific code paths affected by the change — which may be narrower than the candidate's component scope.
+
+When neither candidate component matching nor change context applies to an entry, it receives default priority ordering by kind: correctness > unit > integration > benchmark > stress.
+
+---
+
+## 6. Caching Layer (via Bundle B Archive)
+
+**File:** `src/spotlights_validation/discovery/cache.py`
+
+Prevents re-running expensive discovery (especially LLM calls and GitHub API queries) when valid artifacts already exist for the same candidate at the same target version. The cache is designed against Bundle B's planned archive query interface, with a filesystem fallback until Bundle B is implemented.
+
+### Interface
+
+```python
+class DiscoveryArchive(Protocol):
+    """Bundle B archive interface for discovery artifact retrieval."""
+
+    async def query_discovery_artifacts(
+        self,
+        repo_url: str,
+        candidate: Candidate,
+        target_version: str,
+    ) -> DiscoveryOutput | None:
+        """Retrieve cached discovery artifacts for a candidate at a version."""
+        ...
+
+    async def store_discovery_artifacts(
+        self,
+        repo_url: str,
+        candidate: Candidate,
+        target_version: str,
+        output: DiscoveryOutput,
+    ) -> None:
+        """Persist discovery artifacts keyed by repo + candidate + version."""
+        ...
+
+
+class FilesystemDiscoveryArchive:
+    """Filesystem fallback implementing DiscoveryArchive until Bundle B lands."""
+
+    def __init__(self, cache_dir: Path):
+        self.cache_dir = cache_dir
+
+    async def query_discovery_artifacts(
+        self,
+        repo_url: str,
+        candidate: Candidate,
+        target_version: str,
+    ) -> DiscoveryOutput | None: ...
+
+    async def store_discovery_artifacts(
+        self,
+        repo_url: str,
+        candidate: Candidate,
+        target_version: str,
+        output: DiscoveryOutput,
+    ) -> None: ...
+```
+
+### Cache key (mirrors Bundle B archive key structure)
+
+The real Bundle B archive keys records on `(repo, Candidate.file, Candidate.symbol, Candidate.kind, target_version)` as the primary lookup, with `anomaly_refs` used as a signal-driven filter to narrow results. The filesystem fallback mirrors this structure:
+
+```
+{cache_dir}/{repo_name}/{target_version}/{file_path_normalized}/{symbol}/{kind}/
+```
+
+Where `repo_name` is derived from the target repository URL (e.g., `vllm-project/vllm` from `https://github.com/vllm-project/vllm`).
+
+Within a keyed directory, multiple discovery outputs may exist if different `anomaly_refs` or `evolve_rationale` produced them. On query:
+
+1. **Primary lookup** — Match on `(file, symbol, kind, target_version)`. This mirrors Bundle B's `query(query, mode="signal_driven")` semantics.
+2. **Signal-driven filter** — Among matching entries, select the one whose `anomaly_refs` overlap with the query candidate's `anomaly_refs`. If no overlap exists, treat as cache miss.
+3. **Rationale check** — If `evolve_rationale` differs from the cached entry, treat as cache miss (different rationale may produce different search keywords and prioritization).
+
+This means the filesystem fallback stores metadata alongside artifacts:
+
+```
+{cache_dir}/{target_version}/{file_path_normalized}/{symbol}/{kind}/
+  metadata.json       # { anomaly_refs, evolve_rationale, stored_at }
+  harness_map.json
+  workload_matrix.json
+  discovery_summary.json
+  verification_report.json
+```
+
+When Bundle B is implemented, it replaces the filesystem walk with its native index — the query semantics (primary key + signal filter + rationale match) remain identical.
+
+### Validity check on cache hit
+
+When artifacts are found in the archive:
+1. **Structural** — Files deserialize into `TestHarnessMap` / `ValidationWorkloadMatrix` via `from_json()`.
+2. **Semantic** — Run `verify_artifacts()` on loaded artifacts to check path existence, version match, and candidate relevance.
+
+Structural failure → cache miss (fall through to live discovery). Verification failure → return artifacts with attached `VerificationReport` (caller decides).
+
+**Default `cache_dir`:** `source_tree / ".spotlights_validation_cache"`.
+
+---
+
+## 7. CLI Integration
+
+**File:** `src/spotlights_validation/cli.py` (extend existing)
+
+### Generic API
+
+```bash
+# Discovery command
+python -m spotlights_validation.cli discover \
+    --source-tree <PATH_TO_TARGET_REPO> \
+    --target-version <COMMIT_SHA_OR_TAG> \
+    --repo-url <GITHUB_REPO_URL> \
+    --candidate <PATH_TO_CANDIDATE_JSON> \
+    --out-dir <OUTPUT_DIRECTORY> \
+    [--include-github] \
+    [--scope-keywords <COMMA_SEPARATED_KEYWORDS>]
+
+# Plan creation command
+python -m spotlights_validation.cli plan \
+    --harness-map <PATH_TO_HARNESS_MAP_JSON> \
+    --workload-matrix <PATH_TO_WORKLOAD_MATRIX_JSON> \
+    --candidate <PATH_TO_CANDIDATE_JSON> \
+    [--change-repo <PATH_TO_CHANGE_REPO>] \
+    --out <PATH_TO_OUTPUT_PLAN_JSON>
+```
+
+### Example usage
+
+```bash
+# Full automated discovery
+python -m spotlights_validation.cli discover \
+    --source-tree /path/to/target \
+    --target-version v0.18.0 \
+    --repo-url https://github.com/vllm-project/vllm \
+    --candidate artifacts/candidate.json \  # Candidate from Bundle C
+    --out-dir artifacts/ \
+    --include-github               # opt-in to GitHub issue/PR discovery
+    --scope-keywords "kv offload,cpu offload,swap"  # narrows GitHub search
+
+# Plan creation from existing artifacts
+python -m spotlights_validation.cli plan \
+    --harness-map artifacts/harness_map.json \
+    --workload-matrix artifacts/workload_matrix.json \
+    --candidate artifacts/candidate.json \
+    --change-repo /path/to/change \
+    --out artifacts/validation_plan.json
+```
+
+---
+
+## 8. Wiring into `prepare()`
 
 **File:** `src/spotlights_engine/validation/__init__.py`
 
 ```python
-async def prepare(source_tree: Path) -> PreparationRun:
+async def prepare(
+    source_tree: Path,
+    candidate: Candidate,
+    archive: DiscoveryArchive | None = None,
+) -> PreparationRun:
 ```
 
-1. Generate `prep_id = uuid4().hex`.
-2. Determine `target_version` by running `git -C source_tree rev-parse HEAD` via `asyncio.create_subprocess_exec`.
-3. Launch a background `asyncio.Task` that:
-   - a. Checks the cache (Step 6). If hit, skip to (d).
-   - b. Calls `discover_test_harness()` and `seed_workload_matrix()` concurrently via `asyncio.gather`.
-   - c. Writes to cache.
-   - d. Queries Bundle B for archive context (stub for Stage 1: returns empty list).
-   - e. Calls `build_validation_plan()` (planning step, out of scope for this document).
-   - f. Stores `ValidationPreparation` inside the `PreparationRun` object.
-4. Return `PreparationRun(prep_id=prep_id)` immediately.
-5. `PreparationRun.result()` awaits the background task and returns `ValidationPreparation`.
+1. **Query Bundle B archive** — Call `archive.query_discovery_artifacts(candidate, target_version)`. Uses the full Candidate identity (file, symbol, kind, anomaly_refs, evolve_rationale) as the cache key. If no `archive` is provided, instantiate `FilesystemDiscoveryArchive` with the default cache dir.
+2. **Validate cached artifacts** — If the archive returns artifacts:
+   - Structural check: deserialize into `TestHarnessMap` / `ValidationWorkloadMatrix`.
+   - Semantic check: run `verify_artifacts()` against the current source tree.
+   - Structural failure → treat as cache miss; semantic failure → use artifacts with `VerificationReport` attached.
+3. **On cache miss** — Run `run_discovery()` with the `candidate` to produce artifacts live. Store results back via `archive.store_discovery_artifacts()`.
+4. **Build plan** — Run `build_validation_plan()` to produce the base plan, prioritized toward the candidate's component.
+5. **Persist state** — Store `ValidationPreparation` (including the `candidate`) with all outputs.
+6. Return `PreparationRun` immediately; background task handles the work.
 
-**Phase transitions:** The background task updates a `ValidationStatus` object stored in an in-process dict keyed by `prep_id`. Phase advances `discovery → planning` after both `discover_test_harness` and `seed_workload_matrix` complete.
+Phase transitions: `discovery → planning` after both harness map and workload matrix are produced and verified.
 
 ---
 
-## 8. Tests
+## 9. Tests
 
-### Unit tests (no real vLLM repo, no real LLM)
+### Unit tests (no real target repo, no real LLM, no network)
 
 | File | What it tests |
 |---|---|
-| `tests/unit/test_scanner.py` | Static scanner against `tests/fixtures/fake_vllm/` fixture tree. Assert correct candidate count, invoke strings, inferred kinds. |
-| `tests/unit/test_component_mapper.py` | `map_components()` with a mocked Anthropic client and a minimal fixture `ProjectTree`. Assert correct batching, handling of parse errors. |
-| `tests/unit/test_cache.py` | Cache write → read round-trip. Assert cache miss on different `target_version`. |
+| `tests/unit/test_prompt_template.py` | Template rendering with various placeholder combinations. Output prompt contains all expected sections. |
+| `tests/unit/test_verification.py` | Verification logic against fixture artifacts with known issues (missing paths, duplicates). |
+| `tests/unit/test_plan_builder.py` | Plan prioritization logic: with/without Change, halt_on_failure assignment, component matching. |
+| `tests/unit/test_cache.py` | Cache write → read round-trip. Cache miss on different `target_version`. |
 | `tests/unit/test_schemas.py` | `TestHarnessMap.for_components()`, `of_kind()`, `to_json()`/`from_json()` round-trip. |
 
-### Integration tests (real vLLM repo, mocked LLM)
+### Integration tests (real target repo, mocked LLM)
 
 | File | What it tests |
 |---|---|
-| `tests/integration/test_harness_discovery.py` | `discover_test_harness(vllm_path, "HEAD")` produces a `TestHarnessMap` with ≥3 entries covering distinct kinds (unit, integration, benchmark). Verifies Stage 1 success criterion. |
-| `tests/integration/test_workload_discovery.py` | `seed_workload_matrix(vllm_path, "HEAD")` produces ≥2 distinct workload classes. |
-| `tests/integration/test_caching.py` | Second call with same `target_version` returns cached result without LLM calls (verify by asserting the mock LLM was called 0 times on second run). |
+| `tests/integration/test_discovery_orchestrator.py` | `run_discovery()` against a real source tree produces valid `TestHarnessMap` with ≥3 entries covering distinct kinds. |
+| `tests/integration/test_github_discovery.py` | `discover_from_github()` returns structured candidates. Uses recorded API responses (VCR/cassettes) to avoid live API calls in CI. |
+| `tests/integration/test_verification.py` | Verification against real source tree catches intentionally invalid paths. |
+| `tests/integration/test_caching.py` | Second call with same `target_version` returns cached result without LLM calls. |
 
-Integration tests read `vllm_path` from a `VLLM_REPO_PATH` env var and skip if not set.
+Integration tests read `target_repo_path` from a `TARGET_REPO_PATH` env var and skip if not set.
 
 ---
 
-## 9. Open Question Resolutions for Discovery
+## 10. Design Decisions
 
 | Question | Decision |
 |---|---|
-| Static analysis vs. LLM for component mapping | Hybrid: static scanner always runs first (no LLM cost), LLM fills `components` field only. Makes the scanner testable without any LLM dependency. |
-| Component vocabulary source | Use `ProjectTree` from `modules_extractor` output. If it hasn't run for the target version, run it as part of `prepare()` before the LLM pass. |
-| Harness discovery refresh frequency | Invalidate on `target_version` change (commit SHA). The cache check in Step 6 handles this automatically. |
-| vLLM-specific workload abstraction | Keep `workload_class` as a `Literal` enum in `WorkloadEntry` for v1. The `curated` source value is the escape hatch for classes not discoverable from repo structure. |
-| Custom output format parsing | Out of scope for discovery — `output_format` in `TestHarnessEntry` declares intent; the runner implements parsers. Discovery only needs to correctly classify which format applies. |
+| Hardcoded scanners vs. LLM-driven discovery | LLM-driven via template prompt. Generalizes across target systems and languages; not limited to Python/pytest or vLLM-specific CI (BuildKite). |
+| GitHub issues/PRs as discovery source | First-class source with trustworthiness filtering and version gating. Extends base discovery with regression signals and reproduction scripts from community reports. |
+| Discovery scope (Python/pytest only?) | No. The template prompt and verification are language-agnostic. Support any executable: shell scripts, Makefile targets, `__main__` scripts, language-specific test runners. |
+| `__main__` scripts as test harness entries | Yes, included as a valid invocation pattern. The `invoke` field can be `python path/to/script.py` or any other command. |
+| Artifact verification | Automated check after generation; issues reported but not auto-removed. Human-in-the-loop review possible via CLI output. |
+| Component vocabulary source | `ProjectTree` from `modules_extractor` when available; falls back to directory-structure inference. |
+| Cache invalidation | On `target_version` change (commit SHA). Same version = cache hit. |
 
 ---
 
@@ -291,10 +428,11 @@ Integration tests read `vllm_path` from a `VLLM_REPO_PATH` env var and skip if n
 
 Steps are sequentially dependent but each is independently deliverable:
 
-1. **Schema layer** (Step 1) — unblocks everything else; no dependencies.
-2. **Static scanner** (Step 2) — unblocks harness + workload discovery; fully testable with fixtures.
-3. **Component mapper** (Step 3) — unblocks component assignment; testable with mock LLM.
-4. **Harness discovery** (Step 4) + **Workload discovery** (Step 5) in parallel — both depend on 2 and 3.
-5. **Caching** (Step 6) — wraps 4 and 5.
-6. **`prepare()` wiring** (Step 7) — thin orchestration layer on top of 4–6.
-7. **Tests** — written alongside each step, not after.
+1. **Prompt template** (Step 1) — Defines the discovery contract; no dependencies.
+2. **Verification** (Step 4) — Testable with fixture artifacts; no LLM or network needed.
+3. **GitHub discovery** (Step 2) — Independent module; testable with recorded responses.
+4. **Plan builder** (Step 5) — Depends only on schemas; testable with fixture data.
+5. **Orchestrator** (Step 3) — Assembles 1–4 into the full flow.
+6. **Caching** (Step 6) — Wraps the orchestrator.
+7. **CLI integration** (Step 7) — Thin layer on top of orchestrator.
+8. **`prepare()` wiring** (Step 8) — Connects discovery to the public API.
