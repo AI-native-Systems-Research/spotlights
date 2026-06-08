@@ -1,0 +1,245 @@
+{
+  "target_version": "40651c020772b80f9ca80272aebe749fe01cd38a",
+  "entries": [
+    {
+      "id": "unit-kv-offload-tiering",
+      "name": "unit tests — KV offload tiering",
+      "kind": "unit",
+      "path": "tests/v1/kv_offload",
+      "invoke": "pytest -v tests/v1/kv_offload/",
+      "components": ["kv_offload"],
+      "output_format": "pytest-json",
+      "estimated_duration": 600
+    },
+    {
+      "id": "unit-simple-kv-offload",
+      "name": "unit tests — simple KV offload",
+      "kind": "unit",
+      "path": "tests/v1/simple_kv_offload",
+      "invoke": "pytest -v tests/v1/simple_kv_offload/",
+      "components": ["kv_offload"],
+      "output_format": "pytest-json",
+      "estimated_duration": 300
+    },
+    {
+      "id": "unit-kv-connector-offloading",
+      "name": "unit tests — KV connector offloading",
+      "kind": "unit",
+      "path": "tests/v1/kv_connector/unit/test_offloading_connector.py",
+      "invoke": "pytest -v tests/v1/kv_connector/unit/test_offloading_connector.py",
+      "components": ["kv_offload", "distributed.kv_transfer"],
+      "output_format": "pytest-json",
+      "estimated_duration": 300
+    },
+    {
+      "id": "unit-kv-connector-lifecycle",
+      "name": "unit tests — KV connector lifecycle",
+      "kind": "unit",
+      "path": "tests/v1/kv_connector/unit/test_kv_connector_lifecycle.py",
+      "invoke": "pytest -v tests/v1/kv_connector/unit/test_kv_connector_lifecycle.py",
+      "components": ["kv_offload", "distributed.kv_transfer"],
+      "output_format": "pytest-json",
+      "estimated_duration": 180
+    },
+    {
+      "id": "unit-kv-cache-layout",
+      "name": "unit tests — KV cache layout",
+      "kind": "unit",
+      "path": "tests/v1/kv_connector/unit/test_kv_cache_layout.py",
+      "invoke": "pytest -v tests/v1/kv_connector/unit/test_kv_cache_layout.py",
+      "components": ["kv_offload", "kv_cache"],
+      "output_format": "pytest-json",
+      "estimated_duration": 180
+    },
+    {
+      "id": "unit-kv-load-failure-recovery",
+      "name": "unit tests — KV load failure recovery",
+      "kind": "unit",
+      "path": "tests/v1/kv_connector/unit/test_kv_load_failure_recovery.py",
+      "invoke": "pytest -v tests/v1/kv_connector/unit/test_kv_load_failure_recovery.py",
+      "components": ["kv_offload"],
+      "output_format": "pytest-json",
+      "estimated_duration": 180
+    },
+    {
+      "id": "unit-kv-cache-manager",
+      "name": "unit tests — KV cache manager",
+      "kind": "unit",
+      "path": "tests/v1/core/test_kv_cache_manager.py",
+      "invoke": "pytest -v tests/v1/core/test_kv_cache_manager.py",
+      "components": ["kv_cache"],
+      "output_format": "pytest-json",
+      "estimated_duration": 300
+    },
+    {
+      "id": "unit-single-type-kv-cache-manager",
+      "name": "unit tests — single-type KV cache manager",
+      "kind": "unit",
+      "path": "tests/v1/core/test_single_type_kv_cache_manager.py",
+      "invoke": "pytest -v tests/v1/core/test_single_type_kv_cache_manager.py",
+      "components": ["kv_cache"],
+      "output_format": "pytest-json",
+      "estimated_duration": 300
+    },
+    {
+      "id": "unit-block-pool",
+      "name": "unit tests — block pool",
+      "kind": "unit",
+      "path": "tests/v1/core/test_block_pool.py",
+      "invoke": "pytest -v tests/v1/core/test_block_pool.py",
+      "components": ["kv_cache"],
+      "output_format": "pytest-json",
+      "estimated_duration": 180
+    },
+    {
+      "id": "unit-kv-cache-utils",
+      "name": "unit tests — KV cache utilities",
+      "kind": "unit",
+      "path": "tests/v1/core/test_kv_cache_utils.py",
+      "invoke": "pytest -v tests/v1/core/test_kv_cache_utils.py",
+      "components": ["kv_cache"],
+      "output_format": "pytest-json",
+      "estimated_duration": 300
+    },
+    {
+      "id": "unit-kv-cache-coordinator",
+      "name": "unit tests — KV cache coordinator",
+      "kind": "unit",
+      "path": "tests/v1/core/test_kv_cache_coordinator.py",
+      "invoke": "pytest -v tests/v1/core/test_kv_cache_coordinator.py",
+      "components": ["kv_cache"],
+      "output_format": "pytest-json",
+      "estimated_duration": 300
+    },
+    {
+      "id": "unit-cache-kernels",
+      "name": "unit tests — cache kernels",
+      "kind": "unit",
+      "path": "tests/kernels/test_cache_kernels.py",
+      "invoke": "pytest -v tests/kernels/test_cache_kernels.py",
+      "components": ["kv_cache", "kernels"],
+      "output_format": "pytest-json",
+      "estimated_duration": 900
+    },
+    {
+      "id": "unit-scheduler",
+      "name": "unit tests — scheduler",
+      "kind": "unit",
+      "path": "tests/v1/core/test_scheduler.py",
+      "invoke": "pytest -v tests/v1/core/test_scheduler.py",
+      "components": ["scheduler"],
+      "output_format": "pytest-json",
+      "estimated_duration": 600
+    },
+    {
+      "id": "unit-async-scheduler",
+      "name": "unit tests — async scheduler",
+      "kind": "unit",
+      "path": "tests/v1/core/test_async_scheduler.py",
+      "invoke": "pytest -v tests/v1/core/test_async_scheduler.py",
+      "components": ["scheduler"],
+      "output_format": "pytest-json",
+      "estimated_duration": 300
+    },
+    {
+      "id": "unit-worker",
+      "name": "unit tests — worker",
+      "kind": "unit",
+      "path": "tests/v1/worker",
+      "invoke": "pytest -v tests/v1/worker/",
+      "components": ["worker"],
+      "output_format": "pytest-json",
+      "estimated_duration": 600
+    },
+    {
+      "id": "integration-scheduler-e2e",
+      "name": "integration tests — scheduler end-to-end",
+      "kind": "integration",
+      "path": "tests/v1/core/test_scheduler_e2e.py",
+      "invoke": "pytest -v tests/v1/core/test_scheduler_e2e.py",
+      "components": ["scheduler", "kv_cache"],
+      "output_format": "pytest-json",
+      "estimated_duration": 900
+    },
+    {
+      "id": "integration-kv-connector-nixl",
+      "name": "integration tests — KV connector NixL accuracy",
+      "kind": "integration",
+      "path": "tests/v1/kv_connector/nixl_integration",
+      "invoke": "bash tests/v1/kv_connector/nixl_integration/run_accuracy_test.sh",
+      "components": ["kv_offload", "distributed.kv_transfer"],
+      "output_format": "custom",
+      "estimated_duration": 1800
+    },
+    {
+      "id": "integration-engine",
+      "name": "integration tests — v1 engine",
+      "kind": "integration",
+      "path": "tests/v1/engine",
+      "invoke": "pytest -v tests/v1/engine/",
+      "components": ["engine", "scheduler"],
+      "output_format": "pytest-json",
+      "estimated_duration": 1800
+    },
+    {
+      "id": "correctness-basic",
+      "name": "correctness tests — basic model output",
+      "kind": "correctness",
+      "path": "tests/basic_correctness",
+      "invoke": "pytest -v tests/basic_correctness/",
+      "components": ["model_executor", "kv_cache"],
+      "output_format": "pytest-json",
+      "estimated_duration": 1200
+    },
+    {
+      "id": "stress-kv-offload-memory-pressure",
+      "name": "stress tests — KV offload under memory pressure",
+      "kind": "stress",
+      "path": "tests/v1/kv_connector/nixl_integration",
+      "invoke": "bash -lc 'bash \"$ROOT_DIR/spotlights/src/spotlights_validation/examples/kvoffload/scripts/run_nixl_stress.sh\"'",
+      "components": ["kv_offload", "kv_cache", "scheduler"],
+      "output_format": "custom",
+      "estimated_duration": 1800
+    },
+    {
+      "id": "benchmark-attention",
+      "name": "benchmark — attention backends",
+      "kind": "benchmark",
+      "path": "benchmarks/attention_benchmarks",
+      "invoke": "python benchmarks/attention_benchmarks/benchmark.py --config benchmarks/attention_benchmarks/configs/standard_attention.yaml",
+      "components": ["attention", "kv_cache"],
+      "output_format": "custom",
+      "estimated_duration": 1800
+    },
+    {
+      "id": "benchmark-prefix-caching",
+      "name": "benchmark — prefix caching throughput",
+      "kind": "benchmark",
+      "path": "benchmarks/benchmark_prefix_caching.py",
+      "invoke": "python benchmarks/benchmark_prefix_caching.py --model meta-llama/Llama-3.1-8B-Instruct",
+      "components": ["kv_cache", "scheduler"],
+      "output_format": "custom",
+      "estimated_duration": 1800
+    },
+    {
+      "id": "benchmark-serving-throughput",
+      "name": "benchmark — serving throughput",
+      "kind": "benchmark",
+      "path": "benchmarks/benchmark_serving.py",
+      "invoke": "vllm bench serve --model meta-llama/Llama-3.1-8B-Instruct --request-rate 10 --num-prompts 100",
+      "components": ["scheduler", "kv_cache", "worker"],
+      "output_format": "custom",
+      "estimated_duration": 3600
+    },
+    {
+      "id": "benchmark-long-document-qa",
+      "name": "benchmark — long document Q&A throughput",
+      "kind": "benchmark",
+      "path": "benchmarks/benchmark_long_document_qa_throughput.py",
+      "invoke": "python benchmarks/benchmark_long_document_qa_throughput.py --model meta-llama/Llama-3.1-8B-Instruct",
+      "components": ["kv_cache", "scheduler"],
+      "output_format": "custom",
+      "estimated_duration": 3600
+    }
+  ]
+}

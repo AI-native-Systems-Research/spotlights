@@ -1,0 +1,53 @@
+{
+  "target_version": "40651c020772b80f9ca80272aebe749fe01cd38a",
+  "workloads": [
+    {
+      "workload_id": "wl-standard-decode",
+      "workload_class": "batch-inference",
+      "source": "discovered",
+      "config_path": "benchmarks/attention_benchmarks/configs/standard_attention.yaml",
+      "components_exercised": ["attention", "kv_cache", "scheduler"],
+      "description": "Standard decode workload: 64 concurrent requests, 1K KV cache per request. Represents the typical online serving baseline with no memory pressure. Used as the reference point for throughput and latency regression checks."
+    },
+    {
+      "workload_id": "wl-large-kv-decode",
+      "workload_class": "batch-inference",
+      "source": "curated",
+      "config_path": null,
+      "components_exercised": ["kv_offload", "kv_cache", "scheduler", "worker"],
+      "description": "Decode under memory pressure: 128 concurrent requests with 16K KV cache per request, intentionally exceeding GPU VRAM to trigger KV offload eviction and reload. Core scenario for validating kv-offload correctness and measuring throughput cost of offloading. Derived from the mla_decode.yaml batch spec pattern (128q1s16k) scaled to a standard attention model."
+    },
+    {
+      "workload_id": "wl-long-context",
+      "workload_class": "long-context",
+      "source": "discovered",
+      "config_path": "benchmarks/benchmark_long_document_qa_throughput.py",
+      "components_exercised": ["kv_cache", "scheduler", "kv_offload"],
+      "description": "Long document Q&A: single requests with 32K–128K input tokens. Tests that KV blocks for very long sequences are correctly managed (allocated, potentially offloaded and reloaded) without corruption or silent truncation. Catches regressions in large-KV-block handling specific to the offloading path."
+    },
+    {
+      "workload_id": "wl-prefix-heavy",
+      "workload_class": "batch-inference",
+      "source": "discovered",
+      "config_path": "benchmarks/benchmark_prefix_caching.py",
+      "components_exercised": ["kv_cache", "scheduler"],
+      "description": "High prefix cache reuse: requests sharing a long common prefix (e.g., system prompt + document context). Validates that prefix blocks evicted to NVMe/CPU are correctly reloaded and hash-verified on reuse. Throughput here is sensitive to eviction policy and reload latency."
+    },
+    {
+      "workload_id": "wl-mixed-prefill-decode",
+      "workload_class": "mixed",
+      "source": "discovered",
+      "config_path": "benchmarks/attention_benchmarks/configs/standard_attention.yaml",
+      "components_exercised": ["attention", "kv_cache", "scheduler", "worker"],
+      "description": "Concurrent prefill and decode: mixed batch with new requests being prefilled while existing ones are mid-decode. Exercises the scheduler's block allocation and the attention backend simultaneously. Used to detect regressions where KV offload interferes with prefill block allocation."
+    },
+    {
+      "workload_id": "wl-agentic",
+      "workload_class": "agentic",
+      "source": "curated",
+      "config_path": null,
+      "components_exercised": ["scheduler", "kv_cache", "kv_offload"],
+      "description": "Agentic multi-turn workload: sequences of short decode steps interleaved with tool calls, modelling ReAct or function-calling patterns. KV blocks from earlier turns must be retained across multiple short generations. Validates that the LRU/ARC eviction policy does not prematurely evict blocks needed for active multi-turn sessions under concurrent load."
+    }
+  ]
+}

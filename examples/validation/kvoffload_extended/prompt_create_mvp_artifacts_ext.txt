@@ -1,0 +1,125 @@
+Artifacts folder: src/spotlights_engine/validation/examples/kvoffload
+Validation artifacts:
+- harness_map.json
+- workload_matrix.json
+- validation_plan.json
+
+Extend the existing validation artifacts by discovering additional resources in vLLM issues and PRs.
+Perform a discovery pass against the vllm GitHub repository to find test cases, workloads, and benchmarks that are not present in the existing artifacts but are relevant to KV-cache offloading.
+
+### Step 1 — Search GitHub for relevant issues and PRs
+
+Query https://github.com/vllm-project/vllm using the **GitHub REST API** (via `curl`). The `gh` CLI may not be available in all environments; the REST API is the reliable fallback. Search for issues and pull requests that are related to KV-cache offloading, CPU offload, disk offload, swap, paged attention, or prefix caching. Suggested queries:
+
+```bash
+# GitHub Search API — issues and PRs are both returned via the issues endpoint
+curl -s -H "Accept: application/vnd.github+json" \
+  "https://api.github.com/search/issues?q=repo:vllm-project/vllm+kv+cache+offload+in:title,body&per_page=30&sort=updated&order=desc"
+
+curl -s -H "Accept: application/vnd.github+json" \
+  "https://api.github.com/search/issues?q=repo:vllm-project/vllm+cpu+offload+swap+in:title,body&per_page=30&sort=updated&order=desc"
+
+curl -s -H "Accept: application/vnd.github+json" \
+  "https://api.github.com/search/issues?q=repo:vllm-project/vllm+prefix+cache+evict+in:title,body&per_page=30&sort=updated&order=desc"
+
+# Additional recommended search terms for broader coverage:
+#   "kv_connector offload", "SimpleCPUOffload", "OffloadingConnector",
+#   "swap_blocks kv", "cpu_kv_cache OR kv_cache_dtype offload"
+
+# Fetch individual issue/PR details:
+curl -s -H "Accept: application/vnd.github+json" \
+  "https://api.github.com/repos/vllm-project/vllm/issues/<NUMBER>"
+
+# Fetch comments (for trustworthiness verification):
+curl -s -H "Accept: application/vnd.github+json" \
+  "https://api.github.com/repos/vllm-project/vllm/issues/<NUMBER>/comments?per_page=10"
+```
+
+Run additional queries as needed to get broad coverage. If a `GITHUB_TOKEN` environment variable is available, include `-H "Authorization: Bearer $GITHUB_TOKEN"` to increase rate limits from 10 to 30 requests/minute.
+
+### Step 2 - Filter out non-trustable issues 
+Filtering Conditions:
+- No maintainer commented on the issue and approved this is a real problem
+- The issue author did not submit many issues, and his few issues were not processed and\or not approved by maintainers
+
+### Step 3 — Extract test cases, workloads, and benchmarks
+
+For each issue or PR found, extract the following if present:
+
+- **Test cases**: reproduction scripts, pytest invocations, test file paths referenced in the body or diff (e.g. `tests/kv_cache/`, `tests/distributed/`, inline code snippets that assert specific behavior).
+- **Workloads**: model names, dataset references, request patterns, concurrency levels, sequence lengths, or any other workload parameters mentioned (e.g. "128 concurrent requests, seq_len=4096, Llama-2-70B").
+- **Benchmarks**: benchmark script invocations (e.g. `benchmarks/benchmark_throughput.py`, `benchmarks/benchmark_latency.py`), reported metric values (throughput, latency, memory), and the conditions under which they were measured.
+- **Regression signals**: issues that describe a metric worsening after a change — these become regression checks in the validation plan.
+- **Environment constraints**: hardware requirements (GPU model, VRAM, number of GPUs), software versions, or flags that enable/disable the feature under test.
+
+Prefer concrete, runnable entries. Skip items that are purely conceptual or lack enough detail to construct a harness entry or workload config.
+
+### Step 4 — Merge into extended artifacts
+
+Produce three new artifact files under `src/spotlights_engine/validation/examples/kvoffload_extended/`:
+
+**harness_map.json** — start from the base `src/spotlights_engine/validation/examples/kvoffload/harness_map.json` and add new entries discovered from GitHub. Each new entry must follow the `TestHarnessMap` schema (see design.md). Set `source` to `"github_issue"` or `"github_pr"` and add a `source_ref` field with the URL of the issue or PR it was extracted from. Example entry shape:
+
+```json
+{
+  "id": "gh_issue_1234_repro",
+  "name": "repro — KV offload OOM on long prefix (issue #1234)",
+  "kind": "correctness",
+  "path": "tests/kv_cache/test_offload_oom.py",
+  "invoke": "pytest tests/kv_cache/test_offload_oom.py -v",
+  "components": ["kv_cache_manager", "cpu_offload"],
+  "output_format": "pytest-json",
+  "estimated_duration": 60,
+  "source": "github_issue",
+  "source_ref": "https://github.com/vllm-project/vllm/issues/1234"
+}
+```
+
+**workload_matrix.json** — start from the base `src/spotlights_engine/validation/examples/kvoffload/workload_matrix.json` and add new workload entries extracted from GitHub. Each entry follows the `ValidationWorkloadMatrix` schema. Add a `source_ref` field. Example:
+
+```json
+{
+  "workload_id": "gh_pr_5678_long_context_70b",
+  "workload_class": "long-context",
+  "source": "github_pr",
+  "source_ref": "https://github.com/vllm-project/vllm/pull/5678",
+  "config_path": null,
+  "components_exercised": ["kv_cache_manager", "block_manager"],
+  "description": "128 concurrent requests, seq_len=8192, Llama-2-70B, CPU offload enabled",
+  "parameters": {
+    "model": "meta-llama/Llama-2-70B-chat-hf",
+    "num_requests": 128,
+    "input_len": 512,
+    "output_len": 512,
+    "max_model_len": 8192,
+    "kv_transfer_config": {"kv_connector": "PyNcclConnector"}
+  }
+}
+```
+
+**validation_plan.json** — start from the base `src/spotlights_engine/validation/examples/kvoffload/validation_plan.json` and add plan entries for the newly discovered harness entries and workloads. Assign priorities using the same rules as design.md: entries that directly exercise the KV offload path get higher priority; entries derived from regression reports get `halt_on_failure: true` when the regression was severe (data loss, OOM crash, correctness failure).
+
+### Step 5 — Write a discovery summary
+
+Append a `_discovery_summary.json` file to `src/spotlights_engine/validation/examples/kvoffload_extended/` that records:
+
+```json
+{
+  "queries_run": ["<query string>", ...],
+  "issues_inspected": [{"number": 1234, "url": "...", "title": "..."}],
+  "prs_inspected":    [{"number": 5678, "url": "...", "title": "..."}],
+  "new_harness_entries":  <count>,
+  "new_workload_entries": <count>,
+  "new_plan_entries":     <count>,
+  "skipped": [{"ref": "...", "reason": "..."}]
+}
+```
+
+### Constraints
+
+- Do not modify the files under `src/spotlights_engine/validation/examples/kvoffload/` — only write to `src/spotlights_engine/validation/examples/kvoffload_extended/`.
+- All new artifact files must be valid JSON and conform to the schemas in design.md.
+- If a GitHub API rate limit is reached, pause and resume; do not discard partial results.
+- If a test path referenced in an issue does not exist in the local `vllm/` clone, still include the entry but set `"path_verified": false`.
+- Deduplicate: if an issue or PR references a test that is already in the base harness_map, do not add a duplicate entry — instead annotate the existing entry with the `source_ref`.
+- **Version gate (v0.18.0):** Only include entries whose test paths and source code actually exist in the vllm `v0.18.0` tag. Before adding any entry, verify the path with `git ls-tree -r --name-only v0.18.0 <path>` against the local `vllm/` clone. If the path does not exist in `v0.18.0` — even if it exists on `main` — omit the entry entirely. Do not set `path_verified: false` as a workaround for a version-gating failure; that flag is only for paths that are expected to exist but couldn't be confirmed due to network or access issues. Issues and PRs merged after the v0.18.0 release (tag date: check with `git log v0.18.0 -1 --format=%ci` in the vllm clone) are out of scope unless their test file was already present in `v0.18.0`.
