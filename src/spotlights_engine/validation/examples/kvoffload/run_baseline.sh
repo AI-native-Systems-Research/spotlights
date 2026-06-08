@@ -146,7 +146,7 @@ jq '(.entries[] | select(.harness_entry.id == "benchmark-multi-turn-kv-offload-l
 echo "Plan:           $PLAN_BASELINE (evolved entry skipped)"
 
 # --- run ---
-python -m spotlights_validation.cli run \
+python -m spotlights_engine.validation.cli run \
     --plan        "$PLAN_BASELINE" \
     --source-tree "$ROOT_DIR/vllm" \
     --change-ref  "kv-offload-lab@HEAD" \

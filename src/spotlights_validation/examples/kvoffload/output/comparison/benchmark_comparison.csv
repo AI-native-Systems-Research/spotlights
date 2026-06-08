@@ -1,4 +1,0 @@
-run,id,status,policy,ttft_ms_mean,tpot_ms_mean,cpu_hit_rate,evictions
-baseline-lru,benchmark-multi-turn-kv-offload-lab-lru,pass,lru,146.642,12.395,0.05017457689135302,354688.0
-baseline-arc,benchmark-multi-turn-kv-offload-lab-arc,pass,arc,142.829,12.362,0.13696339198976895,271294.0
-evolved,benchmark-multi-turn-kv-offload-lab,pass,evolved,129.996,12.269,0.3296662150198481,132417.0

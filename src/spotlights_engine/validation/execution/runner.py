@@ -14,7 +14,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from spotlights_validation.schemas import (
+from spotlights_engine.validation.schemas import (
     BenchmarkOutputTemplate,
     BenchmarkResult,
     MetricResult,

@@ -9,14 +9,14 @@ The discovery phase (the `discovery` state in `ValidationStatus.phase`) produces
 **Deliverable:** A working Python package that can be imported.
 
 - Create `pyproject.toml` following the same structure as `spotlights-engine`: `hatchling` builder, `src/` layout, `pydantic>=2` + `spotlights-engine` as runtime deps, `anthropic` for LLM calls, `pytest`/`ruff`/`mypy` as dev deps.
-- `src/spotlights_validation/__init__.py` — exports `prepare`, `start_validation`, `get_validation_status` as stubs (raise `NotImplementedError`) so the public contract exists before the internals are filled in.
-- `src/spotlights_validation/schemas.py` — all Pydantic models (see Step 1).
+- `src/spotlights_engine/validation/__init__.py` — exports `prepare`, `start_validation`, `get_validation_status` as stubs (raise `NotImplementedError`) so the public contract exists before the internals are filled in.
+- `src/spotlights_engine/validation/schemas.py` — all Pydantic models (see Step 1).
 
 ---
 
 ## 1. Schema Layer
 
-**File:** `src/spotlights_validation/schemas.py`
+**File:** `src/spotlights_engine/validation/schemas.py`
 
 Define all models needed by discovery. Follow the `ProjectTree` pattern from `spotlights_engine/schemas/modules.py` exactly — Pydantic `BaseModel`, `to_json(path)`, `from_json(path)`, and filter helpers.
 
@@ -64,7 +64,7 @@ class ValidationWorkloadMatrix(BaseModel):
 
 ## 2. Static Scanner
 
-**File:** `src/spotlights_validation/discovery/_scanner.py`
+**File:** `src/spotlights_engine/validation/discovery/_scanner.py`
 
 Pure filesystem scanning — no LLM, no I/O beyond reading files. Returns raw unclassified candidates; classification happens later. Each function is independently testable with synthetic fixture trees.
 
@@ -121,7 +121,7 @@ Four scanners:
 
 ## 3. Component Mapper (LLM pass)
 
-**File:** `src/spotlights_validation/discovery/_component_mapper.py`
+**File:** `src/spotlights_engine/validation/discovery/_component_mapper.py`
 
 Takes raw candidates + a `ProjectTree` (from `modules_extractor`) and assigns the `components` field to each entry. Pure path heuristics can't reliably map `tests/kernels/` to `["attention_backend", "scheduler"]` without understanding the code structure; the `ProjectTree` provides the component vocabulary and the LLM does the mapping.
 
@@ -154,7 +154,7 @@ def map_components(
 
 ## 4. Harness Discovery
 
-**File:** `src/spotlights_validation/discovery/harness_discovery.py`
+**File:** `src/spotlights_engine/validation/discovery/harness_discovery.py`
 
 Assembles Steps 2 and 3 into the public internal function.
 
@@ -180,7 +180,7 @@ async def discover_test_harness(source_tree: Path, target_version: str) -> TestH
 
 ## 5. Workload Discovery
 
-**File:** `src/spotlights_validation/discovery/workload_discovery.py`
+**File:** `src/spotlights_engine/validation/discovery/workload_discovery.py`
 
 ```python
 async def seed_workload_matrix(source_tree: Path, target_version: str) -> ValidationWorkloadMatrix:
@@ -202,7 +202,7 @@ async def seed_workload_matrix(source_tree: Path, target_version: str) -> Valida
 
 ## 6. Caching Layer
 
-**File:** `src/spotlights_validation/discovery/_cache.py`
+**File:** `src/spotlights_engine/validation/discovery/_cache.py`
 
 Prevents re-running expensive discovery (especially LLM calls) when the target hasn't changed.
 
@@ -224,13 +224,13 @@ def write_discovery_cache(
 
 **Cache structure:** `{cache_dir}/{sha256(str(source_tree))}/{target_version}/harness_map.json` and `workload_matrix.json`. A different `target_version` = cache miss. Uses `TestHarnessMap.to_json()` / `from_json()`.
 
-**Default `cache_dir`:** `source_tree / ".spotlights_validation_cache"` — lives inside the target repo, gitignored.
+**Default `cache_dir`:** `source_tree / ".spotlights_engine.validation_cache"` — lives inside the target repo, gitignored.
 
 ---
 
 ## 7. Wiring into `prepare()`
 
-**File:** `src/spotlights_validation/__init__.py`
+**File:** `src/spotlights_engine/validation/__init__.py`
 
 ```python
 async def prepare(source_tree: Path) -> PreparationRun:

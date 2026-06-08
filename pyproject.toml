@@ -29,6 +29,7 @@ Source        = "https://github.com/AI-native-Systems-Research/spotlights"
 spotlights-engine = "spotlights_engine.cli:main"
 spotlights-objectives = "spotlights_engine.objectives.cli:main"
 signal-pipeline = "spotlights_engine.signal_pipeline.cli:main"
+spotlights-validation = "spotlights_engine.validation.cli:cli"
 
 [project.optional-dependencies]
 validation = [

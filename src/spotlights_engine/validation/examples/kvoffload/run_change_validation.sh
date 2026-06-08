@@ -170,7 +170,7 @@ jq '(.entries[] | select(
 echo "Plan:           $PLAN_CHANGE (LRU + ARC entries skipped)"
 
 # --- run ---
-python -m spotlights_validation.cli run \
+python -m spotlights_engine.validation.cli run \
     --plan        "$PLAN_CHANGE" \
     --source-tree "$ROOT_DIR/vllm" \
     --change-ref  "kv-offload-lab@HEAD" \

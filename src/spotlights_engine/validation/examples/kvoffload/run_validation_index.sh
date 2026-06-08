@@ -111,7 +111,7 @@ echo "INDEXES:        $INDEXES"
 echo "GPU:            $(nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || echo 'n/a')"
 
 # --- run ---
-python -m spotlights_validation.cli run \
+python -m spotlights_engine.validation.cli run \
     --plan        "$ARTIFACTS_DIR/validation_plan.json" \
     --source-tree "$ROOT_DIR/vllm" \
     --change-ref  "kv-offload-lab@HEAD" \

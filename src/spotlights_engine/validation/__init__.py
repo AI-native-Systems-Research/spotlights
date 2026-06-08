@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from spotlights_validation.schemas import (
+from spotlights_engine.validation.schemas import (
     ExecutionResult,
     PreparationRun,
     ValidationPreparation,

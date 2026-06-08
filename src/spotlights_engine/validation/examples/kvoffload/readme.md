@@ -1,7 +1,7 @@
 # Running a `validation_plan.json`
 
 This guide explains how to execute a validation plan produced by the MVP
-planning step against a target source tree using the `spotlights_validation`
+planning step against a target source tree using the `spotlights_engine.validation`
 CLI (part of the `spotlights` repository).
 
 ## What is `validation_plan.json`?
@@ -13,7 +13,7 @@ benchmarks) plus per-entry metadata: priority, `halt_on_failure`, the
 entries in priority order and produces a single pass / fail / conditional
 verdict.
 
-A reference plan lives at `src/spotlights_validation/examples/kvoffload/validation_plan.json`.
+A reference plan lives at `src/spotlights_engine/validation/examples/kvoffload/validation_plan.json`.
 
 ## Cloning the required repositories
 
@@ -149,7 +149,7 @@ incompatible and unrelated to the kv-offload change under test:
   entry's 1800s timeout fires. The `[False]` parametrization is
   excluded too because the `-k` filter matches by base test name. Job
   1225022 (2026-05-26) is the most recent reproduction; full stdout in
-  `src/spotlights_validation/examples/kvoffload/validation_job.stdout`. To re-enable: run
+  `src/spotlights_engine/validation/examples/kvoffload/validation_job.stdout`. To re-enable: run
   `pytest -v tests/v1/kv_connector/unit/test_offloading_connector.py::test_request_preemption -p no:cacheprovider --timeout=120`
   standalone, capture the stack from `pytest --timeout=…` to identify
   what it is waiting on, then drop the filter once fixed.
@@ -160,7 +160,7 @@ incompatible and unrelated to the kv-offload change under test:
   > **Important:** once the HuggingFace access request for
   > `meta-llama/Llama-3.2-1B-Instruct` is approved, download the model
   > (`HF_HOME=<hf-cache>/hub huggingface-cli download meta-llama/Llama-3.2-1B-Instruct`)
-  > and revert the `-k` filter in `src/spotlights_validation/examples/kvoffload/validation_plan.json`
+  > and revert the `-k` filter in `src/spotlights_engine/validation/examples/kvoffload/validation_plan.json`
   > back to `pytest -v tests/v1/kv_offload/` (no filter).
 - `integration-engine`:
   `--ignore=tests/v1/engine/test_async_llm.py
@@ -199,7 +199,7 @@ In practice that means **four layers, all in a single venv**:
 2. **The target project's test dependencies** (pytest, fixtures, mocks,
    etc.) listed in its requirements files.
 3. **`spotlights` (the `spotlights-engine` package)**, so the `python -m
-   spotlights_validation.cli` entry point is on `PATH`.
+   spotlights_engine.validation.cli` entry point is on `PATH`.
 4. **`pytest-json-report`**, if any plan entry uses
    `output_format: "pytest-json"` and you want structured counts instead of
    exit-code-only parsing.
@@ -289,7 +289,7 @@ commit referenced in the `path` field.
 
 ```bash
 # CLI is importable from this venv
-python -m spotlights_validation.cli run --help
+python -m spotlights_engine.validation.cli run --help
 
 # pytest can discover the kv_offload tests in the source tree
 cd <workdir>/vllm
@@ -308,8 +308,8 @@ pytest --collect-only tests/v1/kv_offload/ -q   # expect ~80 tests collected
 After that, run the validation plan from anywhere with the venv active:
 
 ```bash
-python -m spotlights_validation.cli run \
-    --plan <workdir>/spotlights/src/spotlights_validation/examples/kvoffload/validation_plan.json \
+python -m spotlights_engine.validation.cli run \
+    --plan <workdir>/spotlights/src/spotlights_engine/validation/examples/kvoffload/validation_plan.json \
     --source-tree <workdir>/vllm \
     --change-ref "kv-offload-lab@HEAD" \
     --out result.json
@@ -325,8 +325,8 @@ cd <workdir>/vllm
 pytest --collect-only tests/v1/kv_offload/ -q
 
 # (b) Dry-run the plan to see every command that would execute
-python -m spotlights_validation.cli run \
-    --plan src/spotlights_validation/examples/kvoffload/validation_plan.json \
+python -m spotlights_engine.validation.cli run \
+    --plan src/spotlights_engine/validation/examples/kvoffload/validation_plan.json \
     --source-tree <workdir>/vllm \
     --dry-run
 ```
@@ -347,7 +347,7 @@ From the repo root:
 pip install -e .
 ```
 
-This exposes both `python -m spotlights_validation.cli` and the
+This exposes both `python -m spotlights_engine.validation.cli` and the
 `spotlights-validation` console script (installed via `pip install -e <workdir>/spotlights`).
 
 ## Running the validation
@@ -410,7 +410,7 @@ validation passes or fails.
 
 `run_validation.sh` is the original LSF-submittable wrapper
 that activates the venv, exports the HuggingFace / vLLM environment, and
-launches `python -m spotlights_validation.cli run` against the reference
+launches `python -m spotlights_engine.validation.cli run` against the reference
 `kvoffload` plan. It runs **all** entries (including all three benchmark
 policies) in a single pass. Each input can be supplied as a CLI flag, in
 the `.env` file, or as an exported environment variable in the calling
@@ -491,17 +491,17 @@ submit with `bsub`. The split scripts are submitted independently:
 
 ```bash
 # Baseline (original vLLM, LRU + ARC benchmarks)
-bsub < src/spotlights_validation/examples/kvoffload/run_baseline.sh
+bsub < src/spotlights_engine/validation/examples/kvoffload/run_baseline.sh
 
 # Change validation (evolved policy applied, evolved benchmark)
-bsub < src/spotlights_validation/examples/kvoffload/run_change_validation.sh
+bsub < src/spotlights_engine/validation/examples/kvoffload/run_change_validation.sh
 ```
 
 Or submit the combined single-run script if you want all three policies
 in one pass (requires the evolved policy to already be applied manually):
 
 ```bash
-bsub < src/spotlights_validation/examples/kvoffload/run_validation.sh
+bsub < src/spotlights_engine/validation/examples/kvoffload/run_validation.sh
 ```
 
 Pick the input style that matches how you prefer
@@ -514,7 +514,7 @@ Drop a populated `.env` next to the script (default path:
 
 ```bash
 cd /path/to/spotlights
-bsub < src/spotlights_validation/examples/kvoffload/run_validation.sh
+bsub < src/spotlights_engine/validation/examples/kvoffload/run_validation.sh
 ```
 
 `bsub` reads the `#BSUB` headers from stdin. The script resolves
@@ -524,7 +524,7 @@ so the file is picked up wherever LSF places the job.
 #### Option 2 — CLI flags (override `.env`)
 
 ```bash
-bsub src/spotlights_validation/examples/kvoffload/run_validation.sh \
+bsub src/spotlights_engine/validation/examples/kvoffload/run_validation.sh \
     --root-dir            <absolute-path-to-clones-parent> \
     --venv                <absolute-path-to-venv> \
     --nvme-offload-path   <absolute-path-to-nvme-scratch-dir> \
@@ -547,7 +547,7 @@ export VENV=…
 export VLLM_NVME_OFFLOAD_PATH=…
 export HF_CACHE_DIR=…
 export HF_TOKEN=…
-bsub < src/spotlights_validation/examples/kvoffload/run_validation.sh
+bsub < src/spotlights_engine/validation/examples/kvoffload/run_validation.sh
 ```
 
 LSF forwards the submitting shell's environment to the compute node by
@@ -559,7 +559,7 @@ The same script works on a GPU host you've grabbed interactively — just
 execute it directly. The `#BSUB` lines are comments to bash:
 
 ```bash
-src/spotlights_validation/examples/kvoffload/run_validation.sh \
+src/spotlights_engine/validation/examples/kvoffload/run_validation.sh \
     --root-dir            <absolute-path-to-clones-parent> \
     --venv                <absolute-path-to-venv> \
     --nvme-offload-path   <absolute-path-to-nvme-scratch-dir> \
@@ -571,8 +571,8 @@ src/spotlights_validation/examples/kvoffload/run_validation.sh \
 ```bash
 bjobs                                                    # job state
 bpeek <jobid>                                            # live tail of stdout while queued/running
-tail -f src/spotlights_validation/examples/kvoffload/validation_job.stdout        # once the script has redirected
-tail -f src/spotlights_validation/examples/kvoffload/validation_job.stderr
+tail -f src/spotlights_engine/validation/examples/kvoffload/validation_job.stdout        # once the script has redirected
+tail -f src/spotlights_engine/validation/examples/kvoffload/validation_job.stderr
 ```
 
 Stdout and stderr are redirected to
@@ -583,8 +583,8 @@ and per-entry logs under `$ARTIFACTS_DIR/logs/`.
 ## Run a plan
 
 ```bash
-python -m spotlights_validation.cli run \
-    --plan src/spotlights_validation/examples/kvoffload/validation_plan.json \
+python -m spotlights_engine.validation.cli run \
+    --plan src/spotlights_engine/validation/examples/kvoffload/validation_plan.json \
     --source-tree ../vllm \
     --change-ref "kv-offload-lab@HEAD" \
     --out result.json
@@ -678,8 +678,8 @@ works even days later without re-executing the plan.
 To preview what would run without executing anything:
 
 ```bash
-python -m spotlights_validation.cli run \
-    --plan src/spotlights_validation/examples/kvoffload/validation_plan.json \
+python -m spotlights_engine.validation.cli run \
+    --plan src/spotlights_engine/validation/examples/kvoffload/validation_plan.json \
     --source-tree ../vllm \
     --dry-run
 ```

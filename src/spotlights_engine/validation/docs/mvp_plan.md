@@ -35,7 +35,7 @@ Produces `TestHarnessMap` and `ValidationWorkloadMatrix` for [vllm repo](https:/
 
 ```bash
 # From spotlights-validation root
-python -m spotlights_validation.cli discover \
+python -m spotlights_engine.validation.cli discover \
     --source-tree https://github.com/vllm-project/vllm \
     --out-dir artifacts/
 # Writes: artifacts/harness_map.json, artifacts/workload_matrix.json
@@ -48,7 +48,7 @@ Run once per target version. Re-run whenever the target's test or benchmark infr
 Produces the full `ValidationPlan` from the saved discovery artifacts.
 
 ```bash
-python -m spotlights_validation.cli plan \
+python -m spotlights_engine.validation.cli plan \
     --harness-map artifacts/harness_map.json \
     --workload-matrix artifacts/workload_matrix.json \
     --archive-context artifacts/archive_context.json \  # optional, empty list if absent
@@ -62,7 +62,7 @@ The plan is not prioritied at this stage. `build_validation_plan` will adapt it 
 Once the saved artifacts are in place, Bundle F calls the standard public API:
 
 ```python
-from spotlights_validation import prepare, start_validation
+from spotlights_engine.validation import prepare, start_validation
 
 # prepare loads from disk; no live discovery
 prep = await prepare(source_tree=target_repo_path, artifacts_dir=Path("artifacts/"))

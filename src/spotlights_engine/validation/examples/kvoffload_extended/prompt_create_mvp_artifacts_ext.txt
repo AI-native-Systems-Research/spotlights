@@ -1,4 +1,4 @@
-Artifacts folder: src/spotlights_validation/examples/kvoffload
+Artifacts folder: src/spotlights_engine/validation/examples/kvoffload
 Validation artifacts:
 - harness_map.json
 - workload_matrix.json
@@ -56,9 +56,9 @@ Prefer concrete, runnable entries. Skip items that are purely conceptual or lack
 
 ### Step 4 — Merge into extended artifacts
 
-Produce three new artifact files under `src/spotlights_validation/examples/kvoffload_extended/`:
+Produce three new artifact files under `src/spotlights_engine/validation/examples/kvoffload_extended/`:
 
-**harness_map.json** — start from the base `src/spotlights_validation/examples/kvoffload/harness_map.json` and add new entries discovered from GitHub. Each new entry must follow the `TestHarnessMap` schema (see design.md). Set `source` to `"github_issue"` or `"github_pr"` and add a `source_ref` field with the URL of the issue or PR it was extracted from. Example entry shape:
+**harness_map.json** — start from the base `src/spotlights_engine/validation/examples/kvoffload/harness_map.json` and add new entries discovered from GitHub. Each new entry must follow the `TestHarnessMap` schema (see design.md). Set `source` to `"github_issue"` or `"github_pr"` and add a `source_ref` field with the URL of the issue or PR it was extracted from. Example entry shape:
 
 ```json
 {
@@ -75,7 +75,7 @@ Produce three new artifact files under `src/spotlights_validation/examples/kvoff
 }
 ```
 
-**workload_matrix.json** — start from the base `src/spotlights_validation/examples/kvoffload/workload_matrix.json` and add new workload entries extracted from GitHub. Each entry follows the `ValidationWorkloadMatrix` schema. Add a `source_ref` field. Example:
+**workload_matrix.json** — start from the base `src/spotlights_engine/validation/examples/kvoffload/workload_matrix.json` and add new workload entries extracted from GitHub. Each entry follows the `ValidationWorkloadMatrix` schema. Add a `source_ref` field. Example:
 
 ```json
 {
@@ -97,11 +97,11 @@ Produce three new artifact files under `src/spotlights_validation/examples/kvoff
 }
 ```
 
-**validation_plan.json** — start from the base `src/spotlights_validation/examples/kvoffload/validation_plan.json` and add plan entries for the newly discovered harness entries and workloads. Assign priorities using the same rules as design.md: entries that directly exercise the KV offload path get higher priority; entries derived from regression reports get `halt_on_failure: true` when the regression was severe (data loss, OOM crash, correctness failure).
+**validation_plan.json** — start from the base `src/spotlights_engine/validation/examples/kvoffload/validation_plan.json` and add plan entries for the newly discovered harness entries and workloads. Assign priorities using the same rules as design.md: entries that directly exercise the KV offload path get higher priority; entries derived from regression reports get `halt_on_failure: true` when the regression was severe (data loss, OOM crash, correctness failure).
 
 ### Step 5 — Write a discovery summary
 
-Append a `_discovery_summary.json` file to `src/spotlights_validation/examples/kvoffload_extended/` that records:
+Append a `_discovery_summary.json` file to `src/spotlights_engine/validation/examples/kvoffload_extended/` that records:
 
 ```json
 {
@@ -117,7 +117,7 @@ Append a `_discovery_summary.json` file to `src/spotlights_validation/examples/k
 
 ### Constraints
 
-- Do not modify the files under `src/spotlights_validation/examples/kvoffload/` — only write to `src/spotlights_validation/examples/kvoffload_extended/`.
+- Do not modify the files under `src/spotlights_engine/validation/examples/kvoffload/` — only write to `src/spotlights_engine/validation/examples/kvoffload_extended/`.
 - All new artifact files must be valid JSON and conform to the schemas in design.md.
 - If a GitHub API rate limit is reached, pause and resume; do not discard partial results.
 - If a test path referenced in an issue does not exist in the local `vllm/` clone, still include the entry but set `"path_verified": false`.

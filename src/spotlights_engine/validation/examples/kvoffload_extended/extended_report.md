@@ -1,8 +1,8 @@
 # Extended Validation Plan — Discovery Report
 
 **Target version:** vllm v0.18.0
-**Base plan:** `src/spotlights_validation/examples/kvoffload/validation_plan.json`
-**Extended plan:** `src/spotlights_validation/examples/kvoffload_extended/validation_plan.json`
+**Base plan:** `src/spotlights_engine/validation/examples/kvoffload/validation_plan.json`
+**Extended plan:** `src/spotlights_engine/validation/examples/kvoffload_extended/validation_plan.json`
 
 The extended plan starts from the base kvoffload artifacts and adds entries
 discovered from vllm GitHub issues and PRs. All paths were verified against the

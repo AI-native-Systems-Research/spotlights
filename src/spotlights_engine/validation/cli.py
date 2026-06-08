@@ -6,8 +6,8 @@ from pathlib import Path
 
 import click
 
-from spotlights_validation.execution.runner import run_validation_plan
-from spotlights_validation.schemas import ValidationPlan
+from spotlights_engine.validation.execution.runner import run_validation_plan
+from spotlights_engine.validation.schemas import ValidationPlan
 
 
 @click.group()

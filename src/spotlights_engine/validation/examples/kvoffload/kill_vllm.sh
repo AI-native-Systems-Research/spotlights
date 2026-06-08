@@ -7,7 +7,7 @@ set -euo pipefail
 # validation runner whose --source-tree path also contains "vllm".
 CMDLINE_PIDS=$(pgrep -u "$USER" -f "vllm\.entrypoints|vllm\.engine|serve\.py" 2>/dev/null \
     | xargs -r ps -o pid,args --no-headers -p 2>/dev/null \
-    | grep -v "spotlights_validation" \
+    | grep -v "spotlights_engine.validation" \
     | awk 'tolower($2) ~ /python/ {print $1}' \
     || true)
 
