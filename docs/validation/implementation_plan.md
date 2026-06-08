@@ -214,17 +214,17 @@ When neither candidate component matching nor change context applies to an entry
 
 ---
 
-## 6. Caching Layer (via Bundle B Archive)
+## 6. Caching Layer (via Knowledge Archive)
 
 **File:** `src/spotlights_validation/discovery/cache.py`
 
-Prevents re-running expensive discovery (especially LLM calls and GitHub API queries) when valid artifacts already exist for the same candidate at the same target version. The cache is designed against Bundle B's planned archive query interface, with a filesystem fallback until Bundle B is implemented.
+Prevents re-running expensive discovery (especially LLM calls and GitHub API queries) when valid artifacts already exist for the same candidate at the same target version. The cache is designed against Knowledge's planned archive query interface, with a filesystem fallback until Knowledge is implemented.
 
 ### Interface
 
 ```python
 class DiscoveryArchive(Protocol):
-    """Bundle B archive interface for discovery artifact retrieval."""
+    """Knowledge archive interface for discovery artifact retrieval."""
 
     async def query_discovery_artifacts(
         self,
@@ -247,7 +247,7 @@ class DiscoveryArchive(Protocol):
 
 
 class FilesystemDiscoveryArchive:
-    """Filesystem fallback implementing DiscoveryArchive until Bundle B lands."""
+    """Filesystem fallback implementing DiscoveryArchive until Knowledge lands."""
 
     def __init__(self, cache_dir: Path):
         self.cache_dir = cache_dir
@@ -268,9 +268,9 @@ class FilesystemDiscoveryArchive:
     ) -> None: ...
 ```
 
-### Cache key (mirrors Bundle B archive key structure)
+### Cache key (mirrors Knowledge archive key structure)
 
-The real Bundle B archive keys records on `(repo, Candidate.file, Candidate.symbol, Candidate.kind, target_version)` as the primary lookup, with `anomaly_refs` used as a signal-driven filter to narrow results. The filesystem fallback mirrors this structure:
+The real Knowledge archive keys records on `(repo, Candidate.file, Candidate.symbol, Candidate.kind, target_version)` as the primary lookup, with `anomaly_refs` used as a signal-driven filter to narrow results. The filesystem fallback mirrors this structure:
 
 ```
 {cache_dir}/{repo_name}/{target_version}/{file_path_normalized}/{symbol}/{kind}/
@@ -280,7 +280,7 @@ Where `repo_name` is derived from the target repository URL (e.g., `vllm-project
 
 Within a keyed directory, multiple discovery outputs may exist if different `anomaly_refs` or `evolve_rationale` produced them. On query:
 
-1. **Primary lookup** — Match on `(file, symbol, kind, target_version)`. This mirrors Bundle B's `query(query, mode="signal_driven")` semantics.
+1. **Primary lookup** — Match on `(file, symbol, kind, target_version)`. This mirrors Knowledge's `query(query, mode="signal_driven")` semantics.
 2. **Signal-driven filter** — Among matching entries, select the one whose `anomaly_refs` overlap with the query candidate's `anomaly_refs`. If no overlap exists, treat as cache miss.
 3. **Rationale check** — If `evolve_rationale` differs from the cached entry, treat as cache miss (different rationale may produce different search keywords and prioritization).
 
@@ -295,7 +295,7 @@ This means the filesystem fallback stores metadata alongside artifacts:
   verification_report.json
 ```
 
-When Bundle B is implemented, it replaces the filesystem walk with its native index — the query semantics (primary key + signal filter + rationale match) remain identical.
+When Knowledge is implemented, it replaces the filesystem walk with its native index — the query semantics (primary key + signal filter + rationale match) remain identical.
 
 ### Validity check on cache hit
 
@@ -343,7 +343,7 @@ python -m spotlights_validation.cli discover \
     --source-tree /path/to/target \
     --target-version v0.18.0 \
     --repo-url https://github.com/vllm-project/vllm \
-    --candidate artifacts/candidate.json \  # Candidate from Bundle C
+    --candidate artifacts/candidate.json \  # Candidate from Candidate Generation
     --out-dir artifacts/ \
     --include-github               # opt-in to GitHub issue/PR discovery
     --scope-keywords "kv offload,cpu offload,swap"  # narrows GitHub search
@@ -371,7 +371,7 @@ async def prepare(
 ) -> PreparationRun:
 ```
 
-1. **Query Bundle B archive** — Call `archive.query_discovery_artifacts(candidate, target_version)`. Uses the full Candidate identity (file, symbol, kind, anomaly_refs, evolve_rationale) as the cache key. If no `archive` is provided, instantiate `FilesystemDiscoveryArchive` with the default cache dir.
+1. **Query Knowledge archive** — Call `archive.query_discovery_artifacts(candidate, target_version)`. Uses the full Candidate identity (file, symbol, kind, anomaly_refs, evolve_rationale) as the cache key. If no `archive` is provided, instantiate `FilesystemDiscoveryArchive` with the default cache dir.
 2. **Validate cached artifacts** — If the archive returns artifacts:
    - Structural check: deserialize into `TestHarnessMap` / `ValidationWorkloadMatrix`.
    - Semantic check: run `verify_artifacts()` against the current source tree.
