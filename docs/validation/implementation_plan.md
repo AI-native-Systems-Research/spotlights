@@ -12,7 +12,7 @@ The following are already implemented and inform this plan:
 
 - **Schemas** (`src/spotlights_engine/validation/schemas.py`): `TestHarnessMap`, `TestHarnessEntry`, `ValidationWorkloadMatrix`, `WorkloadEntry`, `ValidationPlan`, `ValidationPlanEntry`, and all result types.
 - **MVP examples** (`examples/validation/kvoffload/`, `examples/validation/kvoffload_extended/`): Manually-produced artifacts demonstrating the expected output shape, including entries discovered from GitHub issues/PRs.
-- **Runner** (`execution/runner.py`): Consumes the artifacts produced by discovery.
+- **Runner** (`src/spotlights_engine/validation/execution/runner.py`): Consumes the artifacts produced by discovery.
 - **Public API contract** (`__init__.py`): `prepare()`, `start_validation()`, `get_validation_status()`.
 
 The goal of this implementation is to automate what the MVP examples do manually: produce `TestHarnessMap`, `ValidationWorkloadMatrix`, and `ValidationPlan` given a target repo and version.
