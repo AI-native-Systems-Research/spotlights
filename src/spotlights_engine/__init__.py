@@ -1,5 +1,7 @@
 """Spotlight Engine: spine for schemas, orchestration, and integration."""
 
+# ruff: noqa: E402 - configure package logger before importing submodules.
+
 import logging as _logging
 
 # Library default: silence package-level logs unless the application opts in.
@@ -13,6 +15,12 @@ from spotlights_engine.agent_proposals import (
     AgentProposalsValidationError,
     create_agent_proposals,
     create_agent_proposals_with_telemetry,
+)
+from spotlights_engine.module_knowledge import (
+    KnowledgeBase,
+    KnowledgeRecord,
+    RetrievedItem,
+    RetrieveRequest,
 )
 from spotlights_engine.proposal_from_finding_creator import (
     ProposalFromFindingConfig,
@@ -38,6 +46,10 @@ __all__ = [
     "AgentProposalsConfig",
     "AgentProposalsSetupError",
     "AgentProposalsValidationError",
+    "KnowledgeBase",
+    "KnowledgeRecord",
+    "RetrieveRequest",
+    "RetrievedItem",
     "ManagerSetupError",
     "ModuleFilter",
     "ModuleTelemetry",

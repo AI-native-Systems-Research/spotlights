@@ -17,7 +17,10 @@ import logging
 import sys
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from spotlights_engine.agent_proposals import AgentProposalsConfig
+from spotlights_engine.module_knowledge import KnowledgeBase, KnowledgeRecord, RetrieveRequest
 from spotlights_engine.proposal_from_finding_creator import (
     ProposalFromFindingConfig,
 )
@@ -29,7 +32,6 @@ from spotlights_engine.spotlights_manager import (
     SpotlightsManagerResult,
     run_with_telemetry,
 )
-
 
 _DEFAULT_REPO = Path("../vllm")
 _DEFAULT_OUTPUT = Path("./spotlights-out")
@@ -175,6 +177,61 @@ def _build_argparser() -> argparse.ArgumentParser:
     return p
 
 
+def _build_knowledge_argparser() -> argparse.ArgumentParser:
+    p = argparse.ArgumentParser(
+        prog="spotlights-engine knowledge",
+        description=(
+            "Local module-knowledge archive/retrieve/wiki commands. These commands "
+            "are deterministic and do not invoke agents."
+        ),
+    )
+    p.add_argument(
+        "--root",
+        type=Path,
+        default=Path(".spotlights/knowledge"),
+        help="Knowledge root directory (default: .spotlights/knowledge).",
+    )
+    sub = p.add_subparsers(dest="knowledge_command", required=True)
+
+    archive = sub.add_parser("archive", help="Archive one record or a list of records from JSON.")
+    archive.add_argument(
+        "--record-json",
+        required=True,
+        help="Path to a KnowledgeRecord JSON object/list, or '-' for stdin.",
+    )
+    archive.add_argument(
+        "--render-wiki",
+        action="store_true",
+        help="Render the generated wiki after archiving.",
+    )
+
+    retrieve = sub.add_parser("retrieve", help="Retrieve ranked local knowledge records.")
+    retrieve.add_argument("query", help="Query text.")
+    retrieve.add_argument("--top-k", type=int, default=10)
+    retrieve.add_argument("--source-type", action="append", default=[])
+    retrieve.add_argument("--tag", action="append", default=[])
+    retrieve.add_argument("--json", action="store_true", help="Print machine-readable JSON.")
+    retrieve.add_argument(
+        "--render-query-page",
+        action="store_true",
+        help="Write a generated wiki page for this retrieval.",
+    )
+    retrieve.add_argument("--query-id", default=None, help="Optional stable wiki query page id.")
+
+    wiki = sub.add_parser("wiki", help="Render or verify generated knowledge wiki pages.")
+    wiki_sub = wiki.add_subparsers(dest="wiki_command", required=True)
+    wiki_sub.add_parser("render", help="Render wiki pages from archive/records.jsonl.")
+    verify = wiki_sub.add_parser("verify", help="Verify generated wiki pages.")
+    verify.add_argument(
+        "--no-strict",
+        dest="strict",
+        action="store_false",
+        help="Skip strict record-page coverage checks.",
+    )
+    verify.set_defaults(strict=True)
+    return p
+
+
 _LOG_FORMAT = "%(asctime)s %(levelname)-5s %(message)s"
 _LOG_DATEFMT = "%H:%M:%S"
 _HANDLER_TAG = "_spotlights_cli_handler"
@@ -279,6 +336,8 @@ def _write_result_json(result: SpotlightsManagerResult, output_folder: Path) -> 
     `extractor_invocation` is a dataclass (not a pydantic model), so we
     serialize it via `dataclasses.asdict` and splice it into the dump.
     """
+    if not hasattr(result, "model_dump"):
+        raise TypeError("result must provide pydantic model_dump()")
     payload = result.model_dump(mode="json", exclude={"extractor_invocation"})
     payload["extractor_invocation"] = dataclasses.asdict(result.extractor_invocation)
     path = output_folder / "result.json"
@@ -329,12 +388,102 @@ def _print_summary(result: SpotlightsManagerResult) -> None:
             print(f"  manager-issue [{issue.step}/{issue.severity}]: {issue.message}")
 
 
+def _read_json_argument(value: str) -> object:
+    if value == "-":
+        return json.loads(sys.stdin.read())
+    return json.loads(Path(value).read_text(encoding="utf-8"))
+
+
+def _knowledge_archive(args: argparse.Namespace) -> int:
+    kb = KnowledgeBase.open(args.root)
+    try:
+        payload = _read_json_argument(args.record_json)
+        raw_records = payload if isinstance(payload, list) else [payload]
+        records = [KnowledgeRecord.model_validate(raw) for raw in raw_records]
+    except (OSError, json.JSONDecodeError, ValidationError, TypeError) as exc:
+        print(f"invalid knowledge record JSON: {exc}", file=sys.stderr)
+        return 2
+
+    result = kb.archive_many(records)
+    print(f"archive: {result.records_written} records at {result.path}")
+    print(f"inserted: {result.inserted}")
+    print(f"updated: {result.updated}")
+    if args.render_wiki:
+        render = kb.render_wiki()
+        print(f"wiki: {render.wiki_dir} ({render.pages_written} pages)")
+    return 0
+
+
+def _knowledge_retrieve(args: argparse.Namespace) -> int:
+    kb = KnowledgeBase.open(args.root)
+    try:
+        request = RetrieveRequest(
+            query=args.query,
+            top_k=args.top_k,
+            source_types=list(args.source_type),
+            tags=list(args.tag),
+        )
+    except ValidationError as exc:
+        print(f"invalid retrieve request: {exc}", file=sys.stderr)
+        return 2
+
+    results = kb.retrieve(request)
+    if args.render_query_page:
+        query_page = kb.render_retrieval_wiki(args.query, results, query_id=args.query_id)
+        print(f"query_page: {query_page}")
+
+    if args.json:
+        print(json.dumps([item.model_dump(mode="json") for item in results], indent=2))
+    else:
+        print(f"results: {len(results)}")
+        for idx, item in enumerate(results, start=1):
+            record = item.record
+            terms = ", ".join(item.matched_terms) or "(none)"
+            print(
+                f"{idx}. [{record.source_type}] {record.title} "
+                f"(score={item.score:.4f}, id={record.record_id})"
+            )
+            print(f"   matched: {terms}")
+    return 0
+
+
+def _knowledge_wiki(args: argparse.Namespace) -> int:
+    kb = KnowledgeBase.open(args.root)
+    if args.wiki_command == "render":
+        result = kb.render_wiki()
+        print(f"wiki: {result.wiki_dir}")
+        print(f"pages: {result.pages_written}")
+        print(f"source_hash: {result.source_hash}")
+        return 0
+    if args.wiki_command == "verify":
+        report = kb.verify_wiki(strict=args.strict)
+        print(f"checked_pages: {report.checked_pages}")
+        for issue in report.issues:
+            print(f"{issue.severity}: {issue.page_path}: {issue.message}")
+        return 0 if report.ok else 1
+    return 2
+
+
+def _knowledge_main(argv: list[str]) -> int:
+    args = _build_knowledge_argparser().parse_args(argv)
+    args.root = args.root.resolve()
+    if args.knowledge_command == "archive":
+        return _knowledge_archive(args)
+    if args.knowledge_command == "retrieve":
+        return _knowledge_retrieve(args)
+    if args.knowledge_command == "wiki":
+        return _knowledge_wiki(args)
+    return 2
+
+
 def main(argv: list[str] | None = None) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     if raw_argv and raw_argv[0] == "init":
         from spotlights_engine.init_skills import main as init_main
 
         return init_main(raw_argv[1:])
+    if raw_argv and raw_argv[0] == "knowledge":
+        return _knowledge_main(raw_argv[1:])
 
     args = _build_argparser().parse_args(argv)
 
@@ -355,9 +504,10 @@ def main(argv: list[str] | None = None) -> int:
     cfg = _build_config(args)
 
     result = run_with_telemetry(inp, config=cfg)
-    json_path = _write_result_json(result, args.output_folder)
     _print_summary(result)
-    print(f"result json: {json_path}")
+    if isinstance(result, SpotlightsManagerResult):
+        json_path = _write_result_json(result, args.output_folder)
+        print(f"result json: {json_path}")
 
     any_unrecoverable = any(
         any(not iss.recoverable for iss in run.issues)

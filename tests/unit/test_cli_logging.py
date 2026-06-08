@@ -98,7 +98,7 @@ def test_main_preserves_summary_stdout_contract(
     output = tmp_path / "output"
 
     class _FakeResult:
-        module_runs = {}
+        module_runs: dict = {}
 
     def _fake_run(input, *, config):
         assert input.repo_path == repo
