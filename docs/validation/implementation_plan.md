@@ -27,17 +27,17 @@ The core of discovery is an LLM prompt that receives structured context about th
 
 ### Template placeholders
 
-| Placeholder | Source | Description |
-|---|---|---|
-| `{target_repo_url}` | CLI argument | GitHub URL of the target repository |
-| `{target_version}` | CLI argument or `git rev-parse HEAD` | Commit SHA, tag, or branch to validate against |
-| `{source_tree_summary}` | Built at runtime | Directory listing, CI configs, test directories, benchmark scripts |
-| `{component_vocabulary}` | From `ProjectTree` if available | Known components of the target system |
-| `{candidate_context}` | From Candidate object | The optimization candidate: target file, symbol, kind, anomaly_refs, and evolve_rationale. Used to focus discovery on the candidate's component and inform archive queries. |
-| `{change_context}` | Optional, from Change object | Affected components and code paths (for change-specific discovery) |
-| `{output_artifacts_path}` | CLI argument | Where to write the produced JSON artifacts |
-| `{existing_artifacts}` | Loaded from prior run if present | Base harness map and workload matrix to extend (not duplicate) |
-| `{github_discovery_results}` | From GitHub search step | Issues and PRs relevant to the discovery scope |
+| Placeholder | Source | Mandatory | Description |
+|---|---|---|---|
+| `{target_repo_url}` | CLI argument | Yes | GitHub URL of the target repository |
+| `{target_version}` | CLI argument or `git rev-parse HEAD` | No (default: latest version) | Commit SHA, tag, or branch to validate against |
+| `{source_tree_summary}` | Built at runtime | Yes (built at runtime) | Directory listing, CI configs, test directories, benchmark scripts |
+| `{component_vocabulary}` | From `ProjectTree` if available | No (built from signal_pipeline if not provided) | Known components of the target system |
+| `{candidate_context}` | From Candidate object | Yes | The optimization candidate: target file, symbol, kind, anomaly_refs, and evolve_rationale. Used to focus discovery on the candidate's component and inform archive queries. |
+| `{change_context}` | Optional, from Change object | No (default: None) | Affected components and code paths (for change-specific discovery) |
+| `{output_artifacts_path}` | CLI argument | Yes | Where to write the produced JSON artifacts |
+| `{existing_artifacts}` | Loaded from prior run if present | No (default: None) | Base harness map and workload matrix to extend (not duplicate) |
+| `{github_discovery_results}` | From GitHub search step | No (default: None) | Issues and PRs relevant to the discovery scope |
 
 ### Template structure
 
