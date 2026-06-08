@@ -48,6 +48,7 @@ def write_spec(
     run_dir: Path,
     config_notes: str = "",
     workload_summary_md: str | None = None,
+    workload_commands_md: str | None = None,
 ) -> tuple[Path, Path]:
     """Build the BenchSpec, write JSON + MD into `run_dir`.
 
@@ -80,7 +81,11 @@ def write_spec(
     write_json(json_path, spec)
 
     md_path = run_dir / BENCH_SPEC_MD_NAME
-    atomic_write_text(md_path, render_md(spec, workload_summary_md=workload_summary_md))
+    atomic_write_text(md_path, render_md(
+        spec,
+        workload_summary_md=workload_summary_md,
+        workload_commands_md=workload_commands_md,
+    ))
 
     log.info(
         "bench_spec: wrote %s and %s (SHA %s)",
@@ -89,7 +94,12 @@ def write_spec(
     return json_path, md_path
 
 
-def render_md(spec: BenchSpec, *, workload_summary_md: str | None = None) -> str:
+def render_md(
+    spec: BenchSpec,
+    *,
+    workload_summary_md: str | None = None,
+    workload_commands_md: str | None = None,
+) -> str:
     """Render the bench spec MD from its canonical JSON form.
 
     Pure function — same input → same output. No side effects.
@@ -114,24 +124,35 @@ def render_md(spec: BenchSpec, *, workload_summary_md: str | None = None) -> str
         output_naming_template=spec.output_naming_template,
         n_view=sn.n_view,
     )
+    sections: list[str] = [base]
+    if workload_commands_md:
+        sections.append(_workload_commands_section(workload_commands_md))
     if workload_summary_md:
-        return base + "\n\n" + _workload_section(workload_summary_md)
-    return base
+        sections.append(_workload_signals_section(workload_summary_md))
+    return "\n\n".join(sections)
 
 
-def _workload_section(summary_md: str) -> str:
-    """Wrap the workload analyzer's summary MD in a spec section."""
-    # Demote the summary's `# Workload analysis ...` h1 to h2 so it
-    # nests under the spec's section structure.
+def _workload_signals_section(summary_md: str) -> str:
+    """Wrap the workload analyzer's summary MD as a spec section."""
     body = summary_md.replace("# Workload analysis", "## Workload signals from filtered PRs", 1)
     return (
-        "## 6. Workload signals (auto-derived from filtered PRs)\n\n"
+        "## 7. Workload signals (auto-derived from filtered PRs)\n\n"
         "These tables describe what models / features / hardware appear "
-        "across the filtered view. Use them to choose a workload your "
-        "bench can run that exercises representative perf landscapes. "
-        "If the signals don't match what your hardware supports, ping "
-        "back rather than substituting silently.\n\n"
+        "across the filtered view. Use them as background — pick a "
+        "workload from §6 (recommended workloads) where possible.\n\n"
         + body
+    )
+
+
+def _workload_commands_section(portfolio_md: str) -> str:
+    """Wrap the runnable workload portfolio as a spec section."""
+    return (
+        "## 6. Recommended workloads (extracted from PR bodies)\n\n"
+        "Each entry below is a runnable benchmark configuration extracted "
+        "from filtered PRs' bodies, clustered by (model family + flags) "
+        "and ranked by PR coverage. Pick whichever your hardware "
+        "supports.\n\n"
+        + portfolio_md
     )
 
 

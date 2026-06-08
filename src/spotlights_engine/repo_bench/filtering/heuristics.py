@@ -77,14 +77,21 @@ def revert_pattern() -> str:
 # insensitive) for any of the chore categories. Anchored at start so
 # `[Perf] Fix slow attention by 30%` is NOT matched.
 
-_NON_PERF_CHORE_RE = re.compile(
-    r"^\s*"
-    r"(?:"
-    r"  \[\s*(?:bug\s*fix|bugfix|fix|ci|ci/?build|build|test|tests|doc|docs"
-    r"      |chore|refactor|cleanup|style|lint|typo|nit|misc|deps|dep)\s*\]"
-    r"  |  (?:bug\s*fix|bugfix|fix|chore|refactor|cleanup|style|lint|typo|nit|docs?|tests?|ci|deps?)\s*[:\-]"
-    r")",
-    re.IGNORECASE | re.VERBOSE,
+def _build_non_perf_chore_re(tags_alt: str) -> "re.Pattern[str]":
+    """Build the chore-tag regex from a `tag1|tag2|...` alternation.
+
+    The alternation is sourced from config (baseline tags + repo-specific
+    extras). Two anchored variants: `[Tag]` form and `tag:`/`tag-` prefix.
+    """
+    return re.compile(
+        rf"^\s*(?:\[\s*(?:{tags_alt})\s*\]|(?:{tags_alt})\s*[:\-])",
+        re.IGNORECASE | re.VERBOSE,
+    )
+
+
+_NON_PERF_CHORE_RE = _build_non_perf_chore_re(
+    "bug\\s*fix|bugfix|fix|ci|ci/?build|build|test|tests|doc|docs|"
+    "chore|refactor|cleanup|style|lint|typo|nit|misc|deps|dep"
 )
 
 NON_PERF_CHORE_HEURISTIC_VERSION = "v1"
@@ -102,6 +109,11 @@ def is_non_perf_chore_title(title: str) -> bool:
 
 def non_perf_chore_pattern() -> str:
     return _NON_PERF_CHORE_RE.pattern
+
+
+def perf_strict_pattern_re() -> "re.Pattern[str]":
+    """Used by tests to introspect the active strict-perf regex object."""
+    return _PERF_STRICT_RE
 
 
 # ── Author-tagged perf signal ────────────────────────────────────────
@@ -146,36 +158,62 @@ def perf_tag_pattern() -> str:
 # NN%" stat-dump fragments before matching, so a benchmark-output dump
 # in the body doesn't trigger a false positive.
 
-_PERF_NOUN = (
-    r"throughput|tput|tps|qps|rps|latency|ttft|tpot|itl|"
-    r"speed[- ]?up|speedup|memory|mem|vram|footprint|"
-    r"perf(?:ormance)?"
-)
 _BRIDGE = (
     r"improvement|improvements|gain|gains|increase|decrease|reduction|"
     r"drop|boost|regression|faster|slower|lower|higher|reduced|increased"
 )
 
-_PERF_LOOSE_RE = re.compile(
-    rf"(?is)("
-    rf"  \d+(?:\.\d+)?\s*%[^\n]{{0,80}}\b(?:{_PERF_NOUN})\b"
-    rf"  | \b(?:{_PERF_NOUN})\b[^\n]{{0,80}}\d+(?:\.\d+)?\s*%"
-    rf"  | \d+(?:\.\d+)?\s*[x×]\s*(?:speed[- ]?up|speedup|faster|slower)"
-    rf")",
-    re.VERBOSE,
-)
 
-_PERF_STRICT_RE = re.compile(
-    rf"(?ix)"
-    rf"(?:"
-    rf"  \b\d+(?:\.\d+)?\s*%\s*(?:e2e\s+|end[- ]to[- ]end\s+)?"
-    rf"  (?:{_BRIDGE}\s+(?:in\s+|to\s+|of\s+)?)?"
-    rf"  (?:in\s+|to\s+|on\s+)?(?:{_PERF_NOUN})\b"
-    rf"  | \b(?:{_PERF_NOUN})\b\s+(?:{_BRIDGE})?\s*(?:by|of|from)?\s*"
-    rf"     (?:up\s+to\s+)?\d+(?:\.\d+)?\s*%"
-    rf"  | \b\d+(?:\.\d+)?\s*[x×]\s+(?:speed[- ]?up|speedup|faster|slower)\b"
-    rf")",
+def _build_perf_loose_re(perf_noun_alt: str) -> "re.Pattern[str]":
+    return re.compile(
+        rf"(?is)("
+        rf"  \d+(?:\.\d+)?\s*%[^\n]{{0,80}}\b(?:{perf_noun_alt})\b"
+        rf"  | \b(?:{perf_noun_alt})\b[^\n]{{0,80}}\d+(?:\.\d+)?\s*%"
+        rf"  | \d+(?:\.\d+)?\s*[x×]\s*(?:speed[- ]?up|speedup|faster|slower)"
+        rf")",
+        re.VERBOSE,
+    )
+
+
+def _build_perf_strict_re(perf_noun_alt: str) -> "re.Pattern[str]":
+    return re.compile(
+        rf"(?ix)"
+        rf"(?:"
+        rf"  \b\d+(?:\.\d+)?\s*%\s*(?:e2e\s+|end[- ]to[- ]end\s+)?"
+        rf"  (?:{_BRIDGE}\s+(?:in\s+|to\s+|of\s+)?)?"
+        rf"  (?:in\s+|to\s+|on\s+)?(?:{perf_noun_alt})\b"
+        rf"  | \b(?:{perf_noun_alt})\b\s+(?:{_BRIDGE})?\s*(?:by|of|from)?\s*"
+        rf"     (?:up\s+to\s+)?\d+(?:\.\d+)?\s*%"
+        rf"  | \b\d+(?:\.\d+)?\s*[x×]\s+(?:speed[- ]?up|speedup|faster|slower)\b"
+        rf")",
+    )
+
+
+# Module-level pattern objects pre-built from the default (vllm) config.
+# `set_active_config()` swaps them when a different config is loaded.
+_DEFAULT_PERF_NOUN = (
+    r"throughput|tput|tps|qps|rps|latency|ttft|tpot|itl|"
+    r"speed[- ]?up|speedup|memory|mem|vram|footprint|"
+    r"perf(?:ormance)?"
 )
+_PERF_LOOSE_RE = _build_perf_loose_re(_DEFAULT_PERF_NOUN)
+_PERF_STRICT_RE = _build_perf_strict_re(_DEFAULT_PERF_NOUN)
+
+
+def set_active_config(filter_patterns: "Any") -> None:
+    """Replace module-level regex objects from compiled-config patterns.
+
+    `filter_patterns` is a `CompiledFilterPatterns` (perf_nouns +
+    chore_tags). We rebuild the regex objects in place so existing
+    function calls (`strict_perf_match`, etc.) pick up the new patterns
+    without needing parameter threading.
+
+    Call exactly once per process, before any filter rules run.
+    """
+    global _PERF_LOOSE_RE, _PERF_STRICT_RE, _NON_PERF_CHORE_RE
+    _PERF_LOOSE_RE = _build_perf_loose_re(filter_patterns.perf_nouns)
+    _PERF_STRICT_RE = _build_perf_strict_re(filter_patterns.perf_nouns)
+    _NON_PERF_CHORE_RE = _build_non_perf_chore_re(filter_patterns.chore_tags)
 
 _FALSE_POSITIVE_RE = re.compile(
     r"(?i)(?:cache\s+usage|kv\s+cache\s+usage|utilization|util\.?)\s*:\s*\d+(?:\.\d+)?\s*%"

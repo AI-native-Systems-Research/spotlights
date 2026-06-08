@@ -97,9 +97,9 @@
   <!-- 5. WORKLOADS -->
   <rect x="40" y="772" width="280" height="80" rx="8" class="det"/>
   <text x="60" y="798" class="title">5 · workloads</text>
-  <text x="60" y="818" class="body">Regex extraction: models / features /</text>
-  <text x="60" y="832" class="body">hardware / file categories across view.</text>
-  <text x="60" y="846" class="small">deterministic · ~10s</text>
+  <text x="60" y="818" class="body">Regex extraction: signals (models /</text>
+  <text x="60" y="832" class="body">features / hw) + runnable portfolio.</text>
+  <text x="60" y="846" class="small">deterministic · ~10s · config-driven</text>
 
   <!-- arrow to bench-spec -->
   <path d="M180 852 L180 882" class="line" marker-end="url(#arr)"/>
@@ -125,12 +125,13 @@
   <text x="400" y="800" class="small">SHA + rationale + buffer</text>
   <text x="400" y="822" class="mono">workload_analysis.json</text>
   <text x="400" y="838" class="mono">workload_summary.md</text>
-  <text x="400" y="854" class="small">model / feature / hardware signals</text>
-  <text x="400" y="876" class="mono">bench_spec.json</text>
-  <text x="400" y="892" class="mono">OBSERVABILITY_BENCH_SPEC.md</text>
-  <text x="400" y="908" class="small">contract → handed to bench module (workloads inlined §6)</text>
-  <text x="400" y="930" class="mono">run_report.{json,md}</text>
-  <text x="400" y="946" class="small">per-stage status, counts, paths</text>
+  <text x="400" y="854" class="mono">workload_portfolio.md</text>
+  <text x="400" y="870" class="small">signal tables + runnable cluster portfolio</text>
+  <text x="400" y="892" class="mono">bench_spec.json</text>
+  <text x="400" y="908" class="mono">OBSERVABILITY_BENCH_SPEC.md</text>
+  <text x="400" y="924" class="small">contract → bench module (portfolio inlined §6)</text>
+  <text x="400" y="946" class="mono">run_report.{json,md}</text>
+  <text x="400" y="962" class="small">per-stage status, counts, paths</text>
 
   <!-- ===== HANDOFF DIVIDER ===== -->
   <text x="40" y="1004" class="label">HAND OFF · WAIT FOR RawTelemetry + findings.json · THEN MATCH</text>

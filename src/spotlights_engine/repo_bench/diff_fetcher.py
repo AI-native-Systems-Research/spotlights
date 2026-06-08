@@ -116,6 +116,10 @@ def fetch_diffs(
             "fetched_at": datetime.now(timezone.utc).isoformat(),
             "bytes": len(body),
         }
+        # Persist manifest after each PR so a Ctrl+C mid-run leaves a
+        # consistent state on disk: every diff that exists has its
+        # entry in the manifest.
+        _write_manifest(diffs_dir, manifest)
         fetched += 1
         if fetched % 10 == 0:
             log.info("fetch_diffs: %d/%d", fetched + skipped, len(pr_numbers))

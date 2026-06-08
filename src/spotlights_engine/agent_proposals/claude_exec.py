@@ -78,8 +78,18 @@ def run_candidate_claude(
     wallclock_s: int,
 ) -> CandidateAgentRunResult:
     """Run one Claude session for a single candidate."""
+    # Resolve via shutil.which so Windows finds the .cmd shim. Python's
+    # subprocess on Windows doesn't follow PATHEXT for unqualified
+    # argv[0], so a bare "claude" → FileNotFoundError even when the
+    # CLI is on PATH (just as `claude.cmd`/`claude.ps1`, not `.exe`).
+    claude_path = shutil.which("claude")
+    if claude_path is None:
+        raise AgentProposalsSetupError(
+            "required CLI not on PATH: claude",
+            executable="claude",
+        )
     argv = [
-        "claude",
+        claude_path,
         "-p",
         "--output-format",
         "stream-json",

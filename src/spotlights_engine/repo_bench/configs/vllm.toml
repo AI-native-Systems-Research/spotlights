@@ -1,0 +1,283 @@
+# Repo bench config — vllm-project/vllm.
+#
+# Generic baselines (perf nouns like "throughput", "latency"; chore
+# tags like "bugfix", "ci", "doc") are inherited automatically — only
+# add what's specific to this repo here.
+
+name = "vllm"
+repo = "vllm-project/vllm"
+description = "vLLM — high-throughput LLM serving framework. MoE, FP8, multi-GPU, expert parallelism."
+
+[filter]
+# vLLM-specific perf-claim words used in PR titles/bodies that aren't
+# obvious from generic English.
+perf_nouns_extra = [
+    "tput", "tps", "qps", "rps",
+    "ttft", "tpot", "itl",
+    "memory", "mem", "vram", "footprint",
+]
+# Mostly empty — generic baselines cover the chore tags vLLM uses.
+chore_tags_extra = []
+
+# ── Workload patterns ────────────────────────────────────────────────
+# Used by:
+#   - workload_summary.md (frequency tables)
+#   - workload_portfolio.md / bench-spec §6 (clustered runnable commands)
+
+# Order matters: longer / more specific patterns come first so they
+# match before broader ones (e.g. Qwen3-30B-A3B before Qwen3-30B).
+
+[[workload.models]]
+regex = 'Qwen[23]-?\d+B-A\d+B(?:-(?:Thinking|Instruct))?(?:-2507)?(?:-FP8|-fp8|-NVFP4)?'
+family = "qwen3-moe"
+
+[[workload.models]]
+regex = 'Qwen[23]-?(?:235B|72B|32B|14B|8B|4B|1\.7B|0\.6B)(?:-FP8)?(?:-Instruct)?'
+family = "qwen-dense"
+
+[[workload.models]]
+regex = 'DeepSeek-V\d(?:\.\d)?(?:-Lite)?(?:-FP8|-NVFP4)?'
+family = "deepseek-v"
+
+[[workload.models]]
+regex = 'DeepSeek-R\d(?:-(?:Distill-)?(?:Qwen|Llama)(?:-\d+B)?)?'
+family = "deepseek-r"
+
+[[workload.models]]
+regex = 'LongCat[- ]?Flash(?:-Chat)?'
+family = "longcat-flash"
+
+[[workload.models]]
+regex = 'MiniMax-M\d(?:\.\d)?'
+family = "minimax-m"
+
+[[workload.models]]
+regex = 'Mistral[- ]?7B(?:-Instruct(?:-v\d+\.\d+)?)?'
+family = "mistral-7b"
+
+[[workload.models]]
+regex = 'Mixtral-8x(?:7B|22B)'
+family = "mixtral-8x"
+
+[[workload.models]]
+regex = 'Llama-?3(?:\.\d+)?-(?:70B|8B|3B|1B)(?:-Instruct)?'
+family = "llama-3"
+
+[[workload.models]]
+regex = 'Llama-?2-\d+B'
+family = "llama-2"
+
+[[workload.models]]
+regex = 'gpt-oss(?:-20b|-120b)?'
+family = "gpt-oss"
+
+[[workload.models]]
+regex = 'Gemma-?\d+'
+family = "gemma"
+
+[[workload.models]]
+regex = 'GLM-?4(?:\.\d+)?(?:V)?'
+family = "glm-4"
+
+[[workload.models]]
+regex = 'Whisper(?:-large(?:-v\d)?)?'
+family = "whisper"
+
+[[workload.models]]
+regex = 'Medusa'
+family = "medusa"
+
+[[workload.models]]
+regex = 'Eagle\d?'
+family = "eagle"
+
+
+# Boolean / categorical features detected anywhere in title+body.
+
+[[workload.features]]
+regex = '\benable-expert-parallel\b|enable_expert_parallel|--ep\b'
+tag = "expert_parallel"
+
+[[workload.features]]
+regex = '\benable-eplb\b|enable_eplb|EPLB'
+tag = "eplb"
+
+[[workload.features]]
+regex = '\bspec(?:ulative)?[- _]?decod'
+tag = "spec_decode"
+
+[[workload.features]]
+regex = '\basync[- _]?schedul'
+tag = "async_scheduling"
+
+[[workload.features]]
+regex = '\bchunked[- _]?prefill\b'
+tag = "chunked_prefill"
+
+[[workload.features]]
+regex = '\bprefix[- _]?cach'
+tag = "prefix_cache"
+
+[[workload.features]]
+regex = '\bcuda[- _]?graph\b'
+tag = "cuda_graph"
+
+[[workload.features]]
+regex = '\btorch\.compile\b'
+tag = "torch_compile"
+
+[[workload.features]]
+regex = '\bFP8|fp8\b'
+tag = "fp8"
+
+[[workload.features]]
+regex = '\b(?:INT4|int4|W4A16|w4a16)\b'
+tag = "int4_quant"
+
+[[workload.features]]
+regex = '\b(?:INT8|int8|W8A8|w8a8)\b'
+tag = "int8_quant"
+
+[[workload.features]]
+regex = '\bBF16|bf16\b'
+tag = "bf16"
+
+[[workload.features]]
+regex = '\bFP16|fp16\b'
+tag = "fp16"
+
+[[workload.features]]
+regex = '\bMoE\b|fused.?moe\b|mixture.?of.?experts'
+tag = "moe"
+
+[[workload.features]]
+regex = '\bMLA\b|multi.?head.?latent'
+tag = "mla"
+
+[[workload.features]]
+regex = '\bRoPE|rotary.?embed'
+tag = "rotary"
+
+[[workload.features]]
+regex = '\bRMSNorm|rms_norm'
+tag = "rmsnorm"
+
+[[workload.features]]
+regex = '\battention\b'
+tag = "attention"
+
+[[workload.features]]
+regex = '\bscheduler\b|preempt'
+tag = "scheduler"
+
+[[workload.features]]
+regex = '\bKV[- ]?cache\b|kv_cache'
+tag = "kv_cache"
+
+[[workload.features]]
+regex = '\boffload'
+tag = "offload"
+
+
+# Hardware mentions. Mostly NVIDIA + AMD GPU classes.
+
+[[workload.hardware]]
+regex = '\bH100\b|H200\b'
+tag = "nvidia-hopper"
+
+[[workload.hardware]]
+regex = '\bB200\b|B100\b|GB200\b'
+tag = "nvidia-blackwell"
+
+[[workload.hardware]]
+regex = '\bA100\b|A800\b'
+tag = "nvidia-ampere"
+
+[[workload.hardware]]
+regex = '\bL40S?\b|L4\b'
+tag = "nvidia-l4"
+
+[[workload.hardware]]
+regex = '\b(?:MI300X?|MI250X?|MI355X?)\b|\bROCm\b|\bAITER\b'
+tag = "amd"
+
+[[workload.hardware]]
+regex = '\bTPU\b|XLA'
+tag = "tpu"
+
+[[workload.hardware]]
+regex = '\bSM(?:90|100|120)\b'
+tag = "sm_arch"
+
+[[workload.hardware]]
+regex = '\bGFX(?:11|11\d\d)\b'
+tag = "gfx_arch"
+
+
+# vLLM directory layout → component category. Used to label which
+# subsystem each PR's diff touches.
+
+[[workload.file_categories]]
+regex = 'vllm/v1/spec_decode/|spec_decode\.py'
+category = "spec_decode"
+
+[[workload.file_categories]]
+regex = 'vllm/model_executor/layers/fused_moe/|fused_moe\.py'
+category = "moe_kernel"
+
+[[workload.file_categories]]
+regex = 'vllm/distributed/eplb/'
+category = "eplb"
+
+[[workload.file_categories]]
+regex = 'vllm/distributed/'
+category = "distributed_comm"
+
+[[workload.file_categories]]
+regex = 'vllm/v1/core/sched/|scheduler\.py'
+category = "scheduler"
+
+[[workload.file_categories]]
+regex = 'vllm/v1/attention/|vllm/attention/'
+category = "attention"
+
+[[workload.file_categories]]
+regex = 'vllm/model_executor/layers/quantization/'
+category = "quantization"
+
+[[workload.file_categories]]
+regex = 'vllm/v1/kv_offload/|kv_cache_manager'
+category = "kv_cache"
+
+[[workload.file_categories]]
+regex = 'vllm/compilation/|torch.compile'
+category = "torch_compile"
+
+[[workload.file_categories]]
+regex = 'vllm/model_executor/layers/(?:layernorm|rotary)'
+category = "norm_rope"
+
+[[workload.file_categories]]
+regex = 'vllm/v1/engine/'
+category = "engine_v1"
+
+[[workload.file_categories]]
+regex = 'vllm/lora/|punica'
+category = "lora"
+
+[[workload.file_categories]]
+regex = 'csrc/'
+category = "cuda_kernels"
+
+[[workload.file_categories]]
+regex = 'vllm/multimodal/|vllm/inputs/'
+category = "multimodal"
+
+[[workload.file_categories]]
+regex = 'vllm/platforms/'
+category = "platform"
+
+
+[workload_commands]
+serve_command_keyword = "vllm serve"
+bench_command_keyword = "vllm bench"

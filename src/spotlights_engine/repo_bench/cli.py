@@ -116,6 +116,10 @@ def _build_parser() -> argparse.ArgumentParser:
     rn.add_argument("--snapshot-buffer-hours", type=int, default=None,
                     help="Override the default 24h buffer between snapshot "
                     "SHA and earliest filtered PR.")
+    rn.add_argument("--config", default="vllm",
+                    help="Config name (e.g. 'vllm') or path to a TOML file. "
+                    "Drives filter perf-noun and workload-pattern lists. "
+                    "Default: 'vllm'.")
     rn.add_argument("--repo", default=aggregation.DEFAULT_REPO)
     rn.add_argument("--token", default=None)
     rn.add_argument("--refresh", action="store_true",
@@ -126,6 +130,14 @@ def _build_parser() -> argparse.ArgumentParser:
                     default="aggregate")
     rn.add_argument("--through-step", choices=list(run_module._STEP_ORDER),
                     default=run_module._DEFAULT_THROUGH)
+    rn.add_argument("--workload-llm", action="store_true",
+                    help="Run LLM workload-command extraction; produces "
+                    "concrete runnable workloads in §6 of the bench spec. "
+                    "Costs ~$0.05-0.10 per filtered PR.")
+    rn.add_argument("--workload-llm-model", default="sonnet",
+                    help="Model for the workload-command extractor.")
+    rn.add_argument("--workload-llm-top-n", type=int, default=5,
+                    help="Top-N clusters to render in the workload portfolio.")
 
     mt = sub.add_parser(
         "match",
@@ -241,6 +253,10 @@ def _cmd_run(args: argparse.Namespace) -> int:
         from_step=args.from_step, through_step=args.through_step,
         github_token=token, github_repo=args.repo,
         snapshot_buffer_hours=args.snapshot_buffer_hours,
+        workload_llm=args.workload_llm,
+        workload_llm_model=args.workload_llm_model,
+        workload_llm_top_n=args.workload_llm_top_n,
+        config=args.config,
     )
     print(f"window_id:      {handle.window_id}")
     print(f"view_id:        {handle.view_id}")
@@ -258,6 +274,9 @@ def _cmd_run(args: argparse.Namespace) -> int:
               f"{handle.snapshot.n_view} view PRs anchored)")
     if handle.workloads is not None:
         print(f"workloads:      {handle.workloads.md_path}")
+    if handle.workload_commands is not None:
+        print(f"workload cmds:  {handle.workload_commands.md_path} "
+              f"({handle.workload_commands.n_clusters} clusters)")
     if handle.bench_spec_md is not None:
         print(f"bench spec:     {handle.bench_spec_md}")
     if handle.report_md is not None:

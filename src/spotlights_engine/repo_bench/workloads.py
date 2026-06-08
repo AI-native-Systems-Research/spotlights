@@ -5,9 +5,16 @@ signals: models, parallelism flags, hardware, benchmark commands,
 quantization, hot-path category. Aggregate to surface which workload
 configurations the perf community actively measures wins against.
 
+Two outputs:
+  - Signal tables (top models/features/hardware/...) — aggregate
+    counts useful for "what's the perf landscape look like."
+  - Runnable workload portfolio — clustered (model_family + flags),
+    each cluster yielding the most-cited (serve, bench) command pair
+    extracted verbatim from PR bodies. This is the §6 spec section.
+
 Output (under `run_dir`):
-  workload_analysis.json   # full per-PR extraction
-  workload_summary.md      # human-readable top-N tables
+  workload_analysis.json   # full per-PR extraction + clusters
+  workload_summary.md      # tables + portfolio
 
 Read-only / regex-based — no LLM calls.
 """
@@ -29,6 +36,10 @@ from spotlights_engine.repo_bench.storage import (
 log = logging.getLogger(__name__)
 
 # ── Signal patterns ───────────────────────────────────────────────────
+#
+# These module-level pattern lists are pre-built from the default
+# (`vllm`) config. `set_active_config()` swaps them in place when a
+# different config is loaded — see `repo_bench/config.py`.
 
 # Model families seen across vLLM PRs. Order matters: longer / more
 # specific names come first so partial matches don't shadow them.
@@ -98,6 +109,7 @@ HARDWARE_PATTERNS = [
 ]
 
 # Benchmark commands embedded in PR bodies.
+# Single-line (used for has-a-command signal counting).
 VLLM_SERVE_RE = re.compile(
     r"vllm\s+serve\s+([\w/.\-]+)([^\n`]*)",
     re.IGNORECASE,
@@ -107,6 +119,124 @@ VLLM_BENCH_RE = re.compile(
     re.IGNORECASE,
 )
 LM_EVAL_RE = re.compile(r"lm_eval\s+([^\n`]*)", re.IGNORECASE)
+
+
+# Multi-line capture (for the runnable command extractor). Captures
+# until a blank line, the next code-fence boundary, or another command
+# start. Tolerates POSIX `\<newline>` continuations.
+_MULTILINE_SERVE_RE = re.compile(
+    r"""(?ix)
+    (vllm \s+ serve \s+
+     (?: \\\n | [^\n`] )+
+     (?: \n \s* (?: --|-[a-z]) [^\n`]* )*
+    )
+    """,
+    re.VERBOSE,
+)
+_MULTILINE_BENCH_RE = re.compile(
+    r"""(?ix)
+    (vllm \s+ bench \s+ (?: serve | throughput | latency ) \s+
+     (?: \\\n | [^\n`] )+
+     (?: \n \s* (?: --|-[a-z]) [^\n`]* )*
+    )
+    """,
+    re.VERBOSE,
+)
+
+
+# Hardware mentioned near a command (within ±200 chars). Order from
+# most specific to least so the captured token is informative.
+_HARDWARE_NEAR_RE = re.compile(
+    r"\b(\d+\s*[x×]\s*(?:H100|H200|A100|MI300X?|MI250X?|MI355X?|L40S?|B200|GB200))"
+    r"|\b(H100|H200|A100|MI300X?|MI250X?|L40S?|B200|GB200)\b",
+    re.IGNORECASE,
+)
+
+
+def _normalize_command(cmd: str) -> str:
+    r"""Collapse `\<newline>` continuations and excess whitespace."""
+    s = cmd.replace("\\\n", " ")
+    s = re.sub(r"\s+", " ", s)
+    return s.strip()
+
+
+def _extract_model_from_serve(serve_cmd: str) -> str:
+    """First non-flag, non-keyword token after `vllm serve` is the model.
+    Captures `$VAR` shell references too — caller may resolve via the body.
+    """
+    m = re.search(
+        r"vllm\s+serve\s+(?!--|-\w)(\$?\w[\w./\-]*)",
+        serve_cmd, re.IGNORECASE,
+    )
+    return m.group(1) if m else ""
+
+
+def _resolve_shell_var(name: str, body: str) -> str:
+    """If `name` is `$FOO` or `${FOO}`, look for an assignment in `body`
+    (`FOO=value` or `export FOO=value`) and return the value. Otherwise
+    return `name` unchanged.
+    """
+    if not name.startswith("$"):
+        return name
+    raw = name[1:]
+    if raw.startswith("{") and raw.endswith("}"):
+        raw = raw[1:-1]
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", raw):
+        return name
+    # Match: optional `export ` + NAME = "value" / 'value' / unquoted value.
+    # Tolerates leading backtick (single-backtick inline code).
+    m = re.search(
+        rf"[`\s\n](?:export\s+)?{re.escape(raw)}\s*=\s*(?:\"([^\"\n]+)\"|'([^'\n]+)'|([^\s`\n]+))",
+        body,
+    )
+    if not m:
+        return name
+    return m.group(1) or m.group(2) or m.group(3) or name
+
+
+def _hardware_near(body: str, span: tuple[int, int]) -> str:
+    """Find a hardware mention in the ±200-char window around `span`."""
+    start = max(0, span[0] - 200)
+    end = min(len(body), span[1] + 200)
+    window = body[start:end]
+    m = _HARDWARE_NEAR_RE.search(window)
+    if not m:
+        return ""
+    return (m.group(1) or m.group(2) or "").strip()
+
+
+def extract_runnable_commands(body: str) -> list[dict]:
+    """Pull (serve_command, bench_command, model, hardware) tuples
+    from a PR body. Each runnable serve produces one entry; the next
+    `vllm bench` after it within ~1500 chars is paired in.
+    """
+    if not body:
+        return []
+    out: list[dict] = []
+    for m in _MULTILINE_SERVE_RE.finditer(body):
+        raw_serve = m.group(1)
+        serve_cmd = _normalize_command(raw_serve)
+        model_token = _extract_model_from_serve(serve_cmd)
+        if not model_token:
+            continue
+        model = _resolve_shell_var(model_token, body)
+        if model.startswith("$"):
+            # Couldn't resolve — drop this entry; cluster needs a real name.
+            continue
+        # Look for a vllm-bench within the next ~1500 chars after serve start.
+        slice_end = min(len(body), m.end() + 1500)
+        bench_cmd = ""
+        bm = _MULTILINE_BENCH_RE.search(body[m.start():slice_end])
+        if bm:
+            bench_cmd = _normalize_command(bm.group(1))
+        hardware = _hardware_near(body, (m.start(), m.end()))
+        out.append({
+            "model": model,
+            "serve_command": serve_cmd,
+            "bench_command": bench_cmd,
+            "hardware": hardware,
+        })
+    return out
 
 
 @dataclass
@@ -122,6 +252,9 @@ class PRSignals:
     bench_cmds: list[str] = field(default_factory=list)
     has_benchmark_table: bool = False
     files_touched_categories: set[str] = field(default_factory=set)
+    # Multi-line runnable command extractions paired by proximity.
+    # Each entry: {model, serve_command, bench_command, hardware}.
+    runnable_commands: list[dict] = field(default_factory=list)
 
 
 # ── File-path → component category ───────────────────────────────────
@@ -144,6 +277,30 @@ FILE_CATEGORY_PATTERNS = [
     (r"vllm/multimodal/|vllm/inputs/", "multimodal"),
     (r"vllm/platforms/", "platform"),
 ]
+
+
+def set_active_config(workload_patterns: "Any") -> None:
+    """Replace module-level pattern lists from compiled-config patterns.
+
+    `workload_patterns` is a `CompiledWorkloadPatterns`. Mutates
+    `MODEL_PATTERNS`, `FEATURE_PATTERNS`, `HARDWARE_PATTERNS`,
+    `FILE_CATEGORY_PATTERNS`, `_MODEL_FAMILY_PATTERNS_RUN`,
+    `_FEATURE_PATTERNS_RUN` in place so existing call sites pick up
+    the new patterns without parameter threading.
+
+    Call exactly once per process, before any signal extraction runs.
+    """
+    global MODEL_PATTERNS, FEATURE_PATTERNS, HARDWARE_PATTERNS
+    global FILE_CATEGORY_PATTERNS
+    global _MODEL_FAMILY_PATTERNS_RUN, _FEATURE_PATTERNS_RUN
+    MODEL_PATTERNS = list(workload_patterns.models)
+    FEATURE_PATTERNS = list(workload_patterns.features)
+    HARDWARE_PATTERNS = list(workload_patterns.hardware)
+    FILE_CATEGORY_PATTERNS = list(workload_patterns.file_categories)
+    # Runnable-portfolio clustering reuses the same model + feature
+    # pattern sets — keep them in sync.
+    _MODEL_FAMILY_PATTERNS_RUN = list(workload_patterns.models)
+    _FEATURE_PATTERNS_RUN = list(workload_patterns.features)
 
 
 def _categorize_file(path: str) -> str | None:
@@ -194,6 +351,10 @@ def extract_signals(pr: dict, diff_text: str | None) -> PRSignals:
     for m in VLLM_BENCH_RE.finditer(blob):
         cmd = (m.group(0) or "")[:300]
         s.bench_cmds.append(cmd.strip())
+
+    # Multi-line runnable extraction over the body only (titles never
+    # carry full commands).
+    s.runnable_commands = extract_runnable_commands(pr.get("body", "") or "")
 
     # Has a "Serving Benchmark Result" table or similar?
     if re.search(r"Serving Benchmark Result|Benchmark duration|Output token throughput|Request throughput",
@@ -323,6 +484,159 @@ def synthesize_workload_portfolio(signals: list[PRSignals], agg: dict) -> list[d
     return selected
 
 
+# ── Runnable workload portfolio (regex-based) ────────────────────────
+
+
+_MODEL_FAMILY_PATTERNS_RUN = [
+    (r"Qwen[23]-?\d+B-A\d+B", "qwen3-moe"),
+    (r"Qwen[23]-?\d+B", "qwen-dense"),
+    (r"DeepSeek-V\d", "deepseek-v"),
+    (r"DeepSeek-R\d", "deepseek-r"),
+    (r"Llama-?\d+", "llama"),
+    (r"Mixtral-\d+x\d+B", "mixtral"),
+    (r"Mistral-?\d+B", "mistral"),
+    (r"gpt-oss", "gpt-oss"),
+    (r"GLM-?\d+", "glm"),
+    (r"MiniMax-M\d+", "minimax"),
+]
+
+_FEATURE_PATTERNS_RUN = [
+    (r"\benable-eplb\b|\benable_eplb\b", "eplb"),
+    (r"\benable-expert-parallel\b|\benable_expert_parallel\b|--ep\b", "ep"),
+    (r"--speculative-model|\beagle\b|\bmedusa\b", "spec-decode"),
+    (r"\benable-prefix-caching\b", "prefix-cache"),
+    (r"--cuda-graph", "cuda-graph"),
+    (r"\bFP8\b|--quantization fp8", "fp8"),
+    (r"-tp[ =]\d", "tp"),
+    (r"-pp[ =]\d", "pp"),
+    (r"-dp[ =]\d", "dp"),
+]
+
+
+def _runnable_model_family(model: str) -> str:
+    for pat, fam in _MODEL_FAMILY_PATTERNS_RUN:
+        if re.search(pat, model, re.IGNORECASE):
+            return fam
+    return model.split("/")[-1].lower().split("-")[0] or "other"
+
+
+def _runnable_features(serve_cmd: str) -> tuple[str, ...]:
+    feats: list[str] = []
+    for pat, name in _FEATURE_PATTERNS_RUN:
+        if re.search(pat, serve_cmd, re.IGNORECASE):
+            feats.append(name)
+    return tuple(sorted(feats))
+
+
+def synthesize_runnable_portfolio(
+    signals: list[PRSignals], top_n: int = 5
+) -> list[dict]:
+    """Cluster runnable commands by (model_family, features); pick the
+    most-cited (model, serve_command) skeleton per cluster.
+
+    A cluster surfaces only if ≥1 PR contributed runnable commands to
+    it. Output is sorted by PR-count desc and capped at `top_n`.
+    """
+    buckets: dict[tuple[str, tuple[str, ...]], list[tuple[int, dict]]] = defaultdict(list)
+    for s in signals:
+        for cmd in s.runnable_commands:
+            fam = _runnable_model_family(cmd["model"])
+            feats = _runnable_features(cmd["serve_command"])
+            buckets[(fam, feats)].append((s.pr_number, cmd))
+
+    clusters: list[dict] = []
+    for (fam, feats), entries in buckets.items():
+        prs = sorted({pr_n for pr_n, _ in entries})
+        # Most-cited model
+        model_counter = Counter(cmd["model"] for _, cmd in entries)
+        top_model, _ = model_counter.most_common(1)[0]
+        # Most-cited serve command for that model
+        cmd_counter = Counter(
+            cmd["serve_command"] for _, cmd in entries
+            if cmd["model"] == top_model
+        )
+        top_serve, _ = cmd_counter.most_common(1)[0]
+        # Pair a bench command that travels with the top serve (if any)
+        bench_options = [
+            cmd["bench_command"] for _, cmd in entries
+            if cmd["serve_command"] == top_serve and cmd["bench_command"]
+        ]
+        top_bench = Counter(bench_options).most_common(1)[0][0] if bench_options else ""
+        # Most-cited hardware tag
+        hw_options = [
+            cmd["hardware"] for _, cmd in entries
+            if cmd["serve_command"] == top_serve and cmd["hardware"]
+        ]
+        top_hw = Counter(hw_options).most_common(1)[0][0] if hw_options else ""
+
+        cluster_id = f"{fam} + {' + '.join(feats) if feats else 'no-flags'}"
+        clusters.append({
+            "cluster_id": cluster_id,
+            "model_family": fam,
+            "features": list(feats),
+            "n_prs": len(prs),
+            "pr_numbers": prs,
+            "canonical_model": top_model,
+            "canonical_serve_command": top_serve,
+            "canonical_bench_command": top_bench,
+            "canonical_hardware": top_hw,
+        })
+
+    clusters.sort(key=lambda c: -c["n_prs"])
+    return clusters[:top_n]
+
+
+def _substitute_model(cmd: str, model: str) -> str:
+    r"""Replace `$MODEL` / `${MODEL}` placeholders with the resolved model.
+
+    The per-PR resolver substitutes `$MODEL` into the `model` field but
+    leaves the original `serve_command` string verbatim. Clustering
+    counts identical commands together, which is correct for clustering
+    but wrong for rendering — readers see `vllm serve $MODEL ...` and
+    don't know what to substitute. Do it here.
+
+    Conservative: only substitutes the `MODEL` variable name, since
+    that's the convention vLLM authors use. Leaves other shell-vars
+    alone (we'd guess wrong on `$PORT`, `$TP`, etc.).
+    """
+    if not model:
+        return cmd
+    return re.sub(r"\$\{?MODEL\}?", model, cmd)
+
+
+def render_runnable_portfolio_md(clusters: list[dict]) -> str:
+    """Render the regex-extracted runnable portfolio as the §6 spec section."""
+    lines: list[str] = []
+    if not clusters:
+        return (
+            "_(No runnable benchmark commands extracted from PR bodies. "
+            "Inspect filtered PR bodies directly for workload context.)_\n"
+        )
+    for i, c in enumerate(clusters, 1):
+        lines.append(f"### W{i} — {c['cluster_id']}\n")
+        n = c["n_prs"]
+        hw = c.get("canonical_hardware") or ""
+        meta = f"**Covers {n} PR{'s' if n != 1 else ''}.**"
+        if hw:
+            meta += f" Hardware: {hw}."
+        lines.append(meta + "\n")
+        model = c.get("canonical_model") or ""
+        serve = _substitute_model(c["canonical_serve_command"].strip(), model)
+        lines.append("```bash")
+        lines.append(serve)
+        if c.get("canonical_bench_command"):
+            bench = _substitute_model(c["canonical_bench_command"].strip(), model)
+            lines.append("")
+            lines.append(bench)
+        lines.append("```\n")
+        prs = c["pr_numbers"]
+        sample = ", ".join(f"#{p}" for p in prs[:10])
+        if len(prs) > 10:
+            sample += f" + {len(prs) - 10} more"
+        lines.append(f"_Source PRs: {sample}_\n")
+    return "\n".join(lines)
+
+
 # ── Markdown render ───────────────────────────────────────────────────
 
 
@@ -388,6 +702,9 @@ class WorkloadAnalysisHandle:
     md_path: Path
     n_prs: int
     portfolio_size: int
+    runnable_portfolio_md_path: Path
+    n_runnable_clusters: int
+    runnable_portfolio_md: str  # for inlining into bench-spec §6
 
 
 def analyze(
@@ -396,6 +713,7 @@ def analyze(
     view_path: Path,
     run_dir: Path,
     data_root_override: Path | None = None,
+    runnable_top_n: int = 5,
 ) -> WorkloadAnalysisHandle:
     """Run workload analysis over a view; emit JSON + MD into `run_dir`.
 
@@ -405,8 +723,9 @@ def analyze(
       `<data_root>/raw/<window>/diffs/<pr>.diff`
 
     Writes:
-      `<run_dir>/workload_analysis.json`
-      `<run_dir>/workload_summary.md`
+      `<run_dir>/workload_analysis.json`     # full per-PR + clusters
+      `<run_dir>/workload_summary.md`        # tables (signals)
+      `<run_dir>/workload_portfolio.md`      # runnable clusters (§6)
     """
     cache_root = data_root_override or data_root()
     raw_path = raw_dir(window_id, root=cache_root) / "prs.jsonl"
@@ -444,11 +763,14 @@ def analyze(
 
     agg = aggregate(signals)
     portfolio = synthesize_workload_portfolio(signals, agg)
+    runnable_clusters = synthesize_runnable_portfolio(signals, top_n=runnable_top_n)
+    runnable_md = render_runnable_portfolio_md(runnable_clusters)
 
     full = {
         "n_prs": len(signals),
         "aggregate": agg,
         "portfolio": portfolio,
+        "runnable_clusters": runnable_clusters,
         "per_pr": [
             {
                 "pr_number": s.pr_number,
@@ -460,6 +782,7 @@ def analyze(
                 "hardware": sorted(s.hardware),
                 "serve_cmds": s.serve_cmds[:3],
                 "bench_cmds": s.bench_cmds[:3],
+                "runnable_commands": s.runnable_commands,
                 "has_benchmark_table": s.has_benchmark_table,
                 "files_touched_categories": sorted(s.files_touched_categories),
             }
@@ -470,12 +793,14 @@ def analyze(
     run_dir.mkdir(parents=True, exist_ok=True)
     json_path = run_dir / "workload_analysis.json"
     md_path = run_dir / "workload_summary.md"
+    runnable_md_path = run_dir / "workload_portfolio.md"
     json_path.write_text(json.dumps(full, indent=2), encoding="utf-8")
     md_path.write_text(render_summary(agg, portfolio, len(signals)), encoding="utf-8")
+    runnable_md_path.write_text(runnable_md, encoding="utf-8")
 
     log.info(
-        "workloads: analyzed %d PRs, %d-entry portfolio → %s",
-        len(signals), len(portfolio), json_path,
+        "workloads: analyzed %d PRs, %d-entry portfolio, %d runnable clusters → %s",
+        len(signals), len(portfolio), len(runnable_clusters), json_path,
     )
 
     return WorkloadAnalysisHandle(
@@ -483,6 +808,9 @@ def analyze(
         md_path=md_path,
         n_prs=len(signals),
         portfolio_size=len(portfolio),
+        runnable_portfolio_md_path=runnable_md_path,
+        n_runnable_clusters=len(runnable_clusters),
+        runnable_portfolio_md=runnable_md,
     )
 
 
@@ -490,6 +818,9 @@ __all__ = [
     "WorkloadAnalysisHandle",
     "analyze",
     "extract_signals",
+    "extract_runnable_commands",
     "aggregate",
     "synthesize_workload_portfolio",
+    "synthesize_runnable_portfolio",
+    "render_runnable_portfolio_md",
 ]

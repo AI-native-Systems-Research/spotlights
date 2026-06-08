@@ -83,7 +83,7 @@ repo-bench match \
 | 2 | `filter` | Predicates + ranker over raw → ranked subset | <1s, deterministic | `<run_dir>/view/prs.jsonl` |
 | 3 | `fetch-diffs` | Per-PR unified diffs from GitHub for the view | ~3 min for 200 PRs | `data/repo_bench/raw/<window>/diffs/<n>.diff` |
 | 4 | `snapshot` | Deterministic: pick a target SHA ≥ buffer before earliest filtered PR | <1s | `<run_dir>/snapshot.json` |
-| 5 | `workloads` | Regex extraction of model / feature / hardware / file-category signals across the view | <10s | `<run_dir>/workload_analysis.json` + `workload_summary.md` |
+| 5 | `workloads` | Regex extraction of signals + runnable command portfolio | <10s | `<run_dir>/{workload_analysis.json, workload_summary.md, workload_portfolio.md}` |
 | 6 | `bench-spec` | Render the cross-module spec for the observability bench, with workload signals inlined | <1s | `<run_dir>/{bench_spec.json, OBSERVABILITY_BENCH_SPEC.md}` |
 
 Every step's existing cache or skip-if-exists check decides whether
@@ -154,8 +154,9 @@ runs/repo_bench/bench-<window>__<view>__<UTC>/
     prs.jsonl                    # filtered + ranked PRs
     manifest.json                # rule specs, counts, derived_at
   snapshot.json                  # SHA pin + rationale
-  workload_analysis.json         # full per-PR signals
-  workload_summary.md            # top-N tables (also inlined into bench-spec)
+  workload_analysis.json         # full per-PR signals + clusters
+  workload_summary.md            # aggregate signal tables (top models / features / ...)
+  workload_portfolio.md          # runnable portfolio (inlined into bench-spec §6)
   bench_spec.json                # canonical cross-module contract
   OBSERVABILITY_BENCH_SPEC.md    # rendered spec, includes workload signals §6
   run_report.json                # per-stage status, counts, paths
@@ -208,21 +209,55 @@ filtered view.
 ## Workload signals
 
 The workloads stage reads filtered PRs' titles + bodies + diffs and
-extracts:
+extracts two views of the same data:
 
-- **Models** (regex over known model families: Qwen, DeepSeek, Llama, etc.)
-- **Features** (FP8, MoE, expert-parallel, spec-decode, prefix-cache, ...)
-- **Hardware** (Hopper, Blackwell, AMD, etc.)
-- **File categories touched** (attention, scheduler, kernels, ...)
-- **Parallelism axes** (tp, pp, dp, max_num_seqs)
-- **Benchmark commands** (extracted `vllm serve` / `vllm bench`-style commands)
+**1. Aggregate signal tables** (`workload_summary.md`):
+- Models (regex over configured model families)
+- Features (e.g. FP8, MoE, expert-parallel, spec-decode, prefix-cache)
+- Hardware (Hopper, Blackwell, AMD, etc.)
+- File categories touched
+- Parallelism axes (tp, pp, dp, max_num_seqs)
 
-Aggregate counts + a greedy AND-cover portfolio (top model+feature
-intersections) get rendered into `workload_summary.md` and inlined
-into `OBSERVABILITY_BENCH_SPEC.md` as §6. Repo-agnostic patterns at
-the regex level — repos that don't match the model/feature
-vocabulary still get the file-category and benchmark-command tables;
-just with sparser counts.
+**2. Runnable workload portfolio** (`workload_portfolio.md`,
+inlined into `OBSERVABILITY_BENCH_SPEC.md` as §6):
+- Multi-line `serve_command` + `bench_command` blocks extracted
+  verbatim from PR bodies (with `\<newline>` continuations resolved
+  and `$MODEL` shell-vars substituted)
+- Clustered by (model family, feature flags); top-N by PR coverage
+- Hardware tag picked from prose near the command
+
+Both views are regex-only — no LLM calls. An opt-in
+`--workload-llm` flag swaps in an LLM-based extractor for the
+runnable portfolio when regex isn't enough; default-off because
+regex covers the common case for ~$0.
+
+## Config
+
+All repo-specific patterns (model families, feature flags, hardware
+tags, file→category mappings, perf nouns, chore tags) live in TOML
+configs under
+[`src/spotlights_engine/repo_bench/configs/`](../../src/spotlights_engine/repo_bench/configs/):
+
+```
+configs/
+  vllm.toml          # ships in repo, the default
+  <your-repo>.toml   # add for any new target
+```
+
+Pass `--config <name-or-path>` to the CLI:
+
+```
+repo-bench run --config vllm ...                 # default
+repo-bench run --config /path/to/postgres.toml ...
+```
+
+Each TOML file extends a generic baseline (perf nouns like
+`throughput`, `latency`, `improvement`; chore tags like `bugfix`,
+`fix`, `ci`, `doc`). Repo-specific entries add to the baseline; you
+don't redeclare what's already generic.
+
+The schema is in
+[`src/spotlights_engine/repo_bench/config.py`](../../src/spotlights_engine/repo_bench/config.py).
 
 ## Costs, roughly
 

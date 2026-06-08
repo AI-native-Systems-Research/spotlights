@@ -48,8 +48,16 @@ from spotlights_engine.repo_bench import (
     filtering,
     report,
     snapshot as snapshot_mod,
+    workload_commands,
     workloads,
 )
+from spotlights_engine.repo_bench.config import (
+    RepoBenchConfig,
+    compile_filter_patterns,
+    compile_workload_patterns,
+    load_config,
+)
+from spotlights_engine.repo_bench.filtering import heuristics as _heuristics
 from spotlights_engine.repo_bench.aggregation import ScrapeHandle
 from spotlights_engine.repo_bench.diff_fetcher import DiffFetchHandle
 from spotlights_engine.repo_bench.filtering.derive import ViewHandle
@@ -59,6 +67,7 @@ from spotlights_engine.repo_bench.storage import (
     runs_root,
     window_id_for,
 )
+from spotlights_engine.repo_bench.workload_commands import WorkloadCommandsHandle
 from spotlights_engine.repo_bench.workloads import WorkloadAnalysisHandle
 
 log = logging.getLogger(__name__)
@@ -86,6 +95,7 @@ class BenchmarkHandle:
     fetch_diffs: DiffFetchHandle | None
     snapshot: SnapshotPin | None
     workloads: WorkloadAnalysisHandle | None
+    workload_commands: WorkloadCommandsHandle | None
     bench_spec_json: Path | None
     bench_spec_md: Path | None
     report_json: Path | None
@@ -111,6 +121,10 @@ def benchmark(
     data_root_override: Path | None = None,
     runs_root_override: Path | None = None,
     snapshot_buffer_hours: int | None = None,
+    workload_llm: bool = False,
+    workload_llm_model: str = "sonnet",
+    workload_llm_top_n: int = 5,
+    config: str | RepoBenchConfig = "vllm",
 ) -> BenchmarkHandle:
     """Run the benchmark pipeline end-to-end.
 
@@ -129,6 +143,17 @@ def benchmark(
     _validate_step_range(from_step, through_step)
     started_at = datetime.now(timezone.utc)
     stages: list[StageReport] = []
+
+    # Resolve config first; it drives filter + workload patterns.
+    cfg = config if isinstance(config, RepoBenchConfig) else load_config(config)
+    _heuristics.set_active_config(compile_filter_patterns(cfg))
+    workloads.set_active_config(compile_workload_patterns(cfg))
+    log.info(
+        "benchmark: config=%s (%d models, %d features, %d hardware, %d file_cats)",
+        cfg.name,
+        len(cfg.workload.models), len(cfg.workload.features),
+        len(cfg.workload.hardware), len(cfg.workload.file_categories),
+    )
 
     window_id = window_id_for(window_start, window_end)
     view_id_pre = filtering.view_id_for(rules)
@@ -279,6 +304,29 @@ def benchmark(
         if through_step == "workloads":
             return _finalize(handle, started_at, stages, window_id, run_id, run_dir)
 
+        # ── 5b. workload_commands (opt-in, LLM) ──────────────────────
+        if workload_llm and _step_in_range("workloads", from_step, through_step):
+            t0 = time.monotonic()
+            handle.workload_commands = workload_commands.extract(
+                window_id=window_id,
+                view_path=view_path,
+                run_dir=run_dir,
+                judge_model=workload_llm_model,
+                data_root_override=data_root_override,
+                top_n=workload_llm_top_n,
+            )
+            stages.append(_stage(
+                "workloads", "done",
+                f"LLM extracted commands from {handle.workload_commands.n_prs_extracted} PRs, "
+                f"{handle.workload_commands.n_clusters} clusters",
+                {
+                    "n_prs_extracted": handle.workload_commands.n_prs_extracted,
+                    "n_prs_with_commands": handle.workload_commands.n_prs_with_commands,
+                    "n_clusters": handle.workload_commands.n_clusters,
+                },
+                t0,
+            ))
+
         # ── 6. bench-spec ────────────────────────────────────────────
         if _step_in_range("bench-spec", from_step, through_step):
             if handle.snapshot is None:
@@ -288,16 +336,23 @@ def benchmark(
             t0 = time.monotonic()
             run_dir.mkdir(parents=True, exist_ok=True)
             workload_summary_md: str | None = None
+            workload_portfolio_md: str | None = None
             if handle.workloads is not None and handle.workloads.md_path.exists():
                 workload_summary_md = handle.workloads.md_path.read_text(
                     encoding="utf-8"
                 )
+                # Default §6 source: regex-extracted runnable portfolio.
+                workload_portfolio_md = handle.workloads.runnable_portfolio_md
+            # Opt-in: LLM-extracted portfolio overrides regex when present.
+            if handle.workload_commands is not None:
+                workload_portfolio_md = handle.workload_commands.portfolio_md
             handle.bench_spec_json, handle.bench_spec_md = bench_spec.write_spec(
                 snapshot=handle.snapshot,
                 reference_bundle_name=reference_bundle_name,
                 run_dir=run_dir,
                 config_notes=bench_spec_config_notes,
                 workload_summary_md=workload_summary_md,
+                workload_commands_md=workload_portfolio_md,
             )
             stages.append(_stage(
                 "bench-spec", "done",
@@ -336,6 +391,7 @@ class _Handle:
     filter: ViewHandle | None = None
     fetch_diffs: DiffFetchHandle | None = None
     snapshot: SnapshotPin | None = None
+    workload_commands: WorkloadCommandsHandle | None = None
     workloads: WorkloadAnalysisHandle | None = None
     bench_spec_json: Path | None = None
     bench_spec_md: Path | None = None
@@ -390,6 +446,7 @@ def _finalize(
         fetch_diffs=handle.fetch_diffs,
         snapshot=handle.snapshot,
         workloads=handle.workloads,
+        workload_commands=handle.workload_commands,
         bench_spec_json=handle.bench_spec_json,
         bench_spec_md=handle.bench_spec_md,
         report_json=report_json,
