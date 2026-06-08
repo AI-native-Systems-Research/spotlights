@@ -436,3 +436,4 @@ Steps are sequentially dependent but each is independently deliverable:
 6. **Caching** (Step 6) — Wraps the orchestrator.
 7. **CLI integration** (Step 7) — Thin layer on top of orchestrator.
 8. **`prepare()` wiring** (Step 8) — Connects discovery to the public API.
+9. **Unit tests** (Step 9) — Create the unit and integration tests described in Section 9. The validation module currently has no dedicated test suite; only the kvoffload example script exists.
