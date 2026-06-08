@@ -1,0 +1,192 @@
+{
+  "generated_at": "2026-06-01T12:00:00Z",
+  "target_version": "40651c020772b80f9ca80272aebe749fe01cd38a",
+  "version_gate": "v0.18.0 (2026-03-19)",
+  "queries_run": [
+    "gh search issues --repo vllm-project/vllm: 'kv cache offload' (type=issue,pr, limit=50)",
+    "gh search issues --repo vllm-project/vllm: 'cpu offload swap' (type=issue,pr, limit=30)",
+    "gh search issues --repo vllm-project/vllm: 'prefix cache evict' (type=issue,pr, limit=30)",
+    "GitHub REST API: GET /search/issues?q=repo:vllm-project/vllm+kv+cache+offload+in:title,body&per_page=30",
+    "GitHub REST API: GET /search/issues?q=repo:vllm-project/vllm+cpu+offload+swap+in:title,body&per_page=30",
+    "GitHub REST API: GET /search/issues?q=repo:vllm-project/vllm+prefix+cache+evict+in:title,body&per_page=30",
+    "GitHub REST API: GET /search/issues?q=repo:vllm-project/vllm+kv_connector+offload+in:title,body&per_page=30&sort=updated",
+    "GitHub REST API: GET /search/issues?q=repo:vllm-project/vllm+SimpleCPUOffload+in:title,body&per_page=30&sort=updated",
+    "GitHub REST API: GET /search/issues?q=repo:vllm-project/vllm+OffloadingConnector+in:title,body&per_page=30&sort=updated",
+    "GitHub REST API: GET /search/issues?q=repo:vllm-project/vllm+swap_blocks+kv+in:title,body&per_page=20&sort=updated",
+    "GitHub REST API: GET /search/issues?q=repo:vllm-project/vllm+cpu_kv_cache+OR+kv_cache_dtype+offload+in:title,body&per_page=20&sort=updated",
+    "GitHub REST API: GET /repos/vllm-project/vllm/issues/42959 (body detail)",
+    "GitHub REST API: GET /repos/vllm-project/vllm/issues/35507 (body detail)",
+    "GitHub REST API: GET /repos/vllm-project/vllm/issues/31210 (body detail)",
+    "GitHub REST API: GET /repos/vllm-project/vllm/issues/36636 (body detail)",
+    "GitHub REST API: GET /repos/vllm-project/vllm/issues/41777 (body detail)",
+    "GitHub REST API: GET /repos/vllm-project/vllm/issues/41549 (body detail)",
+    "GitHub REST API: GET /repos/vllm-project/vllm/issues/41228 (body detail)",
+    "GitHub REST API: GET /repos/vllm-project/vllm/issues/42612 (body detail)",
+    "GitHub REST API: GET /repos/vllm-project/vllm/issues/41515 (body detail)",
+    "GitHub REST API: GET /repos/vllm-project/vllm/issues/43946 (body detail)",
+    "GitHub REST API: GET /repos/vllm-project/vllm/issues/40259 (body detail)",
+    "GitHub REST API: GET /repos/vllm-project/vllm/issues/43689 (body detail)",
+    "GitHub REST API: GET /repos/vllm-project/vllm/issues/31210/comments (trustworthiness check)",
+    "GitHub REST API: GET /repos/vllm-project/vllm/issues/35507/comments (trustworthiness check)",
+    "GitHub REST API: GET /repos/vllm-project/vllm/issues/41515/comments (trustworthiness check)",
+    "GitHub REST API: GET /repos/vllm-project/vllm/issues/40259/comments (trustworthiness check)"
+  ],
+  "issues_inspected": [
+    {"number": 42371, "url": "https://github.com/vllm-project/vllm/issues/42371", "title": "[Bug]: SimpleCPUOffloadConnector: requests stuck in Waiting (Running=0) under sustained load / CPU offload", "state": "open"},
+    {"number": 42085, "url": "https://github.com/vllm-project/vllm/issues/42085", "title": "[Bug]: SimpleCPUOffloadConnector + Hybrid KV Cache Manager: GPU block pool exhaustion (popleft_n assert) on second long-context request", "state": "open"},
+    {"number": 42571, "url": "https://github.com/vllm-project/vllm/issues/42571", "title": "[Bug]: KV Block double free when using eager SimpleCPUOffloading + Sliding window attention", "state": "open"},
+    {"number": 39491, "url": "https://github.com/vllm-project/vllm/issues/39491", "title": "[Bug]: OffloadingConnector GPU->CPU KV offload crashes with cuMemcpyBatchAsync failed at index 1 (error 1 / CUDA_ERROR_INVALID_VALUE)", "state": "closed"},
+    {"number": 42632, "url": "https://github.com/vllm-project/vllm/issues/42632", "title": "[Feature]: Async cudaHostRegister in SimpleCPUOffloadConnector to unblock startup", "state": "open"},
+    {"number": 42948, "url": "https://github.com/vllm-project/vllm/issues/42948", "title": "[Bug]: Prefix-cache 0% hit on re-sent request — DeepSeek-V4-Flash hybrid groups", "state": "open"},
+    {"number": 33689, "url": "https://github.com/vllm-project/vllm/issues/33689", "title": "[RFC]: KV Offloading Roadmap", "state": "open"},
+    {"number": 32604, "url": "https://github.com/vllm-project/vllm/issues/32604", "title": "[Bug]: LMCache CPU kv offload cause decode speed degrade", "state": "closed"},
+    {"number": 43093, "url": "https://github.com/vllm-project/vllm/issues/43093", "title": "[Bug]: Fix two crashes that prevent DeepSeek-V4-Flash + OffloadingConnector", "state": "open"},
+    {"number": 42625, "url": "https://github.com/vllm-project/vllm/issues/42625", "title": "[Bug]: LMCache cache miss", "state": "open"},
+    {"number": 42587, "url": "https://github.com/vllm-project/vllm/issues/42587", "title": "[Bug]: vllm serve crashes at engine init for several --kv-cache-dtype values with OffloadingConnector", "state": "open"},
+    {"number": 42432, "url": "https://github.com/vllm-project/vllm/issues/42432", "title": "[Bug]: deepseek v4 failed to work on R6000 GPU", "state": "open"},
+    {"number": 42185, "url": "https://github.com/vllm-project/vllm/issues/42185", "title": "[RFC]: Cache-affinity-aware request ordering for the V1 scheduler", "state": "open"},
+    {"number": 31210, "url": "https://github.com/vllm-project/vllm/issues/31210", "title": "[Bug]: Wrong Generation Under High Concurrency When Using KVCache CPU Offload (vLLM 0.13.0)", "state": "closed"},
+    {"number": 35507, "url": "https://github.com/vllm-project/vllm/issues/35507", "title": "[Bug]: AssertionError when using OffloadingConnector: assert len(req.block_hashes) >= num_gpu_blocks", "state": "open"},
+    {"number": 41515, "url": "https://github.com/vllm-project/vllm/issues/41515", "title": "[Bug]: [kv_offload+HMA] Fails on chat subsequent request", "state": "open"},
+    {"number": 40259, "url": "https://github.com/vllm-project/vllm/issues/40259", "title": "[Bug]: v0.19.1 Crash with CUDA invalid argument / Segfault when using KV Offloading + EAGLE3 + Expert Parallel (on 8x H20 141GB)", "state": "open"},
+    {"number": 42348, "url": "https://github.com/vllm-project/vllm/issues/42348", "title": "[Bug]: Gemma 4 KVCache CPU offloading broken", "state": "open"},
+    {"number": 23087, "url": "https://github.com/vllm-project/vllm/issues/23087", "title": "[Bug]: How to Offload KV Cache to CPU without initializing in GPU Memory ?", "state": "open"},
+    {"number": 43763, "url": "https://github.com/vllm-project/vllm/issues/43763", "title": "[RFC]: Does SimpleCPUOffloadConnector have plans to support disk/ssd?", "state": "open"},
+    {"number": 38260, "url": "https://github.com/vllm-project/vllm/issues/38260", "title": "[RFC]: Multi-tier KV offloading via the vLLM offloading connector", "state": "open"},
+    {"number": 44181, "url": "https://github.com/vllm-project/vllm/issues/44181", "title": "[Bug]: Severe GPU Memory Leak and OOM with Native KV Offloading in Multi-Node PP=2 TP=8 Setup (v0.22.0)", "state": "open"}
+  ],
+  "prs_inspected": [
+    {"number": 42615, "url": "https://github.com/vllm-project/vllm/pull/42615", "title": "[Bugfix] Dedup gpu_block_ids in SimpleCPUOffload eager store path", "state": "open"},
+    {"number": 42568, "url": "https://github.com/vllm-project/vllm/pull/42568", "title": "Fix async KV loads counting toward scheduler request limit", "state": "open"},
+    {"number": 42466, "url": "https://github.com/vllm-project/vllm/pull/42466", "title": "Expose KV offload cache usage metric", "state": "open"},
+    {"number": 42903, "url": "https://github.com/vllm-project/vllm/pull/42903", "title": "[Bugfix][kv_offload] Dedup gpu_block_ids in eager-mode SCO (store + load paths)", "state": "open"},
+    {"number": 43468, "url": "https://github.com/vllm-project/vllm/pull/43468", "title": "[BugFix][kv_offload] Populate BlockStored payloads for OffloadingConnector KV events", "state": "open"},
+    {"number": 42212, "url": "https://github.com/vllm-project/vllm/pull/42212", "title": "[Perf] Triton fast path for small CPU→GPU swap_blocks_batch in the offloading connector", "state": "open"},
+    {"number": 42799, "url": "https://github.com/vllm-project/vllm/pull/42799", "title": "[Feature][KVConnector] Add optional get_eviction_order hook for policy-driven free-queue ordering", "state": "open"},
+    {"number": 42985, "url": "https://github.com/vllm-project/vllm/pull/42985", "title": "[PoC] Soft-pin recently-hit prefix-cache entries in get_new_blocks", "state": "closed"},
+    {"number": 43191, "url": "https://github.com/vllm-project/vllm/pull/43191", "title": "Extend prefix-cache soft-pin with a popular-insert signal (follow-up to #42985)", "state": "closed"},
+    {"number": 43374, "url": "https://github.com/vllm-project/vllm/pull/43374", "title": "[Core] Experimental session KV eviction with attention sinks", "state": "open"},
+    {"number": 40270, "url": "https://github.com/vllm-project/vllm/pull/40270", "title": "[Feat] GPU KV Cache Pluggable Eviction Policy", "state": "open"},
+    {"number": 41956, "url": "https://github.com/vllm-project/vllm/pull/41956", "title": "[kv_offload] Implement reset_cache() for the offloading connector", "state": "open"},
+    {"number": 43097, "url": "https://github.com/vllm-project/vllm/pull/43097", "title": "[Docs][PD][NIXL] Bidirectional kv-cache transfer", "state": "open"},
+    {"number": 43302, "url": "https://github.com/vllm-project/vllm/pull/43302", "title": "[KVConnector] Multi-storage replication for shared-prefix KV blocks", "state": "open"},
+    {"number": 42296, "url": "https://github.com/vllm-project/vllm/pull/42296", "title": "[Feat][KVConnector] Support DSV4 in SimpleCPUOffloadBackend", "state": "open"},
+    {"number": 42289, "url": "https://github.com/vllm-project/vllm/pull/42289", "title": "[Bugfix][KV Connector] Fix SimpleCPUOffloadScheduler TOCTOU between Phase A and B", "state": "open"},
+    {"number": 43453, "url": "https://github.com/vllm-project/vllm/pull/43453", "title": "[Offloader] Skip per-tensor scale parameters from CPU offload", "state": "open"},
+    {"number": 42050, "url": "https://github.com/vllm-project/vllm/pull/42050", "title": "[kv_offload]: Add request_finished method to OffloadingManager and decouple store", "state": "open"},
+    {"number": 42959, "url": "https://github.com/vllm-project/vllm/pull/42959", "title": "[BugFix][kv_offload]: Prevent offloading stale sliding window blocks", "state": "open"},
+    {"number": 36636, "url": "https://github.com/vllm-project/vllm/pull/36636", "title": "[Bugfix] Fix KV cache offloading for hybrid attention models (e.g. Qwen3.5-27B)", "state": "closed"},
+    {"number": 41549, "url": "https://github.com/vllm-project/vllm/pull/41549", "title": "[Bugfix][KVConnector] Support DCP/PCP in OffloadingConnector", "state": "closed"},
+    {"number": 42612, "url": "https://github.com/vllm-project/vllm/pull/42612", "title": "[Bugfix] Deduplicate blocks in BlockPool.free_blocks() to prevent double-free", "state": "closed"},
+    {"number": 41777, "url": "https://github.com/vllm-project/vllm/pull/41777", "title": "[Bugfix] Flush final KV block when SimpleCPUOffload request finishes in same step as its last full block", "state": "open"},
+    {"number": 41228, "url": "https://github.com/vllm-project/vllm/pull/41228", "title": "[kv_offload+HMA][12/N]: Scheduler-side support for sliding window groups", "state": "closed"},
+    {"number": 43946, "url": "https://github.com/vllm-project/vllm/pull/43946", "title": "kv_offload: eviction-triggered store for OffloadingConnector", "state": "open"},
+    {"number": 43689, "url": "https://github.com/vllm-project/vllm/pull/43689", "title": "[SharedOffloadRegion] Align blocks to page-size", "state": "open"},
+    {"number": 42045, "url": "https://github.com/vllm-project/vllm/pull/42045", "title": "[Bugfix] Auto-detect SupportsHMA connectors instead of unconditional disable", "state": "open"},
+    {"number": 40270, "url": "https://github.com/vllm-project/vllm/pull/40270", "title": "[Feat] GPU KV Cache Pluggable Eviction Policy", "state": "open"},
+    {"number": 40346, "url": "https://github.com/vllm-project/vllm/pull/40346", "title": "[KV Offload] Offload all KV blocks when doing prefill in P/D", "state": "closed"}
+  ],
+  "new_harness_entries": 5,
+  "new_workload_entries": 4,
+  "new_plan_entries": 5,
+  "cumulative_totals": {
+    "total_harness_entries_added_over_base": 18,
+    "total_workload_entries_added_over_base": 10,
+    "total_plan_entries_added_over_base": 18
+  },
+  "skipped": [
+    {
+      "ref": "https://github.com/vllm-project/vllm/issues/42632",
+      "reason": "Feature request for async cudaHostRegister — no concrete test path referenced; the startup behavior it describes is exercised implicitly by existing simple_kv_offload unit tests."
+    },
+    {
+      "ref": "https://github.com/vllm-project/vllm/issues/33689",
+      "reason": "Roadmap RFC — no concrete test or workload parameters; roadmap items are reflected in individual PRs already captured."
+    },
+    {
+      "ref": "https://github.com/vllm-project/vllm/pull/43374",
+      "reason": "Experimental API (VLLM_ENABLE_EXPERIMENTAL_SESSION_EVICTION=1) with no stable test path yet; the corresponding test file is not present in v0.18.0."
+    },
+    {
+      "ref": "https://github.com/vllm-project/vllm/pull/40270",
+      "reason": "Pluggable eviction policy — the PR body does not reference a new test path beyond test_kv_cache_manager.py which is already in the base harness (unit-kv-cache-manager); annotated with source_ref on that entry."
+    },
+    {
+      "ref": "https://github.com/vllm-project/vllm/pull/42289",
+      "reason": "TOCTOU fix in SimpleCPUOffloadScheduler — the fix is behaviorally covered by gh_simple_kv_offload_scheduler_regression (test_scheduler.py); no separate test path added."
+    },
+    {
+      "ref": "https://github.com/vllm-project/vllm/issues/42625",
+      "reason": "LMCache cache miss — LMCache is an external connector; no test path within the vllm local clone; skip to avoid out-of-tree dependency."
+    },
+    {
+      "ref": "https://github.com/vllm-project/vllm/issues/42432",
+      "reason": "DeepSeek V4 on R6000 GPU — hardware-specific (AMD RDNA3 GPU, not the target hardware for this validation run); skip."
+    },
+    {
+      "ref": "https://github.com/vllm-project/vllm/issues/43093",
+      "reason": "DeepSeek-V4-Flash + OffloadingConnector crashes — requires DeepSeek-V4-Flash model weights which are not available in the local model cache; partially covered by gh_offloading_connector_scheduler_unit."
+    },
+    {
+      "ref": "https://github.com/vllm-project/vllm/pull/43453",
+      "reason": "Skip per-tensor scale parameters from CPU offload — quantization-specific, no distinct test path beyond what is already exercised by quantization/test_cpu_offload.py (not in scope of this validation run's primary target components)."
+    },
+    {
+      "ref": "https://github.com/vllm-project/vllm/pull/42050",
+      "reason": "request_finished method + decouple store — internal refactor; covered by existing offloading_connector tests; no new test path needed."
+    },
+    {
+      "ref": "https://github.com/vllm-project/vllm/issues/42185",
+      "reason": "Cache-affinity-aware request ordering RFC — conceptual, no concrete test or workload parameters defined yet."
+    },
+    {
+      "ref": "https://github.com/vllm-project/vllm/pull/42959",
+      "reason": "Version-gated: test path tests/v1/kv_connector/unit/offloading_connector/test_scheduler.py does not exist in v0.18.0. Bug fix for stale sliding-window block offloading (PR by core contributor orozery). Will be relevant when upgrading past v0.18.0."
+    },
+    {
+      "ref": "https://github.com/vllm-project/vllm/pull/41777",
+      "reason": "Version-gated: test path tests/v1/simple_kv_offload/test_scheduler.py does not exist in v0.18.0. Bug fix for flushing final KV block on request finish."
+    },
+    {
+      "ref": "https://github.com/vllm-project/vllm/pull/42612",
+      "reason": "Version-gated: test path tests/v1/core/test_block_pool_double_free.py does not exist in v0.18.0. Bug fix for BlockPool.free_blocks() double-free."
+    },
+    {
+      "ref": "https://github.com/vllm-project/vllm/pull/41228",
+      "reason": "Version-gated: scheduler-side sliding window support tests not in v0.18.0. Relevant to HMA+offloading but test files are post-v0.18.0."
+    },
+    {
+      "ref": "https://github.com/vllm-project/vllm/pull/43946",
+      "reason": "Version-gated: eviction-triggered store feature is new. Test paths tests/v1/kv_offload/cpu/test_manager.py and offloading_connector/test_scheduler.py do not exist in v0.18.0."
+    },
+    {
+      "ref": "https://github.com/vllm-project/vllm/pull/43689",
+      "reason": "Version-gated: test path tests/v1/kv_offload/test_fs_tier.py does not exist in v0.18.0. Page-aligned SharedOffloadRegion is a new feature."
+    },
+    {
+      "ref": "https://github.com/vllm-project/vllm/issues/42348",
+      "reason": "Gemma 4 KVCache CPU offloading broken — model-specific bug requiring Gemma 4 weights not available locally; no distinct test path for this model."
+    },
+    {
+      "ref": "https://github.com/vllm-project/vllm/issues/44181",
+      "reason": "GPU memory leak with Native KV Offloading in multi-node setup (v0.22.0) — version far beyond v0.18.0; multi-node PP=2 TP=8 setup is not reproducible in current test environment."
+    },
+    {
+      "ref": "https://github.com/vllm-project/vllm/issues/23087",
+      "reason": "User question (not a bug report) about initializing KV cache without GPU memory — no test case or workload extractable."
+    },
+    {
+      "ref": "https://github.com/vllm-project/vllm/issues/43763",
+      "reason": "Feature request RFC — disk/SSD support for SimpleCPUOffloadConnector. No concrete test or implementation yet."
+    },
+    {
+      "ref": "https://github.com/vllm-project/vllm/issues/38260",
+      "reason": "Multi-tier KV offloading RFC — conceptual design discussion; no concrete test paths or workload parameters."
+    },
+    {
+      "ref": "https://github.com/vllm-project/vllm/issues/40259",
+      "reason": "CUDA crash with KV Offloading + EAGLE3 + Expert Parallel on 8×H20 — requires specific hardware (8×H20 141GB) and EAGLE3 speculative decoding model not available. Regression signal captured in source_refs on gh_basic_cpu_offload_correctness."
+    }
+  ],
+  "notes": "Second discovery pass (2026-06-01). GitHub REST API used (gh CLI not available in this environment). Queries expanded with additional terms: 'kv_connector offload', 'SimpleCPUOffload', 'OffloadingConnector', 'swap_blocks kv', 'cpu_kv_cache OR kv_cache_dtype offload'. All new test paths strictly verified against the v0.18.0 tag via `git ls-tree -r --name-only v0.18.0 <path>`. Many promising findings (stale SWA blocks #42959, BlockPool double-free #42612, final block flush #41777, eviction-triggered store #43946, FS-tier page alignment #43689) were version-gated out because their test paths were added after v0.18.0. These are noted in the skipped list with 'Version-gated:' prefix for future reference when upgrading. The base artifacts/kvoffload/ files were not modified. Maintainer engagement verified via comments endpoint for all issues used as primary sources (#31210, #35507, #41515, #40259)."
+}

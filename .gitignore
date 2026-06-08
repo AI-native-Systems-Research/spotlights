@@ -47,5 +47,20 @@ output/
 
 .omx/
 
+# Secrets / env
+.env
+
+# Logs and runtime output
+logs/
+artifacts/**/logs/
+*.stdout
+*.stderr
+
+# Local scratch
+commands.txt
+
+# Package caches
+*.spotlights_validation_cache/
+
 # Signal-pipeline run artifacts
 runs/

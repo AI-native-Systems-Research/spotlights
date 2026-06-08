@@ -1,0 +1,12 @@
+Working folder: /Users/oritp/Dev/Repositories/spotlight
+Create and save mvp artifacts as explained in spotlights-validation/docs/mvp_plan.md, and spotlights-validation/docs/design.md:
+
+- spotlights-validation/artifacts/kvoffload/harness_map.json
+- spotlights-validation/artifacts/kvoffload /workload_matrix.json
+- spotlights-validation/artifacts/kvoffload /validation_plan.json
+
+The target system is cloned here under: vllm
+The proposed change is cloned under kv-offload-lab
+Follow the requirements detailed at spotlights-validation/docs/design.md to decide about the full validation plan and the priorities. 
+
+At the current the code that generates these artifacts can be kept specific (hard coded) for vllm.
