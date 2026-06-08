@@ -146,6 +146,7 @@ class SignalPipelineResult(BaseModel):
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
     run_dir: Path
+    output_folder: Path
     completed_stages: list[str] = Field(default_factory=list)
     skipped_stages: list[str] = Field(default_factory=list)
     issues: list[str] = Field(default_factory=list)

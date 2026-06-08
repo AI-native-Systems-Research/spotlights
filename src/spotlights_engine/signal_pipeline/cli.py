@@ -64,6 +64,17 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Directory holding this run's stage artifacts (created if missing).",
     )
     p.add_argument(
+        "--output-folder",
+        type=Path,
+        default=None,
+        help=(
+            "Where the human-readable rollup (findings.json + findings.md) "
+            "is written. Defaults to <artifacts-dir>/report/ so the whole run "
+            "still tars as one dir. Point elsewhere to publish the rollup "
+            "independently of the artifacts."
+        ),
+    )
+    p.add_argument(
         "--repo",
         type=Path,
         required=True,
@@ -197,6 +208,7 @@ def main(argv: list[str] | None = None) -> int:
         result = run_pipeline(
             sp_input,
             run_dir=args.artifacts_dir,
+            output_folder=args.output_folder,
             stages=sel,
             resume=resume,
             inject=args.inject,
@@ -214,6 +226,7 @@ def main(argv: list[str] | None = None) -> int:
     # Compact summary on stdout — useful for CI / scripting.
     summary = {
         "artifacts_dir": str(result.run_dir),
+        "output_folder": str(result.output_folder),
         "completed_stages": result.completed_stages,
         "skipped_stages": result.skipped_stages,
         "issues": result.issues,
