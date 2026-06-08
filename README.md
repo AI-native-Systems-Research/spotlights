@@ -12,7 +12,7 @@ Most code-research tools either scan broadly and return shallow hits, or dive de
 
 The core philosophy behind the project: execution tooling — coding agents, evolutionary search, experiment harnesses — is abundant and improving fast. The harder, less-solved problem is knowing **where to point it**. Spotlights treats that as a first-class discovery problem: build a map of the codebase, converge independent signal sources onto that map, and let the places where evidence piles up — the *spots that light up* — surface as candidates worth optimizing.
 
-> **Current Status:** today Spotlights runs on two signal sources — **code structure** and the **deep research literature** — plus a **preview** of a third path driven by **runtime telemetry** (see [Telemetry-driven discovery (preview)](#telemetry-driven-discovery-preview)). Repository history and paper-driven discovery are in active development. See [Signal sources & roadmap](#signal-sources--roadmap).
+> **Current Status:** today Spotlights runs on two signal sources — **code structure** and the **deep research literature** — plus a **preview** of a third path driven by **runtime telemetry** (see [Telemetry-driven discovery (preview)](#telemetry-driven-discovery-preview)). A **validation module** that confirms proposed changes preserve correctness and improve the targeted metric is in active development (see [Validation](#validation)). Repository history and paper-driven discovery are also in active development. See [Signal sources & roadmap](#signal-sources--roadmap).
 
 ## How it works
 
@@ -21,6 +21,8 @@ A single structural map of the repo is the substrate. Signal sources attach to i
 1. **Structural map** — static analysis extracts the project's modules and how they fit together.
 2. **Candidates** — per module, pick the functions and code regions most worth investigating for the stated goal.
 3. **Proposals** — for each candidate, produce evidence-backed change proposals, with citations and rationale. Proposals aren't limited to local tweaks: when the literature supports it, a proposal can be a genuinely new approach — applying a technique from a recent paper, or building a new kernel — not just a refinement of what's already there.
+
+When proposals are executed by downstream backends, the **validation module** gates the result: it confirms correctness, measures performance delta, and checks intent alignment before outcomes enter the experimental archive. See [Validation](#validation).
 
 The output is a tree of Markdown files.
 
@@ -225,16 +227,30 @@ A sample run on this subset is checked in under `examples/vllm_subset/`: browse 
 A second entry point. Given a captured workload's OpenTelemetry traces and the subject repo, the `signal-pipeline` CLI runs five stages — signal extraction, ProjectTree extraction, candidate generation, change generation, execution — to produce evidence-backed code changes with rationales and applied diffs. A canonical run on a vLLM/LRU OTel capture takes ~10 min and ~$2 in API costs and yields a handful of candidates anchored to the captured anomalies.
 
 ```bash
-env -u ANTHROPIC_AUTH_TOKEN -u ANTHROPIC_BASE_URL \
-  uv run signal-pipeline \
-    --artifacts-dir runs/my-first-run \
+signal-pipeline \
+    --output-folder ./spotlights-out \
+    --artifacts-dir ./artifacts \
     --repo ../vllm \
     --telemetry-from <path-to-otel-capture-or-signals.json>
 ```
 
 `--telemetry-from` accepts either a directory of raw OTel files or a pre-cooked `01_signals.json`. For stage-by-stage details, prompt iteration, the artifacts-dir layout, the `--inject` workflow for hand-edited intermediates, model selection, and troubleshooting, see [`src/spotlights_engine/signal_pipeline/README.md`](src/spotlights_engine/signal_pipeline/README.md). Architecture and contracts live in [`docs/signal-based/`](docs/signal-based/).
 
-**Status:** MVP. Knowledge retrieval, validation, and archive are deferred per the design doc.
+**Status:** MVP. Knowledge retrieval and archive are deferred per the design doc.
+
+## Validation
+
+The validation module (Component E in the [system design](docs/architecture/spotlighs_design.md)) is the gate between a proposed change and the experimental archive. It confirms that changes preserve correctness, improve the targeted metric, and don't regress on others. No change enters the archive without a measured verdict.
+
+Validation runs in three phases:
+
+1. **Discovery** — scans the target repo's test and benchmark infrastructure (CI configs, test directories, benchmark scripts, workload configs, GitHub issues/PRs) to build a `TestHarnessMap` and seed a `ValidationWorkloadMatrix`. This is LLM-driven, not hardcoded, so it generalizes across target systems and languages.
+2. **Planning** — prioritizes discovered validation entries toward the candidate's affected components, ranked by historical failure signal and halt conditions. Optionally augmented with change-specific entries when the `Change` object is available.
+3. **Execution** — runs the target's own test suites and benchmarks (baseline vs. post-change), checks intent alignment against `Change.expected_effect`, and produces a structured pass/fail/conditional verdict with measurements.
+
+Design and contracts: [`docs/architecture/spotlights_validation_design.md`](docs/architecture/spotlights_validation_design.md). Implementation plan: [`docs/validation/implementation_plan.md`](docs/validation/implementation_plan.md).
+
+**Status:** The validation executor is available. Discovery and planning are in development.
 
 ## Configuration
 
@@ -257,7 +273,7 @@ Agent authentication is handled by the underlying `claude` and `codex` CLIs; no 
 
 ## Where Spotlights fits
 
-Spotlights decides *what* to optimize and proposes *how* — it is not itself an execution engine. Its candidates and proposals are designed to hand off to whatever runs and validates changes: coding agents, evolutionary search, or experiment frameworks. Think of it as the scouting engine that points existing optimization machinery at the places most worth its effort.
+Spotlights decides *what* to optimize and proposes *how*. Its candidates and proposals are designed to hand off to execution backends — coding agents, evolutionary search, or experiment frameworks — and the [validation module](#validation) gates the results before they enter the archive. Think of it as the scouting engine that points existing optimization machinery at the places most worth its effort, then confirms the outcome.
 
 ## Contributing
 

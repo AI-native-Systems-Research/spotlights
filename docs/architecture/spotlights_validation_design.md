@@ -232,7 +232,7 @@ ValidationResult {
 ## Public API — what Bundle F imports
 
 ```python
-from spotlights_validation import (
+from spotlights_engine.validation import (
     prepare, start_validation, get_validation_status,
     ValidationPreparation, ValidationResult, ValidationStatus, ValidationRun, PreparationRun, ExecutionResult,
 )
