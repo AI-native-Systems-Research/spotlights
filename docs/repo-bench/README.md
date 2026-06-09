@@ -421,9 +421,3 @@ tests/unit/repo_bench/
 
 78 tests; the full suite runs in ~1 second. No live LLM calls in
 tests — `match` accepts an injected runner protocol.
-
-## Companion docs
-
-- [`PROGRESS_UI_BRIEF.md`](PROGRESS_UI_BRIEF.md) — historical brief
-  for adding a live multi-stage progress UI to `repo-bench
-  run`.

@@ -55,6 +55,7 @@ data/repo_bench/raw/**/diffs/
 
 # Internal-only experiment outputs (kept on disk, not pushed).
 docs/repo-bench/baseline_recon_drill_score_a.md
+docs/repo-bench/PROGRESS_UI_BRIEF.md
 scripts/discovery_benchmark_experiments/
 
 # vLLM checkout (read-only reference, not part of this repo)
