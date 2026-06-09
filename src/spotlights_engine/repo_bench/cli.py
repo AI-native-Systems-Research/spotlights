@@ -43,6 +43,7 @@ _RULES: dict[str, type[filtering.Rule]] = {
     "any-strict-perf-claim": filtering.AnyStrictPerfClaim,
     "any-loose-perf-claim": filtering.AnyLoosePerfClaim,
     "any-perf-signal": filtering.AnyPerfSignal,
+    "any-perf-signal-or-label": filtering.AnyPerfSignalOrLabel,
     "rank-spec-mag": filtering.RankBySpecificityAndMagnitude,
 }
 
@@ -107,10 +108,6 @@ def _build_parser() -> argparse.ArgumentParser:
     rn.add_argument("--rules", required=True,
                     help="Comma-separated rule names. Available: "
                     + ", ".join(sorted(_RULES.keys())) + ".")
-    rn.add_argument("--reference-bundle",
-                    default="20260525T202105Z_util0.4_mem16_lru",
-                    help="Name of the prior observability bundle whose "
-                    "config the bench module should match.")
     rn.add_argument("--bench-spec-config-notes", default="",
                     help="Free-form extra context rendered into the bench spec.")
     rn.add_argument("--snapshot-buffer-hours", type=int, default=None,
@@ -247,7 +244,6 @@ def _cmd_run(args: argparse.Namespace) -> int:
 
     handle = run_module.benchmark(
         window_start=start, window_end=end, rules=rules,
-        reference_bundle_name=args.reference_bundle,
         bench_spec_config_notes=args.bench_spec_config_notes,
         refresh=args.refresh, refresh_aggregate=args.refresh_aggregate,
         from_step=args.from_step, through_step=args.through_step,
@@ -294,15 +290,29 @@ def _cmd_match(args: argparse.Namespace) -> int:
         wallclock_s=args.wallclock_s,
         max_turns=args.max_turns,
     )
-    print(f"out_dir:        {handle.out_dir}")
-    print(f"report:         {handle.report_path}")
-    print(f"n_findings:     {handle.n_findings}")
-    print(f"judge calls:    {handle.n_judged}")
-    print(f"same_idea:      {handle.same_idea}")
-    print(f"related:        {handle.related}")
-    print(f"neighborhood:   {handle.neighborhood}")
-    print(f"no_match:       {handle.no_match}")
-    print(f"tier_2_yield:   {handle.tier_2_yield}")
+    n = handle.n_findings or 1
+    pct_strict = 100 * handle.same_idea / n  # rough; finding-level rate is in MD
+    bar_w = 30
+    filled = max(0, min(bar_w, round(handle.weighted_score * bar_w)))
+    bar = "#" * filled + "-" * (bar_w - filled)
+
+    print()
+    print("=" * 68)
+    print(f"  Match report — {args.experiment}")
+    print("=" * 68)
+    print()
+    print(f"  Weighted score   {handle.weighted_score:.3f}  [{bar}]  / 1.000")
+    print(f"                   (strict={handle.same_idea}  related={handle.related}  "
+          f"neighborhood={handle.neighborhood}  no_match={handle.no_match})")
+    print()
+    print(f"  Findings         {handle.n_findings}")
+    print(f"  Judged           {handle.n_judged}  (skipped: no candidate PRs in view)")
+    print(f"  Tier-2 yield     {handle.tier_2_yield}  "
+          f"(findings whose only hit was Tier 2)")
+    print()
+    print(f"  Report (json)    {handle.report_path}")
+    print(f"  Report (md)      {handle.report_md_path}")
+    print("=" * 68)
     return 0
 
 

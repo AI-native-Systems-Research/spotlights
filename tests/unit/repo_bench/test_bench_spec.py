@@ -8,9 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from spotlights_engine.repo_bench import storage
 from spotlights_engine.repo_bench.bench_spec import (
-    _strip_leading_timestamp,
     load_spec,
     render_md,
     write_spec,
@@ -35,23 +33,6 @@ def _pin(**overrides) -> SnapshotPin:
     return SnapshotPin(**defaults)
 
 
-# ── _strip_leading_timestamp ──────────────────────────────────────────
-
-
-def test_strip_timestamp_real_bundle_name():
-    assert _strip_leading_timestamp(
-        "20260525T202105Z_util0.4_mem16_lru"
-    ) == "util0.4_mem16_lru"
-
-
-def test_strip_timestamp_no_timestamp_returns_unchanged():
-    assert _strip_leading_timestamp("just_a_label") == "just_a_label"
-
-
-def test_strip_timestamp_empty():
-    assert _strip_leading_timestamp("") == ""
-
-
 # ── write_spec / load_spec round-trip ─────────────────────────────────
 
 
@@ -60,7 +41,6 @@ def test_write_spec_creates_json_and_md(tmp_path: Path):
     run_dir.mkdir(parents=True)
     json_path, md_path = write_spec(
         snapshot=_pin(),
-        reference_bundle_name="20260525T202105Z_util0.4_mem16_lru",
         run_dir=run_dir,
         config_notes="LSF cluster",
     )
@@ -72,7 +52,6 @@ def test_write_spec_creates_json_and_md(tmp_path: Path):
     # JSON validates back into BenchSpec
     spec = load_spec(json_path)
     assert spec.snapshot.snapshot_sha.endswith("f")
-    assert spec.config.reference_bundle_name == "20260525T202105Z_util0.4_mem16_lru"
     assert spec.config.notes == "LSF cluster"
 
 
@@ -85,7 +64,6 @@ def test_md_render_contains_critical_fields(tmp_path: Path):
     run_dir.mkdir(parents=True)
     _, md_path = write_spec(
         snapshot=pin,
-        reference_bundle_name="20260525T202105Z_util0.4_mem16_lru",
         run_dir=run_dir,
     )
     md = md_path.read_text(encoding="utf-8")
@@ -93,7 +71,6 @@ def test_md_render_contains_critical_fields(tmp_path: Path):
     assert "abcdef0" in md  # short SHA
     assert "PR #99999" in md
     assert "test rationale" in md
-    assert "20260525T202105Z_util0.4_mem16_lru" in md
     assert "23 PRs all merged" in md  # n_view formatted into §5
 
 
@@ -102,7 +79,6 @@ def test_md_render_handles_empty_config_notes(tmp_path: Path):
     run_dir.mkdir(parents=True)
     _, md_path = write_spec(
         snapshot=_pin(),
-        reference_bundle_name="bundle",
         run_dir=run_dir,
         config_notes="",
     )
@@ -115,7 +91,6 @@ def test_render_md_is_pure(tmp_path: Path):
     run_dir.mkdir(parents=True)
     json_path, _ = write_spec(
         snapshot=_pin(),
-        reference_bundle_name="bundle",
         run_dir=run_dir,
     )
     spec = load_spec(json_path)
@@ -130,7 +105,6 @@ def test_artifacts_named_canonically(tmp_path: Path):
     run_dir.mkdir(parents=True)
     json_path, md_path = write_spec(
         snapshot=_pin(),
-        reference_bundle_name="bundle",
         run_dir=run_dir,
     )
     assert json_path.name == "bench_spec.json"
@@ -152,7 +126,6 @@ def test_md_includes_full_sha_not_just_short(tmp_path: Path):
     run_dir.mkdir(parents=True)
     _, md_path = write_spec(
         snapshot=_pin(snapshot_sha=full),
-        reference_bundle_name="bundle",
         run_dir=run_dir,
     )
     md = md_path.read_text(encoding="utf-8")

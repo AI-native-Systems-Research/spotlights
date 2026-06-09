@@ -198,22 +198,38 @@ _DEFAULT_PERF_NOUN = (
 )
 _PERF_LOOSE_RE = _build_perf_loose_re(_DEFAULT_PERF_NOUN)
 _PERF_STRICT_RE = _build_perf_strict_re(_DEFAULT_PERF_NOUN)
+_PERF_LABELS: frozenset[str] = frozenset()
 
 
 def set_active_config(filter_patterns: "Any") -> None:
     """Replace module-level regex objects from compiled-config patterns.
 
     `filter_patterns` is a `CompiledFilterPatterns` (perf_nouns +
-    chore_tags). We rebuild the regex objects in place so existing
-    function calls (`strict_perf_match`, etc.) pick up the new patterns
-    without needing parameter threading.
+    chore_tags + perf_labels). We rebuild the regex objects in place so
+    existing function calls (`strict_perf_match`, etc.) pick up the new
+    patterns without needing parameter threading.
 
     Call exactly once per process, before any filter rules run.
     """
-    global _PERF_LOOSE_RE, _PERF_STRICT_RE, _NON_PERF_CHORE_RE
+    global _PERF_LOOSE_RE, _PERF_STRICT_RE, _NON_PERF_CHORE_RE, _PERF_LABELS
     _PERF_LOOSE_RE = _build_perf_loose_re(filter_patterns.perf_nouns)
     _PERF_STRICT_RE = _build_perf_strict_re(filter_patterns.perf_nouns)
     _NON_PERF_CHORE_RE = _build_non_perf_chore_re(filter_patterns.chore_tags)
+    _PERF_LABELS = frozenset(getattr(filter_patterns, "perf_labels", ()))
+
+
+PERF_LABEL_HEURISTIC_VERSION = "v1"
+
+
+def has_perf_label(labels: list[str] | tuple[str, ...] | None) -> bool:
+    """True iff any label is in the active config's perf-label whitelist."""
+    if not labels or not _PERF_LABELS:
+        return False
+    return any(lbl.lower() in _PERF_LABELS for lbl in labels)
+
+
+def perf_labels() -> tuple[str, ...]:
+    return tuple(sorted(_PERF_LABELS))
 
 _FALSE_POSITIVE_RE = re.compile(
     r"(?i)(?:cache\s+usage|kv\s+cache\s+usage|utilization|util\.?)\s*:\s*\d+(?:\.\d+)?\s*%"

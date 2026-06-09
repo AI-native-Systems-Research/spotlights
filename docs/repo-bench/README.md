@@ -34,12 +34,64 @@ findings by judging each one against PR diffs in the filtered view.
 | **bench-spec** | Render the cross-module contract — SHA + reference config + workload signals + output naming — for the observability bench module. |
 | **match** *(separate command)* | LLM judge compares each finding in a `findings.json` against PR diffs in the filtered view; produces strict / related / neighborhood / no_match verdicts per (finding, PR) pair plus per-finding hit rates. |
 
+## Setup: GitHub token
+
+The pipeline scrapes PRs and downloads diffs from GitHub. You need a
+personal access token (read-only `public_repo` scope is enough).
+
+```powershell
+$env:GITHUB_TOKEN = "ghp_..."   # PowerShell
+```
+```bash
+export GITHUB_TOKEN=ghp_...     # bash
+```
+
+Either set `$GITHUB_TOKEN` once for the shell, or pass `--token` per
+invocation. Without a token GitHub's anonymous rate limit (~60 req/h)
+will throttle even a small window.
+
 ## Module surface
 
-Two equivalent entry points: a Python API and a CLI subcommand.
+Three user-facing CLI commands:
+
+| Command | What it does |
+|---|---|
+| **`aggregate`** | Scrape every merged PR for a date window into a JSONL cache. Run once per window; subsequent runs reuse the cache. |
+| **`run`** | End-to-end: filter → fetch-diffs → snapshot → workloads → bench-spec. Builds the answer key + spec for the observability bench module. |
+| **`match`** | Grade a `findings.json` against the filtered view by direct diff match. Run after a discovery method has produced findings. |
+
+`filter`, `fetch-diffs`, and `snapshot` exist as standalone subcommands
+for debugging / re-running individual steps, but `run` is the normal
+entry point.
+
+### Examples
+
+```powershell
+# 1) Scrape (one-time per window). Reuses cache after first run.
+python -m spotlights_engine.repo_bench.cli aggregate `
+  --start 2025-12-02 --end 2026-06-03
+
+# 2) Filter + diffs + snapshot + workloads + bench-spec.
+python -m spotlights_engine.repo_bench.cli run `
+  --start 2025-12-02 --end 2026-06-03 `
+  --rules not-bot,not-revert,not-chore,any-perf-signal-or-label,rank-spec-mag
+
+# 3) Grade findings against the filtered view (run separately, after
+#    a discovery method has produced findings.json against the pinned SHA).
+python -m spotlights_engine.repo_bench.cli match `
+  --findings <findings.json> `
+  --bench-run-dir runs/repo_bench/bench-<window>__<view>__<UTC>/ `
+  --experiment <label>
+```
+
+`match` writes both `match_report.json` and `match_report.md` to
+`<bench-run-dir>/matching/<experiment>/`. The MD has the headline
+weighted score, per-finding verdicts, and citation per matched PR.
+
+### Python API
 
 ```python
-from spotlights_engine.repo_bench import run, filtering
+from spotlights_engine.repo_bench import run, filtering, matching
 
 handle = run.benchmark(
     window_start="2025-12-02",
@@ -48,32 +100,19 @@ handle = run.benchmark(
         filtering.NotBot(),
         filtering.NotRevert(),
         filtering.NotChore(),
-        filtering.AnyPerfSignal(),
+        filtering.AnyPerfSignalOrLabel(),
         filtering.RankBySpecificityAndMagnitude(),
     ],
-    reference_bundle_name="20260525T202105Z_util0.4_mem16_lru",
 )
 print(handle.bench_spec_md)  # OBSERVABILITY_BENCH_SPEC.md path
-```
 
+m = matching.run_matching(
+    findings_path=Path("path/to/findings.json"),
+    bench_run_dir=handle.bench_spec_md.parent,
+    experiment_id="my-experiment",
+)
+print(m.weighted_score, m.report_md_path)
 ```
-repo-bench run \
-  --start 2025-12-02 --end 2026-06-03 \
-  --rules not-bot,not-revert,not-chore,any-perf-signal,rank-spec-mag \
-  --reference-bundle 20260525T202105Z_util0.4_mem16_lru
-```
-
-The default flow stops after `bench-spec`. Once a discovery method
-produces a `findings.json`:
-
-```
-repo-bench match \
-  --findings <findings.json> \
-  --bench-run-dir runs/repo_bench/bench-<window>__<view>__<UTC>/ \
-  --experiment <name>
-```
-
-`match` writes its report to `<bench-run-dir>/matching/<experiment>/match_report.json`.
 
 ## The six stages of `run`
 
@@ -116,10 +155,23 @@ Verdicts:
 | `neighborhood` | Diff touches the same file but unrelated code |
 | `no_match` | Diff has nothing to do with the finding |
 
-Output: `match_report.json` with per-finding verdicts, top-line hit
-rates (strict_share, loose_share), and `tier_2_yield` (findings that
-matched only at Tier 2 — captures refactors where the finding's
-symbol moved to a sibling function).
+Output: `match_report.json` + `match_report.md` with per-finding
+verdicts, top-line hit rates (`strict_share`, `loose_share`),
+`tier_2_yield` (findings that matched only at Tier 2 — captures
+refactors where the finding's symbol moved to a sibling function),
+and a single quality-weighted score:
+
+| Verdict | T1 weight | T2 weight |
+|---|---:|---:|
+| `same_idea` | 1.00 | 0.70 |
+| `related` | 0.60 | 0.40 |
+| `neighborhood` | 0.05 | 0.05 |
+| `no_match` | 0.00 | 0.00 |
+
+Per-finding score = best (verdict, tier) weight across its matches.
+`weighted_score` = mean across findings, in `[0, 1]`. T1 vs T2
+weight gap captures that hitting the *exact function* the finding
+named is stronger evidence than just hitting the same file.
 
 ## Snapshot SHA — what it pins, why a buffer
 
@@ -200,6 +252,7 @@ Hash fields are constrained to lowercase 64-char hex.
 | `AnyStrictPerfClaim` | Title OR body |
 | `AnyLoosePerfClaim` | Same shape, more tolerant of phrasing distance |
 | `AnyPerfSignal` | Strict claim (title or body) OR `[Perf]` / `[Performance]` / `[Optimize]` author tag |
+| `AnyPerfSignalOrLabel` | `AnyPerfSignal` plus a labels-carry-perf-signal recall path: keep if any label is in the active config's `perf_labels` whitelist (e.g. `performance`, `kv-connector` for vllm). Recovers staged feature work that doesn't quantify per-PR. |
 | `RankBySpecificityAndMagnitude` | Score = `claimed_pct × 1/files_changed`. Single ranker per view. |
 
 The `view_id` is a 12-char hex hash of the canonical (sorted) rule

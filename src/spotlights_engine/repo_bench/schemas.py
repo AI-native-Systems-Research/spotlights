@@ -131,15 +131,15 @@ class SnapshotPin(BaseModel):
 
 
 class BenchSpecConfig(BaseModel):
-    """Config knobs the observability bench must hold constant.
+    """Free-form notes rendered into the bench spec.
 
-    Referenced from a prior bundle by name; the contract is 'match what
-    `<reference_bundle>` used; only the SHA varies'.
+    Repo-bench does not own observability knobs — the bench module
+    chooses workload, model, and config. Anything repo-bench wants to
+    surface to that module goes in `notes`.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    reference_bundle_name: str = Field(min_length=1)
     notes: str = ""
 
 

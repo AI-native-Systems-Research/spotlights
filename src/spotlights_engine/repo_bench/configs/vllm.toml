@@ -19,6 +19,14 @@ perf_nouns_extra = [
 # Mostly empty — generic baselines cover the chore tags vLLM uses.
 chore_tags_extra = []
 
+# GitHub labels that mark a PR as perf-relevant even without a numeric
+# claim. Narrow on purpose — broader labels (rocm, tpu, speculative-
+# decoding) get attached to refactors and CI work that aren't perf.
+perf_labels = [
+    "performance",
+    "kv-connector",
+]
+
 # ── Workload patterns ────────────────────────────────────────────────
 # Used by:
 #   - workload_summary.md (frequency tables)

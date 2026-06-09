@@ -64,6 +64,11 @@ class FilterConfig(BaseModel):
         description="Repo-specific chore tags. Generic baseline includes "
         "bugfix, fix, ci, test, doc, refactor, chore, etc.",
     )
+    perf_labels: list[str] = Field(
+        default_factory=list,
+        description="GitHub labels that mark a PR as perf-relevant even "
+        "without a numeric claim. Used by the LabelsCarryPerfSignal rule.",
+    )
 
 
 class WorkloadConfig(BaseModel):
@@ -142,6 +147,7 @@ class CompiledFilterPatterns:
     """Pre-compiled regex pieces for filter heuristics."""
     perf_nouns: str       # alternation, ready to inline into bigger regex
     chore_tags: str       # alternation, anchored at title start by caller
+    perf_labels: tuple[str, ...] = ()  # lowercased labels for set membership
 
 
 @dataclass(frozen=True)
@@ -176,9 +182,11 @@ _BASELINE_CHORE_TAGS = (
 def compile_filter_patterns(cfg: RepoBenchConfig) -> CompiledFilterPatterns:
     nouns = list(_BASELINE_PERF_NOUNS) + list(cfg.filter.perf_nouns_extra)
     tags = list(_BASELINE_CHORE_TAGS) + list(cfg.filter.chore_tags_extra)
+    labels = tuple(lbl.lower() for lbl in cfg.filter.perf_labels)
     return CompiledFilterPatterns(
         perf_nouns="|".join(nouns),
         chore_tags="|".join(tags),
+        perf_labels=labels,
     )
 
 

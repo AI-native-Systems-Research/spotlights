@@ -110,7 +110,6 @@ def benchmark(
     window_start: date | datetime | str,
     window_end: date | datetime | str,
     rules: list[filtering.Rule],
-    reference_bundle_name: str = "20260525T202105Z_util0.4_mem16_lru",
     bench_spec_config_notes: str = "",
     refresh: bool = False,
     refresh_aggregate: bool = False,
@@ -348,7 +347,6 @@ def benchmark(
                 workload_portfolio_md = handle.workload_commands.portfolio_md
             handle.bench_spec_json, handle.bench_spec_md = bench_spec.write_spec(
                 snapshot=handle.snapshot,
-                reference_bundle_name=reference_bundle_name,
                 run_dir=run_dir,
                 config_notes=bench_spec_config_notes,
                 workload_summary_md=workload_summary_md,

@@ -44,7 +44,6 @@ BENCH_SPEC_JSON_NAME = "bench_spec.json"
 def write_spec(
     *,
     snapshot: SnapshotPin,
-    reference_bundle_name: str,
     run_dir: Path,
     config_notes: str = "",
     workload_summary_md: str | None = None,
@@ -54,9 +53,6 @@ def write_spec(
 
     Args:
         snapshot: the SnapshotPin produced by `pick_snapshot`.
-        reference_bundle_name: the prior bundle whose config the
-            observability bench module should match exactly. E.g.
-            `20260525T202105Z_util0.4_mem16_lru`.
         run_dir: directory owned by the orchestrator; both files land here.
         config_notes: free-form extra context for the runner; rendered
             verbatim in §1.
@@ -70,10 +66,7 @@ def write_spec(
         window_id=snapshot.window_id,
         view_id=snapshot.view_id,
         snapshot=snapshot,
-        config=BenchSpecConfig(
-            reference_bundle_name=reference_bundle_name,
-            notes=config_notes,
-        ),
+        config=BenchSpecConfig(notes=config_notes),
         written_at=datetime.now(timezone.utc),
     )
 
@@ -116,10 +109,6 @@ def render_md(
         snapshot_pr_number=sn.snapshot_pr_number,
         snapshot_merged_at=sn.snapshot_merged_at.isoformat(),
         rationale=sn.rationale,
-        reference_bundle_name=spec.config.reference_bundle_name,
-        reference_bundle_name_minus_timestamp=_strip_leading_timestamp(
-            spec.config.reference_bundle_name
-        ),
         config_notes=spec.config.notes or "(no extra notes)",
         output_naming_template=spec.output_naming_template,
         n_view=sn.n_view,
@@ -154,26 +143,6 @@ def _workload_commands_section(portfolio_md: str) -> str:
         "supports.\n\n"
         + portfolio_md
     )
-
-
-def _strip_leading_timestamp(name: str) -> str:
-    """`20260525T202105Z_util0.4_mem16_lru` → `util0.4_mem16_lru`.
-
-    Best-effort. If the leading segment isn't a timestamp, return the
-    name unchanged.
-    """
-    if not name:
-        return name
-    head, _, tail = name.partition("_")
-    # ISO compact timestamp: digits + 'T' + digits + 'Z'.
-    if (
-        len(head) >= 8
-        and head.endswith("Z")
-        and head[:8].isdigit()
-        and "T" in head
-    ):
-        return tail or name
-    return name
 
 
 def load_spec(json_path: Path) -> BenchSpec:

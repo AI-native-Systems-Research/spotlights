@@ -20,13 +20,7 @@ bundle. Treat each section as a hard requirement.
 
 {rationale}
 
-**Config to match**: `{reference_bundle_name}`
-
-- Hold every knob constant from that prior bundle: GPU memory utilization,
-  cache backend, model, workload, request count, queue, walltime cap,
-  job-script structure.
-- The **only** thing that varies vs. the reference bundle is the vLLM SHA.
-- {config_notes}
+**Config notes**: {config_notes}
 
 ## 2. Output (interface contract)
 
@@ -38,15 +32,12 @@ bundle. Treat each section as a hard requirement.
 
 Where:
 - `<timestamp>` = UTC at job start, format `YYYYMMDDTHHMMSSZ`.
-- `<config>` = the same config tag as the reference bundle (e.g. `util0.4_mem16_lru`).
+- `<config>` = a tag identifying the workload/config used for this run.
 - `<short_sha>` = first 7 chars of `{snapshot_sha}` → `{snapshot_sha_short}`.
 
-So a concrete output dir might be:
-`<timestamp>_{reference_bundle_name_minus_timestamp}_vllm-{snapshot_sha_short}`.
-
-**What goes in it**: structurally identical to `{reference_bundle_name}`
-— same files, same JSON keys, telemetry channels populated end-to-end.
-If something is missing because the SHA broke a wrap target, **flag it**
+**What goes in it**: a `RawTelemetry` bundle — traces, metrics, logs
+captured end-to-end against this SHA on the chosen workload. If
+something is missing because the SHA broke a wrap target, **flag it**
 in the run report rather than silently omitting it.
 
 ## 3. Failure protocol

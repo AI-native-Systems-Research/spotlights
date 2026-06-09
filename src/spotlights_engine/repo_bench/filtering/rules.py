@@ -232,6 +232,44 @@ class AnyPerfSignal:
         )
 
 
+class AnyPerfSignalOrLabel:
+    """`AnyPerfSignal` plus a labels-carry-perf-signal recall path.
+
+    Keep PRs that pass `AnyPerfSignal` OR carry any label in the active
+    config's `perf_labels` whitelist (e.g. `performance`, `kv-connector`
+    for vllm). Recovers staged feature work that doesn't quantify per-PR
+    but is genuinely perf-relevant.
+    """
+
+    NAME = "any-perf-signal-or-label"
+
+    def keep(self, pr: RawPR) -> bool:
+        return (
+            heuristics.strict_perf_match(pr.title) is not None
+            or heuristics.strict_perf_match(pr.body) is not None
+            or heuristics.has_perf_tag_title(pr.title)
+            or heuristics.has_perf_label(pr.labels)
+        )
+
+    def to_spec(self) -> RuleSpec:
+        return RuleSpec(
+            name=self.NAME,
+            version=(
+                heuristics.PERF_CLAIM_HEURISTIC_VERSION + "+"
+                + heuristics.PERF_TAG_HEURISTIC_VERSION + "+"
+                + heuristics.PERF_LABEL_HEURISTIC_VERSION
+            ),
+            kind="predicate",
+            params={
+                "strict_pattern": heuristics.perf_strict_pattern(),
+                "false_positive_strip": heuristics.perf_false_positive_pattern(),
+                "tag_pattern": heuristics.perf_tag_pattern(),
+                "perf_labels": list(heuristics.perf_labels()),
+                "scope": "title-or-body for strict; title-only for tag; labels-any",
+            },
+        )
+
+
 class AnyLoosePerfClaim:
     """Keep PRs whose **title or body** matches the loose perf-claim regex.
 
@@ -316,6 +354,7 @@ class RankBySpecificityAndMagnitude:
 __all__ = [
     "AnyLoosePerfClaim",
     "AnyPerfSignal",
+    "AnyPerfSignalOrLabel",
     "AnyStrictPerfClaim",
     "BodyStrictPerfClaim",
     "NotBot",

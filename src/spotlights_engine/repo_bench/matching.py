@@ -54,6 +54,35 @@ DEFAULT_MAX_TURNS = 15
 TIER2_CAP_PER_FINDING = 8
 DIFF_MAX_KB_PER_PR = 60
 
+# Quality-weighted score per (verdict, tier). T1 = diff hunk inside the
+# finding's symbol (exact function-level overlap, stronger evidence the
+# finding pointed at the right surgery site). same_idea > related —
+# difference between "same change" and "right code, different change".
+# Per-finding score = max weight across its matches; overall =
+# mean of per-finding scores.
+_VERDICT_TIER_WEIGHTS: dict[tuple[str, int], float] = {
+    ("same_idea", 1): 1.00,
+    ("same_idea", 2): 0.70,
+    ("related", 1): 0.60,
+    ("related", 2): 0.40,
+    ("neighborhood", 1): 0.05,
+    ("neighborhood", 2): 0.05,
+    # no_match → 0; missing entries default to 0.
+}
+SCORE_VERSION = "v1"
+
+
+def _score_finding(f: dict) -> float:
+    """Best (verdict, tier) weight across f's matches. 0.0 if none."""
+    best = 0.0
+    for m in f.get("matches", []) or []:
+        w = _VERDICT_TIER_WEIGHTS.get(
+            (m.get("verdict"), m.get("tier")), 0.0
+        )
+        if w > best:
+            best = w
+    return best
+
 
 # ── Diff parsing ──────────────────────────────────────────────────────
 
@@ -246,6 +275,7 @@ def prompt_sha256() -> str:
 class MatchHandle:
     out_dir: Path
     report_path: Path
+    report_md_path: Path
     n_findings: int
     n_judged: int
     same_idea: int
@@ -253,6 +283,7 @@ class MatchHandle:
     neighborhood: int
     no_match: int
     tier_2_yield: int
+    weighted_score: float
 
 
 def run_matching(
@@ -449,6 +480,15 @@ def run_matching(
         if any(m.get("verdict") in ("same_idea", "related") for m in f.get("matches", []))
     )
 
+    per_finding_scores = [
+        {"finding_id": f["finding_id"], "score": _score_finding(f)}
+        for f in per_finding
+    ]
+    weighted_score = (
+        sum(s["score"] for s in per_finding_scores) / len(per_finding_scores)
+        if per_finding_scores else 0.0
+    )
+
     summary = {
         "n_findings": len(findings),
         "n_judged": n_judged,
@@ -466,6 +506,9 @@ def run_matching(
         },
         "tier_2_yield": tier_2_yield,
         "tier_2_yield_share": tier_2_yield / len(findings) if findings else 0.0,
+        "weighted_score": weighted_score,
+        "score_version": SCORE_VERSION,
+        "per_finding_score": per_finding_scores,
     }
 
     report = {
@@ -482,6 +525,9 @@ def run_matching(
     report_path = out_dir / "match_report.json"
     atomic_write_text(report_path, json.dumps(report, indent=2) + "\n")
 
+    report_md_path = out_dir / "match_report.md"
+    atomic_write_text(report_md_path, render_match_md(report))
+
     log.info(
         "match: wrote %s — strict=%d/%d loose=%d/%d tier2_yield=%d judged=%d",
         report_path,
@@ -492,6 +538,7 @@ def run_matching(
     return MatchHandle(
         out_dir=out_dir,
         report_path=report_path,
+        report_md_path=report_md_path,
         n_findings=len(findings),
         n_judged=n_judged,
         same_idea=same_idea_total,
@@ -499,7 +546,133 @@ def run_matching(
         neighborhood=neighborhood_total,
         no_match=no_match_total,
         tier_2_yield=tier_2_yield,
+        weighted_score=weighted_score,
     )
+
+
+_VERDICT_ORDER = ("same_idea", "related", "neighborhood", "no_match")
+
+
+def render_match_md(report: dict) -> str:
+    """Render a human-readable MD from a match report dict.
+
+    Pure function — same input → same output. No I/O. Mirrors what the
+    JSON contains; one section per finding with a verdict table.
+    """
+    s = report["summary"]
+    findings = report["per_finding"]
+    n = s["n_findings"]
+    pct_strict = s["per_finding_hit"]["strict_share"] * 100
+    pct_loose = s["per_finding_hit"]["loose_share"] * 100
+    pct_t2 = s["tier_2_yield_share"] * 100
+
+    out: list[str] = []
+    out.append(f"# Match report — {report['experiment_id']}")
+    out.append("")
+    out.append(f"- **Window**: `{report['window_id']}`")
+    out.append(f"- **Judge model**: `{report['judge_model']}` (prompt {report['prompt_version']})")
+    out.append(f"- **Findings file**: `{report['findings_path']}`")
+    out.append(f"- **Scored at**: {report['scored_at']}")
+    out.append("")
+    out.append("## Summary")
+    out.append("")
+    out.append("| Metric | Value |")
+    out.append("|---|---:|")
+    out.append(f"| Findings | {n} |")
+    out.append(f"| Findings judged (≥1 candidate in view) | {s['n_judged']} |")
+    if "weighted_score" in s:
+        out.append(
+            f"| **Weighted score** (score `{s.get('score_version','v1')}`) "
+            f"| **{s['weighted_score']:.3f}** |"
+        )
+    out.append(f"| `same_idea` (strict) | {s['per_finding_hit']['strict_same_idea']} ({pct_strict:.0f}%) |")
+    out.append(f"| `same_idea` or `related` (loose) | {s['per_finding_hit']['loose_same_idea_or_related']} ({pct_loose:.0f}%) |")
+    out.append(f"| Tier-2 yield | {s['tier_2_yield']} ({pct_t2:.0f}%) |")
+    out.append("")
+    if "per_finding_score" in s:
+        out.append(
+            "**Score weights** — T1 = hunk inside the finding's symbol, "
+            "T2 = same file. Per-finding score = best (verdict, tier) weight; "
+            "overall = mean across findings."
+        )
+        out.append("")
+        out.append("| Verdict | T1 weight | T2 weight |")
+        out.append("|---|---:|---:|")
+        out.append("| `same_idea`     | 1.00 | 0.70 |")
+        out.append("| `related`       | 0.60 | 0.40 |")
+        out.append("| `neighborhood`  | 0.05 | 0.05 |")
+        out.append("| `no_match`      | 0.00 | 0.00 |")
+        out.append("")
+    out.append("**Verdict totals across all (finding, candidate) pairs**:")
+    out.append("")
+    out.append("| Verdict | Count |")
+    out.append("|---|---:|")
+    for v in _VERDICT_ORDER:
+        out.append(f"| `{v}` | {s['verdicts'].get(v, 0)} |")
+    out.append("")
+    out.append("Verdict meanings — `same_idea` = essentially the same change; "
+               "`related` = same code, related but distinct; `neighborhood` = same "
+               "file, unrelated; `no_match` = nothing in common.")
+    out.append("")
+    out.append("## Per-finding")
+    out.append("")
+    score_by_id = {
+        x["finding_id"]: x["score"]
+        for x in s.get("per_finding_score", [])
+    }
+    for f in findings:
+        verdicts = [m.get("verdict") for m in f.get("matches", [])]
+        any_real = any(v in ("same_idea", "related") for v in verdicts)
+        n_cands = f["n_tier1_candidates"] + f["n_tier2_candidates"]
+        if any_real:
+            tag = "**[hit]**"
+        elif verdicts:
+            tag = "**[file-only]**"
+        elif n_cands > 0:
+            tag = "**[judge returned no verdicts]**"
+        else:
+            tag = "**[no candidates]**"
+        sc = score_by_id.get(f["finding_id"])
+        score_suffix = f" — score **{sc:.2f}**" if sc is not None else ""
+        out.append(f"### {tag} `{f['finding_id']}` — `{f['symbol']}`{score_suffix}")
+        out.append("")
+        out.append(f"- File: `{f['file']}`")
+        out.append(
+            f"- Tier-1 candidates: {f['n_tier1_candidates']}  ·  "
+            f"Tier-2 candidates: {f['n_tier2_candidates']}"
+        )
+        if f.get("skip_reason"):
+            out.append(f"- Skip reason: `{f['skip_reason']}`")
+        if not f.get("matches"):
+            out.append("")
+            if n_cands > 0:
+                out.append(
+                    f"_{n_cands} candidate PR(s) touched this file but the judge "
+                    f"returned no per-candidate verdicts._"
+                )
+            else:
+                out.append("_No candidate PRs touch this file in the filtered view._")
+            out.append("")
+            continue
+        out.append("")
+        out.append("| PR | Tier | Verdict | Citation |")
+        out.append("|---:|:---:|---|---|")
+        # sort: same_idea > related > neighborhood > no_match, then PR asc
+        order = {v: i for i, v in enumerate(_VERDICT_ORDER)}
+        rows = sorted(
+            f["matches"],
+            key=lambda m: (order.get(m.get("verdict", "no_match"), 99), m.get("pr_number", 0)),
+        )
+        for m in rows:
+            cite = (m.get("hunk_citation") or "").replace("|", "\\|").strip()
+            if not cite:
+                cite = "—"
+            out.append(
+                f"| #{m['pr_number']} | T{m['tier']} | "
+                f"`{m['verdict']}` | {cite} |"
+            )
+        out.append("")
+    return "\n".join(out)
 
 
 __all__ = [

@@ -19,6 +19,7 @@ from spotlights_engine.repo_bench.filtering.derive import (
 from spotlights_engine.repo_bench.filtering.rules import (
     AnyLoosePerfClaim,
     AnyPerfSignal,
+    AnyPerfSignalOrLabel,
     AnyStrictPerfClaim,
     BodyStrictPerfClaim,
     NotBot,
@@ -34,6 +35,7 @@ from spotlights_engine.repo_bench.filtering.rules import (
 __all__ = [
     "AnyLoosePerfClaim",
     "AnyPerfSignal",
+    "AnyPerfSignalOrLabel",
     "AnyStrictPerfClaim",
     "BodyStrictPerfClaim",
     "NotBot",
