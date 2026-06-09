@@ -21,6 +21,11 @@ import json
 import sys
 from pathlib import Path
 
+from spotlights_engine.defaults import (
+    DEFAULT_ARTIFACTS,
+    DEFAULT_OUTPUT,
+    DEFAULT_REPO,
+)
 from spotlights_engine.signal_pipeline.layout import ALL_STAGES, StageId
 from spotlights_engine.signal_pipeline.runner import (
     InjectSpec,
@@ -60,27 +65,31 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--artifacts-dir",
         type=Path,
-        required=True,
-        help="Directory holding this run's stage artifacts (created if missing).",
+        default=DEFAULT_ARTIFACTS,
+        help=(
+            "Directory holding this run's stage artifacts (created if missing) "
+            f"(default: {DEFAULT_ARTIFACTS})."
+        ),
     )
     p.add_argument(
         "--output-folder",
         type=Path,
-        default=None,
+        default=DEFAULT_OUTPUT,
         help=(
             "Where the human-readable rollup (findings.json + findings.md) "
-            "is written. Defaults to <artifacts-dir>/report/ so the whole run "
-            "still tars as one dir. Point elsewhere to publish the rollup "
-            "independently of the artifacts."
+            f"is written (default: {DEFAULT_OUTPUT})."
         ),
     )
     p.add_argument(
         "--repo",
         type=Path,
-        required=True,
+        default=DEFAULT_REPO,
         dest="subject_root",
         metavar="REPO",
-        help="Path to the subject system's repo (the system being analyzed).",
+        help=(
+            "Path to the subject system's repo (the system being analyzed) "
+            f"(default: {DEFAULT_REPO})."
+        ),
     )
     p.add_argument(
         "--telemetry-from",

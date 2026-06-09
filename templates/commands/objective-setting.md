@@ -142,13 +142,26 @@ Ask: "Does this look right? You can adjust anything before we lock this in."
 
 Ask for the user's name (for the `approved_by` field). Generate a session ID (use a UUID).
 
-Then finalize (do NOT pass `output_path` — the CLI auto-generates a unique filename using datetime, approver name, and role under `output/objectives/`):
+Before finalizing, tell the user where the objective will be saved (default: `output/objectives/`) and ask if they'd like to override the root output folder. Use `AskUserQuestion`:
+
+- Question: "Where should I save the locked objective?"
+- Options:
+  - **Default (`output/`)** — "Recommended; saves under `output/objectives/`. Downstream modules look here by default."
+  - **Custom root folder** — "I'll provide a different `--output-folder`. The objective will be saved under `<your-folder>/objectives/`."
+
+If they pick custom, prompt for the root folder path conversationally.
+
+Then finalize. The CLI always auto-generates the filename (`<timestamp>_<name>_<role>.json`) and always writes into an `objectives/` subdirectory of the supplied root — only the root is configurable via `output_folder` (matches the `--output-folder` flag used by signal-pipeline and other downstream modules):
 
 ```bash
+# Default root → output/objectives/<file>
 spotlights-objectives finalize '{"proposal": <proposal JSON>, "session_id": "<uuid>", "approved_by": "<name>"}'
+
+# Custom root → <root>/objectives/<file>
+spotlights-objectives finalize '{"proposal": <proposal JSON>, "session_id": "<uuid>", "approved_by": "<name>", "output_folder": "<root>"}'
 ```
 
-Report the location of the output file and confirm the objective is locked for this session. Then print the closing marker:
+Report the full path of the saved file and confirm the objective is locked for this session. Then print the closing marker:
 
 > **--- Objective Setting complete. ---**
 

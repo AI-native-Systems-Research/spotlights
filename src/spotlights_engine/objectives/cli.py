@@ -6,6 +6,7 @@ import json
 import sys
 from pathlib import Path
 
+from spotlights_engine.defaults import DEFAULT_OUTPUT
 from spotlights_engine.objectives.core import (
     assemble_proposal,
     build_intent,
@@ -41,17 +42,18 @@ def _cmd_finalize(data: dict) -> str:
         approved_by=data["approved_by"],
     )
     json_str = objective.model_dump_json(indent=2)
-    if "output_path" in data:
-        output_path = Path(data["output_path"])
-    else:
-        from datetime import UTC, datetime
+    from datetime import UTC, datetime
 
-        timestamp = datetime.now(UTC).strftime("%Y-%m-%d_%H%M%S")
-        sanitized_name = data["approved_by"].lower().replace(" ", "_")
-        sanitized_name = "".join(c for c in sanitized_name if c.isalnum() or c == "_")
-        role = data.get("proposal", {}).get("intent", {}).get("role", "pm")
-        output_path = Path(f"output/objectives/{timestamp}_{sanitized_name}_{role}.json")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%d_%H%M%S")
+    sanitized_name = data["approved_by"].lower().replace(" ", "_")
+    sanitized_name = "".join(c for c in sanitized_name if c.isalnum() or c == "_")
+    role = data.get("proposal", {}).get("intent", {}).get("role", "pm")
+    filename = f"{timestamp}_{sanitized_name}_{role}.json"
+
+    output_root = Path(data["output_folder"]) if "output_folder" in data else DEFAULT_OUTPUT
+    output_dir = output_root / "objectives"
+    output_path = output_dir / filename
+    output_dir.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json_str + "\n")
     return json_str
 
