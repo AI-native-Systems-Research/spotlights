@@ -20,6 +20,11 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from spotlights_engine.agent_proposals import AgentProposalsConfig
+from spotlights_engine.defaults import (
+    DEFAULT_ARTIFACTS as _DEFAULT_ARTIFACTS,
+    DEFAULT_OUTPUT as _DEFAULT_OUTPUT,
+    DEFAULT_REPO as _DEFAULT_REPO,
+)
 from spotlights_engine.module_knowledge import KnowledgeBase, KnowledgeRecord, RetrieveRequest
 from spotlights_engine.proposal_from_finding_creator import (
     ProposalFromFindingConfig,
@@ -33,9 +38,6 @@ from spotlights_engine.spotlights_manager import (
     run_with_telemetry,
 )
 
-_DEFAULT_REPO = Path("../vllm")
-_DEFAULT_OUTPUT = Path("./spotlights-out")
-_DEFAULT_ARTIFACTS = Path("./artifacts")
 _DEFAULT_OBJECTIVE = "reduce hot-path latency on common workloads"
 
 
