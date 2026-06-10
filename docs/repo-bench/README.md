@@ -34,6 +34,19 @@ findings by judging each one against PR diffs in the filtered view.
 | **bench-spec** | Render the cross-module contract — SHA + reference config + workload signals + output naming — for the observability bench module. |
 | **match** *(separate command)* | LLM judge compares each finding in a `findings.json` against PR diffs in the filtered view; produces strict / related / neighborhood / no_match verdicts per (finding, PR) pair plus per-finding hit rates. |
 
+## Setup: Python environment
+
+Requires Python 3.11+. From the repo root:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+The only runtime dependency is `pydantic>=2` — all other imports are
+stdlib (`urllib` for HTTP, `argparse` for CLI, etc.).
+
 ## Setup: GitHub token
 
 The pipeline scrapes PRs and downloads diffs from GitHub. You need a
@@ -68,25 +81,55 @@ entry point.
 
 ```powershell
 # 1) Scrape (one-time per window). Reuses cache after first run.
-python -m spotlights_engine.repo_bench.cli aggregate `
+python -m spotlights_engine.repo_bench.cli aggregate 
   --start 2025-12-02 --end 2026-06-03
 
 # 2) Filter + diffs + snapshot + workloads + bench-spec.
-python -m spotlights_engine.repo_bench.cli run `
-  --start 2025-12-02 --end 2026-06-03 `
+python -m spotlights_engine.repo_bench.cli run 
+  --start 2025-12-02 --end 2026-06-03 
   --rules not-bot,not-revert,not-chore,any-perf-signal-or-label,rank-spec-mag
 
 # 3) Grade findings against the filtered view (run separately, after
 #    a discovery method has produced findings.json against the pinned SHA).
-python -m spotlights_engine.repo_bench.cli match `
-  --findings <findings.json> `
-  --bench-run-dir runs/repo_bench/bench-<window>__<view>__<UTC>/ `
+python -m spotlights_engine.repo_bench.cli match 
+  --findings <findings.json> 
+  --bench-run-dir runs/repo_bench/bench-<window>__<view>__<UTC>/ 
   --experiment <label>
 ```
 
 `match` writes both `match_report.json` and `match_report.md` to
 `<bench-run-dir>/matching/<experiment>/`. The MD has the headline
 weighted score, per-finding verdicts, and citation per matched PR.
+
+### Running as a background daemon (macOS)
+
+The `aggregate` step can take several hours for large repos. To run it
+in the background so it survives terminal close and macOS idle sleep:
+
+```bash
+caffeinate -i nohup python -m spotlights_engine.repo_bench.cli aggregate \
+  --start 2025-12-02 --end 2026-06-03 > aggregate.log 2>&1 &
+```
+
+- `caffeinate -i` — prevents macOS idle sleep while the process runs
+- `nohup ... &` — detaches from the terminal session
+- `> aggregate.log 2>&1` — captures stdout/stderr to a log file
+
+Monitor progress:
+
+```bash
+tail -f aggregate.log
+```
+
+Stop the process:
+
+```bash
+pkill -f "repo_bench.cli aggregate"
+```
+
+The scrape saves progress incrementally to
+`data/repo_bench/raw/<window>/prs.jsonl.partial`, so restarting after
+a crash resumes from the last fetched PR.
 
 ### Python API
 

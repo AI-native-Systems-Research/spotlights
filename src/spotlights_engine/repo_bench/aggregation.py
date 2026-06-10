@@ -281,6 +281,14 @@ class _GitHubClient:
                 )
                 time.sleep(wait)
                 return self._get_json(url, attempt=attempt + 1)
+            if e.code in (502, 503, 504) and attempt <= 5:
+                wait = min(2 ** attempt, 30)
+                log.warning(
+                    "github transient %s on %s — sleeping %.1fs (attempt %d/5)",
+                    e.code, url, wait, attempt,
+                )
+                time.sleep(wait)
+                return self._get_json(url, attempt=attempt + 1)
             raise
         except (
             http.client.IncompleteRead,
