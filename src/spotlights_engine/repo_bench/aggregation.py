@@ -182,6 +182,97 @@ def scrape(
     )
 
 
+@dataclass(frozen=True)
+class MergeHandle:
+    window_id: str
+    out_dir: Path
+    prs_path: Path
+    manifest_path: Path
+    total_prs: int
+
+
+def merge_windows(
+    *,
+    window_ids: list[str],
+    target_window_id: str | None = None,
+    out_root: Path | None = None,
+) -> MergeHandle:
+    """Merge multiple raw windows into one, deduplicating by pr_number.
+
+    Later windows in the list take precedence on duplicates. The merged
+    output lands in raw/<target_window_id>/ (computed from the combined
+    date span if not given explicitly).
+    """
+    if len(window_ids) < 2:
+        raise ValueError("merge_windows requires at least two window_ids")
+
+    manifests: list[AggregationManifest] = []
+    all_prs: dict[int, dict] = {}
+
+    for wid in window_ids:
+        wdir = raw_dir(wid, root=out_root)
+        prs_path = wdir / "prs.jsonl"
+        manifest_path = wdir / "manifest.json"
+        if not prs_path.exists():
+            raise FileNotFoundError(f"No prs.jsonl in window {wid} ({prs_path})")
+        if not manifest_path.exists():
+            raise FileNotFoundError(f"No manifest.json in window {wid} ({manifest_path})")
+
+        manifest = AggregationManifest.model_validate_json(
+            manifest_path.read_text(encoding="utf-8")
+        )
+        manifests.append(manifest)
+
+        for row in read_jsonl_lenient(prs_path):
+            all_prs[row["pr_number"]] = row
+
+    repos = {m.repo for m in manifests}
+    if len(repos) > 1:
+        raise ValueError(f"Cannot merge windows from different repos: {repos}")
+
+    starts = [m.window_start for m in manifests]
+    ends = [m.window_end for m in manifests]
+    merged_start = min(starts)
+    merged_end = max(ends)
+
+    if target_window_id is None:
+        target_window_id = window_id_for(merged_start, merged_end)
+
+    rows = sorted(all_prs.values(), key=lambda r: r["pr_number"])
+
+    out_dir = raw_dir(target_window_id, root=out_root)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    prs_out = out_dir / "prs.jsonl"
+    manifest_out = out_dir / "manifest.json"
+
+    write_jsonl(prs_out, rows)
+
+    merged_manifest = AggregationManifest(
+        window_start=merged_start,
+        window_end=merged_end,
+        window_days=(merged_end.date() - merged_start.date()).days
+        if hasattr(merged_end, "date")
+        else (merged_end - merged_start).days,
+        github_query=" | ".join(m.github_query for m in manifests),
+        fetched_at=datetime.now(timezone.utc),
+        total_prs_returned=len(rows),
+        repo=next(iter(repos)),
+    )
+    write_json(manifest_out, merged_manifest)
+
+    log.info(
+        "merge_windows: %d unique PRs from %d windows → %s",
+        len(rows), len(window_ids), prs_out,
+    )
+    return MergeHandle(
+        window_id=target_window_id,
+        out_dir=out_dir,
+        prs_path=prs_out,
+        manifest_path=manifest_out,
+        total_prs=len(rows),
+    )
+
+
 def _load_or_discover_numbers(
     client: "_GitHubClient",
     start: date,

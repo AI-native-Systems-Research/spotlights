@@ -65,11 +65,12 @@ will throttle even a small window.
 
 ## Module surface
 
-Three user-facing CLI commands:
+Four user-facing CLI commands:
 
 | Command | What it does |
 |---|---|
 | **`aggregate`** | Scrape every merged PR for a date window into a JSONL cache. Run once per window; subsequent runs reuse the cache. |
+| **`merge-windows`** | Merge multiple raw windows into one, deduplicating by `pr_number`. Useful for extending an existing window without re-fetching. |
 | **`run`** | End-to-end: filter → fetch-diffs → snapshot → workloads → bench-spec. Builds the answer key + spec for the observability bench module. |
 | **`match`** | Grade a `findings.json` against the filtered view by direct diff match. Run after a discovery method has produced findings. |
 
@@ -89,7 +90,13 @@ python -m spotlights_engine.repo_bench.cli run
   --start 2025-12-02 --end 2026-06-03 
   --rules not-bot,not-revert,not-chore,any-perf-signal-or-label,rank-spec-mag
 
-# 3) Grade findings against the filtered view (run separately, after
+# 3) Extend an existing window with newer PRs (no re-fetch of old data).
+python -m spotlights_engine.repo_bench.cli aggregate 
+  --start 2026-06-03 --end 2026-06-10
+python -m spotlights_engine.repo_bench.cli merge-windows 
+  --windows 2025-12-02__2026-06-03 2026-06-03__2026-06-10
+
+# 4) Grade findings against the filtered view (run separately, after
 #    a discovery method has produced findings.json against the pinned SHA).
 python -m spotlights_engine.repo_bench.cli match 
   --findings <findings.json> 
@@ -134,7 +141,13 @@ a crash resumes from the last fetched PR.
 ### Python API
 
 ```python
-from spotlights_engine.repo_bench import run, filtering, matching
+from spotlights_engine.repo_bench import aggregation, run, filtering, matching
+
+# Merge two windows without re-fetching the older one.
+merged = aggregation.merge_windows(
+    window_ids=["2025-12-02__2026-06-03", "2026-06-03__2026-06-10"],
+)
+print(merged.window_id, merged.total_prs)  # 2025-12-02__2026-06-10, <combined count>
 
 handle = run.benchmark(
     window_start="2025-12-02",
@@ -433,8 +446,8 @@ load-bearing communication outward. Everything else is one-way.
 ```
 src/spotlights_engine/repo_bench/
   __init__.py
-  cli.py                     # 5 subcommands: aggregate, filter,
-                             #   fetch-diffs, run, match
+  cli.py                     # 6 subcommands: aggregate, merge-windows,
+                             #   filter, fetch-diffs, run, match
   schemas.py                 # all pydantic models
   storage.py                 # path resolution, atomic writes
   aggregation.py             # GitHub scrape

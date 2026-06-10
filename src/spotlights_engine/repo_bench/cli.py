@@ -136,6 +136,17 @@ def _build_parser() -> argparse.ArgumentParser:
     rn.add_argument("--workload-llm-top-n", type=int, default=5,
                     help="Top-N clusters to render in the workload portfolio.")
 
+    mw = sub.add_parser(
+        "merge-windows",
+        help="Merge multiple raw windows into one, deduplicating by pr_number.",
+    )
+    mw.add_argument("--windows", nargs="+", required=True,
+                    help="Window IDs to merge (e.g. 2025-12-02__2026-06-03 "
+                    "2026-06-03__2026-06-10). Later windows win on duplicates.")
+    mw.add_argument("--target", default=None,
+                    help="Explicit target window ID. Default: auto-computed "
+                    "from the combined date span.")
+
     mt = sub.add_parser(
         "match",
         help=(
@@ -316,6 +327,17 @@ def _cmd_match(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_merge_windows(args: argparse.Namespace) -> int:
+    handle = aggregation.merge_windows(
+        window_ids=args.windows,
+        target_window_id=args.target,
+    )
+    print(f"window_id: {handle.window_id}")
+    print(f"prs:       {handle.total_prs}")
+    print(f"out_dir:   {handle.out_dir}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
     logging.basicConfig(
@@ -330,6 +352,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_fetch_diffs(args)
     if args.subcommand == "run":
         return _cmd_run(args)
+    if args.subcommand == "merge-windows":
+        return _cmd_merge_windows(args)
     if args.subcommand == "match":
         return _cmd_match(args)
     print(f"unknown subcommand: {args.subcommand}", file=sys.stderr)
