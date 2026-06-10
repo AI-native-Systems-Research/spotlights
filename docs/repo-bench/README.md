@@ -80,27 +80,27 @@ entry point.
 
 ### Examples
 
-```powershell
+```bash
 # 1) Scrape (one-time per window). Reuses cache after first run.
-python -m spotlights_engine.repo_bench.cli aggregate 
+python -m spotlights_engine.repo_bench.cli aggregate \
   --start 2025-12-02 --end 2026-06-03
 
 # 2) Filter + diffs + snapshot + workloads + bench-spec.
-python -m spotlights_engine.repo_bench.cli run 
-  --start 2025-12-02 --end 2026-06-03 
+python -m spotlights_engine.repo_bench.cli run \
+  --start 2025-12-02 --end 2026-06-03 \
   --rules not-bot,not-revert,not-chore,any-perf-signal-or-label,rank-spec-mag
 
 # 3) Extend an existing window with newer PRs (no re-fetch of old data).
-python -m spotlights_engine.repo_bench.cli aggregate 
+python -m spotlights_engine.repo_bench.cli aggregate \
   --start 2026-06-03 --end 2026-06-10
-python -m spotlights_engine.repo_bench.cli merge-windows 
+python -m spotlights_engine.repo_bench.cli merge-windows \
   --windows 2025-12-02__2026-06-03 2026-06-03__2026-06-10
 
 # 4) Grade findings against the filtered view (run separately, after
 #    a discovery method has produced findings.json against the pinned SHA).
-python -m spotlights_engine.repo_bench.cli match 
-  --findings <findings.json> 
-  --bench-run-dir runs/repo_bench/bench-<window>__<view>__<UTC>/ 
+python -m spotlights_engine.repo_bench.cli match \
+  --findings <findings.json> \
+  --bench-run-dir runs/repo_bench/bench-<window>__<view>__<UTC>/ \
   --experiment <label>
 ```
 
@@ -114,10 +114,11 @@ The `aggregate` step can take several hours for large repos. To run it
 in the background so it survives terminal close and macOS idle sleep:
 
 ```bash
-caffeinate -i nohup python -m spotlights_engine.repo_bench.cli aggregate \
-  --start 2025-12-02 --end 2026-06-03 > aggregate.log 2>&1 &
+caffeinate -i nohup bash -c 'source .env && python -m spotlights_engine.repo_bench.cli aggregate \
+  --start 2025-12-02 --end 2026-06-03' > aggregate.log 2>&1 &
 ```
 
+- `source .env` — loads environment variables (e.g. `GITHUB_TOKEN`) into the subprocess
 - `caffeinate -i` — prevents macOS idle sleep while the process runs
 - `nohup ... &` — detaches from the terminal session
 - `> aggregate.log 2>&1` — captures stdout/stderr to a log file
