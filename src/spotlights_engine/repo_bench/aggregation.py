@@ -110,7 +110,15 @@ def scrape(
     pr_numbers_path = out_dir / "pr_numbers.json"
 
     if prs_path.exists() and manifest_path.exists():
-        log.info("scrape: %s already complete — re-running will rebuild it", wid)
+        log.info("scrape: %s already complete — skipping", wid)
+        rows = list(read_jsonl_lenient(prs_path))
+        return ScrapeHandle(
+            window_id=wid,
+            out_dir=out_dir,
+            prs_path=prs_path,
+            manifest_path=manifest_path,
+            total_prs=len(rows),
+        )
 
     client = _GitHubClient(token=token, repo=repo)
     query = (
@@ -128,6 +136,16 @@ def scrape(
     already: dict[int, dict] = {row["pr_number"]: row for row in read_jsonl_lenient(partial_path)}
     if already:
         log.info("scrape: resuming — %d PRs already in partial", len(already))
+
+    # Seed from overlapping completed windows so we don't re-fetch PRs that
+    # were already scraped in a narrower (or shifted) window.
+    borrowed = _borrow_from_existing_windows(
+        pr_numbers=pr_numbers, wid=wid, out_root=out_root,
+    )
+    if borrowed:
+        for num, row in borrowed.items():
+            already.setdefault(num, row)
+        log.info("scrape: borrowed %d PRs from overlapping windows", len(borrowed))
 
     todo = [n for n in pr_numbers if n not in already]
     log.info("scrape: %d PRs to fetch (%d cached)", len(todo), len(already))
@@ -271,6 +289,37 @@ def merge_windows(
         manifest_path=manifest_out,
         total_prs=len(rows),
     )
+
+
+def _borrow_from_existing_windows(
+    *,
+    pr_numbers: list[int],
+    wid: str,
+    out_root: Path | None,
+) -> dict[int, dict]:
+    """Load PRs from other completed windows that overlap the needed set.
+
+    Scans the raw/ directory for completed scrapes (those with prs.jsonl) and
+    pulls any PR rows whose pr_number is in our target set. This avoids
+    re-fetching per-PR detail when extending a window.
+    """
+    needed = set(pr_numbers)
+    raw_root = raw_dir(wid, root=out_root).parent
+    if not raw_root.is_dir():
+        return {}
+
+    found: dict[int, dict] = {}
+    for sibling in raw_root.iterdir():
+        if not sibling.is_dir() or sibling.name == wid:
+            continue
+        prs_file = sibling / "prs.jsonl"
+        if not prs_file.exists():
+            continue
+        for row in read_jsonl_lenient(prs_file):
+            num = row.get("pr_number")
+            if num in needed:
+                found[num] = row
+    return found
 
 
 def _load_or_discover_numbers(

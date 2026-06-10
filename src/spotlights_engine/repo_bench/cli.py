@@ -20,7 +20,7 @@ import argparse
 import logging
 import os
 import sys
-from datetime import date, timedelta
+from datetime import date
 
 from pathlib import Path
 
@@ -64,8 +64,8 @@ def _build_parser() -> argparse.ArgumentParser:
         "aggregate",
         help="Scrape merged PRs from GitHub for a date window.",
     )
-    agg.add_argument("--start", help="Window start (ISO date). Default: 6mo before --end.")
-    agg.add_argument("--end", help="Window end (ISO date). Default: today.")
+    agg.add_argument("--start", required=True, help="Window start (ISO date).")
+    agg.add_argument("--end", required=True, help="Window end (ISO date).")
     agg.add_argument("--repo", default=aggregation.DEFAULT_REPO,
                      help=f"GitHub repo (default: {aggregation.DEFAULT_REPO}).")
     agg.add_argument("--token", default=None, help="GitHub PAT. Default: $GITHUB_TOKEN.")
@@ -103,8 +103,8 @@ def _build_parser() -> argparse.ArgumentParser:
             "inputs is a no-op."
         ),
     )
-    rn.add_argument("--start", help="Window start. Default: 6mo before --end.")
-    rn.add_argument("--end", help="Window end. Default: today.")
+    rn.add_argument("--start", required=True, help="Window start (ISO date).")
+    rn.add_argument("--end", required=True, help="Window end (ISO date).")
     rn.add_argument("--rules", required=True,
                     help="Comma-separated rule names. Available: "
                     + ", ".join(sorted(_RULES.keys())) + ".")
@@ -171,10 +171,8 @@ def _build_parser() -> argparse.ArgumentParser:
     return p
 
 
-def _resolve_window(start: str | None, end: str | None) -> tuple[date, date]:
-    end_d = date.fromisoformat(end) if end else date.today()
-    start_d = date.fromisoformat(start) if start else end_d - timedelta(days=183)
-    return start_d, end_d
+def _resolve_window(start: str, end: str) -> tuple[date, date]:
+    return date.fromisoformat(start), date.fromisoformat(end)
 
 
 def _cmd_aggregate(args: argparse.Namespace) -> int:

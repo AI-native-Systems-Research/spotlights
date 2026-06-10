@@ -69,7 +69,7 @@ Four user-facing CLI commands:
 
 | Command | What it does |
 |---|---|
-| **`aggregate`** | Scrape every merged PR for a date window into a JSONL cache. Run once per window; subsequent runs reuse the cache. |
+| **`aggregate`** | Scrape every merged PR for a date window into a JSONL cache. Run once per window; subsequent runs reuse the cache. When extending a window, PRs already fetched in overlapping windows are reused — only the delta hits GitHub. |
 | **`merge-windows`** | Merge multiple raw windows into one, deduplicating by `pr_number`. Useful for extending an existing window without re-fetching. |
 | **`run`** | End-to-end: filter → fetch-diffs → snapshot → workloads → bench-spec. Builds the answer key + spec for the observability bench module. |
 | **`match`** | Grade a `findings.json` against the filtered view by direct diff match. Run after a discovery method has produced findings. |
@@ -90,7 +90,14 @@ python -m spotlights_engine.repo_bench.cli run \
   --start 2025-12-02 --end 2026-06-03 \
   --rules not-bot,not-revert,not-chore,any-perf-signal-or-label,rank-spec-mag
 
-# 3) Extend an existing window with newer PRs (no re-fetch of old data).
+# 3a) Extend an existing window — just run aggregate with the wider dates.
+#     PRs already fetched in any prior window are reused automatically;
+#     only the delta is fetched from GitHub.
+python -m spotlights_engine.repo_bench.cli aggregate \
+  --start 2025-12-02 --end 2026-06-10
+
+# 3b) Alternatively, scrape only the new slice and merge it with the
+#     prior window (useful when you want to keep the original window intact).
 python -m spotlights_engine.repo_bench.cli aggregate \
   --start 2026-06-03 --end 2026-06-10
 python -m spotlights_engine.repo_bench.cli merge-windows \
