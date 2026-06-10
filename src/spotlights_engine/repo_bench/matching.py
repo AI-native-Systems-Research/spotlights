@@ -332,11 +332,13 @@ def run_matching(
         view_pr_numbers.add(int(json.loads(line)["pr_number"]))
 
     raw_by_n: dict[int, RawPR] = {}
+    n_raw_total = 0
     for d in read_jsonl_lenient(raw_path):
         try:
             pr = RawPR.model_validate(d)
         except ValidationError:
             continue
+        n_raw_total += 1
         if pr.pr_number in view_pr_numbers:
             raw_by_n[pr.pr_number] = pr
 
@@ -492,6 +494,13 @@ def run_matching(
     summary = {
         "n_findings": len(findings),
         "n_judged": n_judged,
+        "ground_truth": {
+            "n_raw_prs": n_raw_total,
+            "n_view_prs": len(view_pr_numbers),
+            "view_share": (
+                len(view_pr_numbers) / n_raw_total if n_raw_total else 0.0
+            ),
+        },
         "verdicts": {
             "same_idea": same_idea_total,
             "related": related_total,
@@ -573,6 +582,49 @@ def render_match_md(report: dict) -> str:
     out.append(f"- **Judge model**: `{report['judge_model']}` (prompt {report['prompt_version']})")
     out.append(f"- **Findings file**: `{report['findings_path']}`")
     out.append(f"- **Scored at**: {report['scored_at']}")
+    gt = s.get("ground_truth") or {}
+    if gt:
+        n_view = gt.get("n_view_prs")
+        n_raw = gt.get("n_raw_prs")
+        share = (gt.get("view_share") or 0.0) * 100
+        if n_view is not None and n_raw:
+            out.append(
+                f"- **Ground truth**: **{n_view} PRs** in the filtered view "
+                f"(out of **{n_raw}** merged PRs scraped, {share:.1f}%). "
+                f"Findings are graded against the diffs of these view PRs."
+            )
+    out.append("")
+    out.append("### What we measure")
+    out.append("")
+    out.append(
+        "For each finding, we collect candidate PRs in the view whose "
+        "diff touches the finding's file, classify each as **Tier 1** "
+        "(diff hunk lands *inside the finding's exact symbol* — "
+        "function/method/class) or **Tier 2** (same file, different "
+        "function), then ask the LLM judge to label each (finding, "
+        "candidate) pair. Verdicts:"
+    )
+    out.append("")
+    out.append(
+        "- **`same_idea`** — diff makes essentially the same change as "
+        "the finding (strongest evidence)."
+    )
+    out.append(
+        "- **`related`** — same code touched, related but distinct change."
+    )
+    out.append(
+        "- **`neighborhood`** — same file, unrelated code (informative "
+        "noise; the file is a hotspot)."
+    )
+    out.append(
+        "- **`no_match`** — diff has nothing to do with the finding."
+    )
+    out.append("")
+    out.append(
+        "All verdict counts are **(finding, candidate-PR) pair** totals "
+        "summed across findings — one PR can appear under several "
+        "findings, and a finding can have many candidate PRs."
+    )
     out.append("")
     out.append("## Summary")
     out.append("")
@@ -603,16 +655,37 @@ def render_match_md(report: dict) -> str:
         out.append("| `neighborhood`  | 0.05 | 0.05 |")
         out.append("| `no_match`      | 0.00 | 0.00 |")
         out.append("")
-    out.append("**Verdict totals across all (finding, candidate) pairs**:")
+    out.append("### Per-finding verdict breakdown")
     out.append("")
-    out.append("| Verdict | Count |")
-    out.append("|---|---:|")
-    for v in _VERDICT_ORDER:
-        out.append(f"| `{v}` | {s['verdicts'].get(v, 0)} |")
-    out.append("")
-    out.append("Verdict meanings — `same_idea` = essentially the same change; "
-               "`related` = same code, related but distinct; `neighborhood` = same "
-               "file, unrelated; `no_match` = nothing in common.")
+    out.append(
+        "| Finding | Tier-1 | Tier-2 | `same_idea` | `related` | `neighborhood` | `no_match` |"
+    )
+    out.append("|---|---:|---:|---:|---:|---:|---:|")
+    sums = {v: 0 for v in _VERDICT_ORDER}
+    sum_t1 = sum_t2 = 0
+    for f in findings:
+        counts = {v: 0 for v in _VERDICT_ORDER}
+        for m in f.get("matches", []):
+            v = m.get("verdict")
+            if v in counts:
+                counts[v] += 1
+                sums[v] += 1
+        sum_t1 += f["n_tier1_candidates"]
+        sum_t2 += f["n_tier2_candidates"]
+        label = f["finding_id"]
+        sym = f.get("symbol") or ""
+        if sym:
+            label = f"{label} (`{sym[:60]}`)"
+        out.append(
+            f"| {label} | {f['n_tier1_candidates']} | {f['n_tier2_candidates']} "
+            f"| {counts['same_idea']} | {counts['related']} "
+            f"| {counts['neighborhood']} | {counts['no_match']} |"
+        )
+    out.append(
+        f"| **total** | **{sum_t1}** | **{sum_t2}** "
+        f"| **{sums['same_idea']}** | **{sums['related']}** "
+        f"| **{sums['neighborhood']}** | **{sums['no_match']}** |"
+    )
     out.append("")
     out.append("## Per-finding")
     out.append("")

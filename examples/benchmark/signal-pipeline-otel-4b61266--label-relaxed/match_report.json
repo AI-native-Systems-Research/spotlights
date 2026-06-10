@@ -1,0 +1,295 @@
+{
+  "experiment_id": "signal-pipeline-otel-4b61266--label-relaxed",
+  "window_id": "2025-12-02__2026-06-03",
+  "judge_model": "sonnet",
+  "prompt_version": "v1",
+  "prompt_sha256": "ff982c29ad15efac24b3aa3cb434a305d64b698cf126ec13cc41007da38c78ef",
+  "findings_path": "C:\\projects\\vs_code\\spotlights\\runs\\signal-pipeline\\with-telemetry-4b612664\\report\\findings.json",
+  "scored_at": "2026-06-09T07:31:50.990340+00:00",
+  "summary": {
+    "n_findings": 5,
+    "n_judged": 5,
+    "verdicts": {
+      "same_idea": 0,
+      "related": 2,
+      "neighborhood": 30,
+      "no_match": 0
+    },
+    "per_finding_hit": {
+      "strict_same_idea": 0,
+      "strict_share": 0.0,
+      "loose_same_idea_or_related": 2,
+      "loose_share": 0.4
+    },
+    "tier_2_yield": 1,
+    "tier_2_yield_share": 0.2,
+    "weighted_score": 0.22999999999999998,
+    "score_version": "v1",
+    "per_finding_score": [
+      {
+        "finding_id": "cand-0001",
+        "score": 0.4
+      },
+      {
+        "finding_id": "cand-0002",
+        "score": 0.6
+      },
+      {
+        "finding_id": "cand-0003",
+        "score": 0.05
+      },
+      {
+        "finding_id": "cand-0004",
+        "score": 0.05
+      },
+      {
+        "finding_id": "cand-0005",
+        "score": 0.05
+      }
+    ],
+    "ground_truth": {
+      "n_raw_prs": 5329,
+      "n_view_prs": 624,
+      "view_share": 0.11709513980108839
+    }
+  },
+  "per_finding": [
+    {
+      "finding_id": "cand-0001",
+      "file": "vllm/distributed/kv_transfer/kv_connector/v1/offloading_connector.py",
+      "symbol": "OffloadingConnector",
+      "n_tier1_candidates": 0,
+      "n_tier2_candidates": 8,
+      "matches": [
+        {
+          "pr_number": 24498,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 27577,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 27942,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 29087,
+          "tier": 2,
+          "verdict": "related",
+          "hunk_citation": "OffloadingConnectorScheduler.get_num_new_matched_tokens: delay loads when blocks already in-flight (perf in same connector)"
+        },
+        {
+          "pr_number": 29870,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 30419,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 30761,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 31916,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        }
+      ]
+    },
+    {
+      "finding_id": "cand-0002",
+      "file": "vllm/distributed/kv_transfer/kv_connector/v1/offloading_connector.py",
+      "symbol": "OffloadingConnectorScheduler.get_num_new_matched_tokens",
+      "n_tier1_candidates": 2,
+      "n_tier2_candidates": 8,
+      "matches": [
+        {
+          "pr_number": 29087,
+          "tier": 1,
+          "verdict": "related",
+          "hunk_citation": "get_num_new_matched_tokens adds early-return paths (None) for in-flight blocks; not the empty-manager skip"
+        },
+        {
+          "pr_number": 36610,
+          "tier": 1,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 24498,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 27577,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 27942,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 29870,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 30419,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 30761,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 31916,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 32064,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        }
+      ]
+    },
+    {
+      "finding_id": "cand-0003",
+      "file": "vllm/v1/spec_decode/ngram_proposer.py",
+      "symbol": "NgramProposer",
+      "n_tier1_candidates": 0,
+      "n_tier2_candidates": 1,
+      "matches": [
+        {
+          "pr_number": 25954,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        }
+      ]
+    },
+    {
+      "finding_id": "cand-0004",
+      "file": "vllm/v1/core/sched/scheduler.py",
+      "symbol": "Scheduler.schedule (WAITING-queue admission loop)",
+      "n_tier1_candidates": 0,
+      "n_tier2_candidates": 8,
+      "matches": [
+        {
+          "pr_number": 24322,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 26813,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 27170,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 28284,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 29821,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 30145,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 30166,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 30522,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        }
+      ]
+    },
+    {
+      "finding_id": "cand-0005",
+      "file": "vllm/v1/core/kv_cache_manager.py",
+      "symbol": "KVCacheManager.get_computed_blocks (prefix_cache_stats.record call site)",
+      "n_tier1_candidates": 0,
+      "n_tier2_candidates": 5,
+      "matches": [
+        {
+          "pr_number": 26813,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 30166,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 35758,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 37307,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 44165,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        }
+      ]
+    }
+  ]
+}
