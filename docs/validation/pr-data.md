@@ -131,7 +131,9 @@ python -m spotlights_engine.repo_bench characterize-workloads \
   [--llm-fallback]         # use LLM for unknowns (opt-in)
 ```
 
-Output is saved to `<run-dir>/workload_characterization.json` and `<run-dir>/workload_characterization.md`.
+Output is saved to `<run-dir>/workload_characterization.json`, `<run-dir>/workload_characterization.md`, and `<run-dir>/workload_characterization.csv`. The CSV has one row per benchmark entry with columns for PR number, title, workload type, scope, tool, params_specified (default/explicit), trace source, flattened generator parameters, and the source command.
+
+A sample CSV is available at [assets/workload_characterization_sample.csv](assets/workload_characterization_sample.csv).
 
 ### Sample output
 
