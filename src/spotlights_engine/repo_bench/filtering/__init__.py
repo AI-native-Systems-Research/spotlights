@@ -16,6 +16,14 @@ from spotlights_engine.repo_bench.filtering.derive import (
     derive,
     view_id_for,
 )
+from spotlights_engine.repo_bench.filtering.report import (
+    FilterReport,
+    RuleStats,
+    format_report,
+    format_report_md,
+    generate_filter_report,
+    report_to_dict,
+)
 from spotlights_engine.repo_bench.filtering.rules import (
     AnyLoosePerfClaim,
     AnyPerfSignal,
@@ -38,6 +46,7 @@ __all__ = [
     "AnyPerfSignalOrLabel",
     "AnyStrictPerfClaim",
     "BodyStrictPerfClaim",
+    "FilterReport",
     "NotBot",
     "NotChore",
     "NotRevert",
@@ -45,10 +54,15 @@ __all__ = [
     "Rule",
     "RulePredicate",
     "RuleRanker",
+    "RuleStats",
     "TitleStrictPerfClaim",
     "ViewEntry",
     "ViewHandle",
     "ViewManifest",
     "derive",
+    "format_report",
+    "format_report_md",
+    "generate_filter_report",
+    "report_to_dict",
     "view_id_for",
 ]

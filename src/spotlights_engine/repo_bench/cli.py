@@ -31,6 +31,8 @@ from spotlights_engine.repo_bench import (
     matching,
     run as run_module,
 )
+from spotlights_engine.repo_bench.config import compile_filter_patterns, load_config
+from spotlights_engine.repo_bench.filtering import heuristics as _heuristics
 
 
 # Registry: CLI rule names → constructors.
@@ -135,6 +137,18 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="Model for the workload-command extractor.")
     rn.add_argument("--workload-llm-top-n", type=int, default=5,
                     help="Top-N clusters to render in the workload portfolio.")
+
+    fr = sub.add_parser(
+        "filter-report",
+        help="Evaluate each predicate independently and report per-rule "
+             "drop/keep stats with overlap matrix.",
+    )
+    fr.add_argument("--window", required=True)
+    fr.add_argument("--rules", required=True,
+                    help="Comma-separated rule names (predicates only; rankers ignored).")
+    fr.add_argument("--config", default="vllm",
+                    help="Config name (e.g. 'vllm') or path to a TOML file. "
+                    "Drives filter perf-noun and label lists. Default: 'vllm'.")
 
     mw = sub.add_parser(
         "merge-windows",
@@ -325,6 +339,37 @@ def _cmd_match(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_filter_report(args: argparse.Namespace) -> int:
+    rule_names = [n.strip() for n in args.rules.split(",") if n.strip()]
+    if not rule_names:
+        print("ERROR: --rules must list at least one rule.", file=sys.stderr)
+        return 2
+    unknown = [n for n in rule_names if n not in _RULES]
+    if unknown:
+        print(
+            f"ERROR: unknown rule(s): {', '.join(unknown)}. "
+            f"Available: {', '.join(sorted(_RULES.keys()))}.",
+            file=sys.stderr,
+        )
+        return 2
+    cfg = load_config(args.config)
+    _heuristics.set_active_config(compile_filter_patterns(cfg))
+    rules = [_RULES[n]() for n in rule_names]
+    report = filtering.generate_filter_report(window_id=args.window, rules=rules)
+    formatted = filtering.format_report(report)
+    print(formatted)
+    from spotlights_engine.repo_bench.storage import raw_dir as _raw_dir
+    import json
+    out_dir = _raw_dir(args.window)
+    md_path = out_dir / "filter_report.md"
+    md_path.write_text(filtering.format_report_md(report) + "\n")
+    json_path = out_dir / "filter_report.json"
+    json_path.write_text(json.dumps(filtering.report_to_dict(report), indent=2) + "\n")
+    print(f"\n  Written: {md_path}")
+    print(f"  Written: {json_path}")
+    return 0
+
+
 def _cmd_merge_windows(args: argparse.Namespace) -> int:
     handle = aggregation.merge_windows(
         window_ids=args.windows,
@@ -350,6 +395,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_fetch_diffs(args)
     if args.subcommand == "run":
         return _cmd_run(args)
+    if args.subcommand == "filter-report":
+        return _cmd_filter_report(args)
     if args.subcommand == "merge-windows":
         return _cmd_merge_windows(args)
     if args.subcommand == "match":

@@ -64,3 +64,38 @@ This favors specific, high-magnitude optimizations over sprawling PRs with small
 - 1-file PR claiming 10% → score 10.0
 - 8-file PR claiming 10% → score 1.25
 - PR with no extractable percentage → score 0 (kept but ranked last)
+
+## Filter Report
+
+The `filter-report` command evaluates each predicate **independently** against all raw PRs and produces a breakdown showing how many PRs fall into each category. Unlike the standard filtering (which short-circuits on the first failing rule), this tests every PR against every rule separately — so a bot-authored revert counts under both "Created by a bot" and "Revert PRs".
+
+```
+python -m spotlights_engine.repo_bench.cli filter-report \
+  --window <window_id> \
+  --rules not-bot,not-revert,not-chore,any-perf-signal-or-label \
+  --config vllm
+```
+
+The report is saved to `data/repo_bench/raw/<window_id>/filter_report.md` (and a `.json` sibling with structured data).
+
+### Sample output
+
+Window `2025-12-02__2026-06-10` (vllm-project/vllm):
+
+| Category | Count | % of total |
+|----------|------:|-----------:|
+| Created by a bot | 5 | 0.1% |
+| Revert PRs | 47 | 0.8% |
+| Chore (bugfix/CI/test/doc/refactor) | 2074 | 37.4% |
+| Not related to performance optimization | 4709 | 84.9% |
+
+**After all filters**: 653 PRs kept (11.8% of 5549 total)
+
+### Reading the results
+
+- **Created by a bot** (5): PRs opened by automated accounts (dependabot, renovate, etc.). Negligible in this repo.
+- **Revert PRs** (47): PRs that undo a previous merge. These carry no new optimization signal.
+- **Chore** (2074): PRs tagged as bugfix, CI, test, doc, refactor, etc. — routine maintenance unlikely to contain performance work. This is the second-largest exclusion category.
+- **Not related to performance optimization** (4709): PRs with no numeric perf claim, no perf tag, and no perf-related label. This is the dominant filter — most PRs in a large project simply aren't performance work.
+
+The overlap matrix shows that most chore PRs (1893 of 2074) are also caught by the perf-signal filter, but 181 chore PRs *would* have slipped through without the dedicated `not-chore` rule (they happen to mention a percentage in a non-performance context that the strict regex matches).
