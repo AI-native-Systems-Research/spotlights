@@ -588,7 +588,7 @@ def render_summary_md(
 
 _CSV_COLUMNS = [
     "pr_number", "title", "workload_type", "benchmark_scope", "tool",
-    "trace_source", "trace_dataset_path",
+    "params_specified", "trace_source", "trace_dataset_path",
     "random_input_len", "random_output_len", "input_len", "output_len",
     "num_prompts", "request_rate", "max_concurrency", "burstiness",
     "confidence", "extraction_method", "source_command",
@@ -612,12 +612,14 @@ def render_csv(
                 continue
             if e.benchmark_scope == "accuracy" and not include_accuracy:
                 continue
+            has_params = bool(e.generator_params)
             row: dict[str, Any] = {
                 "pr_number": pr.pr_number,
                 "title": pr.title,
                 "workload_type": e.workload_type,
                 "benchmark_scope": e.benchmark_scope,
                 "tool": e.tool,
+                "params_specified": "explicit" if has_params else "default",
                 "trace_source": e.trace_source,
                 "trace_dataset_path": e.trace_dataset_path,
                 "confidence": pr.confidence,
