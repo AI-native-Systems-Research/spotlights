@@ -85,23 +85,23 @@ entry point.
 python -m spotlights_engine.repo_bench.cli aggregate \
   --start 2025-12-02 --end 2026-06-03
 
-# 2) Filter + diffs + snapshot + workloads + bench-spec.
-python -m spotlights_engine.repo_bench.cli run \
-  --start 2025-12-02 --end 2026-06-03 \
-  --rules not-bot,not-revert,not-chore,any-perf-signal-or-label,rank-spec-mag
-
-# 3a) Extend an existing window — just run aggregate with the wider dates.
+# 2a) Extend an existing window — just run aggregate with the wider dates.
 #     PRs already fetched in any prior window are reused automatically;
 #     only the delta is fetched from GitHub.
 python -m spotlights_engine.repo_bench.cli aggregate \
   --start 2025-12-02 --end 2026-06-10
 
-# 3b) Alternatively, scrape only the new slice and merge it with the
+# 2b) Alternatively, scrape only the new slice and merge it with the
 #     prior window (useful when you want to keep the original window intact).
 python -m spotlights_engine.repo_bench.cli aggregate \
   --start 2026-06-03 --end 2026-06-10
 python -m spotlights_engine.repo_bench.cli merge-windows \
   --windows 2025-12-02__2026-06-03 2026-06-03__2026-06-10
+
+# 3) Filter + diffs + snapshot + workloads + bench-spec.
+python -m spotlights_engine.repo_bench.cli run \
+  --start 2025-12-02 --end 2026-06-03 \
+  --rules not-bot,not-revert,not-chore,any-perf-signal-or-label,rank-spec-mag
 
 # 4) Grade findings against the filtered view (run separately, after
 #    a discovery method has produced findings.json against the pinned SHA).
