@@ -164,7 +164,20 @@ _Accuracy evals (lm_eval): 68 entries excluded._
 | timed_trace/conversation_trace.jsonl | 1 | #39795 |
 | hf/gorilla-llm/Berkeley-Function-Calling-Leaderboard | 1 | #42457 |
 
-#### Top synthetic configurations
+#### Synthetic workload parameters
+
+**43** synthetic entries use default parameters (no explicit input/output length, concurrency, or rate specified in the command). When `vllm bench serve` is run without these flags, it uses:
+
+| Parameter | Default value |
+|-----------|:--------------|
+| `--dataset-name` | `random` |
+| `--random-input-len` | `1024` |
+| `--random-output-len` | `128` |
+| `--num-prompts` | `1000` |
+| `--request-rate` | `inf` (send as fast as possible) |
+| `--max-concurrency` | unlimited |
+
+**89** synthetic entries specify explicit parameters. Top configurations:
 
 | Input len | Output len | Num prompts | Request rate | Concurrency | Count |
 |----------:|----------:|------------:|:-------------|:------------|------:|
