@@ -87,7 +87,7 @@ class RepoGuard:
                 except OSError:
                     manifest[rel] = (0, 0, "missing")
                     continue
-                manifest[rel] = (st.st_mtime_ns, st.st_size, _xattr_digest(full))
+                manifest[rel] = (st.st_mtime_ns, st.st_size, _file_digest(full))
         return manifest
 
     def _diff(self, before, after):
@@ -136,6 +136,18 @@ def _xattr_digest(path: Path) -> str:
         hasher.update(b"\x00")
         hasher.update(value)
         hasher.update(b"\x00")
+    return hasher.hexdigest()
+
+
+def _file_digest(path: Path) -> str:
+    hasher = hashlib.sha256()
+    try:
+        with path.open("rb") as fh:
+            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                hasher.update(chunk)
+    except OSError:
+        hasher.update(b"unreadable")
+    hasher.update(_xattr_digest(path).encode("utf-8"))
     return hasher.hexdigest()
 
 

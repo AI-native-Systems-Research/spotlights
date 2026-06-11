@@ -4,10 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from spotlights_engine.module_deep_research import api as module_api
 from spotlights_engine.module_deep_research.api import research_module, resolve_target_module
 from spotlights_engine.module_deep_research.codex_exec import CodexExecResult
+from spotlights_engine.module_deep_research.expanded import ExpandedResearchConfig
 from spotlights_engine.schemas.common import SpotlightContext
-from spotlights_engine.schemas.pipeline import ModuleDeepResearchInput
+from spotlights_engine.schemas.pipeline import ModuleDeepResearchInput, ModuleDeepResearchOutput
 from spotlights_engine.schemas.project import Module, ProjectTree, Repository
 
 
@@ -111,6 +113,76 @@ def test_research_module_records_nonzero_runner_exit_as_recoverable_issue() -> N
     assert len(output.issues) == 1
     assert output.issues[0].recoverable is True
     assert "network down" in output.issues[0].message
+
+
+def test_research_module_expanded_path_skips_vanilla_by_default(monkeypatch) -> None:
+    runner = FakeRunner('{"findings": [], "issues": []}')
+    seen_baselines = []
+
+    class FakeExpandedOrchestrator:
+        def __init__(self, *, baseline_output, **kwargs) -> None:
+            seen_baselines.append(baseline_output)
+
+        def run(self):
+            return ModuleDeepResearchOutput(findings=[], issues=[])
+
+    monkeypatch.setattr(
+        module_api,
+        "ExpandedModuleResearchOrchestrator",
+        FakeExpandedOrchestrator,
+    )
+
+    output = research_module(
+        _request(),
+        runner=runner,
+        expanded_config=ExpandedResearchConfig(),
+    )
+
+    assert output.findings == []
+    assert runner.prompts == []
+    assert len(seen_baselines) == 1
+    assert seen_baselines[0].findings == []
+
+
+def test_research_module_can_opt_into_live_vanilla_baseline(monkeypatch) -> None:
+    runner = FakeRunner(
+        """
+        {
+          "findings": [
+            {
+              "finding_id": "find-0001",
+              "title": "baseline",
+              "url": "https://example.com/baseline",
+              "source_type": "paper",
+              "technique_summary": "baseline"
+            }
+          ]
+        }
+        """
+    )
+    seen_baselines = []
+
+    class FakeExpandedOrchestrator:
+        def __init__(self, *, baseline_output, **kwargs) -> None:
+            seen_baselines.append(baseline_output)
+
+        def run(self):
+            return seen_baselines[-1]
+
+    monkeypatch.setattr(
+        module_api,
+        "ExpandedModuleResearchOrchestrator",
+        FakeExpandedOrchestrator,
+    )
+
+    output = research_module(
+        _request(),
+        runner=runner,
+        expanded_config=ExpandedResearchConfig(run_vanilla_baseline=True),
+    )
+
+    assert len(runner.prompts) == 1
+    assert output.findings[0].title == "baseline"
 
 
 def test_codex_command_shape_places_top_level_flags_before_exec(tmp_path: Path) -> None:

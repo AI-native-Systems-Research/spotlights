@@ -9,6 +9,10 @@ from spotlights_engine.module_deep_research.codex_exec import (
     CodexExecOptions,
     CodexExecResult,
 )
+from spotlights_engine.module_deep_research.expanded import (
+    ExpandedModuleResearchOrchestrator,
+    ExpandedResearchConfig,
+)
 from spotlights_engine.module_deep_research.prompts import render_module_deep_research_prompt
 from spotlights_engine.module_deep_research.validation import parse_module_deep_research_output
 from spotlights_engine.schemas.common import StepIssue
@@ -52,6 +56,7 @@ def research_module(
     *,
     check: bool = False,
     runner: ModuleResearchRunner | None = None,
+    expanded_config: ExpandedResearchConfig | None = None,
 ) -> ModuleDeepResearchOutput:
     """Run module deep research and return the architecture output contract."""
     module = resolve_target_module(request.project_tree, request.module_qualified_name)
@@ -66,12 +71,47 @@ def research_module(
             ],
         )
 
+    if expanded_config is not None and expanded_config.enabled:
+        baseline = (
+            _run_vanilla_module_research(
+                request=request,
+                module=module,
+                codex_options=codex_options,
+                check=check,
+                runner=runner,
+            )
+            if expanded_config.run_vanilla_baseline
+            else ModuleDeepResearchOutput()
+        )
+        return ExpandedModuleResearchOrchestrator(
+            request=request,
+            module=module,
+            baseline_output=baseline,
+            config=expanded_config,
+        ).run()
+
+    return _run_vanilla_module_research(
+        request=request,
+        module=module,
+        codex_options=codex_options,
+        check=check,
+        runner=runner,
+    )
+
+
+def _run_vanilla_module_research(
+    *,
+    request: ModuleDeepResearchInput,
+    module: Module,
+    codex_options: CodexExecOptions | None,
+    check: bool,
+    runner: ModuleResearchRunner | None,
+) -> ModuleDeepResearchOutput:
+    """Run the vanilla Codex-only implementation used as the control group."""
     prompt = render_module_deep_research_prompt(request, module)
-    if runner is not None:
-        active_runner = runner
-    else:
-        options = codex_options or CodexExecOptions(cwd=request.repo_path)
-        active_runner = CodexExecClient(options)
+    active_runner = runner or CodexExecClient(
+        codex_options or CodexExecOptions(cwd=request.repo_path)
+    )
 
     try:
         result = active_runner.run(prompt, check=check)

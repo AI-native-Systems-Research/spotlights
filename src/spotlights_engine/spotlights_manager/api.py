@@ -18,6 +18,7 @@ from spotlights_engine.candidate_discovery.api import (
     IterationTelemetry,
 )
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
+from spotlights_engine.module_deep_research.expanded import ExpandedResearchConfig
 from spotlights_engine.modules_extractor import ExtractorConfig
 from spotlights_engine.modules_extractor.agent import ExtractionInvocation
 from spotlights_engine.proposal_from_finding_creator import (
@@ -50,6 +51,7 @@ class SpotlightsManagerConfig(BaseModel):
     extractor: ExtractorConfig = Field(default_factory=ExtractorConfig)
     discovery: DiscoveryConfig | None = None
     deep_research: CodexExecOptions | None = None
+    expanded_deep_research: ExpandedResearchConfig | None = None
     proposal_from_finding: ProposalFromFindingConfig | None = None
     agent_proposals: AgentProposalsConfig | None = None
 
@@ -66,9 +68,7 @@ class ModuleTelemetry(BaseModel):
     discovery_total_cost_usd: float | None = None
     deep_research_duration_s: float | None = None
     proposal_from_finding_duration_s: float | None = None
-    proposal_from_finding_per_pair_durations_s: dict[str, float] = Field(
-        default_factory=dict
-    )
+    proposal_from_finding_per_pair_durations_s: dict[str, float] = Field(default_factory=dict)
     agent_proposals_duration_s: float | None = None
     agent_proposals_per_candidate_durations_s: dict[str, dict[str, float]] = Field(
         default_factory=dict
@@ -93,12 +93,10 @@ class SpotlightsManagerResult(SpotlightsResult):
     extractor_invocation: ExtractionInvocation
     per_module_telemetry: dict[str, ModuleTelemetry] = Field(default_factory=dict)
     manager_issues: list[StepIssue] = Field(default_factory=list)
-    renderer_result: "RendererResult | None" = None
+    renderer_result: RendererResult | None = None
 
 
-def run(
-    input: SpotlightsManagerInput, *, config: SpotlightsManagerConfig
-) -> SpotlightsResult:
+def run(input: SpotlightsManagerInput, *, config: SpotlightsManagerConfig) -> SpotlightsResult:
     """Architecture-shaped entrypoint."""
     rich = run_with_telemetry(input, config=config)
     return SpotlightsResult(

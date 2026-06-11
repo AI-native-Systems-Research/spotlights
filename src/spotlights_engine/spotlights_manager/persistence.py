@@ -14,7 +14,7 @@ import os
 import re
 import shutil
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -26,6 +26,7 @@ from spotlights_engine.candidate_discovery.api import (
     IterationTelemetry,
 )
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
+from spotlights_engine.module_deep_research.expanded import ExpandedResearchConfig
 from spotlights_engine.modules_extractor.agent import ExtractionInvocation
 from spotlights_engine.proposal_from_finding_creator import (
     ProposalFromFindingConfig,
@@ -38,7 +39,6 @@ from spotlights_engine.schemas.pipeline import (
     ProposalFromFindingCreatorOutput,
 )
 from spotlights_engine.schemas.project import ProjectTree
-
 
 _SLUG_SAFE = re.compile(r"[^A-Za-z0-9._-]")
 
@@ -57,7 +57,7 @@ CheckpointStatus = Literal[
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def _atomic_write_text(path: Path, text: str) -> None:
@@ -131,7 +131,7 @@ class ManagerPaths:
     def modules_root(self) -> Path:
         return self.root / "modules"
 
-    def for_module(self, qualified_name: str) -> "ModulePaths":
+    def for_module(self, qualified_name: str) -> ModulePaths:
         return ModulePaths(self.modules_root / slug_for(qualified_name))
 
 
@@ -164,6 +164,10 @@ class ModulePaths:
     @property
     def deep_research_last_message_path(self) -> Path:
         return self.dir / "module_deep_research.last_message.md"
+
+    @property
+    def expanded_deep_research_dir(self) -> Path:
+        return self.dir / "expanded_research"
 
     @property
     def proposal_from_finding_path(self) -> Path:
@@ -250,25 +254,30 @@ def build_config_fingerprint(
     extractor_cfg: BaseModel,
     discovery_cfg: BaseModel | None,
     deep_research_cfg: BaseModel | None,
-    proposal_from_finding_cfg: BaseModel | None,
-    agent_proposals_cfg: BaseModel | None,
+    expanded_deep_research_cfg: BaseModel | None = None,
+    proposal_from_finding_cfg: BaseModel | None = None,
+    agent_proposals_cfg: BaseModel | None = None,
 ) -> dict[str, Any]:
     effective_discovery_cfg = discovery_cfg or DiscoveryConfig()
     effective_deep_research_cfg = deep_research_cfg or CodexExecOptions()
+    effective_expanded_deep_research_cfg = expanded_deep_research_cfg or ExpandedResearchConfig(
+        enabled=False
+    )
     effective_proposal_cfg = proposal_from_finding_cfg or ProposalFromFindingConfig()
     effective_agent_proposals_cfg = agent_proposals_cfg or AgentProposalsConfig()
     return {
         "module_filter": (
             module_filter.model_dump(mode="json") if module_filter is not None else None
         ),
-        "extractor_hash": hash_pydantic_excluding(
-            extractor_cfg, exclude={"artifacts_dir"}
-        ),
+        "extractor_hash": hash_pydantic_excluding(extractor_cfg, exclude={"artifacts_dir"}),
         "discovery_hash": hash_pydantic_excluding(
             effective_discovery_cfg, exclude={"artifacts_dir", "repo_path"}
         ),
         "deep_research_hash": hash_pydantic_excluding(
             effective_deep_research_cfg, exclude={"cwd", "output_last_message"}
+        ),
+        "expanded_deep_research_hash": hash_pydantic_excluding(
+            effective_expanded_deep_research_cfg, exclude={"artifacts_dir", "knowledge_root"}
         ),
         "proposal_from_finding_hash": hash_pydantic_excluding(
             effective_proposal_cfg, exclude={"artifacts_dir", "repo_path"}
@@ -283,9 +292,7 @@ def default_agent_proposals_hash() -> str:
     """Stable hash of the default `AgentProposalsConfig`. Used by the one-shot
     pre-step-5 manifest forward migration; see orchestrator
     `_ensure_resume_compatible`."""
-    return hash_pydantic_excluding(
-        AgentProposalsConfig(), exclude={"artifacts_dir", "repo_path"}
-    )
+    return hash_pydantic_excluding(AgentProposalsConfig(), exclude={"artifacts_dir", "repo_path"})
 
 
 def read_manifest(paths: ManagerPaths) -> dict[str, Any] | None:
@@ -347,12 +354,9 @@ def read_module_state(module_paths: ModulePaths) -> LoadedModuleState:
     discovery_total_duration_s: float | None = None
     discovery_total_cost_usd: float | None = None
     if module_paths.discovery_telemetry_path.exists():
-        payload = json.loads(
-            module_paths.discovery_telemetry_path.read_text(encoding="utf-8")
-        )
+        payload = json.loads(module_paths.discovery_telemetry_path.read_text(encoding="utf-8"))
         discovery_telemetry = [
-            IterationTelemetry.model_validate(it)
-            for it in payload.get("iterations", [])
+            IterationTelemetry.model_validate(it) for it in payload.get("iterations", [])
         ]
         discovery_total_duration_s = payload.get("total_duration_s")
         discovery_total_cost_usd = payload.get("total_cost_usd")
@@ -360,9 +364,7 @@ def read_module_state(module_paths: ModulePaths) -> LoadedModuleState:
     deep_research: ModuleDeepResearchOutput | None = None
     deep_research_duration_s: float | None = None
     if module_paths.deep_research_path.exists():
-        payload = json.loads(
-            module_paths.deep_research_path.read_text(encoding="utf-8")
-        )
+        payload = json.loads(module_paths.deep_research_path.read_text(encoding="utf-8"))
         # Sidecar wraps the output with telemetry — the contract object lives
         # under "output", everything else is runtime metadata.
         if "output" in payload:
@@ -376,9 +378,7 @@ def read_module_state(module_paths: ModulePaths) -> LoadedModuleState:
     proposal_from_finding_duration_s: float | None = None
     proposal_from_finding_per_pair_durations_s: dict[str, float] = {}
     if module_paths.proposal_from_finding_path.exists():
-        payload = json.loads(
-            module_paths.proposal_from_finding_path.read_text(encoding="utf-8")
-        )
+        payload = json.loads(module_paths.proposal_from_finding_path.read_text(encoding="utf-8"))
         if "output" in payload:
             proposal_from_finding = ProposalFromFindingCreatorOutput.model_validate(
                 payload["output"]
@@ -390,17 +390,13 @@ def read_module_state(module_paths: ModulePaths) -> LoadedModuleState:
                     str(k): float(v) for k, v in per_pair.items()
                 }
         else:
-            proposal_from_finding = ProposalFromFindingCreatorOutput.model_validate(
-                payload
-            )
+            proposal_from_finding = ProposalFromFindingCreatorOutput.model_validate(payload)
 
     agent_proposals: AgentProposalsOutput | None = None
     agent_proposals_duration_s: float | None = None
     agent_proposals_per_candidate_durations_s: dict[str, dict[str, float]] = {}
     if module_paths.agent_proposals_path.exists():
-        payload = json.loads(
-            module_paths.agent_proposals_path.read_text(encoding="utf-8")
-        )
+        payload = json.loads(module_paths.agent_proposals_path.read_text(encoding="utf-8"))
         if "output" in payload:
             agent_proposals = AgentProposalsOutput.model_validate(payload["output"])
             agent_proposals_duration_s = payload.get("duration_s")
@@ -409,9 +405,7 @@ def read_module_state(module_paths: ModulePaths) -> LoadedModuleState:
                 normalized: dict[str, dict[str, float]] = {}
                 for cand_id, durations in per_cand.items():
                     if isinstance(durations, dict):
-                        normalized[str(cand_id)] = {
-                            str(k): float(v) for k, v in durations.items()
-                        }
+                        normalized[str(cand_id)] = {str(k): float(v) for k, v in durations.items()}
                 agent_proposals_per_candidate_durations_s = normalized
         else:
             agent_proposals = AgentProposalsOutput.model_validate(payload)
@@ -435,16 +429,12 @@ def read_module_state(module_paths: ModulePaths) -> LoadedModuleState:
 
 def write_checkpoint(module_paths: ModulePaths, checkpoint: ModuleCheckpoint) -> None:
     module_paths.dir.mkdir(parents=True, exist_ok=True)
-    _atomic_write_text(
-        module_paths.status_path, checkpoint.model_dump_json(indent=2) + "\n"
-    )
+    _atomic_write_text(module_paths.status_path, checkpoint.model_dump_json(indent=2) + "\n")
 
 
 def write_candidates(module_paths: ModulePaths, candidates: Candidates) -> None:
     module_paths.dir.mkdir(parents=True, exist_ok=True)
-    _atomic_write_text(
-        module_paths.candidates_path, candidates.model_dump_json(indent=2) + "\n"
-    )
+    _atomic_write_text(module_paths.candidates_path, candidates.model_dump_json(indent=2) + "\n")
 
 
 def write_discovery_telemetry(
@@ -489,6 +479,8 @@ def clear_deep_research_artifacts(module_paths: ModulePaths) -> None:
     ):
         if p.exists():
             p.unlink()
+    if module_paths.expanded_deep_research_dir.exists():
+        shutil.rmtree(module_paths.expanded_deep_research_dir)
 
 
 def write_proposal_from_finding(
@@ -546,24 +538,18 @@ def write_extractor_outputs(
         paths.project_tree_path,
         project_tree.model_dump_json(indent=2) + "\n",
     )
-    _atomic_write_json(
-        paths.extractor_invocation_path, dataclasses.asdict(invocation)
-    )
+    _atomic_write_json(paths.extractor_invocation_path, dataclasses.asdict(invocation))
 
 
 def read_extractor_outputs(
     paths: ManagerPaths,
 ) -> tuple[ProjectTree | None, ExtractionInvocation | None]:
     tree = (
-        ProjectTree.from_json(paths.project_tree_path)
-        if paths.project_tree_path.exists()
-        else None
+        ProjectTree.from_json(paths.project_tree_path) if paths.project_tree_path.exists() else None
     )
     invocation: ExtractionInvocation | None = None
     if paths.extractor_invocation_path.exists():
-        payload = json.loads(
-            paths.extractor_invocation_path.read_text(encoding="utf-8")
-        )
+        payload = json.loads(paths.extractor_invocation_path.read_text(encoding="utf-8"))
         invocation = ExtractionInvocation(**payload)
     return tree, invocation
 
