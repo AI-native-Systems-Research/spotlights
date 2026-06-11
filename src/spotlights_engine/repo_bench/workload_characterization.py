@@ -20,11 +20,13 @@ Output:
 
 from __future__ import annotations
 
+import csv
 import json
 import logging
 import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+from io import StringIO
 from pathlib import Path
 from typing import Any, Literal
 
@@ -428,6 +430,8 @@ class AggregateStats:
     trace_sources: dict[str, list[int]]
     tool_counts: dict[str, int]
     top_synthetic_configs: list[dict[str, Any]]
+    n_synthetic_default_params: int
+    n_synthetic_with_params: int
     n_kernel_excluded: int
     n_accuracy_excluded: int
 
@@ -445,6 +449,8 @@ def aggregate_characterizations(
     synthetic_configs: list[tuple[dict[str, Any], int]] = []
     param_counter: Counter[str] = Counter()
     n_with_benchmarks = 0
+    n_synthetic_default_params = 0
+    n_synthetic_with_params = 0
     n_kernel_excluded = 0
     n_accuracy_excluded = 0
 
@@ -474,9 +480,13 @@ def aggregate_characterizations(
                 if e.trace_dataset_path:
                     source_key = f"{e.trace_source}/{e.trace_dataset_path}"
                 trace_sources[source_key].append(pr.pr_number)
-            if e.workload_type == "synthetic" and e.generator_params:
-                param_key = json.dumps(e.generator_params, sort_keys=True)
-                param_counter[param_key] += 1
+            if e.workload_type == "synthetic":
+                if e.generator_params:
+                    n_synthetic_with_params += 1
+                    param_key = json.dumps(e.generator_params, sort_keys=True)
+                    param_counter[param_key] += 1
+                else:
+                    n_synthetic_default_params += 1
 
     # Build top synthetic configs
     top_configs: list[dict[str, Any]] = []
@@ -491,6 +501,8 @@ def aggregate_characterizations(
         trace_sources=dict(trace_sources),
         tool_counts=dict(tool_counter.most_common()),
         top_synthetic_configs=top_configs,
+        n_synthetic_default_params=n_synthetic_default_params,
+        n_synthetic_with_params=n_synthetic_with_params,
         n_kernel_excluded=n_kernel_excluded,
         n_accuracy_excluded=n_accuracy_excluded,
     )
@@ -536,8 +548,18 @@ def render_summary_md(
         lines.append("")
 
     # Synthetic configs
+    lines.append("## Synthetic workload parameters\n")
+    if stats.n_synthetic_default_params > 0:
+        lines.append(
+            f"**{stats.n_synthetic_default_params}** synthetic entries use "
+            f"default parameters (no explicit input/output length, concurrency, "
+            f"or rate specified in the command).\n"
+        )
     if stats.top_synthetic_configs:
-        lines.append("## Top synthetic configurations\n")
+        lines.append(
+            f"**{stats.n_synthetic_with_params}** synthetic entries specify "
+            f"explicit parameters. Top configurations:\n"
+        )
         lines.append("| Input len | Output len | Num prompts | Request rate | Concurrency | Count |")
         lines.append("|----------:|----------:|------------:|:-------------|:------------|------:|")
         for cfg in stats.top_synthetic_configs[:10]:
@@ -562,6 +584,56 @@ def render_summary_md(
     return "\n".join(lines)
 
 
+# ── CSV rendering ────────────────────────────────────────────────────────
+
+_CSV_COLUMNS = [
+    "pr_number", "title", "workload_type", "benchmark_scope", "tool",
+    "trace_source", "trace_dataset_path",
+    "random_input_len", "random_output_len", "input_len", "output_len",
+    "num_prompts", "request_rate", "max_concurrency", "burstiness",
+    "confidence", "extraction_method", "source_command",
+]
+
+
+def render_csv(
+    results: list[PRCharacterization],
+    *,
+    include_kernel: bool = False,
+    include_accuracy: bool = False,
+) -> str:
+    """Render one row per benchmark entry across all PRs."""
+    buf = StringIO()
+    writer = csv.DictWriter(buf, fieldnames=_CSV_COLUMNS, extrasaction="ignore")
+    writer.writeheader()
+
+    for pr in results:
+        for e in pr.entries:
+            if e.benchmark_scope == "kernel" and not include_kernel:
+                continue
+            if e.benchmark_scope == "accuracy" and not include_accuracy:
+                continue
+            row: dict[str, Any] = {
+                "pr_number": pr.pr_number,
+                "title": pr.title,
+                "workload_type": e.workload_type,
+                "benchmark_scope": e.benchmark_scope,
+                "tool": e.tool,
+                "trace_source": e.trace_source,
+                "trace_dataset_path": e.trace_dataset_path,
+                "confidence": pr.confidence,
+                "extraction_method": pr.extraction_method,
+                "source_command": e.source_command,
+            }
+            # Flatten generator_params into columns
+            for key in ("random_input_len", "random_output_len", "input_len",
+                        "output_len", "num_prompts", "request_rate",
+                        "max_concurrency", "burstiness"):
+                row[key] = e.generator_params.get(key, "")
+            writer.writerow(row)
+
+    return buf.getvalue()
+
+
 # ── Public API ───────────────────────────────────────────────────────────
 
 
@@ -569,6 +641,7 @@ def render_summary_md(
 class CharacterizationHandle:
     json_path: Path
     md_path: Path
+    csv_path: Path
     n_total: int
     n_with_benchmarks: int
     type_counts: dict[str, int]
@@ -662,6 +735,14 @@ def characterize(
     md_path = output_dir / "workload_characterization.md"
     atomic_write_text(md_path, md_content)
 
+    csv_content = render_csv(
+        results,
+        include_kernel=include_kernel,
+        include_accuracy=include_accuracy,
+    )
+    csv_path = output_dir / "workload_characterization.csv"
+    atomic_write_text(csv_path, csv_content)
+
     log.info(
         "characterize: %d PRs analyzed, %d with benchmarks → %s",
         stats.n_total, stats.n_with_benchmarks, json_path,
@@ -670,6 +751,7 @@ def characterize(
     return CharacterizationHandle(
         json_path=json_path,
         md_path=md_path,
+        csv_path=csv_path,
         n_total=stats.n_total,
         n_with_benchmarks=stats.n_with_benchmarks,
         type_counts=stats.type_counts,

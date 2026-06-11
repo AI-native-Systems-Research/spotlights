@@ -376,6 +376,7 @@ def _cmd_characterize_workloads(args: argparse.Namespace) -> int:
         print(f"  {wtype}: {count}")
     print(f"json:       {handle.json_path}")
     print(f"markdown:   {handle.md_path}")
+    print(f"csv:        {handle.csv_path}")
     return 0
 
 
