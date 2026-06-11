@@ -18,17 +18,27 @@ from spotlights_engine.repo_bench.schemas import (
     StageReport,
 )
 from spotlights_engine.repo_bench.storage import window_id_for
+from spotlights_engine.repo_bench.workload_characterization import (
+    BenchmarkEntry,
+    CharacterizationHandle,
+    PRCharacterization,
+    characterize,
+)
 
 __all__ = [
     "AggregationManifest",
     "BenchSpec",
     "BenchSpecConfig",
+    "BenchmarkEntry",
     "ChangeType",
+    "CharacterizationHandle",
     "FileChange",
+    "PRCharacterization",
     "RawPR",
     "RuleSpec",
     "RunReport",
     "SnapshotPin",
     "StageReport",
+    "characterize",
     "window_id_for",
 ]

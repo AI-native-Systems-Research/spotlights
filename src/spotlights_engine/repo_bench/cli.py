@@ -161,6 +161,23 @@ def _build_parser() -> argparse.ArgumentParser:
                     help="Explicit target window ID. Default: auto-computed "
                     "from the combined date span.")
 
+    cw = sub.add_parser(
+        "characterize-workloads",
+        help="Classify benchmark workloads in filtered PRs as synthetic, "
+             "recorded_trace, or combination. Extracts generator params "
+             "and trace sources.",
+    )
+    cw.add_argument("--window", required=True,
+                    help="Window ID (e.g. 2025-12-02__2026-06-10).")
+    cw.add_argument("--run-dir", required=True,
+                    help="Run dir containing view/prs.jsonl.")
+    cw.add_argument("--out-dir", default=None,
+                    help="Output directory. Default: <run-dir>/.")
+    cw.add_argument("--include-kernel", action="store_true",
+                    help="Include kernel micro-benchmarks (excluded by default).")
+    cw.add_argument("--include-accuracy", action="store_true",
+                    help="Include accuracy evals like lm_eval (excluded by default).")
+
     mt = sub.add_parser(
         "match",
         help=(
@@ -339,6 +356,29 @@ def _cmd_match(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_characterize_workloads(args: argparse.Namespace) -> int:
+    from spotlights_engine.repo_bench import workload_characterization
+
+    run_dir = Path(args.run_dir).resolve()
+    view_path = run_dir / "view" / "prs.jsonl"
+    out_dir = Path(args.out_dir).resolve() if args.out_dir else run_dir
+
+    handle = workload_characterization.characterize(
+        window_id=args.window,
+        view_path=view_path,
+        out_dir=out_dir,
+        include_kernel=args.include_kernel,
+        include_accuracy=args.include_accuracy,
+    )
+    print(f"analyzed:   {handle.n_total} PRs")
+    print(f"with bench: {handle.n_with_benchmarks}")
+    for wtype, count in sorted(handle.type_counts.items(), key=lambda kv: -kv[1]):
+        print(f"  {wtype}: {count}")
+    print(f"json:       {handle.json_path}")
+    print(f"markdown:   {handle.md_path}")
+    return 0
+
+
 def _cmd_filter_report(args: argparse.Namespace) -> int:
     rule_names = [n.strip() for n in args.rules.split(",") if n.strip()]
     if not rule_names:
@@ -395,6 +435,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_fetch_diffs(args)
     if args.subcommand == "run":
         return _cmd_run(args)
+    if args.subcommand == "characterize-workloads":
+        return _cmd_characterize_workloads(args)
     if args.subcommand == "filter-report":
         return _cmd_filter_report(args)
     if args.subcommand == "merge-windows":

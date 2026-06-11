@@ -1,6 +1,6 @@
 # PR Data Filtering Rules
 
-The filtering pipeline used by `repo_bench` to surface performance-relevant PRs.
+The filtering pipeline used by `repo_bench` to surface performance-relevant PRs. The sample data throughout this document was fetched from the [vLLM repository](https://github.com/vllm-project/vllm).
 
 ## Overview
 
@@ -99,3 +99,105 @@ Window `2025-12-02__2026-06-10` (vllm-project/vllm):
 - **Not related to performance optimization** (4709): PRs with no numeric perf claim, no perf tag, and no perf-related label. This is the dominant filter — most PRs in a large project simply aren't performance work.
 
 The overlap matrix shows that most chore PRs (1893 of 2074) are also caught by the perf-signal filter, but 181 chore PRs *would* have slipped through without the dedicated `not-chore` rule (they happen to mention a percentage in a non-performance context that the strict regex matches).
+
+## Workload Characterization
+
+The `characterize-workloads` command classifies each filtered PR's benchmark workload by type (synthetic traffic, recorded trace, or combination) and extracts the generator parameters and trace sources.
+
+### How it works
+
+The tool reads PR bodies from the filtered view and uses two-tier extraction:
+
+**Tier 1 — Regex** (handles ~98% of cases): Finds benchmark commands in the PR body (`vllm bench serve`, `vllm bench throughput`, `benchmark_serving.py`, `python benchmarks/*.py`, `lm_eval`) and classifies based on flags:
+
+- `--dataset-name random` / `--random-input-len` / `--random-output-len` → **synthetic**
+- `--dataset-name sharegpt|hf|timed_trace|burstgpt|custom` → **recorded_trace**
+- `--input-len` / `--output-len` without explicit dataset (vllm bench defaults to random) → **synthetic**
+- Both synthetic and trace datasets in the same PR → **combination**
+- Commands with `--model`/`--num-prompts` but no dataset flags (vllm bench default = random) → **synthetic**
+
+**Tier 2 — LLM fallback** (opt-in, for the remaining unknowns): Called when a PR has benchmark results but no parseable command. Uses Claude to extract workload type from prose descriptions, with a hallucination guard that verifies any cited commands are verbatim substrings of the PR body.
+
+Benchmark scope is categorized as `serving`, `kernel`, or `accuracy`. Kernel micro-benchmarks and accuracy evals (lm_eval) are excluded by default.
+
+### Usage
+
+```
+python -m spotlights_engine.repo_bench characterize-workloads \
+  --window <window_id> \
+  --run-dir <path-to-run-dir> \
+  [--include-kernel]       # include kernel micro-benchmarks
+  [--include-accuracy]     # include lm_eval / accuracy evals
+  [--llm-fallback]         # use LLM for unknowns (opt-in)
+```
+
+Output is saved to `<run-dir>/workload_characterization.json` and `<run-dir>/workload_characterization.md`.
+
+### Sample output
+
+Window `2025-12-02__2026-06-10`, 653 filtered PRs, with `--include-kernel`:
+
+**138** PRs contain recognizable benchmark commands.
+
+| Type | Count | % of benchmarked PRs |
+|------|------:|---------------------:|
+| synthetic | 105 | 76.1% |
+| recorded_trace | 27 | 19.6% |
+| combination | 4 | 2.9% |
+| unknown | 2 | 1.4% |
+
+_Accuracy evals (lm_eval): 68 entries excluded._
+
+#### Trace sources (recorded + combination)
+
+| Source | Count | Example PRs |
+|--------|------:|-------------|
+| sharegpt//tmp/ShareGPT_V3_unfiltered_cleaned_split.json | 12 | #31781, #32619, #33568, #34206, #34974 +7 more |
+| sharegpt/ShareGPT_V3_unfiltered_cleaned_split.json | 3 | #30528, #31246, #35220 |
+| sharegpt/./ShareGPT_V3_unfiltered_cleaned_split.json | 2 | #35442, #40172 |
+| speed_bench/benchmarks/speed/ | 1 | #36029 |
+| hf/philschmid/mt-bench | 1 | #24322 |
+| hf/likaixin/InstructCoder | 1 | #24322 |
+| sharegpt | 1 | #29600 |
+| hf/facebook/voxpopuli | 1 | #32300 |
+| spec_bench/question.jsonl | 1 | #32951 |
+| timed_trace/conversation_trace.jsonl | 1 | #39795 |
+| hf/gorilla-llm/Berkeley-Function-Calling-Leaderboard | 1 | #42457 |
+
+#### Top synthetic configurations
+
+| Input len | Output len | Num prompts | Request rate | Concurrency | Count |
+|----------:|----------:|------------:|:-------------|:------------|------:|
+| — | — | 1000 | — | — | 5 |
+| 2 | 128 | 128 | inf | — | 3 |
+| 2048 | — | 2000 | inf | 64 | 3 |
+| — | — | — | — | 64 | 3 |
+| 2 | 256 | 1024 | inf | — | 2 |
+| 1024 | 128 | — | — | — | 2 |
+| 100 | 100 | 8 | — | — | 2 |
+| 100 | 100 | 512 | — | — | 2 |
+| 2 | 512 | 128 | — | — | 2 |
+| 2 | 512 | 128 | inf | — | 2 |
+
+#### Benchmark tools used
+
+| Tool | Count |
+|------|------:|
+| vllm bench serve | 121 |
+| vllm bench throughput | 15 |
+| vllm bench latency | 11 |
+| benchmarks/kernels/benchmark_moe.py | 4 |
+| benchmarks/kernels/benchmark_moe_permute_unpermute.py | 3 |
+| benchmarks/benchmark_prefix_block_hash.py | 2 |
+| benchmarks/attention_benchmarks/benchmark.py | 2 |
+| benchmarks/kernels/benchmark_router_gemm.py | 2 |
+| benchmarks/kernels/benchmark_vit_fp8_attn.py | 2 |
+| vllm bench sweep | 1 |
+| benchmarks/benchmark_prefix_caching.py | 1 |
+
+### Reading the results
+
+- **Synthetic (76%)**: The dominant workload type. PRs use randomly generated token sequences with configurable lengths. The vllm bench tool defaults to `random` when no dataset is specified.
+- **Recorded trace (20%)**: PRs benchmarked against real conversation datasets — primarily ShareGPT (a shared corpus of ChatGPT conversations) and HuggingFace datasets like MT-Bench.
+- **Combination (3%)**: PRs that tested with both synthetic and real workloads.
+- **Unknown (1%)**: Commands pointing to remote endpoints or with insufficient flags to classify. Candidates for the LLM fallback tier.
