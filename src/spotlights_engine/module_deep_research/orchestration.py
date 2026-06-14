@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -125,16 +126,17 @@ def merge_outcomes(
             )
 
         for finding in output.findings:
-            key = _finding_key(finding.title, finding.url)
-            if key in seen:
+            keys = _finding_keys(finding.title, finding.url)
+            if seen.intersection(keys):
                 continue
-            seen.add(key)
+            seen.update(keys)
             findings.append(finding)
 
     merged = ModuleDeepResearchOutput(findings=findings, issues=issues)
+    merged_findings_cap = max_findings_per_module * len(outcomes)
     return normalize_module_deep_research_output(
         merged,
-        max_findings_per_module=max_findings_per_module,
+        max_findings_per_module=merged_findings_cap,
     )
 
 
@@ -159,11 +161,12 @@ def _agent_issues(agent_name: str, issues: Sequence[StepIssue]) -> list[StepIssu
     ]
 
 
-def _finding_key(title: str, url: str) -> str:
+def _finding_keys(title: str, url: str) -> set[str]:
+    keys = {f"title:{_normalize_text(title)}"}
     normalized_url = _normalize_url(url)
     if normalized_url:
-        return f"url:{normalized_url}"
-    return f"title:{_normalize_text(title)}"
+        keys.add(f"url:{normalized_url}")
+    return keys
 
 
 def _normalize_url(url: str) -> str:
@@ -172,11 +175,15 @@ def _normalize_url(url: str) -> str:
         return ""
     for prefix in ("https://arxiv.org/abs/", "http://arxiv.org/abs/"):
         if value.startswith(prefix):
-            return "arxiv:" + value.removeprefix(prefix).removesuffix(".pdf")
+            return "arxiv:" + _normalize_arxiv_id(value.removeprefix(prefix))
     for prefix in ("https://arxiv.org/pdf/", "http://arxiv.org/pdf/"):
         if value.startswith(prefix):
-            return "arxiv:" + value.removeprefix(prefix).removesuffix(".pdf")
+            return "arxiv:" + _normalize_arxiv_id(value.removeprefix(prefix))
     return value
+
+
+def _normalize_arxiv_id(value: str) -> str:
+    return re.sub(r"v\d+$", "", value.removesuffix(".pdf").split("?", 1)[0].split("#", 1)[0])
 
 
 def _normalize_text(text: str) -> str:

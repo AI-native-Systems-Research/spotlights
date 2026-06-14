@@ -59,6 +59,11 @@ def _request(module_qualified_name: str = "inference.attention") -> ModuleDeepRe
     )
 
 
+def _request_with_cap(max_findings_per_module: int) -> ModuleDeepResearchInput:
+    request = _request()
+    return request.model_copy(update={"max_findings_per_module": max_findings_per_module})
+
+
 def test_resolve_target_module_accepts_dot_qualified_name() -> None:
     module = resolve_target_module(_tree(), "inference.attention")
 
@@ -158,8 +163,12 @@ class NamedFakeRunner(FakeRunner):
 
 
 def test_research_module_runs_codex_claude_gemini_and_dedups_outputs() -> None:
-    codex = NamedFakeRunner("codex", _payload("PagedAttention", "https://arxiv.org/abs/2309.06180"))
-    claude = NamedFakeRunner("claude", _payload("PagedAttention", "https://arxiv.org/pdf/2309.06180.pdf"))
+    codex = NamedFakeRunner(
+        "codex", _payload("PagedAttention", "https://arxiv.org/abs/2309.06180")
+    )
+    claude = NamedFakeRunner(
+        "claude", _payload("PagedAttention", "https://arxiv.org/pdf/2309.06180v2.pdf")
+    )
     gemini = NamedFakeRunner("gemini", _payload("vAttention", "https://arxiv.org/abs/2405.04437"))
 
     output = research_module(_request(), runners=[codex, claude, gemini])
@@ -170,16 +179,13 @@ def test_research_module_runs_codex_claude_gemini_and_dedups_outputs() -> None:
     assert output.issues == []
 
 
-def test_research_module_keeps_same_title_when_urls_differ() -> None:
+def test_research_module_dedups_exact_title_matches_with_different_urls() -> None:
     first = NamedFakeRunner("codex", _payload("Cache eviction", "https://example.com/paper-a"))
     second = NamedFakeRunner("gemini", _payload("Cache eviction", "https://example.com/paper-b"))
 
     output = research_module(_request(), runners=[first, second])
 
-    assert [finding.url for finding in output.findings] == [
-        "https://example.com/paper-a",
-        "https://example.com/paper-b",
-    ]
+    assert [finding.url for finding in output.findings] == ["https://example.com/paper-a"]
 
 
 def test_research_module_parallel_runner_pool() -> None:
@@ -202,6 +208,23 @@ def test_research_module_parallel_runner_pool() -> None:
 
     assert [finding.title for finding in output.findings] == ["A", "B", "C"]
     assert output.issues == []
+
+
+def test_research_module_treats_finding_cap_as_per_runner() -> None:
+    runners = [
+        NamedFakeRunner("codex", _payload("A", "https://example.com/a")),
+        NamedFakeRunner("claude", _payload("B", "https://example.com/b")),
+        NamedFakeRunner("gemini", _payload("C", "https://example.com/c")),
+    ]
+
+    output = research_module(_request_with_cap(1), runners=runners)
+
+    assert [finding.finding_id for finding in output.findings] == [
+        "find-0001",
+        "find-0002",
+        "find-0003",
+    ]
+    assert [finding.title for finding in output.findings] == ["A", "B", "C"]
 
 
 def test_claude_command_shape_uses_print_json_and_plan_mode(tmp_path: Path) -> None:
