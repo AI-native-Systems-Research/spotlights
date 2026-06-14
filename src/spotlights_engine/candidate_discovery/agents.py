@@ -162,8 +162,16 @@ class ClaudeRunner(AgentRunner):
 
     def _build_argv(self, schema_path: Path, iter_dir: Path) -> list[str]:
         schema_text = schema_path.read_text(encoding="utf-8")
+        # Resolve to claude.exe (not claude.CMD). The .CMD shim buffers
+        # stdout and deadlocks subprocess.run(capture_output=True) on
+        # large outputs; the shared helper finds the npm-installed
+        # claude.exe and refuses the .CMD fallback.
+        from spotlights_engine.signal_pipeline._subprocess_util import (
+            resolve_claude_argv0,
+        )
+        argv0 = resolve_claude_argv0(self._executable)
         return [
-            self._executable,
+            *argv0,
             "-p",
             "--output-format",
             "stream-json",
@@ -260,8 +268,12 @@ class CodexRunner(AgentRunner):
         # Codex runs with `-C <repo_path>`, so any relative path here would
         # resolve under the target repo. Pass absolutes for both schema and
         # last_message outputs.
+        # Resolve via shutil.which so Windows finds the .CMD/.ps1 shim;
+        # bare "codex" → FileNotFoundError because subprocess on Windows
+        # doesn't follow PATHEXT for unqualified argv[0].
+        resolved = shutil.which(self._executable) or self._executable
         return [
-            self._executable,
+            resolved,
             "exec",
             "-",
             "--json",

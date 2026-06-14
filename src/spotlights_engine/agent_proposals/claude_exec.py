@@ -78,8 +78,12 @@ def run_candidate_claude(
     wallclock_s: int,
 ) -> CandidateAgentRunResult:
     """Run one Claude session for a single candidate."""
+    # Resolve via shutil.which so Windows finds the .CMD shim. Bare
+    # "claude" → FileNotFoundError because subprocess on Windows doesn't
+    # follow PATHEXT for unqualified argv[0].
+    claude_resolved = shutil.which("claude") or "claude"
     argv = [
-        "claude",
+        claude_resolved,
         "-p",
         "--output-format",
         "stream-json",

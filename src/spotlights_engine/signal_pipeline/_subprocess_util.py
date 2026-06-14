@@ -255,7 +255,12 @@ def run_streaming_claude(
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         env=env,
-        cwd=str(cwd) if cwd is not None else None,
+        # Forward slashes on Windows: the agent reads its cwd from the
+        # claude system-init event and copies it into Bash commands; bash
+        # treats `\p`, `\v`, etc. as escape sequences and the listing
+        # fails. POSIX form is accepted by both Windows native APIs and
+        # bash, so normalize.
+        cwd=Path(cwd).as_posix() if cwd is not None else None,
         text=True,
         encoding="utf-8",
         errors="replace",
