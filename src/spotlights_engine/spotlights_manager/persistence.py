@@ -181,6 +181,10 @@ class ModulePaths:
     def agent_proposals_last_message_dir(self) -> Path:
         return self.dir / "agent_proposals.last_messages"
 
+    @property
+    def archived_records_path(self) -> Path:
+        return self.dir / "archived_records.json"
+
 
 @dataclass
 class LoadedModuleState:
@@ -204,6 +208,7 @@ class LoadedModuleState:
     agent_proposals: AgentProposalsOutput | None
     agent_proposals_duration_s: float | None
     agent_proposals_per_candidate_durations_s: dict[str, dict[str, float]]
+    archived_record_ids: list[str] = dataclasses.field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -416,6 +421,17 @@ def read_module_state(module_paths: ModulePaths) -> LoadedModuleState:
         else:
             agent_proposals = AgentProposalsOutput.model_validate(payload)
 
+    archived_record_ids: list[str] = []
+    if module_paths.archived_records_path.exists():
+        try:
+            payload = json.loads(
+                module_paths.archived_records_path.read_text(encoding="utf-8")
+            )
+            if isinstance(payload, list):
+                archived_record_ids = [str(rid) for rid in payload if rid]
+        except (json.JSONDecodeError, OSError):
+            pass
+
     return LoadedModuleState(
         checkpoint=checkpoint,
         candidates=candidates,
@@ -430,6 +446,7 @@ def read_module_state(module_paths: ModulePaths) -> LoadedModuleState:
         agent_proposals=agent_proposals,
         agent_proposals_duration_s=agent_proposals_duration_s,
         agent_proposals_per_candidate_durations_s=agent_proposals_per_candidate_durations_s,
+        archived_record_ids=archived_record_ids,
     )
 
 
@@ -536,6 +553,17 @@ def clear_agent_proposals_artifacts(module_paths: ModulePaths) -> None:
         module_paths.agent_proposals_path.unlink()
 
 
+def write_archived_records(module_paths: ModulePaths, record_ids: list[str]) -> None:
+    """Overwrite the module's archived_records.json with the current run's ids."""
+    module_paths.dir.mkdir(parents=True, exist_ok=True)
+    _atomic_write_json(module_paths.archived_records_path, record_ids)
+
+
+def clear_archived_records(module_paths: ModulePaths) -> None:
+    if module_paths.archived_records_path.exists():
+        module_paths.archived_records_path.unlink()
+
+
 def write_extractor_outputs(
     paths: ManagerPaths,
     project_tree: ProjectTree,
@@ -585,6 +613,7 @@ __all__ = [
     "build_config_fingerprint",
     "build_input_fingerprint",
     "clear_agent_proposals_artifacts",
+    "clear_archived_records",
     "clear_deep_research_artifacts",
     "clear_discovery_artifacts",
     "clear_extractor_artifacts",
@@ -596,6 +625,7 @@ __all__ = [
     "read_module_state",
     "slug_for",
     "write_agent_proposals",
+    "write_archived_records",
     "write_candidates",
     "write_checkpoint",
     "write_deep_research",

@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections.abc import Iterable
 from pathlib import Path
 
-from spotlights_engine.module_knowledge.layout import KnowledgeLayout
-from spotlights_engine.module_knowledge.retrieve import retrieve_records
-from spotlights_engine.module_knowledge.schemas import (
+from spotlights_engine.module_knowledge.records.layout import KnowledgeLayout
+from spotlights_engine.module_knowledge.records.retrieve import retrieve_records
+from spotlights_engine.module_knowledge.records.schemas import (
     ArchiveResult,
     KnowledgeRecord,
     RetrievedItem,
@@ -15,8 +15,8 @@ from spotlights_engine.module_knowledge.schemas import (
     WikiRenderResult,
     WikiVerificationReport,
 )
-from spotlights_engine.module_knowledge.store import read_records, upsert_records, with_content_hash
-from spotlights_engine.module_knowledge.wiki import WikiRenderer
+from spotlights_engine.module_knowledge.records.store import read_records, upsert_records, with_content_hash
+from spotlights_engine.module_knowledge.records.wiki import WikiRenderer
 
 
 class KnowledgeBase:
@@ -39,12 +39,14 @@ class KnowledgeBase:
         """Insert or update knowledge records by `record_id`."""
         self.layout.ensure()
         prepared = [with_content_hash(record) for record in records]
+        record_ids = [r.record_id for r in prepared]
         total, inserted, updated = upsert_records(prepared, self.layout.records_jsonl)
         return ArchiveResult(
             path=str(self.layout.records_jsonl),
             records_written=total,
             inserted=inserted,
             updated=updated,
+            record_ids=record_ids,
         )
 
     def records(self) -> list[KnowledgeRecord]:

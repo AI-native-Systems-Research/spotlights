@@ -115,6 +115,7 @@ class ArchiveResult(BaseModel):
     records_written: int
     inserted: int
     updated: int
+    record_ids: list[str] = Field(default_factory=list)
 
 
 class WikiRenderResult(BaseModel):

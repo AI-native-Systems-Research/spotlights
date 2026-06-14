@@ -44,6 +44,17 @@ def _format_module(module: Module, module_qualified_name: str) -> str:
     )
 
 
+def _format_prior_synthesis(prior: str) -> str:
+    return (
+        "Prior synthesis from the wiki:\n"
+        "The following concept pages were retrieved from the knowledge wiki based on\n"
+        "this module. Treat them as a starting point, not ground truth: cite what you\n"
+        "reuse, verify any claim you act on, and explicitly note when the wiki is\n"
+        "wrong or incomplete.\n\n"
+        f"{prior}\n"
+    )
+
+
 def render_module_deep_research_prompt(
     request: ModuleDeepResearchInput,
     module: Module,
@@ -51,6 +62,11 @@ def render_module_deep_research_prompt(
     """Render the survey prompt from repository, target module, and context fields."""
     schema_json = json.dumps(ModuleDeepResearchOutput.model_json_schema(), indent=2)
     repo_path = str(request.repo_path)
+    prior_section = (
+        f"\n{_format_prior_synthesis(request.prior_synthesis)}\n"
+        if request.prior_synthesis
+        else ""
+    )
     return f"""You are running the Spotlights module_deep_research pipeline step.
 Do not modify files. Do not ask questions.
 
@@ -61,7 +77,7 @@ improve the target module. Every finding must contribute an actionable idea
 the module could adopt or adapt - not just be topically related. This step
 surfaces improvement-bearing related work for the module; it does not produce
 per-file change recipes.
-
+{prior_section}
 Repository:
 {_format_repository(request.project_tree.repository)}
 

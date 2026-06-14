@@ -62,6 +62,14 @@ from spotlights_engine.schemas.pipeline import (
     SpotlightsManagerInput,
 )
 from spotlights_engine.schemas.project import Module, ProjectTree
+from spotlights_engine.module_knowledge import (
+    KnowledgeBase,
+    Wiki,
+    InlineIngestRequest,
+    InlineSource,
+    RecordsBackedIngestRequest,
+    records_from_module_deep_research,
+)
 from spotlights_engine.spotlights_manager.api import (
     ModuleTelemetry,
     SpotlightsManagerConfig,
@@ -95,6 +103,44 @@ def _now_iso() -> str:
 
 def _slash_to_dot(qn: str) -> str:
     return qn.replace("/", ".")
+
+
+def _chunks(lst: list, n: int):
+    for i in range(0, max(len(lst), 1), n):
+        yield lst[i : i + n]
+
+
+def _knowledge_root(paths: ManagerPaths) -> Path:
+    return paths.artifacts_dir / ".spotlights" / "knowledge"
+
+
+def _format_query_results(results: list) -> str:
+    """Format wiki QueryResult or RetrievedItem objects into a prior-synthesis string."""
+    parts: list[str] = []
+    for r in results:
+        if hasattr(r, "page"):
+            page = r.page
+            parts.append(f"### {page.title} ({page.kind})\n\n{page.body}")
+        elif hasattr(r, "record"):
+            rec = r.record
+            parts.append(f"### {rec.title}\n\n{rec.text}")
+    return "\n\n---\n\n".join(parts)
+
+
+def _findings_to_inline_sources(findings: list, module_qn: str) -> list[InlineSource]:
+    return [
+        InlineSource(
+            kind="finding",
+            id=f"finding:{module_qn}:{f.finding_id}",
+            title=f.title,
+            body="\n\n".join(
+                p for p in [f.technique_summary, f.supporting_evidence] if p.strip()
+            ),
+            url=f.url,
+            module_qn=module_qn,
+        )
+        for f in findings
+    ]
 
 
 def _issue(
@@ -529,6 +575,8 @@ async def _do_step3(
     mgr_input: SpotlightsManagerInput,
     cfg: SpotlightsManagerConfig,
     module_paths: ModulePaths,
+    kb: KnowledgeBase | None = None,
+    prior_synthesis: str | None = None,
 ) -> tuple[ModuleDeepResearchOutput, float]:
     research_input = ModuleDeepResearchInput(
         project_tree=tree,
@@ -536,6 +584,7 @@ async def _do_step3(
         context=mgr_input.context,
         repo_path=mgr_input.repo_path,
         max_findings_per_module=mgr_input.max_findings_per_module,
+        prior_synthesis=prior_synthesis,
     )
     options = _build_deep_research_options(
         cfg, mgr_input.repo_path, module_paths.deep_research_last_message_path
@@ -543,6 +592,12 @@ async def _do_step3(
     start = time.monotonic()
     output = await asyncio.to_thread(research_module, research_input, options)
     duration = time.monotonic() - start
+
+    if kb is not None and output.findings:
+        records = records_from_module_deep_research(output, module_qualified_name=qn)
+        archive_result = await asyncio.to_thread(kb.archive_many, records)
+        P.write_archived_records(module_paths, archive_result.record_ids)
+
     return output, duration
 
 
@@ -686,6 +741,9 @@ async def _run_module(
     paths: ManagerPaths,
     manifest_lock: asyncio.Lock,
     manifest: dict[str, Any],
+    kb: KnowledgeBase | None = None,
+    wiki: Wiki | None = None,
+    knowledge_mode: str = "off",
 ) -> ModuleCheckpoint:
     module_paths = paths.for_module(qn)
     module_paths.dir.mkdir(parents=True, exist_ok=True)
@@ -862,6 +920,20 @@ async def _run_module(
             P.clear_deep_research_artifacts(module_paths)
             P.clear_proposal_from_finding_artifacts(module_paths)
             P.clear_agent_proposals_artifacts(module_paths)
+            P.clear_archived_records(module_paths)
+
+        prior_synthesis: str | None = None
+        if run_step3 and knowledge_mode != "off":
+            workload = " ".join(mgr_input.context.workload_hints)
+            query_str = f"{qn} {mgr_input.context.objective} {workload}"
+            if knowledge_mode in ("concepts-only", "records-and-concepts") and wiki is not None:
+                results = wiki.query(query_str, top_k=8, kinds=["technique", "entity"])
+                if results:
+                    prior_synthesis = _format_query_results(results)
+            elif knowledge_mode == "records-only" and kb is not None:
+                results = await asyncio.to_thread(kb.retrieve, query_str, top_k=8)
+                if results:
+                    prior_synthesis = _format_query_results(results)
 
         if run_step3:
             _log.info("[%s] deep_research: start (Codex session)", qn)
@@ -872,6 +944,8 @@ async def _run_module(
                     mgr_input=mgr_input,
                     cfg=cfg,
                     module_paths=module_paths,
+                    kb=kb if knowledge_mode in ("records-only", "records-and-concepts") else None,
+                    prior_synthesis=prior_synthesis,
                 )
             except Exception as e:  # noqa: BLE001
                 cp = _now_checkpoint(
@@ -1337,7 +1411,24 @@ async def _run_async(
         else [qn for qn in leaf_qns if qn in selected_set]
     )
 
-    sem = asyncio.Semaphore(config.max_parallel_sessions)
+    # Knowledge layer setup: None means the knowledge subsystem is disabled.
+    knowledge_mode = config.knowledge.mode if config.knowledge is not None else "off"
+    subject_system = (
+        config.knowledge.subject_system_name if config.knowledge is not None else None
+    ) or input.repo_path.name
+    run_id: str = manifest.get("created_at", _now_iso())
+
+    kb: KnowledgeBase | None = None
+    wiki: Wiki | None = None
+    if knowledge_mode in ("records-only", "records-and-concepts"):
+        kb = KnowledgeBase.open(_knowledge_root(paths))
+    if knowledge_mode in ("concepts-only", "records-and-concepts"):
+        wiki = Wiki.open(_knowledge_root(paths))
+
+    resume_after = wiki.read_resume_marker(run_id) if wiki else -1
+    wave_size = config.max_parallel_sessions
+
+    sem = asyncio.Semaphore(wave_size)
     manifest_lock = asyncio.Lock()
     cancel_event = (
         None if input.continue_on_module_failure else asyncio.Event()
@@ -1355,6 +1446,9 @@ async def _run_async(
                 paths=paths,
                 manifest_lock=manifest_lock,
                 manifest=manifest,
+                kb=kb,
+                wiki=wiki,
+                knowledge_mode=knowledge_mode,
             )
         except Exception:
             if cancel_event is not None:
@@ -1368,10 +1462,77 @@ async def _run_async(
             cancel_event.set()
         return cp
 
-    tasks = [asyncio.create_task(_wrapped(qn)) for qn in ordered_qns]
-    results = (
-        await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
-    )
+    results: list[ModuleCheckpoint | BaseException] = []
+
+    if knowledge_mode == "off":
+        # Original rolling-window behaviour: all modules under the semaphore.
+        tasks = [asyncio.create_task(_wrapped(qn)) for qn in ordered_qns]
+        results = list(
+            await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
+        )
+    else:
+        # Wave-based: groups of wave_size, with ingest between waves.
+        for wave_idx, wave in enumerate(_chunks(ordered_qns, wave_size)):
+            if cancel_event is not None and cancel_event.is_set():
+                break
+            wave_tasks = [asyncio.create_task(_wrapped(qn)) for qn in wave]
+            wave_results = list(
+                await asyncio.gather(*wave_tasks, return_exceptions=True)
+            )
+            results.extend(wave_results)
+
+            if wiki is None or wave_idx <= resume_after:
+                continue
+
+            successful = [
+                qn
+                for qn, r in zip(wave, wave_results, strict=True)
+                if not isinstance(r, BaseException)
+                and isinstance(r, ModuleCheckpoint)
+                and r.status != "FAILED"
+            ]
+            successful = wiki.filter_uningested(successful, run_id)
+            if not successful:
+                continue
+
+            try:
+                if knowledge_mode == "records-and-concepts":
+                    record_ids: list[str] = []
+                    for qn in successful:
+                        state = P.read_module_state(paths.for_module(qn))
+                        record_ids.extend(state.archived_record_ids)
+                    if record_ids:
+                        await wiki.ingest(
+                            RecordsBackedIngestRequest(
+                                record_ids=record_ids,
+                                subject_system=subject_system,
+                                objective=input.context.objective,
+                                run_id=run_id,
+                            )
+                        )
+                elif knowledge_mode == "concepts-only":
+                    sources: list[InlineSource] = []
+                    for qn in successful:
+                        state = P.read_module_state(paths.for_module(qn))
+                        if state.deep_research:
+                            sources.extend(
+                                _findings_to_inline_sources(
+                                    state.deep_research.findings, qn
+                                )
+                            )
+                    if sources:
+                        await wiki.ingest(
+                            InlineIngestRequest(
+                                sources=sources,
+                                subject_system=subject_system,
+                                objective=input.context.objective,
+                                run_id=run_id,
+                            )
+                        )
+                wiki.bump_resume_marker(run_id, wave_idx, successful)
+            except Exception as exc:  # noqa: BLE001
+                _log.warning("knowledge ingest wave %d failed: %s", wave_idx, exc)
+                _log.debug("knowledge ingest traceback", exc_info=True)
 
     # Build the module_runs and per-module telemetry from disk so a crash
     # mid-write doesn't show as success.

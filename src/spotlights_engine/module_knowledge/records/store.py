@@ -9,7 +9,7 @@ import tempfile
 from collections.abc import Iterable
 from pathlib import Path
 
-from spotlights_engine.module_knowledge.schemas import KnowledgeRecord
+from spotlights_engine.module_knowledge.records.schemas import KnowledgeRecord
 
 
 def sha256_text(text: str) -> str:

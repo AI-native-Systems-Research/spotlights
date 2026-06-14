@@ -6,15 +6,15 @@ import os
 import re
 from pathlib import Path
 
-from spotlights_engine.module_knowledge.layout import KnowledgeLayout
-from spotlights_engine.module_knowledge.schemas import (
+from spotlights_engine.module_knowledge.records.layout import KnowledgeLayout
+from spotlights_engine.module_knowledge.records.schemas import (
     KnowledgeRecord,
     RetrievedItem,
     WikiRenderResult,
     WikiVerificationIssue,
     WikiVerificationReport,
 )
-from spotlights_engine.module_knowledge.store import read_records, sha256_file, write_records
+from spotlights_engine.module_knowledge.records.store import read_records, sha256_file, write_records
 
 _GENERATED_FROM_RE = re.compile(r"<!-- generated_from: (?P<path>.*?) -->")
 _SOURCE_HASH_RE = re.compile(r"<!-- source_hash: (?P<hash>sha256:[a-f0-9]{64}) -->")

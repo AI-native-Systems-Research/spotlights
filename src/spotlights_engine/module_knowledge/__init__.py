@@ -5,7 +5,41 @@ records, retrieve ranked local records, and render a generated wiki. It is
 intentionally phase-free and dependency-light.
 """
 
-from spotlights_engine.module_knowledge.adapters import (
+from spotlights_engine.module_knowledge.concepts import (
+    CONCEPTS_SCHEMA_VERSION,
+    ConceptKind,
+    ConceptLinks,
+    ConceptPage,
+    ConceptVerifyIssue,
+    ConceptVerifyReport,
+    ConceptsLayout,
+    IngestReport,
+    IngestRequest,
+    InlineIngestRequest,
+    InlineSource,
+    LightSourceRef,
+    LintReport,
+    QueryResult,
+    RecordSourceRef,
+    RecordsBackedIngestRequest,
+    Wiki,
+)
+from spotlights_engine.module_knowledge.records import (
+    SCHEMA_VERSION,
+    ArchiveResult,
+    KnowledgeBase,
+    KnowledgeLayout,
+    KnowledgeRecord,
+    KnowledgeSourceType,
+    Provenance,
+    RetrieveRequest,
+    RetrievedItem,
+    SourceRef,
+    TrustTier,
+    WikiRenderResult,
+    WikiRenderer,
+    WikiVerificationIssue,
+    WikiVerificationReport,
     record_from_agent_proposal,
     record_from_candidate,
     record_from_deep_research_proposal,
@@ -18,28 +52,32 @@ from spotlights_engine.module_knowledge.adapters import (
     records_from_module_run,
     records_from_project_tree,
     records_from_spotlights_result,
+    read_records,
+    retrieve_records,
+    verify_wiki,
+    write_records,
 )
-from spotlights_engine.module_knowledge.archive import KnowledgeBase
-from spotlights_engine.module_knowledge.layout import KnowledgeLayout
-from spotlights_engine.module_knowledge.retrieve import retrieve_records
-from spotlights_engine.module_knowledge.schemas import (
-    SCHEMA_VERSION,
-    ArchiveResult,
-    KnowledgeRecord,
-    KnowledgeSourceType,
-    Provenance,
-    RetrievedItem,
-    RetrieveRequest,
-    SourceRef,
-    TrustTier,
-    WikiRenderResult,
-    WikiVerificationIssue,
-    WikiVerificationReport,
-)
-from spotlights_engine.module_knowledge.store import read_records, write_records
-from spotlights_engine.module_knowledge.wiki import WikiRenderer, verify_wiki
 
 __all__ = [
+    # concepts layer
+    "CONCEPTS_SCHEMA_VERSION",
+    "ConceptKind",
+    "ConceptLinks",
+    "ConceptPage",
+    "ConceptVerifyIssue",
+    "ConceptVerifyReport",
+    "ConceptsLayout",
+    "IngestReport",
+    "IngestRequest",
+    "InlineIngestRequest",
+    "InlineSource",
+    "LightSourceRef",
+    "LintReport",
+    "QueryResult",
+    "RecordSourceRef",
+    "RecordsBackedIngestRequest",
+    "Wiki",
+    # records layer
     "SCHEMA_VERSION",
     "ArchiveResult",
     "KnowledgeBase",

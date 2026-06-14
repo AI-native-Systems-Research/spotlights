@@ -7,7 +7,7 @@ import re
 from collections import Counter
 from collections.abc import Iterable
 
-from spotlights_engine.module_knowledge.schemas import (
+from spotlights_engine.module_knowledge.records.schemas import (
     KnowledgeRecord,
     RetrievedItem,
     RetrieveRequest,

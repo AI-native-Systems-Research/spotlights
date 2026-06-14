@@ -1,0 +1,67 @@
+from spotlights_engine.module_knowledge.records.adapters import (
+    record_from_agent_proposal,
+    record_from_candidate,
+    record_from_deep_research_proposal,
+    record_from_finding,
+    record_from_module,
+    records_from_candidate_proposals,
+    records_from_candidates,
+    records_from_findings,
+    records_from_module_deep_research,
+    records_from_module_run,
+    records_from_project_tree,
+    records_from_spotlights_result,
+)
+from spotlights_engine.module_knowledge.records.archive import KnowledgeBase
+from spotlights_engine.module_knowledge.records.layout import KnowledgeLayout
+from spotlights_engine.module_knowledge.records.retrieve import retrieve_records
+from spotlights_engine.module_knowledge.records.schemas import (
+    SCHEMA_VERSION,
+    ArchiveResult,
+    KnowledgeRecord,
+    KnowledgeSourceType,
+    Provenance,
+    RetrievedItem,
+    RetrieveRequest,
+    SourceRef,
+    TrustTier,
+    WikiRenderResult,
+    WikiVerificationIssue,
+    WikiVerificationReport,
+)
+from spotlights_engine.module_knowledge.records.store import read_records, write_records
+from spotlights_engine.module_knowledge.records.wiki import WikiRenderer, verify_wiki
+
+__all__ = [
+    "SCHEMA_VERSION",
+    "ArchiveResult",
+    "KnowledgeBase",
+    "KnowledgeLayout",
+    "KnowledgeRecord",
+    "KnowledgeSourceType",
+    "Provenance",
+    "RetrieveRequest",
+    "RetrievedItem",
+    "SourceRef",
+    "TrustTier",
+    "WikiRenderResult",
+    "WikiRenderer",
+    "WikiVerificationIssue",
+    "WikiVerificationReport",
+    "record_from_agent_proposal",
+    "record_from_candidate",
+    "record_from_deep_research_proposal",
+    "records_from_candidate_proposals",
+    "records_from_candidates",
+    "records_from_findings",
+    "records_from_module_run",
+    "records_from_spotlights_result",
+    "record_from_finding",
+    "record_from_module",
+    "records_from_module_deep_research",
+    "records_from_project_tree",
+    "read_records",
+    "retrieve_records",
+    "verify_wiki",
+    "write_records",
+]

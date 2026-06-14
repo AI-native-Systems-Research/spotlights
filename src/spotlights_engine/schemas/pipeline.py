@@ -56,6 +56,7 @@ class ModuleDeepResearchInput(BaseModel):
     context: SpotlightContext
     repo_path: Path
     max_findings_per_module: int = Field(default=30, ge=0)
+    prior_synthesis: str | None = None
 
 
 class ModuleDeepResearchOutput(BaseModel):

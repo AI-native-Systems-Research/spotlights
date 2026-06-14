@@ -9,6 +9,7 @@ deep-research wallclock, and the manager's view of step issues.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -29,6 +30,17 @@ from spotlights_engine.schemas.pipeline import (
     SpotlightsResult,
 )
 from spotlights_engine.spotlights_manager.filters import ModuleFilter
+
+
+class KnowledgeConfig(BaseModel):
+    """Controls which knowledge layers run during a manager run."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["concepts-only", "records-only", "records-and-concepts", "off"] = (
+        "records-and-concepts"
+    )
+    subject_system_name: str | None = None
 
 
 class SpotlightsManagerConfig(BaseModel):
@@ -54,6 +66,7 @@ class SpotlightsManagerConfig(BaseModel):
     agent_proposals: AgentProposalsConfig | None = None
 
     resume: bool = True
+    knowledge: KnowledgeConfig | None = None
 
 
 class ModuleTelemetry(BaseModel):

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 
-from spotlights_engine.module_knowledge.schemas import KnowledgeRecord, Provenance, SourceRef
+from spotlights_engine.module_knowledge.records.schemas import KnowledgeRecord, Provenance, SourceRef
 from spotlights_engine.schemas.candidate import Candidate, Candidates
 from spotlights_engine.schemas.finding import Finding
 from spotlights_engine.schemas.pipeline import ModuleDeepResearchOutput, ModuleRun, SpotlightsResult
