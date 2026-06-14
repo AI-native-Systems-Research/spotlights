@@ -13,6 +13,8 @@ from typing import IO
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from spotlights_engine.module_deep_research.agent_exec import AgentExecResult
+
 
 class CodexExecOptions(BaseModel):
     """Options for running Codex in non-interactive mode."""
@@ -36,21 +38,10 @@ class CodexExecOptions(BaseModel):
     stream_logs: bool = False
 
 
-class CodexExecResult(BaseModel):
+class CodexExecResult(AgentExecResult):
     """Captured result from one `codex exec` invocation."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    command: list[str]
-    returncode: int
-    stdout: str
-    stderr: str
-    final_message: str | None
     output_last_message: Path | None
-
-    @property
-    def ok(self) -> bool:
-        return self.returncode == 0
 
     def raise_for_status(self) -> None:
         if self.returncode != 0:
@@ -60,9 +51,10 @@ class CodexExecResult(BaseModel):
                 f"STDOUT:\n{self.stdout}\nSTDERR:\n{self.stderr}"
             )
 
-
 class CodexExecClient:
     """Run Codex in non-interactive mode from Python."""
+
+    name = "codex"
 
     def __init__(self, options: CodexExecOptions | None = None) -> None:
         self.options = options or CodexExecOptions()

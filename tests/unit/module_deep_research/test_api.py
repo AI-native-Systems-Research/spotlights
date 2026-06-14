@@ -132,3 +132,94 @@ def test_codex_command_shape_places_top_level_flags_before_exec(tmp_path: Path) 
     assert cmd.index("--search") < cmd.index("exec")
     assert cmd.index("--sandbox") > cmd.index("exec")
     assert cmd[-1] == "-"
+
+
+def _payload(title: str, url: str) -> str:
+    return f'''
+    {{
+      "findings": [
+        {{
+          "finding_id": "find-9999",
+          "title": "{title}",
+          "url": "{url}",
+          "source_type": "paper",
+          "technique_summary": "Useful transfer idea."
+        }}
+      ],
+      "issues": []
+    }}
+    '''
+
+
+class NamedFakeRunner(FakeRunner):
+    def __init__(self, name: str, final_message: str, returncode: int = 0) -> None:
+        super().__init__(final_message, returncode=returncode)
+        self.name = name
+
+
+def test_research_module_runs_codex_claude_gemini_and_dedups_outputs() -> None:
+    codex = NamedFakeRunner("codex", _payload("PagedAttention", "https://arxiv.org/abs/2309.06180"))
+    claude = NamedFakeRunner("claude", _payload("PagedAttention", "https://arxiv.org/pdf/2309.06180.pdf"))
+    gemini = NamedFakeRunner("gemini", _payload("vAttention", "https://arxiv.org/abs/2405.04437"))
+
+    output = research_module(_request(), runners=[codex, claude, gemini])
+
+    assert [len(r.prompts) for r in (codex, claude, gemini)] == [1, 1, 1]
+    assert [finding.finding_id for finding in output.findings] == ["find-0001", "find-0002"]
+    assert [finding.title for finding in output.findings] == ["PagedAttention", "vAttention"]
+    assert output.issues == []
+
+
+def test_research_module_parallel_runner_pool() -> None:
+    import threading
+
+    barrier = threading.Barrier(3)
+
+    class BarrierRunner(NamedFakeRunner):
+        def run(self, prompt: str, *, check: bool = True) -> CodexExecResult:
+            barrier.wait(timeout=1)
+            return super().run(prompt, check=check)
+
+    runners = [
+        BarrierRunner("codex", _payload("A", "https://example.com/a")),
+        BarrierRunner("claude", _payload("B", "https://example.com/b")),
+        BarrierRunner("gemini", _payload("C", "https://example.com/c")),
+    ]
+
+    output = research_module(_request(), runners=runners)
+
+    assert [finding.title for finding in output.findings] == ["A", "B", "C"]
+    assert output.issues == []
+
+
+def test_claude_command_shape_uses_print_json_and_plan_mode(tmp_path: Path) -> None:
+    from spotlights_engine.module_deep_research.claude_exec import (
+        ClaudeExecClient,
+        ClaudeExecOptions,
+    )
+
+    cmd = ClaudeExecClient(
+        ClaudeExecOptions(cwd=tmp_path, model="claude-opus-4-7", max_turns=3)
+    ).build_command()
+
+    assert cmd[:4] == ["claude", "-p", "--output-format", "json"]
+    assert cmd[cmd.index("--permission-mode") + 1] == "plan"
+    assert cmd[cmd.index("--model") + 1] == "claude-opus-4-7"
+    assert cmd[cmd.index("--max-turns") + 1] == "3"
+
+
+def test_gemini_command_shape_uses_headless_json_and_plan_mode(tmp_path: Path) -> None:
+    from spotlights_engine.module_deep_research.gemini_exec import (
+        GeminiExecClient,
+        GeminiExecOptions,
+    )
+
+    cmd = GeminiExecClient(
+        GeminiExecOptions(cwd=tmp_path, model="gcp/gemini-3.1-pro-preview")
+    ).build_command()
+
+    assert cmd[:3] == ["gemini", "--prompt", ""]
+    assert cmd[cmd.index("--output-format") + 1] == "json"
+    assert cmd[cmd.index("--approval-mode") + 1] == "plan"
+    assert "--skip-trust" in cmd
+    assert cmd[cmd.index("--model") + 1] == "gcp/gemini-3.1-pro-preview"

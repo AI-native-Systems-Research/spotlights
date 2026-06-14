@@ -52,10 +52,11 @@ Contributions to any of these are welcome — see [Contributing](#contributing).
 - Python ≥ 3.11
 - [uv](https://docs.astral.sh/uv/)
 - The `claude` CLI on PATH, with auth configured via its own login state or supported environment variables. Used by the modules extractor, candidate discovery, and the Claude executors for steps 4 and 5.
-- The `codex` CLI on PATH, with auth configured via its own login state or supported environment variables. Used by `module_deep_research` (hard-coded today) and the Codex executors for steps 2 and 5.
+- The `codex` CLI on PATH, with auth configured via its own login state or supported environment variables. Used by `module_deep_research` and the Codex executors for steps 2 and 5.
+- The `gemini` CLI on PATH, with API-key or gateway auth configured. Used by `module_deep_research` alongside Codex and Claude.
 - A target repo on disk (the quickstart below uses vLLM).
 
-Both CLIs are required for the default end-to-end path; the engine will not run without one of them today. Install, authenticate, and verify each before launching the engine.
+All three CLIs are used by the default end-to-end path. Install, authenticate, and verify each before launching the engine.
 
 ### Install the `claude` CLI
 
@@ -106,9 +107,25 @@ codex           # first run: pick "Sign in with ChatGPT"
 codex --version
 ```
 
-### Optional: route both CLIs through a LiteLLM proxy
+### Install the `gemini` CLI
 
-If you can't (or don't want to) authenticate against Anthropic and OpenAI directly — for example, when running inside a corporate environment that exposes models via a LiteLLM proxy — you can point each CLI at the proxy instead of its native backend.
+Install Gemini CLI with npm, then verify it from a fresh shell:
+
+```bash
+npm install -g @google/gemini-cli
+which gemini && gemini --version
+```
+
+For direct Google auth, set `GEMINI_API_KEY` or run `gemini` once and choose an auth method. For headless/API-key usage:
+
+```bash
+export GEMINI_API_KEY="<your-gemini-api-key>"
+gemini --prompt "Reply with exactly: OK" --output-format json
+```
+
+### Optional: route the CLIs through a LiteLLM proxy
+
+If you can't (or don't want to) authenticate against Anthropic, OpenAI, or Google directly — for example, when running inside a corporate environment that exposes models via a LiteLLM proxy — you can point each CLI at the proxy instead of its native backend.
 
 **`claude` CLI** — edit `~/.claude/settings.json` and set `ANTHROPIC_BASE_URL` plus the per-tier model overrides to models served by your proxy:
 
@@ -126,32 +143,56 @@ If you can't (or don't want to) authenticate against Anthropic and OpenAI direct
 }
 ```
 
-**`codex` CLI** — edit `~/.codex/config.toml` and define a `litellm` provider, then select it as the default:
+**`codex` CLI** — edit `~/.codex/config.toml` and define a `litellm` provider, then select it as the default or as a named profile:
 
 ```toml
-model = "<your-model-id>"
+model = "<your-openai-compatible-model-id>"
 model_provider = "litellm"
 model_reasoning_effort = "xhigh"
 
 [model_providers.litellm]
 name = "LiteLLM"
 base_url = "https://your-litellm-host.example.com/v1"
-experimental_bearer_token = "<your-litellm-key>"
+env_key = "LITELLM_API_KEY"
 wire_api = "responses"
 ```
 
-Swap the host and model IDs for whatever your LiteLLM deployment exposes. After editing either file, re-run `claude --version` / `codex --version` from a fresh shell to confirm the CLI still launches; the engine will then route all of its agent calls through the proxy.
+**`gemini` CLI** — point Gemini at the gateway with the Gemini CLI gateway environment variables. For the IBM LiteLLM gateway used by this project, keep the Gemini base URL at the proxy root rather than the OpenAI-compatible `/v1` path:
 
-### Verify both CLIs from a fresh shell
+```bash
+export LITELLM_API_KEY="<your-litellm-virtual-key>"
+export GEMINI_API_KEY="$LITELLM_API_KEY"
+export GOOGLE_GEMINI_BASE_URL="https://ete-litellm.ai-models.vpc-int.res.ibm.com"
+export GEMINI_MODEL="gcp/gemini-3.1-pro-preview"
 
-Open a new terminal (so any PATH changes from the installers are picked up) and confirm both binaries resolve and report a version:
+# Optional: pin Gemini CLI to API-key auth so Google login state is not used.
+mkdir -p ~/.gemini
+cat > ~/.gemini/settings.json <<'JSON'
+{
+  "security": {
+    "auth": {
+      "selectedType": "gemini-api-key"
+    }
+  }
+}
+JSON
+
+gemini --prompt "Reply with exactly: OK" --output-format json
+```
+
+Swap the host and model IDs for whatever your LiteLLM deployment exposes. After editing config or environment, re-run `claude --version` / `codex --version` / `gemini --version` from a fresh shell to confirm the CLIs still launch; the engine will then route its agent calls through the proxy.
+
+### Verify all CLIs from a fresh shell
+
+Open a new terminal (so any PATH changes from the installers are picked up) and confirm all binaries resolve and report a version:
 
 ```bash
 which claude && claude --version
 which codex  && codex  --version
+which gemini && gemini --version
 ```
 
-If either command is not found, re-open your terminal so shell PATH updates from the installers take effect. The native `claude` installer drops its binary at `~/.local/bin/claude`; the `codex` binary location depends on the install method (e.g. `/opt/homebrew/bin/codex` for Homebrew, `~/.local/bin/codex` for the native installer) — check the installer's final output if `codex` still isn't on PATH.
+If any command is not found, re-open your terminal so shell PATH updates from the installers are picked up. The native `claude` installer drops its binary at `~/.local/bin/claude`; the `codex` and `gemini` binary locations depend on the install method (for example, Homebrew vs npm vs native installer) — check the installer's final output if a binary still is not on PATH.
 
 ### Install the engine
 
