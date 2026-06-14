@@ -53,10 +53,13 @@ Contributions to any of these are welcome — see [Contributing](#contributing).
 - [uv](https://docs.astral.sh/uv/)
 - The `claude` CLI on PATH, with auth configured via its own login state or supported environment variables. Used by the modules extractor, candidate discovery, and the Claude executors for steps 4 and 5.
 - The `codex` CLI on PATH, with auth configured via its own login state or supported environment variables. Used by `module_deep_research` and the Codex executors for steps 2 and 5.
-- The `gemini` CLI on PATH, with API-key or gateway auth configured. Used by `module_deep_research` alongside Codex and Claude.
+- The `gemini` CLI on PATH, with API-key or gateway auth configured. Used by `module_deep_research` alongside Codex and Claude when available.
 - A target repo on disk (the quickstart below uses vLLM).
 
-All three CLIs are used by the default end-to-end path. Install, authenticate, and verify each before launching the engine.
+The module deep-research step fans out to Codex, Claude, and Gemini by default,
+then treats individual runner failures as recoverable so one flaky provider does
+not fail the whole step. Install, authenticate, and verify all three CLIs for
+best coverage.
 
 ### Install the `claude` CLI
 
@@ -181,10 +184,10 @@ JSON
 gemini --prompt "Reply with exactly: OK" --output-format json
 ```
 
-The module deep-research Gemini runner applies the same IBM LiteLLM defaults
-when no custom `GeminiExecOptions` are provided: model
-`gcp/gemini-3.1-pro-preview`, proxy root URL, `GEMINI_API_KEY` sourced from
-`LITELLM_API_KEY`, bearer auth, and Gemini CLI network mode for research.
+For IBM LiteLLM-backed live research from Python, use
+`GeminiExecOptions.ibm_litellm(...)`. The plain `GeminiExecOptions()` default
+leaves Gemini CLI auth/model/proxy behavior native and read-only unless callers
+override it.
 
 Swap the host and model IDs for whatever your LiteLLM deployment exposes. After editing config or environment, re-run `claude --version` / `codex --version` / `gemini --version` from a fresh shell to confirm the CLIs still launch; the engine will then route its agent calls through the proxy.
 

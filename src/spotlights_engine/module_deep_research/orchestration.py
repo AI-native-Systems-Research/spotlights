@@ -125,10 +125,10 @@ def merge_outcomes(
             )
 
         for finding in output.findings:
-            keys = _finding_keys(finding.title, finding.url)
-            if seen.intersection(keys):
+            key = _finding_key(finding.title, finding.url)
+            if key in seen:
                 continue
-            seen.update(keys)
+            seen.add(key)
             findings.append(finding)
 
     merged = ModuleDeepResearchOutput(findings=findings, issues=issues)
@@ -159,12 +159,11 @@ def _agent_issues(agent_name: str, issues: Sequence[StepIssue]) -> list[StepIssu
     ]
 
 
-def _finding_keys(title: str, url: str) -> set[str]:
-    keys = {f"title:{_normalize_text(title)}"}
+def _finding_key(title: str, url: str) -> str:
     normalized_url = _normalize_url(url)
     if normalized_url:
-        keys.add(f"url:{normalized_url}")
-    return keys
+        return f"url:{normalized_url}"
+    return f"title:{_normalize_text(title)}"
 
 
 def _normalize_url(url: str) -> str:

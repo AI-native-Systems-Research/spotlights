@@ -24,16 +24,41 @@ class GeminiExecOptions(BaseModel):
 
     cwd: Path | str = Field(default_factory=Path.cwd)
     gemini_bin: str = "gemini"
-    model: str | None = IBM_GEMINI_MODEL
-    approval_mode: str = "yolo"
-    gemini_base_url: str | None = IBM_LITELLM_PROXY_URL
-    gemini_api_key_env: str | None = "LITELLM_API_KEY"
-    api_key_auth_mechanism: Literal["x-goog-api-key", "bearer"] | None = "bearer"
+    model: str | None = None
+    approval_mode: str = "plan"
+    gemini_base_url: str | None = None
+    gemini_api_key_env: str | None = None
+    api_key_auth_mechanism: Literal["x-goog-api-key", "bearer"] | None = None
     settings_path: Path | str | None = None
-    skip_trust: bool = True
+    skip_trust: bool = False
     timeout_seconds: int | None = None
     extra_args: Sequence[str] = Field(default_factory=tuple)
     env: Mapping[str, str] | None = None
+
+    @classmethod
+    def ibm_litellm(
+        cls,
+        *,
+        cwd: Path | str | None = None,
+        model: str = IBM_GEMINI_MODEL,
+        settings_path: Path | str | None = None,
+        timeout_seconds: int | None = None,
+        approval_mode: str = "yolo",
+        env: Mapping[str, str] | None = None,
+    ) -> GeminiExecOptions:
+        """Return the explicit IBM LiteLLM configuration used by live research runs."""
+        return cls(
+            cwd=Path.cwd() if cwd is None else cwd,
+            model=model,
+            approval_mode=approval_mode,
+            gemini_base_url=IBM_LITELLM_PROXY_URL,
+            gemini_api_key_env="LITELLM_API_KEY",
+            api_key_auth_mechanism="bearer",
+            settings_path=settings_path,
+            skip_trust=True,
+            timeout_seconds=timeout_seconds,
+            env=env,
+        )
 
 
 class GeminiExecClient:
@@ -44,12 +69,12 @@ class GeminiExecClient:
     def __init__(self, options: GeminiExecOptions | None = None) -> None:
         self.options = options or GeminiExecOptions()
 
-    def build_command(self, prompt: str = "") -> list[str]:
+    def build_command(self) -> list[str]:
         opt = self.options
         cmd = [
             opt.gemini_bin,
             "--prompt",
-            prompt,
+            "",
             "--output-format",
             "json",
             "--approval-mode",
@@ -81,10 +106,11 @@ class GeminiExecClient:
         return env
 
     def run(self, prompt: str, *, check: bool = True) -> AgentExecResult:
-        cmd = self.build_command(prompt)
+        cmd = self.build_command()
 
         completed = subprocess.run(
             cmd,
+            input=prompt,
             capture_output=True,
             text=True,
             cwd=str(Path(self.options.cwd).expanduser().resolve()),

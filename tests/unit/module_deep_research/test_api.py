@@ -170,6 +170,18 @@ def test_research_module_runs_codex_claude_gemini_and_dedups_outputs() -> None:
     assert output.issues == []
 
 
+def test_research_module_keeps_same_title_when_urls_differ() -> None:
+    first = NamedFakeRunner("codex", _payload("Cache eviction", "https://example.com/paper-a"))
+    second = NamedFakeRunner("gemini", _payload("Cache eviction", "https://example.com/paper-b"))
+
+    output = research_module(_request(), runners=[first, second])
+
+    assert [finding.url for finding in output.findings] == [
+        "https://example.com/paper-a",
+        "https://example.com/paper-b",
+    ]
+
+
 def test_research_module_parallel_runner_pool() -> None:
     import threading
 
@@ -208,18 +220,30 @@ def test_claude_command_shape_uses_print_json_and_plan_mode(tmp_path: Path) -> N
     assert cmd[cmd.index("--max-turns") + 1] == "3"
 
 
-def test_gemini_command_shape_uses_headless_json_and_network_mode(tmp_path: Path) -> None:
+def test_gemini_default_command_is_read_only_and_does_not_expose_prompt(tmp_path: Path) -> None:
     from spotlights_engine.module_deep_research.gemini_exec import (
         GeminiExecClient,
         GeminiExecOptions,
     )
 
-    cmd = GeminiExecClient(
-        GeminiExecOptions(cwd=tmp_path, model="gcp/gemini-3.1-pro-preview")
-    ).build_command("research prompt")
+    cmd = GeminiExecClient(GeminiExecOptions(cwd=tmp_path)).build_command()
 
-    assert cmd[:3] == ["gemini", "--prompt", "research prompt"]
+    assert cmd[:3] == ["gemini", "--prompt", ""]
+    assert "research prompt" not in cmd
     assert cmd[cmd.index("--output-format") + 1] == "json"
+    assert cmd[cmd.index("--approval-mode") + 1] == "plan"
+    assert "--skip-trust" not in cmd
+    assert "--model" not in cmd
+
+
+def test_gemini_ibm_litellm_command_uses_explicit_network_config(tmp_path: Path) -> None:
+    from spotlights_engine.module_deep_research.gemini_exec import (
+        GeminiExecClient,
+        GeminiExecOptions,
+    )
+
+    cmd = GeminiExecClient(GeminiExecOptions.ibm_litellm(cwd=tmp_path)).build_command()
+
     assert cmd[cmd.index("--approval-mode") + 1] == "yolo"
     assert "--skip-trust" in cmd
     assert cmd[cmd.index("--model") + 1] == "gcp/gemini-3.1-pro-preview"
@@ -233,7 +257,7 @@ def test_gemini_env_maps_litellm_key_to_gemini_proxy(tmp_path: Path) -> None:
 
     settings_path = tmp_path / "gemini-settings.json"
     client = GeminiExecClient(
-        GeminiExecOptions(
+        GeminiExecOptions.ibm_litellm(
             cwd=tmp_path,
             settings_path=settings_path,
             env={"LITELLM_API_KEY": "test-key"},
