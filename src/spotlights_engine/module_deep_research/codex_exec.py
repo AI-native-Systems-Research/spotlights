@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -14,7 +13,10 @@ from typing import IO
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from spotlights_engine.module_deep_research.agent_exec import AgentExecResult
+from spotlights_engine.module_deep_research.agent_exec import (
+    AgentExecResult,
+    resolve_cli_executable,
+)
 
 
 class CodexExecOptions(BaseModel):
@@ -52,6 +54,7 @@ class CodexExecResult(AgentExecResult):
                 f"STDOUT:\n{self.stdout}\nSTDERR:\n{self.stderr}"
             )
 
+
 class CodexExecClient:
     """Run Codex in non-interactive mode from Python."""
 
@@ -74,12 +77,7 @@ class CodexExecClient:
             output_last_message = Path(opt.output_last_message).expanduser().resolve()
             output_last_message.parent.mkdir(parents=True, exist_ok=True)
 
-        # Resolve via shutil.which so Windows finds the .CMD/.ps1 shim.
-        # Python's subprocess on Windows doesn't follow PATHEXT for an
-        # unqualified argv[0], so a bare "codex" → FileNotFoundError
-        # even when the CLI is on PATH.
-        codex_resolved = shutil.which(opt.codex_bin) or opt.codex_bin
-        cmd = [codex_resolved]
+        cmd = [resolve_cli_executable(opt.codex_bin)]
         if opt.model:
             cmd += ["--model", opt.model]
         if opt.profile:

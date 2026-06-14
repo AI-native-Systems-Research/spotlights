@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import os
+import shutil
 from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict
+
+WINDOWS_SUBPROCESS_NEEDS_SHIM_RESOLUTION = os.name == "nt"
 
 
 class AgentExecResult(BaseModel):
@@ -39,4 +43,19 @@ class ModuleResearchRunner(Protocol):
     def run(self, prompt: str, *, check: bool = True) -> AgentExecResult: ...
 
 
-__all__ = ["AgentExecResult", "ModuleResearchRunner"]
+def resolve_cli_executable(executable: str) -> str:
+    """Resolve CLI shims on Windows while preserving POSIX command behavior.
+
+    npm-installed CLIs are commonly exposed as `.cmd` shims on Windows. Passing a
+    bare command name to `subprocess.run(..., shell=False)` can fail with
+    `FileNotFoundError` there, even when the command works in `cmd.exe` or
+    PowerShell. `shutil.which` applies Windows `PATHEXT` lookup and returns the
+    concrete shim path. POSIX callers keep the configured command unchanged so
+    command shapes remain stable in logs and tests.
+    """
+    if not WINDOWS_SUBPROCESS_NEEDS_SHIM_RESOLUTION:
+        return executable
+    return shutil.which(executable) or executable
+
+
+__all__ = ["AgentExecResult", "ModuleResearchRunner", "resolve_cli_executable"]

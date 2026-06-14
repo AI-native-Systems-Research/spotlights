@@ -11,7 +11,10 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from spotlights_engine.module_deep_research.agent_exec import AgentExecResult
+from spotlights_engine.module_deep_research.agent_exec import (
+    AgentExecResult,
+    resolve_cli_executable,
+)
 
 IBM_LITELLM_PROXY_URL = "https://ete-litellm.ai-models.vpc-int.res.ibm.com"
 IBM_GEMINI_MODEL = "gcp/gemini-3.1-pro-preview"
@@ -72,7 +75,7 @@ class GeminiExecClient:
     def build_command(self) -> list[str]:
         opt = self.options
         cmd = [
-            opt.gemini_bin,
+            resolve_cli_executable(opt.gemini_bin),
             "--prompt",
             "",
             "--output-format",

@@ -166,9 +166,7 @@ class NamedFakeRunner(FakeRunner):
 
 
 def test_research_module_runs_codex_claude_gemini_and_dedups_outputs() -> None:
-    codex = NamedFakeRunner(
-        "codex", _payload("PagedAttention", "https://arxiv.org/abs/2309.06180")
-    )
+    codex = NamedFakeRunner("codex", _payload("PagedAttention", "https://arxiv.org/abs/2309.06180"))
     claude = NamedFakeRunner(
         "claude", _payload("PagedAttention", "https://arxiv.org/pdf/2309.06180v2.pdf")
     )
@@ -299,3 +297,32 @@ def test_gemini_env_maps_litellm_key_to_gemini_proxy(tmp_path: Path) -> None:
     assert env["GOOGLE_GEMINI_BASE_URL"] == "https://ete-litellm.ai-models.vpc-int.res.ibm.com"
     assert env["GEMINI_API_KEY_AUTH_MECHANISM"] == "bearer"
     assert env["GEMINI_CLI_SYSTEM_SETTINGS_PATH"] == str(settings_path)
+
+
+def test_cli_resolution_preserves_posix_command_shape(monkeypatch) -> None:
+    from spotlights_engine.module_deep_research import agent_exec
+
+    monkeypatch.setattr(agent_exec, "WINDOWS_SUBPROCESS_NEEDS_SHIM_RESOLUTION", False)
+
+    assert agent_exec.resolve_cli_executable("claude") == "claude"
+
+
+def test_cli_resolution_uses_windows_cmd_shims(monkeypatch) -> None:
+    from spotlights_engine.module_deep_research import agent_exec
+    from spotlights_engine.module_deep_research.claude_exec import ClaudeExecClient
+    from spotlights_engine.module_deep_research.codex_exec import CodexExecClient, CodexExecOptions
+    from spotlights_engine.module_deep_research.gemini_exec import GeminiExecClient
+
+    def fake_which(executable: str) -> str:
+        return f"C:/Users/example/AppData/Roaming/npm/{executable}.CMD"
+
+    monkeypatch.setattr(agent_exec, "WINDOWS_SUBPROCESS_NEEDS_SHIM_RESOLUTION", True)
+    monkeypatch.setattr(agent_exec.shutil, "which", fake_which)
+
+    assert agent_exec.resolve_cli_executable("claude") == (
+        "C:/Users/example/AppData/Roaming/npm/claude.CMD"
+    )
+    assert ClaudeExecClient().build_command()[0].endswith("/claude.CMD")
+    assert GeminiExecClient().build_command()[0].endswith("/gemini.CMD")
+    codex_cmd, _ = CodexExecClient(CodexExecOptions(output_last_message="last.md")).build_command()
+    assert codex_cmd[0].endswith("/codex.CMD")

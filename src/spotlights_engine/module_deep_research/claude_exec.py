@@ -10,7 +10,10 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from spotlights_engine.module_deep_research.agent_exec import AgentExecResult
+from spotlights_engine.module_deep_research.agent_exec import (
+    AgentExecResult,
+    resolve_cli_executable,
+)
 
 CLAUDE_RESEARCH_TOOLS = (
     "Read",
@@ -50,7 +53,7 @@ class ClaudeExecClient:
     def build_command(self) -> list[str]:
         opt = self.options
         cmd = [
-            opt.claude_bin,
+            resolve_cli_executable(opt.claude_bin),
             "-p",
             "--output-format",
             "json",
