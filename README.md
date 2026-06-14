@@ -163,6 +163,7 @@ wire_api = "responses"
 export LITELLM_API_KEY="<your-litellm-virtual-key>"
 export GEMINI_API_KEY="$LITELLM_API_KEY"
 export GOOGLE_GEMINI_BASE_URL="https://ete-litellm.ai-models.vpc-int.res.ibm.com"
+export GEMINI_API_KEY_AUTH_MECHANISM="bearer"
 export GEMINI_MODEL="gcp/gemini-3.1-pro-preview"
 
 # Optional: pin Gemini CLI to API-key auth so Google login state is not used.
@@ -179,6 +180,11 @@ JSON
 
 gemini --prompt "Reply with exactly: OK" --output-format json
 ```
+
+The module deep-research Gemini runner applies the same IBM LiteLLM defaults
+when no custom `GeminiExecOptions` are provided: model
+`gcp/gemini-3.1-pro-preview`, proxy root URL, `GEMINI_API_KEY` sourced from
+`LITELLM_API_KEY`, bearer auth, and Gemini CLI network mode for research.
 
 Swap the host and model IDs for whatever your LiteLLM deployment exposes. After editing config or environment, re-run `claude --version` / `codex --version` / `gemini --version` from a fresh shell to confirm the CLIs still launch; the engine will then route its agent calls through the proxy.
 

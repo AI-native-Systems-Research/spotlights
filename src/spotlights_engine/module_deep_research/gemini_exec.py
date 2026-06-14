@@ -7,10 +7,14 @@ import os
 import subprocess
 from collections.abc import Mapping, Sequence
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from spotlights_engine.module_deep_research.agent_exec import AgentExecResult
+
+IBM_LITELLM_PROXY_URL = "https://ete-litellm.ai-models.vpc-int.res.ibm.com"
+IBM_GEMINI_MODEL = "gcp/gemini-3.1-pro-preview"
 
 
 class GeminiExecOptions(BaseModel):
@@ -20,8 +24,13 @@ class GeminiExecOptions(BaseModel):
 
     cwd: Path | str = Field(default_factory=Path.cwd)
     gemini_bin: str = "gemini"
-    model: str | None = None
-    approval_mode: str = "plan"
+    model: str | None = IBM_GEMINI_MODEL
+    approval_mode: str = "yolo"
+    gemini_base_url: str | None = IBM_LITELLM_PROXY_URL
+    gemini_api_key_env: str | None = "LITELLM_API_KEY"
+    api_key_auth_mechanism: Literal["x-goog-api-key", "bearer"] | None = "bearer"
+    settings_path: Path | str | None = None
+    skip_trust: bool = True
     timeout_seconds: int | None = None
     extra_args: Sequence[str] = Field(default_factory=tuple)
     env: Mapping[str, str] | None = None
@@ -35,36 +44,51 @@ class GeminiExecClient:
     def __init__(self, options: GeminiExecOptions | None = None) -> None:
         self.options = options or GeminiExecOptions()
 
-    def build_command(self) -> list[str]:
+    def build_command(self, prompt: str = "") -> list[str]:
         opt = self.options
         cmd = [
             opt.gemini_bin,
             "--prompt",
-            "",
+            prompt,
             "--output-format",
             "json",
             "--approval-mode",
             opt.approval_mode,
-            "--skip-trust",
         ]
         if opt.model:
             cmd += ["--model", opt.model]
+        if opt.skip_trust:
+            cmd += ["--skip-trust"]
         cmd += list(opt.extra_args)
         return cmd
 
-    def run(self, prompt: str, *, check: bool = True) -> AgentExecResult:
-        cmd = self.build_command()
+    def build_env(self) -> dict[str, str]:
+        opt = self.options
         env = os.environ.copy()
-        if self.options.env:
-            env.update(dict(self.options.env))
+        if opt.env:
+            env.update(dict(opt.env))
+
+        if opt.gemini_base_url:
+            env["GOOGLE_GEMINI_BASE_URL"] = opt.gemini_base_url
+        if opt.gemini_api_key_env:
+            key = env.get(opt.gemini_api_key_env)
+            if key:
+                env["GEMINI_API_KEY"] = key
+        if opt.api_key_auth_mechanism:
+            env["GEMINI_API_KEY_AUTH_MECHANISM"] = opt.api_key_auth_mechanism
+        if opt.settings_path:
+            env["GEMINI_CLI_SYSTEM_SETTINGS_PATH"] = str(opt.settings_path)
+        return env
+
+    def run(self, prompt: str, *, check: bool = True) -> AgentExecResult:
+        cmd = self.build_command(prompt)
 
         completed = subprocess.run(
             cmd,
-            input=prompt,
             capture_output=True,
             text=True,
             cwd=str(Path(self.options.cwd).expanduser().resolve()),
-            env=env,
+            env=self.build_env(),
             timeout=self.options.timeout_seconds,
             check=False,
         )
