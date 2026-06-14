@@ -137,6 +137,21 @@ def _build_argparser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--mode",
+        choices=["full", "code_only"],
+        default="full",
+        help=(
+            "Pipeline shape. `full` (default) runs all five stages "
+            "(modules-extractor → candidate-discovery → "
+            "module-deep-research → proposal-from-finding → "
+            "agent-proposals). `code_only` skips deep-research and "
+            "proposal-from-finding entirely; the agent finds candidates "
+            "from source and stage 5 produces per-candidate proposals "
+            "directly. No external retrieval. Faster, cheaper, fully "
+            "reproducible without network access."
+        ),
+    )
+    p.add_argument(
         "--no-resume",
         dest="resume",
         action="store_false",
@@ -295,6 +310,9 @@ def _build_input(args: argparse.Namespace) -> SpotlightsManagerInput:
     }
     if args.max_findings_per_module is not None:
         input_kwargs["max_findings_per_module"] = args.max_findings_per_module
+    # Only set when non-default; preserves SpotlightsManagerInput's own default.
+    if getattr(args, "mode", "full") != "full":
+        input_kwargs["mode"] = args.mode
     return SpotlightsManagerInput(**input_kwargs)
 
 

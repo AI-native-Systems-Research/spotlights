@@ -117,11 +117,16 @@ def make_research_output(
     )
 
 
-def make_input(repo_path: Path) -> SpotlightsManagerInput:
-    return SpotlightsManagerInput(
-        repo_path=repo_path,
-        context=SpotlightContext(objective="reduce latency"),
-    )
+def make_input(
+    repo_path: Path, *, mode: str = "full"
+) -> SpotlightsManagerInput:
+    kwargs: dict = {
+        "repo_path": repo_path,
+        "context": SpotlightContext(objective="reduce latency"),
+    }
+    if mode != "full":
+        kwargs["mode"] = mode
+    return SpotlightsManagerInput(**kwargs)
 
 
 def make_extractor_result(tree: ProjectTree) -> ExtractorResult:

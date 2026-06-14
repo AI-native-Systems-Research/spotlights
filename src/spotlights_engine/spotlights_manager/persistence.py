@@ -235,13 +235,20 @@ def build_input_fingerprint(
     context: BaseModel,
     max_findings_per_module: int,
     continue_on_module_failure: bool,
+    mode: str = "full",
 ) -> dict[str, Any]:
-    return {
+    fp: dict[str, Any] = {
         "repo_path": str(repo_path),
         "context_hash": _stable_hash(context.model_dump(mode="json")),
         "max_findings_per_module": max_findings_per_module,
         "continue_on_module_failure": continue_on_module_failure,
     }
+    # Only include `mode` when non-default so existing checkpoints
+    # (written before `mode` existed) keep their fingerprint hash.
+    # A change away from "full" still invalidates them, which is correct.
+    if mode != "full":
+        fp["mode"] = mode
+    return fp
 
 
 def build_config_fingerprint(

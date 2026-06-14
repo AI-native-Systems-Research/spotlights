@@ -269,6 +269,7 @@ All flags are optional once `--repo` and the agent CLIs are available.
 | `--max-parallel-pairs` | `5` | Within-step parallelism for step 4. |
 | `--max-parallel-candidates` | `5` | Within-step parallelism for step 5. |
 | `--max-findings-per-module` | `30` | Cap on findings produced by step 3 per module. |
+| `--mode` | `full` | Pipeline shape. `full` runs all five stages. `code_only` skips deep-research (step 3) and proposal-from-finding (step 4); the agent finds candidates from source and stage 5 produces per-candidate proposals directly. No external retrieval — faster, cheaper, fully reproducible without network access. |
 
 Agent authentication is handled by the underlying `claude` and `codex` CLIs; no engine config file is required for the happy path.
 

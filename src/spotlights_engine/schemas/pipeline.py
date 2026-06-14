@@ -11,8 +11,23 @@ another with typed payloads.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+DiscoveryMode = Literal["full", "code_only"]
+"""Top-level pipeline shape.
+
+- `full` — original behavior. All five stages run: modules-extractor,
+  candidate-discovery, module-deep-research, proposal-from-finding,
+  agent-proposals.
+- `code_only` — skip stages 3 (module-deep-research) and 4
+  (proposal-from-finding-creator). Pipeline becomes
+  `modules-extractor → candidate-discovery → agent-proposals`. The
+  agent-proposals stage still produces concrete per-candidate proposals
+  from local source. No external retrieval, no findings, no
+  `deep_research_proposals`.
+"""
 
 from spotlights_engine.schemas.candidate import Candidates
 from spotlights_engine.schemas.common import (
@@ -139,6 +154,7 @@ class SpotlightsManagerInput(BaseModel):
     context: SpotlightContext
     max_findings_per_module: int = Field(default=30, ge=0)
     continue_on_module_failure: bool = True
+    mode: DiscoveryMode = "full"
 
 
 class SpotlightsResult(BaseModel):
@@ -159,6 +175,7 @@ __all__ = [
     "AgentProposalsInput",
     "AgentProposalsOutput",
     "CandidateDiscoveryInput",
+    "DiscoveryMode",
     "ModuleDeepResearchInput",
     "ModuleDeepResearchOutput",
     "ModuleRun",

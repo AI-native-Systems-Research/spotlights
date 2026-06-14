@@ -857,13 +857,32 @@ async def _run_module(
             return cp
 
         # ------------------------- step 3 -----------------------------------
+        # `mode=code_only` skips deep-research entirely: no Codex session,
+        # no findings. Step 4 then takes the existing zero-findings
+        # short-circuit (synthetic empty output, no Claude session
+        # either). The end-to-end shape is
+        # extractor → discovery → agent_proposals.
         run_step3 = plan.redo_step2 or plan.redo_step3 or state.deep_research is None
         if plan.redo_step3:
             P.clear_deep_research_artifacts(module_paths)
             P.clear_proposal_from_finding_artifacts(module_paths)
             P.clear_agent_proposals_artifacts(module_paths)
 
-        if run_step3:
+        if mgr_input.mode == "code_only":
+            _log.info(
+                "[%s] deep_research: skipped (mode=code_only)", qn
+            )
+            research_output = ModuleDeepResearchOutput(findings=[], issues=[])
+            P.write_deep_research(module_paths, research_output, duration_s=0.0)
+            cp = _now_checkpoint(
+                qn=qn,
+                status="DEEP_RESEARCHED",
+                last_step="module_deep_research",
+                started_at=plan.started_at,
+            )
+            P.write_checkpoint(module_paths, cp)
+            await _update_module_in_manifest(paths, manifest, manifest_lock, qn, cp)
+        elif run_step3:
             _log.info("[%s] deep_research: start (Codex session)", qn)
             try:
                 research_output, dr_duration = await _do_step3(
@@ -1293,6 +1312,7 @@ async def _run_async(
         context=input.context,
         max_findings_per_module=input.max_findings_per_module,
         continue_on_module_failure=input.continue_on_module_failure,
+        mode=input.mode,
     )
     config_fp = P.build_config_fingerprint(
         module_filter=config.module_filter,
