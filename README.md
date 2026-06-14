@@ -112,14 +112,14 @@ codex --version
 
 ### Install the `gemini` CLI
 
-Install Gemini CLI with npm, then verify it from a fresh shell:
+Install Gemini CLI with npm and verify it from a fresh shell:
 
 ```bash
 npm install -g @google/gemini-cli
 which gemini && gemini --version
 ```
 
-For direct Google auth, set `GEMINI_API_KEY` or run `gemini` once and choose an auth method. For headless/API-key usage:
+For direct Google API-key auth:
 
 ```bash
 export GEMINI_API_KEY="<your-gemini-api-key>"
@@ -128,7 +128,7 @@ gemini --prompt "Reply with exactly: OK" --output-format json
 
 ### Optional: route the CLIs through a LiteLLM proxy
 
-If you can't (or don't want to) authenticate against Anthropic, OpenAI, or Google directly — for example, when running inside a corporate environment that exposes models via a LiteLLM proxy — you can point each CLI at the proxy instead of its native backend.
+Use this when Anthropic, OpenAI, or Google models are exposed through an OpenAI-compatible LiteLLM gateway.
 
 **`claude` CLI** — edit `~/.claude/settings.json` and set `ANTHROPIC_BASE_URL` plus the per-tier model overrides to models served by your proxy:
 
@@ -160,7 +160,7 @@ env_key = "LITELLM_API_KEY"
 wire_api = "responses"
 ```
 
-**`gemini` CLI** — point Gemini at the gateway with the Gemini CLI gateway environment variables. For the IBM LiteLLM gateway used by this project, keep the Gemini base URL at the proxy root rather than the OpenAI-compatible `/v1` path:
+**`gemini` CLI** — point Gemini at the proxy root, not the OpenAI-compatible `/v1` path:
 
 ```bash
 export LITELLM_API_KEY="<your-litellm-virtual-key>"
@@ -185,11 +185,12 @@ gemini --prompt "Reply with exactly: OK" --output-format json
 ```
 
 For IBM LiteLLM-backed live research from Python, use
-`GeminiExecOptions.ibm_litellm(...)`. The plain `GeminiExecOptions()` default
-leaves Gemini CLI auth/model/proxy behavior native and read-only unless callers
-override it.
+`GeminiExecOptions.ibm_litellm(...)`. Plain `GeminiExecOptions()` keeps native
+Gemini CLI auth/model/proxy behavior.
 
-Swap the host and model IDs for whatever your LiteLLM deployment exposes. After editing config or environment, re-run `claude --version` / `codex --version` / `gemini --version` from a fresh shell to confirm the CLIs still launch; the engine will then route its agent calls through the proxy.
+Swap the host and model IDs for your LiteLLM deployment. After editing config or
+environment, re-run `claude --version` / `codex --version` / `gemini --version`
+from a fresh shell.
 
 ### Verify all CLIs from a fresh shell
 
