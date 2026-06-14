@@ -120,7 +120,7 @@ print(m.weighted_score, m.report_md_path)
 |---|---|---|---|---|
 | 1 | `aggregate` | Pull every merged PR in window from the target repo's GitHub | hour-ish first run; skip on re-run | `data/repo_bench/raw/<window>/prs.jsonl` |
 | 2 | `filter` | Predicates + ranker over raw → ranked subset | <1s, deterministic | `<run_dir>/view/prs.jsonl` |
-| 3 | `fetch-diffs` | Per-PR unified diffs from GitHub for the view | ~3 min for 200 PRs | `data/repo_bench/raw/<window>/diffs/<n>.diff` |
+| 3 | `fetch-diffs` | Per-PR unified diffs from GitHub for the view | ~5–10 min for ~624 PRs | `data/repo_bench/raw/<window>/diffs/<n>.diff` |
 | 4 | `snapshot` | Deterministic: pick a target SHA ≥ buffer before earliest filtered PR | <1s | `<run_dir>/snapshot.json` |
 | 5 | `workloads` | Regex extraction of signals + runnable command portfolio | <10s | `<run_dir>/{workload_analysis.json, workload_summary.md, workload_portfolio.md}` |
 | 6 | `bench-spec` | Render the cross-module spec for the observability bench, with workload signals inlined | <1s | `<run_dir>/{bench_spec.json, OBSERVABILITY_BENCH_SPEC.md}` |
@@ -317,7 +317,7 @@ The schema is in
 The bench module itself does **zero** LLM calls during `run`. The
 workload signals are regex; the snapshot is deterministic; the
 bench-spec is template rendering. End-to-end `run` cost is GitHub
-API (free with token) + ~5 min wallclock for ~200 diffs.
+API (free with token) + ~5–10 min wallclock for 624 diffs.
 
 The match step is the only LLM cost on the repo-bench side:
 
@@ -325,9 +325,10 @@ The match step is the only LLM cost on the repo-bench side:
 |---|---|---|---|---|
 | Match (per finding) | Sonnet | ~5–50 KB (file-filtered diff slices for candidates) | ~1 KB | ~$0.05–0.20 |
 
-For a 148-finding run against a 200-PR view, total match cost is
-typically ~$1–5 (judge calls only fire when a finding has at least
-one file-overlap candidate).
+Typical match cost is ~$1–5 (judge calls only fire when a finding has
+at least one file-overlap candidate). On the bundled vLLM 6-month
+window with the relaxed-filter view (624 PRs), 5–10 findings cost
+under $2 to grade end-to-end.
 
 ## Reproducibility, honestly
 

@@ -61,7 +61,7 @@
   <!-- artifact: <run_dir>/view/prs.jsonl -->
   <rect x="60" y="412" width="240" height="50" rx="4" class="artifact"/>
   <text x="80" y="432" class="mono">&lt;run_dir&gt;/view/prs.jsonl</text>
-  <text x="80" y="450" class="small" font-size="10">(filtered, ranked, e.g. 201 PRs)</text>
+  <text x="80" y="450" class="small" font-size="10">(filtered, ranked, e.g. 624 PRs)</text>
 
   <!-- arrow -->
   <path d="M180 462 L180 478" class="line" marker-end="url(#arr)"/>
@@ -71,7 +71,7 @@
   <text x="60" y="506" class="title">3 · fetch-diffs</text>
   <text x="60" y="526" class="body">GitHub: per-PR unified diff for each</text>
   <text x="60" y="540" class="body">PR in the view.</text>
-  <text x="60" y="554" class="small">deterministic · ~3 min for 200 PRs</text>
+  <text x="60" y="554" class="small">deterministic · ~5–10 min for ~624 PRs</text>
 
   <!-- arrow -->
   <path d="M180 560 L180 590" class="line" marker-end="url(#arr)"/>
