@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -73,7 +74,12 @@ class CodexExecClient:
             output_last_message = Path(opt.output_last_message).expanduser().resolve()
             output_last_message.parent.mkdir(parents=True, exist_ok=True)
 
-        cmd = [opt.codex_bin]
+        # Resolve via shutil.which so Windows finds the .CMD/.ps1 shim.
+        # Python's subprocess on Windows doesn't follow PATHEXT for an
+        # unqualified argv[0], so a bare "codex" → FileNotFoundError
+        # even when the CLI is on PATH.
+        codex_resolved = shutil.which(opt.codex_bin) or opt.codex_bin
+        cmd = [codex_resolved]
         if opt.model:
             cmd += ["--model", opt.model]
         if opt.profile:
@@ -111,6 +117,13 @@ class CodexExecClient:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            # Pin UTF-8 for stdin/stdout/stderr. Without this, Python's
+            # text mode uses locale.getpreferredencoding() — cp1252 on
+            # Windows — and any non-cp1252 char in codex's response
+            # (arrows, quotes, em-dashes, accented chars, …) crashes
+            # the reader thread with a 'charmap' codec error.
+            encoding="utf-8",
+            errors="replace",
             cwd=str(Path(self.options.cwd).expanduser().resolve()),
             env=env,
             bufsize=1,

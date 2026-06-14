@@ -131,7 +131,10 @@ def test_codex_command_shape_places_top_level_flags_before_exec(tmp_path: Path) 
         )
     ).build_command("-")
 
-    assert cmd[0] == "codex"
+    # cmd[0] is the resolved path on Windows (e.g. C:\...\codex.CMD)
+    # and the literal "codex" on POSIX where shutil.which falls through.
+    # Either way the basename, stripped of any extension, must be "codex".
+    assert Path(cmd[0]).stem.lower() == "codex"
     assert cmd.index("--profile") < cmd.index("exec")
     assert cmd.index("--ask-for-approval") < cmd.index("exec")
     assert cmd.index("--search") < cmd.index("exec")

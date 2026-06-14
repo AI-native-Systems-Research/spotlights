@@ -80,8 +80,12 @@ def run_pair(
     wallclock_s: int,
 ) -> PairRunResult:
     """Run one Claude session and return the parsed structured output."""
+    # Resolve via shutil.which so Windows finds the .CMD shim. Bare
+    # "claude" → FileNotFoundError because subprocess on Windows doesn't
+    # follow PATHEXT for unqualified argv[0].
+    claude_resolved = shutil.which("claude") or "claude"
     argv = [
-        "claude",
+        claude_resolved,
         "-p",
         "--output-format",
         "stream-json",
