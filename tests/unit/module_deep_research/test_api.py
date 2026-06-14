@@ -227,7 +227,7 @@ def test_research_module_treats_finding_cap_as_per_runner() -> None:
     assert [finding.title for finding in output.findings] == ["A", "B", "C"]
 
 
-def test_claude_command_shape_uses_print_json_and_plan_mode(tmp_path: Path) -> None:
+def test_claude_command_shape_uses_network_research_tools(tmp_path: Path) -> None:
     from spotlights_engine.module_deep_research.claude_exec import (
         ClaudeExecClient,
         ClaudeExecOptions,
@@ -238,9 +238,12 @@ def test_claude_command_shape_uses_print_json_and_plan_mode(tmp_path: Path) -> N
     ).build_command()
 
     assert cmd[:4] == ["claude", "-p", "--output-format", "json"]
-    assert cmd[cmd.index("--permission-mode") + 1] == "plan"
+    assert cmd[cmd.index("--permission-mode") + 1] == "acceptEdits"
     assert cmd[cmd.index("--model") + 1] == "claude-opus-4-7"
     assert cmd[cmd.index("--max-turns") + 1] == "3"
+    assert "WebSearch" in cmd[cmd.index("--tools") + 1]
+    assert "WebFetch" in cmd[cmd.index("--allowedTools") + 1]
+    assert "Edit" not in cmd[cmd.index("--tools") + 1]
 
 
 def test_gemini_default_command_is_read_only_and_does_not_expose_prompt(tmp_path: Path) -> None:

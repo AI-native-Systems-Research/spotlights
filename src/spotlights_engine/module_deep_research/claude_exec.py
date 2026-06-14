@@ -12,6 +12,16 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from spotlights_engine.module_deep_research.agent_exec import AgentExecResult
 
+CLAUDE_RESEARCH_TOOLS = (
+    "Read",
+    "Grep",
+    "Glob",
+    "LS",
+    "Bash",
+    "WebSearch",
+    "WebFetch",
+)
+
 
 class ClaudeExecOptions(BaseModel):
     """Options for running Claude in non-interactive mode."""
@@ -21,7 +31,8 @@ class ClaudeExecOptions(BaseModel):
     cwd: Path | str = Field(default_factory=Path.cwd)
     claude_bin: str = "claude"
     model: str | None = None
-    permission_mode: str = "plan"
+    permission_mode: str = "acceptEdits"
+    allowed_tools: Sequence[str] = CLAUDE_RESEARCH_TOOLS
     max_turns: int = 8
     timeout_seconds: int | None = None
     extra_args: Sequence[str] = Field(default_factory=tuple)
@@ -50,6 +61,9 @@ class ClaudeExecClient:
         ]
         if opt.model:
             cmd += ["--model", opt.model]
+        if opt.allowed_tools:
+            cmd += ["--tools", ",".join(opt.allowed_tools)]
+            cmd += ["--allowedTools", ",".join(opt.allowed_tools)]
         cmd += list(opt.extra_args)
         return cmd
 
