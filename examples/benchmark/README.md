@@ -13,8 +13,8 @@ vLLM, window `2025-12-02 → 2026-06-03`, 624 filtered PRs, snapshot SHA
 | Run | Scope | Findings | Weighted | `same_idea` | `related` | Report |
 |---|---|---:|---:|---:|---:|---|
 | Signal pipeline | OTel-derived (anomaly files across kv-offload, scheduler, kv-cache, spec-decode) | 5 | 0.23 | 0 | 2 | [match_report.md](signal-pipeline-otel-4b61266--label-relaxed/match_report.md) |
-| Deep research — code-only | `v1.kv_offload` | 10 | **0.33** | **3** | 9 | [match_report.md](spotlights-deep-research-code-only--a690fb5/match_report.md) |
-| Deep research — full (papers) | `v1.kv_offload` | 9 | **0.39** | 2 | 9 | [match_report.md](spotlights-deep-research-full--a690fb5/match_report.md) |
+| spotlights-engine — `--mode code_only` (skip stages 3 + 4) | `v1.kv_offload` | 10 | **0.45** | **3** | 13 | [match_report.md](spotlights-code-only-skip3-4--a690fb5/match_report.md) |
+| spotlights-engine — `--mode full` (all 5 stages, papers) | `v1.kv_offload` | 9 | 0.39 | 2 | 9 | [match_report.md](spotlights-deep-research-full--a690fb5/match_report.md) |
 
 ## Column meaning
 
