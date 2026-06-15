@@ -1,11 +1,11 @@
 {
-  "experiment_id": "spotlights-deep-research-full--a690fb5",
+  "experiment_id": "spotlights-full--a690fb5--rerun",
   "window_id": "2025-12-02__2026-06-03",
   "judge_model": "sonnet",
   "prompt_version": "v1",
   "prompt_sha256": "ff982c29ad15efac24b3aa3cb434a305d64b698cf126ec13cc41007da38c78ef",
   "findings_path": "C:\\projects\\vs_code\\spotlights\\runs\\spotlights\\full-a690fb5\\findings.json",
-  "scored_at": "2026-06-11T11:06:39.368344+00:00",
+  "scored_at": "2026-06-15T11:51:56.058120+00:00",
   "summary": {
     "n_findings": 9,
     "n_judged": 9,
@@ -15,53 +15,53 @@
       "view_share": 0.11709513980108839
     },
     "verdicts": {
-      "same_idea": 2,
-      "related": 9,
-      "neighborhood": 23,
-      "no_match": 2
+      "same_idea": 5,
+      "related": 13,
+      "neighborhood": 20,
+      "no_match": 0
     },
     "per_finding_hit": {
-      "strict_same_idea": 2,
-      "strict_share": 0.2222222222222222,
-      "loose_same_idea_or_related": 5,
-      "loose_share": 0.5555555555555556
+      "strict_same_idea": 4,
+      "strict_share": 0.4444444444444444,
+      "loose_same_idea_or_related": 6,
+      "loose_share": 0.6666666666666666
     },
     "tier_2_yield": 2,
     "tier_2_yield_share": 0.2222222222222222,
-    "weighted_score": 0.3888888888888889,
+    "weighted_score": 0.5277777777777778,
     "score_version": "v1",
     "per_finding_score": [
       {
         "finding_id": "cand-0001",
-        "score": 0.7
+        "score": 0.05
       },
       {
         "finding_id": "cand-0002",
-        "score": 1.0
+        "score": 0.05
       },
       {
         "finding_id": "cand-0003",
-        "score": 0.6
+        "score": 0.05
       },
       {
         "finding_id": "cand-0004",
-        "score": 0.05
+        "score": 0.7
       },
       {
         "finding_id": "cand-0005",
-        "score": 0.05
+        "score": 1.0
       },
       {
         "finding_id": "cand-0006",
-        "score": 0.05
+        "score": 0.6
       },
       {
         "finding_id": "cand-0007",
-        "score": 0.4
+        "score": 1.0
       },
       {
         "finding_id": "cand-0008",
-        "score": 0.05
+        "score": 0.7
       },
       {
         "finding_id": "cand-0009",
@@ -72,6 +72,51 @@
   "per_finding": [
     {
       "finding_id": "cand-0001",
+      "file": "vllm/v1/kv_offload/arc_manager.py",
+      "symbol": "ARCOffloadingManager.prepare_store",
+      "n_tier1_candidates": 0,
+      "n_tier2_candidates": 1,
+      "matches": [
+        {
+          "pr_number": 29087,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        }
+      ]
+    },
+    {
+      "finding_id": "cand-0002",
+      "file": "vllm/v1/kv_offload/arc_manager.py",
+      "symbol": "ARCOffloadingManager.touch",
+      "n_tier1_candidates": 0,
+      "n_tier2_candidates": 1,
+      "matches": [
+        {
+          "pr_number": 29087,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        }
+      ]
+    },
+    {
+      "finding_id": "cand-0003",
+      "file": "vllm/v1/kv_offload/lru_manager.py",
+      "symbol": "LRUOffloadingManager.prepare_store",
+      "n_tier1_candidates": 0,
+      "n_tier2_candidates": 1,
+      "matches": [
+        {
+          "pr_number": 29087,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        }
+      ]
+    },
+    {
+      "finding_id": "cand-0004",
       "file": "vllm/v1/kv_offload/worker/cpu_gpu.py",
       "symbol": "expand_block_ids",
       "n_tier1_candidates": 0,
@@ -99,7 +144,7 @@
           "pr_number": 37206,
           "tier": 2,
           "verdict": "same_idea",
-          "hunk_citation": "compute_sub_block_ptrs: all_ptrs = base_ptr + block_ids[:,None]*row_stride + sub_offsets[None,:] (replaces Python loop)"
+          "hunk_citation": "compute_sub_block_ptrs replaces expand_block_ids loop with vectorized block_ids[:,None]*row_stride + sub_offsets[None,:]"
         },
         {
           "pr_number": 37853,
@@ -116,8 +161,8 @@
         {
           "pr_number": 38460,
           "tier": 2,
-          "verdict": "neighborhood",
-          "hunk_citation": ""
+          "verdict": "related",
+          "hunk_citation": "transfer_async still calls expand_block_ids; reworks pointer assembly around it but doesn't vectorize the loop"
         },
         {
           "pr_number": 39182,
@@ -128,7 +173,7 @@
       ]
     },
     {
-      "finding_id": "cand-0002",
+      "finding_id": "cand-0005",
       "file": "vllm/v1/kv_offload/worker/cpu_gpu.py",
       "symbol": "CpuGpuOffloadingHandler.transfer_async",
       "n_tier1_candidates": 6,
@@ -138,37 +183,37 @@
           "pr_number": 27942,
           "tier": 1,
           "verdict": "related",
-          "hunk_citation": "transfer_async: adds start/end events + Transfer dataclass for timing metrics, not perf optimization"
+          "hunk_citation": "transfer_async records start_event/end_event for timing metrics; perf hot path unchanged"
         },
         {
           "pr_number": 29870,
           "tier": 1,
           "verdict": "related",
-          "hunk_citation": "transfer_async: adds _transfer_events dict + wait(); preemption fix, not the allocation/loop perf"
+          "hunk_citation": "transfer_async records job_id->event in _transfer_events; adds wait(); not a perf change"
         },
         {
           "pr_number": 37206,
           "tier": 1,
           "verdict": "related",
-          "hunk_citation": "transfer_async: replaces expand_block_ids with vectorized compute_sub_block_ptrs + pinned mmap region"
+          "hunk_citation": "replaces expand_block_ids with vectorized compute_sub_block_ptrs and adds shared mmap pinned region"
         },
         {
           "pr_number": 37853,
           "tier": 1,
           "verdict": "related",
-          "hunk_citation": "transfer_async: signature refactor for hybrid CanonicalKVCaches; uses tensor_block_size_in_bytes loop"
+          "hunk_citation": "refactors constructor for hybrid CanonicalKVCaches; transfer_async loop body unchanged"
         },
         {
           "pr_number": 38453,
           "tier": 1,
-          "verdict": "related",
-          "hunk_citation": "transfer_async: rewrites for multi-group HMA; keeps batched swap_blocks_batch path from #38460"
+          "verdict": "same_idea",
+          "hunk_citation": "transfer_async builds flat all_src/all_dst/all_sizes across groups+tensors and dispatches via swap_blocks_batch"
         },
         {
           "pr_number": 38460,
           "tier": 1,
           "verdict": "same_idea",
-          "hunk_citation": "transfer_async: replaces per-layer swap_blocks loop with single ops.swap_blocks_batch call"
+          "hunk_citation": "replaces per-layer ops.swap_blocks loop with single ops.swap_blocks_batch over flat pointer arrays"
         },
         {
           "pr_number": 31916,
@@ -185,7 +230,7 @@
       ]
     },
     {
-      "finding_id": "cand-0003",
+      "finding_id": "cand-0006",
       "file": "vllm/v1/kv_offload/worker/cpu_gpu.py",
       "symbol": "CpuGpuOffloadingHandler.get_finished",
       "n_tier1_candidates": 1,
@@ -195,13 +240,13 @@
           "pr_number": 29870,
           "tier": 1,
           "verdict": "related",
-          "hunk_citation": "get_finished pop loop adds `del self._transfer_events[job_id]` to support new wait(); FIFO structure unchanged"
+          "hunk_citation": "get_finished: del self._transfer_events[job_id]; new wait() syncs events by job_id"
         },
         {
           "pr_number": 27942,
           "tier": 2,
           "verdict": "related",
-          "hunk_citation": "get_finished refactored to emit per-transfer timing via Transfer dataclass; head-only deque polling preserved"
+          "hunk_citation": "get_finished rewritten with Transfer dataclass and start/end timing events"
         },
         {
           "pr_number": 31916,
@@ -242,122 +287,89 @@
       ]
     },
     {
-      "finding_id": "cand-0004",
-      "file": "vllm/v1/kv_offload/arc_manager.py",
-      "symbol": "ARCOffloadingManager.prepare_store.eviction_loop",
-      "n_tier1_candidates": 0,
-      "n_tier2_candidates": 1,
-      "matches": [
-        {
-          "pr_number": 29087,
-          "tier": 2,
-          "verdict": "neighborhood",
-          "hunk_citation": ""
-        }
-      ]
-    },
-    {
-      "finding_id": "cand-0005",
-      "file": "vllm/v1/kv_offload/lru_manager.py",
-      "symbol": "LRUOffloadingManager.prepare_store",
-      "n_tier1_candidates": 0,
-      "n_tier2_candidates": 1,
-      "matches": [
-        {
-          "pr_number": 29087,
-          "tier": 2,
-          "verdict": "neighborhood",
-          "hunk_citation": ""
-        }
-      ]
-    },
-    {
-      "finding_id": "cand-0006",
-      "file": "vllm/v1/kv_offload/arc_manager.py",
-      "symbol": "ARCOffloadingManager.touch",
-      "n_tier1_candidates": 0,
-      "n_tier2_candidates": 1,
-      "matches": [
-        {
-          "pr_number": 29087,
-          "tier": 2,
-          "verdict": "neighborhood",
-          "hunk_citation": ""
-        }
-      ]
-    },
-    {
       "finding_id": "cand-0007",
       "file": "vllm/v1/kv_offload/cpu.py",
-      "symbol": "CPUOffloadingSpec.get_manager.eviction_policy_dispatch",
+      "symbol": "CPUOffloadingSpec.get_manager eviction_policy selector",
       "n_tier1_candidates": 0,
       "n_tier2_candidates": 4,
       "matches": [
         {
           "pr_number": 24498,
           "tier": 2,
-          "verdict": "neighborhood",
-          "hunk_citation": ""
+          "verdict": "related",
+          "hunk_citation": "get_manager: replaces num_cpu_blocks with derived num_blocks from cpu_bytes_to_use"
         },
         {
           "pr_number": 31916,
           "tier": 2,
-          "verdict": "no_match",
+          "verdict": "neighborhood",
           "hunk_citation": ""
         },
         {
           "pr_number": 35342,
-          "tier": 2,
-          "verdict": "related",
-          "hunk_citation": "cpu.py:86-99 wraps manager with FilterReusedOffloadingManager after eviction_policy dispatch"
+          "tier": 1,
+          "verdict": "same_idea",
+          "hunk_citation": "get_manager: wraps selected manager with FilterReusedOffloadingManager admission policy"
         },
         {
           "pr_number": 36610,
           "tier": 2,
-          "verdict": "neighborhood",
-          "hunk_citation": ""
+          "verdict": "related",
+          "hunk_citation": "get_manager: switches to per-group gpu_block_size and block_size_factor for backend sizing"
         }
       ]
     },
     {
       "finding_id": "cand-0008",
-      "file": "vllm/v1/kv_offload/lru_manager.py",
-      "symbol": "LRUOffloadingManager.touch",
+      "file": "vllm/v1/kv_offload/factory.py",
+      "symbol": "OffloadingSpecFactory.create_spec/register_spec",
       "n_tier1_candidates": 0,
-      "n_tier2_candidates": 1,
+      "n_tier2_candidates": 3,
       "matches": [
         {
-          "pr_number": 29087,
+          "pr_number": 24498,
           "tier": 2,
-          "verdict": "neighborhood",
-          "hunk_citation": ""
+          "verdict": "related",
+          "hunk_citation": "create_spec gains kv_cache_config param; passes it to spec_cls(config, kv_cache_config)"
+        },
+        {
+          "pr_number": 36610,
+          "tier": 2,
+          "verdict": "related",
+          "hunk_citation": "create_spec tightens kv_cache_config from KVCacheConfig|None to required KVCacheConfig"
+        },
+        {
+          "pr_number": 40020,
+          "tier": 2,
+          "verdict": "same_idea",
+          "hunk_citation": "register_spec('TieringOffloadingSpec', 'vllm.v1.kv_offload.tiering.spec', ...) \u2014 tiered spec via the factory"
         }
       ]
     },
     {
       "finding_id": "cand-0009",
       "file": "vllm/v1/kv_offload/spec.py",
-      "symbol": "OffloadingSpec.offloaded_block_size",
+      "symbol": "OffloadingSpec.__init__ offloaded_block_size",
       "n_tier1_candidates": 0,
       "n_tier2_candidates": 4,
       "matches": [
         {
           "pr_number": 24498,
-          "tier": 2,
-          "verdict": "neighborhood",
-          "hunk_citation": ""
+          "tier": 1,
+          "verdict": "related",
+          "hunk_citation": "OffloadingSpec.__init__ adds kv_cache_config param; doesn't alter offloaded_block_size default/assert"
         },
         {
           "pr_number": 31916,
           "tier": 2,
-          "verdict": "no_match",
+          "verdict": "neighborhood",
           "hunk_citation": ""
         },
         {
           "pr_number": 36610,
           "tier": 1,
           "verdict": "related",
-          "hunk_citation": "spec.py:34-63 reworks gpu/offloaded block_size into per-group tuple + block_size_factor, same invariant"
+          "hunk_citation": "Restructures __init__ block-size logic into hash/gpu(per-group)/offloaded with block_size_factor; still static default"
         },
         {
           "pr_number": 37853,
