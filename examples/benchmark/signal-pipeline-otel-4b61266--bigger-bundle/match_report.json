@@ -1,0 +1,307 @@
+{
+  "experiment_id": "signal-pipeline-otel-4b61266--bigger-bundle",
+  "window_id": "2025-12-02__2026-06-03",
+  "judge_model": "sonnet",
+  "prompt_version": "v1",
+  "prompt_sha256": "ff982c29ad15efac24b3aa3cb434a305d64b698cf126ec13cc41007da38c78ef",
+  "findings_path": "C:\\projects\\vs_code\\spotlights\\runs\\signal-pipeline\\with-telemetry-4b612664-bigger\\report\\findings.json",
+  "scored_at": "2026-06-15T12:28:38.740947+00:00",
+  "summary": {
+    "n_findings": 5,
+    "n_judged": 5,
+    "ground_truth": {
+      "n_raw_prs": 5329,
+      "n_view_prs": 624,
+      "view_share": 0.11709513980108839
+    },
+    "verdicts": {
+      "same_idea": 1,
+      "related": 6,
+      "neighborhood": 27,
+      "no_match": 0
+    },
+    "per_finding_hit": {
+      "strict_same_idea": 1,
+      "strict_share": 0.2,
+      "loose_same_idea_or_related": 5,
+      "loose_share": 1.0
+    },
+    "tier_2_yield": 3,
+    "tier_2_yield_share": 0.6,
+    "weighted_score": 0.54,
+    "score_version": "v1",
+    "per_finding_score": [
+      {
+        "finding_id": "cand-0001",
+        "score": 0.7
+      },
+      {
+        "finding_id": "cand-0002",
+        "score": 0.6
+      },
+      {
+        "finding_id": "cand-0003",
+        "score": 0.4
+      },
+      {
+        "finding_id": "cand-0004",
+        "score": 0.6
+      },
+      {
+        "finding_id": "cand-0005",
+        "score": 0.4
+      }
+    ]
+  },
+  "per_finding": [
+    {
+      "finding_id": "cand-0001",
+      "file": "vllm/v1/kv_offload/cpu.py",
+      "symbol": "CPUOffloadingSpec",
+      "n_tier1_candidates": 0,
+      "n_tier2_candidates": 4,
+      "matches": [
+        {
+          "pr_number": 24498,
+          "tier": 2,
+          "verdict": "related",
+          "hunk_citation": "self.num_blocks = int(cpu_bytes_to_use) // kv_bytes_per_offloaded_block \u2014 resizes pool, doesn't gate instantiation"
+        },
+        {
+          "pr_number": 31916,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 35342,
+          "tier": 2,
+          "verdict": "same_idea",
+          "hunk_citation": "FilterReusedOffloadingManager wraps manager when store_threshold>=2 to suppress unused GPU\u2192CPU stores"
+        },
+        {
+          "pr_number": 36610,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        }
+      ]
+    },
+    {
+      "finding_id": "cand-0002",
+      "file": "vllm/distributed/kv_transfer/kv_connector/v1/offloading_connector.py",
+      "symbol": "OffloadingConnectorScheduler.get_num_new_matched_tokens",
+      "n_tier1_candidates": 2,
+      "n_tier2_candidates": 8,
+      "matches": [
+        {
+          "pr_number": 29087,
+          "tier": 1,
+          "verdict": "related",
+          "hunk_citation": "get_num_new_matched_tokens: returns (None, False) to delay reqs whose hit-blocks are already being loaded"
+        },
+        {
+          "pr_number": 36610,
+          "tier": 1,
+          "verdict": "related",
+          "hunk_citation": "OffloadingConnectorScheduler.__init__: derives offloaded_block_size from per-group gpu_block_size & factor"
+        },
+        {
+          "pr_number": 24498,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 27577,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 27942,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 29870,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 30419,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 30761,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 31916,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 32064,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        }
+      ]
+    },
+    {
+      "finding_id": "cand-0003",
+      "file": "vllm/v1/metrics/stats.py",
+      "symbol": "PrefixCacheStats.record",
+      "n_tier1_candidates": 0,
+      "n_tier2_candidates": 5,
+      "matches": [
+        {
+          "pr_number": 33290,
+          "tier": 2,
+          "verdict": "related",
+          "hunk_citation": "Adds PromptTokenStats with per-source breakdown (local_compute / local_cache_hit / external_kv_transfer) \u2014 alternative metric, not a fix to PrefixCacheStats.record"
+        },
+        {
+          "pr_number": 34510,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 37160,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 37460,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 38709,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        }
+      ]
+    },
+    {
+      "finding_id": "cand-0004",
+      "file": "vllm/v1/engine/output_processor.py",
+      "symbol": "OutputProcessor.do_tracing",
+      "n_tier1_candidates": 1,
+      "n_tier2_candidates": 6,
+      "matches": [
+        {
+          "pr_number": 27987,
+          "tier": 1,
+          "verdict": "related",
+          "hunk_citation": "do_tracing: span.set_attribute(GEN_AI_REQUEST_ID, req_state.external_req_id) \u2014 touches span attrs, not code.*"
+        },
+        {
+          "pr_number": 28284,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 32056,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 32975,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 37460,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 39568,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 39917,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        }
+      ]
+    },
+    {
+      "finding_id": "cand-0005",
+      "file": "vllm/v1/worker/gpu_model_runner.py",
+      "symbol": "GPUModelRunner._model_forward",
+      "n_tier1_candidates": 0,
+      "n_tier2_candidates": 8,
+      "matches": [
+        {
+          "pr_number": 20859,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 24322,
+          "tier": 2,
+          "verdict": "related",
+          "hunk_citation": "Adds DraftModelProposer routing in __init__/propose_draft_token_ids \u2014 enables draft-model speculative decoding the finding cites as a mitigation"
+        },
+        {
+          "pr_number": 25954,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 27532,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 28284,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 29821,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 29870,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        },
+        {
+          "pr_number": 30145,
+          "tier": 2,
+          "verdict": "neighborhood",
+          "hunk_citation": ""
+        }
+      ]
+    }
+  ]
+}

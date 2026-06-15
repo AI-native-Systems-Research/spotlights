@@ -12,7 +12,8 @@ vLLM, window `2025-12-02 → 2026-06-03`, 624 filtered PRs, snapshot SHA
 
 | Run | Scope | Findings | Weighted | `same_idea` | `related` | Report |
 |---|---|---:|---:|---:|---:|---|
-| Signal pipeline | OTel-derived (anomaly files across kv-offload, scheduler, kv-cache, spec-decode) | 5 | 0.23 | 0 | 2 | [match_report.md](signal-pipeline-otel-4b61266--label-relaxed/match_report.md) |
+| Signal pipeline (smaller OTel bundle, June 2026) | OTel-derived (anomaly files across kv-offload, scheduler, kv-cache, spec-decode) | 5 | 0.23 | 0 | 2 | [match_report.md](signal-pipeline-otel-4b61266--label-relaxed/match_report.md) |
+| Signal pipeline (larger OTel bundle, Aug 2026) | OTel-derived (anomaly files across kv-offload, prefix-cache stats, output-processor tracing, gpu-model-runner) | 5 | **0.54** | **1** | 6 | [match_report.md](signal-pipeline-otel-4b61266--bigger-bundle/match_report.md) |
 | spotlights-engine — `--mode code_only` (skip stages 3 + 4) | `v1.kv_offload` | 10 | 0.45 | 3 | 13 | [match_report.md](spotlights-code-only-skip3-4--a690fb5/match_report.md) |
 | spotlights-engine — `--mode full` (all 5 stages, papers) | `v1.kv_offload` | 9 | **0.53** | **5** | 13 | [match_report.md](spotlights-full--a690fb5/match_report.md) |
 
