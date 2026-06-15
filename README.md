@@ -173,7 +173,7 @@ GEMINI_CLI_TRUST_WORKSPACE=true
 EOF
 ```
 
-Then pin Gemini CLI to API-key auth and map every internal flash-tier alias to a model ID that your LiteLLM team allows. For the IBM gateway, use `gcp/gemini-3.1-pro-preview` for the main model and `gcp/gemini-3.5-flash` for flash-tier helper calls.
+Then pin Gemini CLI to API-key auth and map every internal flash-tier alias to a model ID that your LiteLLM gateway allows. The model IDs below are examples; replace both `gcp/...` values with the public model names exposed by your LiteLLM deployment.
 
 ```bash
 cat > ~/.gemini/settings.json <<'JSON'
@@ -205,12 +205,14 @@ gemini --prompt "Reply with exactly: OK" --output-format json
 
 Notes:
 
-- `GOOGLE_GEMINI_BASE_URL` is the proxy root, for example `https://ete-litellm.ai-models.vpc-int.res.ibm.com`; do not append `/v1`.
+- `GOOGLE_GEMINI_BASE_URL` is the LiteLLM proxy root; do not append `/v1`.
 - `advanced.ignoreLocalEnv` prevents a repo-level `.env` from shadowing the Gemini credentials above.
 - If your LiteLLM deployment uses different public model names, replace both `gcp/...` values.
 
-For IBM LiteLLM-backed live research from Python, use
-`GeminiExecOptions.ibm_litellm(...)`. Plain `GeminiExecOptions()` keeps native
+For LiteLLM-backed live research from Python, use an explicit
+`GeminiExecOptions` with the proxy root, bearer auth, and your gateway model IDs.
+`GeminiExecOptions.ibm_litellm(...)` is only a convenience preset for this
+project's IBM-hosted LiteLLM gateway. Plain `GeminiExecOptions()` keeps native
 Gemini CLI auth/model/proxy behavior.
 
 Swap the host and model IDs for your LiteLLM deployment. After editing config or
