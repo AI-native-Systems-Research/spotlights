@@ -173,7 +173,7 @@ GEMINI_CLI_TRUST_WORKSPACE=true
 EOF
 ```
 
-Then pin Gemini CLI to API-key auth and map every internal flash-tier alias to a model ID that your LiteLLM gateway allows. The model IDs below are examples; replace both `gcp/...` values with the public model names exposed by your LiteLLM deployment.
+Then pin Gemini CLI to API-key auth and map every internal flash-tier alias to one allowed flash model from your LiteLLM gateway. The alias keys below are Gemini CLI helper names, not extra models selected by Spotlights. The model IDs are examples; replace both `gcp/...` values with the public model names exposed by your LiteLLM deployment.
 
 ```bash
 cat > ~/.gemini/settings.json <<'JSON'
