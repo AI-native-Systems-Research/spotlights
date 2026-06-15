@@ -129,7 +129,7 @@ def _final_message(stdout: str) -> str | None:
             if joined.strip():
                 return joined
 
-    return text
+    return None
 
 
 __all__ = ["ClaudeExecClient", "ClaudeExecOptions"]

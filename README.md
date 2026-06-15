@@ -160,29 +160,44 @@ env_key = "LITELLM_API_KEY"
 wire_api = "responses"
 ```
 
-**`gemini` CLI** — point Gemini at the proxy root, not the OpenAI-compatible `/v1` path:
+**`gemini` CLI** — point Gemini at the proxy root, not the OpenAI-compatible `/v1` path. Unlike `claude`, the Gemini CLI's `settings.json` has no `env` block, so authentication and proxy variables go in `~/.gemini/.env` (auto-loaded by every gemini invocation). `~/.gemini/settings.json` then handles auth pinning and — critically when routing through a LiteLLM proxy — the per-tier model overrides so flash-tier subcalls (web search, classifier, summarization) don't try to hit unprefixed model IDs your team isn't allowed.
+
+Folder trust note: `~/.gemini/.env` is only loaded for trusted workspaces. The simplest fix for headless/subprocess runs is exporting `GEMINI_CLI_TRUST_WORKSPACE=true` in your shell profile (the only gemini-related export still needed). If you'd rather keep folder trust on, accept the trust prompt once per workspace in interactive `gemini`.
 
 ```bash
-export LITELLM_API_KEY="<your-litellm-virtual-key>"
-export GEMINI_API_KEY="$LITELLM_API_KEY"
-export GOOGLE_GEMINI_BASE_URL="https://ete-litellm.ai-models.vpc-int.res.ibm.com"
-export GEMINI_API_KEY_AUTH_MECHANISM="bearer"
-export GEMINI_MODEL="gcp/gemini-3.1-pro-preview"
-
-# Optional: pin Gemini CLI to API-key auth so Google login state is not used.
 mkdir -p ~/.gemini
+
+# Persist auth + proxy variables — auto-loaded by every gemini invocation.
+export GEMINI_API_KEY=<your-litellm-virtual-key>
+export GOOGLE_GEMINI_BASE_URL=https://your-litellm-host.example.com
+export GEMINI_API_KEY_AUTH_MECHANISM=bearer
+export GEMINI_CLI_TRUST_WORKSPACE=true
+
+# Pin auth, set the pro-tier model, and remap every flash-tier alias to a
+# model id your LiteLLM team is allowed to access. Without the customAliases
+# block, web search / classifier / summarization calls send the bare
+# `gemini-3-flash-preview` id and the proxy 401s.
 cat > ~/.gemini/settings.json <<'JSON'
 {
-  "security": {
-    "auth": {
-      "selectedType": "gemini-api-key"
+  "model": { "name": "gcp/gemini-3.1-pro-preview" },
+  "modelConfigs": {
+    "customAliases": {
+      "gemini-3-flash-base":   { "extends": "base", "modelConfig": { "model": "gcp/gemini-3-flash-preview" } },
+      "gemini-3.5-flash-base": { "extends": "base", "modelConfig": { "model": "gcp/gemini-3-flash-preview" } },
+      "gemini-2.5-flash-base": { "extends": "base", "modelConfig": { "model": "gcp/gemini-3-flash-preview" } },
+      "classifier":            { "extends": "base", "modelConfig": { "model": "gcp/gemini-3-flash-preview" } }
     }
-  }
+  },
+  "advanced": { "ignoreLocalEnv": true },
+  "security": { "auth": { "selectedType": "gemini-api-key" } }
 }
 JSON
 
+
 gemini --prompt "Reply with exactly: OK" --output-format json
 ```
+
+Swap `gcp/gemini-3.1-pro-preview` and `gcp/gemini-3-flash-preview` for whatever pro/flash IDs your gateway exposes. `advanced.ignoreLocalEnv: true` prevents a project-root `.env` from shadowing `~/.gemini/.env` (gemini auto-loads the first `.env` it finds walking up from cwd; without this flag, any project's own `.env` wins).
 
 For IBM LiteLLM-backed live research from Python, use
 `GeminiExecOptions.ibm_litellm(...)`. Plain `GeminiExecOptions()` keeps native

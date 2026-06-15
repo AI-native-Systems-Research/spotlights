@@ -41,6 +41,19 @@ def _extract_json_object(text: str) -> str:
     raise ValueError("no JSON object found in module_deep_research response")
 
 
+_CLI_ENVELOPE_MARKERS = frozenset({"session_id", "subtype", "is_error", "total_cost_usd", "num_turns"})
+
+
+def _looks_like_cli_envelope(payload: Any) -> bool:
+    """A `claude -p --output-format json` envelope (or similar CLI wrapper)
+    that wasn't unwrapped by the runner. Three or more marker keys is a
+    strong signal that this is a transport envelope, not the agent's
+    `ModuleDeepResearchOutput` payload."""
+    if not isinstance(payload, dict):
+        return False
+    return len(_CLI_ENVELOPE_MARKERS.intersection(payload)) >= 3
+
+
 def _renumber_findings(findings: list[Finding], max_findings: int) -> list[Finding]:
     return [
         finding.model_copy(update={"finding_id": f"find-{idx:04d}"})
@@ -73,6 +86,17 @@ def parse_module_deep_research_output(
     """
     try:
         payload: Any = json.loads(_extract_json_object(text))
+        if _looks_like_cli_envelope(payload):
+            return ModuleDeepResearchOutput(
+                findings=[],
+                issues=[
+                    _issue(
+                        "module_deep_research agent returned a CLI envelope "
+                        "without unwrapped content (no usable `result` / "
+                        "`structured_output` / `message.content` field)"
+                    )
+                ],
+            )
         parsed = ModuleDeepResearchOutput.model_validate(payload)
     except (json.JSONDecodeError, TypeError, ValueError, ValidationError) as exc:
         return ModuleDeepResearchOutput(

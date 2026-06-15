@@ -45,7 +45,12 @@ def research_module(
         runner=runner,
         runners=runners,
     )
-    outcomes = run_runners(prompt=prompt, runners=active_runners, check=check)
+    outcomes = run_runners(
+        prompt=prompt,
+        runners=active_runners,
+        check=check,
+        module_qualified_name=request.module_qualified_name,
+    )
     return merge_outcomes(
         outcomes,
         max_findings_per_module=request.max_findings_per_module,

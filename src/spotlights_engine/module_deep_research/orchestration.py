@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import concurrent.futures
+import logging
 import re
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +21,8 @@ from spotlights_engine.module_deep_research.validation import (
 from spotlights_engine.schemas.common import StepIssue
 from spotlights_engine.schemas.pipeline import ModuleDeepResearchOutput
 from spotlights_engine.schemas.project import Module, ProjectTree
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -75,7 +79,11 @@ def select_runners(
 
 
 def run_runners(
-    *, prompt: str, runners: Sequence[ModuleResearchRunner], check: bool
+    *,
+    prompt: str,
+    runners: Sequence[ModuleResearchRunner],
+    check: bool,
+    module_qualified_name: str | None = None,
 ) -> list[RunnerOutcome]:
     """Run research agents concurrently and capture recoverable runner failures."""
     if not runners:
@@ -86,9 +94,24 @@ def run_runners(
             )
         ]
 
+    agent_names = [getattr(r, "name", type(r).__name__) for r in runners]
+    log_prefix = f"[{module_qualified_name}] " if module_qualified_name else ""
+    _log.info(
+        "%sdeep_research: dispatching %d runner(s): %s",
+        log_prefix,
+        len(runners),
+        ", ".join(agent_names),
+    )
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(runners)) as executor:
         futures = [
-            executor.submit(_run_one_runner, runner=runner, prompt=prompt, check=check)
+            executor.submit(
+                _run_one_runner,
+                runner=runner,
+                prompt=prompt,
+                check=check,
+                log_prefix=log_prefix,
+            )
             for runner in runners
         ]
         return [future.result() for future in futures]
@@ -140,18 +163,59 @@ def merge_outcomes(
     )
 
 
-def _run_one_runner(*, runner: ModuleResearchRunner, prompt: str, check: bool) -> RunnerOutcome:
+def _run_one_runner(
+    *,
+    runner: ModuleResearchRunner,
+    prompt: str,
+    check: bool,
+    log_prefix: str = "",
+) -> RunnerOutcome:
     agent_name = getattr(runner, "name", type(runner).__name__)
+    started = time.monotonic()
+    _log.info("%sdeep_research: %s start", log_prefix, agent_name)
     try:
-        return RunnerOutcome(
-            agent_name=agent_name,
-            result=runner.run(prompt, check=check),
-        )
+        result = runner.run(prompt, check=check)
     except Exception as exc:
+        elapsed = time.monotonic() - started
+        _log.warning(
+            "%sdeep_research: %s failed in %.1fs: %s",
+            log_prefix,
+            agent_name,
+            elapsed,
+            exc,
+        )
         return RunnerOutcome(
             agent_name=agent_name,
             error=f"module_deep_research {agent_name} execution failed: {exc}",
         )
+
+    elapsed = time.monotonic() - started
+    response_text = result.final_message or result.stdout
+    parsed = parse_module_deep_research_output(response_text)
+    finding_count = len(parsed.findings)
+    parse_issue_count = len(parsed.issues)
+    if not result.ok:
+        _log.warning(
+            "%sdeep_research: %s exited with code %d in %.1fs — "
+            "%d findings, %d parse issues, stderr=%s",
+            log_prefix,
+            agent_name,
+            result.returncode,
+            elapsed,
+            finding_count,
+            parse_issue_count,
+            result.stderr.strip() or "(no stderr)",
+        )
+    else:
+        _log.info(
+            "%sdeep_research: %s complete in %.1fs — %d findings%s",
+            log_prefix,
+            agent_name,
+            elapsed,
+            finding_count,
+            f", {parse_issue_count} parse issue(s)" if parse_issue_count else "",
+        )
+    return RunnerOutcome(agent_name=agent_name, result=result)
 
 
 def _agent_issues(agent_name: str, issues: Sequence[StepIssue]) -> list[StepIssue]:
