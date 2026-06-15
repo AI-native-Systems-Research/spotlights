@@ -236,7 +236,7 @@ def test_claude_default_max_turns_is_16() -> None:
     assert cmd[cmd.index("--max-turns") + 1] == "16"
 
 
-def test_claude_command_shape_uses_network_research_tools(tmp_path: Path) -> None:
+def test_claude_command_shape_uses_litellm_safe_research_tools(tmp_path: Path) -> None:
     from spotlights_engine.module_deep_research.claude_exec import (
         ClaudeExecClient,
         ClaudeExecOptions,
@@ -250,9 +250,12 @@ def test_claude_command_shape_uses_network_research_tools(tmp_path: Path) -> Non
     assert cmd[cmd.index("--permission-mode") + 1] == "acceptEdits"
     assert cmd[cmd.index("--model") + 1] == "claude-opus-4-7"
     assert cmd[cmd.index("--max-turns") + 1] == "3"
-    assert "WebSearch" in cmd[cmd.index("--tools") + 1]
-    assert "WebFetch" in cmd[cmd.index("--allowedTools") + 1]
-    assert "Edit" not in cmd[cmd.index("--tools") + 1]
+    tools = cmd[cmd.index("--tools") + 1]
+    allowed_tools = cmd[cmd.index("--allowedTools") + 1]
+    assert "WebFetch" in tools
+    assert "WebFetch" in allowed_tools
+    assert "WebSearch" not in tools
+    assert "Edit" not in tools
 
 
 def test_gemini_default_command_is_read_only_and_does_not_expose_prompt(tmp_path: Path) -> None:

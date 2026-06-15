@@ -21,7 +21,6 @@ CLAUDE_RESEARCH_TOOLS = (
     "Glob",
     "LS",
     "Bash",
-    "WebSearch",
     "WebFetch",
 )
 
