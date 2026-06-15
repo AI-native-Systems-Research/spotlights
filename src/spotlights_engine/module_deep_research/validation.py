@@ -41,7 +41,9 @@ def _extract_json_object(text: str) -> str:
     raise ValueError("no JSON object found in module_deep_research response")
 
 
-_CLI_ENVELOPE_MARKERS = frozenset({"session_id", "subtype", "is_error", "total_cost_usd", "num_turns"})
+_CLI_ENVELOPE_MARKERS = frozenset(
+    {"session_id", "subtype", "is_error", "total_cost_usd", "num_turns"}
+)
 
 
 def _looks_like_cli_envelope(payload: Any) -> bool:

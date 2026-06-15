@@ -228,6 +228,14 @@ def test_research_module_treats_finding_cap_as_per_runner() -> None:
     assert [finding.title for finding in output.findings] == ["A", "B", "C"]
 
 
+def test_claude_default_max_turns_is_16() -> None:
+    from spotlights_engine.module_deep_research.claude_exec import ClaudeExecClient
+
+    cmd = ClaudeExecClient().build_command()
+
+    assert cmd[cmd.index("--max-turns") + 1] == "16"
+
+
 def test_claude_command_shape_uses_network_research_tools(tmp_path: Path) -> None:
     from spotlights_engine.module_deep_research.claude_exec import (
         ClaudeExecClient,
