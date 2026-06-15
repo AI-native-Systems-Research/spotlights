@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import tempfile
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -16,8 +17,7 @@ from spotlights_engine.module_deep_research.agent_exec import (
     resolve_cli_executable,
 )
 
-IBM_LITELLM_PROXY_URL = "https://ete-litellm.ai-models.vpc-int.res.ibm.com"
-IBM_GEMINI_MODEL = "gcp/gemini-3.1-pro-preview"
+DEFAULT_LITELLM_GEMINI_MODEL = "gcp/gemini-3.1-pro-preview"
 
 
 class GeminiExecOptions(BaseModel):
@@ -33,31 +33,44 @@ class GeminiExecOptions(BaseModel):
     gemini_api_key_env: str | None = None
     api_key_auth_mechanism: Literal["x-goog-api-key", "bearer"] | None = None
     settings_path: Path | str | None = None
+    managed_settings: Mapping[str, Any] | None = None
     skip_trust: bool = False
     timeout_seconds: int | None = None
     extra_args: Sequence[str] = Field(default_factory=tuple)
     env: Mapping[str, str] | None = None
 
     @classmethod
-    def ibm_litellm(
+    def litellm_proxy(
         cls,
         *,
+        base_url: str,
         cwd: Path | str | None = None,
-        model: str = IBM_GEMINI_MODEL,
+        model: str = DEFAULT_LITELLM_GEMINI_MODEL,
+        api_key_env: str = "LITELLM_API_KEY",
         settings_path: Path | str | None = None,
         timeout_seconds: int | None = None,
         approval_mode: str = "yolo",
         env: Mapping[str, str] | None = None,
+        configure_web_tools: bool = True,
+        web_utility_model: str | None = None,
     ) -> GeminiExecOptions:
-        """Return the explicit IBM LiteLLM configuration used by live research runs."""
+        """Return explicit Gemini CLI settings for a LiteLLM gateway."""
         return cls(
             cwd=Path.cwd() if cwd is None else cwd,
             model=model,
             approval_mode=approval_mode,
-            gemini_base_url=IBM_LITELLM_PROXY_URL,
-            gemini_api_key_env="LITELLM_API_KEY",
+            gemini_base_url=base_url.rstrip("/"),
+            gemini_api_key_env=api_key_env,
             api_key_auth_mechanism="bearer",
             settings_path=settings_path,
+            managed_settings=(
+                litellm_settings_payload(
+                    model=model,
+                    web_utility_model=web_utility_model or model,
+                )
+                if configure_web_tools and settings_path is None
+                else None
+            ),
             skip_trust=True,
             timeout_seconds=timeout_seconds,
             env=env,
@@ -90,7 +103,7 @@ class GeminiExecClient:
         cmd += list(opt.extra_args)
         return cmd
 
-    def build_env(self) -> dict[str, str]:
+    def build_env(self, *, settings_path: Path | str | None = None) -> dict[str, str]:
         opt = self.options
         env = os.environ.copy()
         if opt.env:
@@ -104,25 +117,25 @@ class GeminiExecClient:
                 env["GEMINI_API_KEY"] = key
         if opt.api_key_auth_mechanism:
             env["GEMINI_API_KEY_AUTH_MECHANISM"] = opt.api_key_auth_mechanism
-        if opt.settings_path:
-            env["GEMINI_CLI_SYSTEM_SETTINGS_PATH"] = str(opt.settings_path)
+        effective_settings_path = settings_path or opt.settings_path
+        if effective_settings_path:
+            env["GEMINI_CLI_SYSTEM_SETTINGS_PATH"] = str(effective_settings_path)
         return env
 
     def run(self, prompt: str, *, check: bool = True) -> AgentExecResult:
-        cmd = self.build_command()
-
-        completed = subprocess.run(
-            cmd,
-            input=prompt,
-            capture_output=True,
-            text=True,
-            cwd=str(Path(self.options.cwd).expanduser().resolve()),
-            env=self.build_env(),
-            timeout=self.options.timeout_seconds,
-            check=False,
-        )
+        with _managed_settings_file(self.options.managed_settings) as settings_path:
+            completed = subprocess.run(
+                self.build_command(),
+                input=prompt,
+                capture_output=True,
+                text=True,
+                cwd=str(Path(self.options.cwd).expanduser().resolve()),
+                env=self.build_env(settings_path=settings_path),
+                timeout=self.options.timeout_seconds,
+                check=False,
+            )
         result = AgentExecResult(
-            command=cmd,
+            command=self.build_command(),
             returncode=completed.returncode,
             stdout=completed.stdout,
             stderr=completed.stderr,
@@ -131,6 +144,91 @@ class GeminiExecClient:
         if check:
             result.raise_for_status()
         return result
+
+
+def litellm_settings_payload(
+    *,
+    model: str,
+    web_utility_model: str | None = None,
+) -> dict[str, Any]:
+    """Return Gemini CLI settings that route internal web-tool aliases via LiteLLM.
+
+    Gemini CLI implements `google_web_search` and `web_fetch` with internal model
+    aliases (`web-search`, `web-fetch`, and `web-fetch-fallback`). LiteLLM
+    deployments often expose provider-qualified public names, so remap those
+    aliases directly instead of relying on Gemini CLI's unqualified defaults.
+    """
+    utility_model = web_utility_model or model
+    return {
+        "model": {"name": model},
+        "modelConfigs": {
+            "customAliases": {
+                "web-search": {
+                    "extends": "base",
+                    "modelConfig": {
+                        "model": utility_model,
+                        "generateContentConfig": {"tools": [{"googleSearch": {}}]},
+                    },
+                },
+                "web-fetch": {
+                    "extends": "base",
+                    "modelConfig": {
+                        "model": utility_model,
+                        "generateContentConfig": {"tools": [{"urlContext": {}}]},
+                    },
+                },
+                "web-fetch-fallback": {
+                    "extends": "base",
+                    "modelConfig": {"model": utility_model},
+                },
+            }
+        },
+        "advanced": {"ignoreLocalEnv": True},
+        "security": {"auth": {"selectedType": "gemini-api-key"}},
+    }
+
+
+def write_litellm_settings(
+    path: Path | str,
+    *,
+    model: str,
+    web_utility_model: str | None = None,
+) -> Path:
+    """Write a Gemini CLI settings file for LiteLLM-backed web tools."""
+    destination = Path(path).expanduser()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_text(
+        json.dumps(
+            litellm_settings_payload(model=model, web_utility_model=web_utility_model),
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return destination
+
+
+class _managed_settings_file:
+    def __init__(self, payload: Mapping[str, Any] | None) -> None:
+        self.payload = payload
+        self._tmpdir: tempfile.TemporaryDirectory[str] | None = None
+        self.path: Path | None = None
+
+    def __enter__(self) -> Path | None:
+        if self.payload is None:
+            return None
+        self._tmpdir = tempfile.TemporaryDirectory(prefix="spotlights-gemini-")
+        self.path = Path(self._tmpdir.name) / "settings.json"
+        self.path.write_text(
+            json.dumps(self.payload, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        return self.path
+
+    def __exit__(self, exc_type: object, exc: object, tb: object) -> None:
+        if self._tmpdir is not None:
+            self._tmpdir.cleanup()
 
 
 def _final_message(stdout: str) -> str | None:
@@ -149,4 +247,9 @@ def _final_message(stdout: str) -> str | None:
     return text
 
 
-__all__ = ["GeminiExecClient", "GeminiExecOptions"]
+__all__ = [
+    "GeminiExecClient",
+    "GeminiExecOptions",
+    "litellm_settings_payload",
+    "write_litellm_settings",
+]

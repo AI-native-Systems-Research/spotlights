@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+import subprocess
 from pathlib import Path
 
 from spotlights_engine.module_deep_research.api import research_module, resolve_target_module
@@ -274,13 +276,15 @@ def test_gemini_default_command_is_read_only_and_does_not_expose_prompt(tmp_path
     assert "--model" not in cmd
 
 
-def test_gemini_ibm_litellm_command_uses_explicit_network_config(tmp_path: Path) -> None:
+def test_gemini_litellm_proxy_command_uses_explicit_network_config(tmp_path: Path) -> None:
     from spotlights_engine.module_deep_research.gemini_exec import (
         GeminiExecClient,
         GeminiExecOptions,
     )
 
-    cmd = GeminiExecClient(GeminiExecOptions.ibm_litellm(cwd=tmp_path)).build_command()
+    cmd = GeminiExecClient(
+        GeminiExecOptions.litellm_proxy(cwd=tmp_path, base_url="https://litellm.example.com")
+    ).build_command()
 
     assert cmd[cmd.index("--approval-mode") + 1] == "yolo"
     assert "--skip-trust" in cmd
@@ -295,8 +299,9 @@ def test_gemini_env_maps_litellm_key_to_gemini_proxy(tmp_path: Path) -> None:
 
     settings_path = tmp_path / "gemini-settings.json"
     client = GeminiExecClient(
-        GeminiExecOptions.ibm_litellm(
+        GeminiExecOptions.litellm_proxy(
             cwd=tmp_path,
+            base_url="https://litellm.example.com",
             settings_path=settings_path,
             env={"LITELLM_API_KEY": "test-key"},
         )
@@ -305,9 +310,69 @@ def test_gemini_env_maps_litellm_key_to_gemini_proxy(tmp_path: Path) -> None:
     env = client.build_env()
 
     assert env["GEMINI_API_KEY"] == "test-key"
-    assert env["GOOGLE_GEMINI_BASE_URL"] == "https://ete-litellm.ai-models.vpc-int.res.ibm.com"
+    assert env["GOOGLE_GEMINI_BASE_URL"] == "https://litellm.example.com"
     assert env["GEMINI_API_KEY_AUTH_MECHANISM"] == "bearer"
     assert env["GEMINI_CLI_SYSTEM_SETTINGS_PATH"] == str(settings_path)
+
+
+def test_gemini_litellm_settings_route_internal_web_tools() -> None:
+    from spotlights_engine.module_deep_research.gemini_exec import litellm_settings_payload
+
+    payload = litellm_settings_payload(
+        model="gcp/gemini-3.1-pro-preview",
+        web_utility_model="gcp/gemini-3.1-pro-preview",
+    )
+
+    aliases = payload["modelConfigs"]["customAliases"]
+    assert aliases["web-search"]["modelConfig"]["model"] == "gcp/gemini-3.1-pro-preview"
+    assert aliases["web-search"]["modelConfig"]["generateContentConfig"]["tools"] == [
+        {"googleSearch": {}}
+    ]
+    assert aliases["web-fetch"]["modelConfig"]["model"] == "gcp/gemini-3.1-pro-preview"
+    assert aliases["web-fetch"]["modelConfig"]["generateContentConfig"]["tools"] == [
+        {"urlContext": {}}
+    ]
+    assert aliases["web-fetch-fallback"]["modelConfig"]["model"] == ("gcp/gemini-3.1-pro-preview")
+
+
+def test_gemini_litellm_proxy_run_uses_managed_web_tool_settings(
+    monkeypatch, tmp_path: Path
+) -> None:
+    from spotlights_engine.module_deep_research import gemini_exec
+    from spotlights_engine.module_deep_research.gemini_exec import (
+        GeminiExecClient,
+        GeminiExecOptions,
+    )
+
+    captured: dict[str, object] = {}
+
+    def fake_run(args, **kwargs):
+        settings_path = Path(kwargs["env"]["GEMINI_CLI_SYSTEM_SETTINGS_PATH"])
+        captured["settings_path"] = settings_path
+        captured["settings"] = json.loads(settings_path.read_text(encoding="utf-8"))
+        return subprocess.CompletedProcess(
+            args,
+            0,
+            stdout='{"response": "ok"}',
+            stderr="",
+        )
+
+    monkeypatch.setattr(gemini_exec.subprocess, "run", fake_run)
+
+    result = GeminiExecClient(
+        GeminiExecOptions.litellm_proxy(
+            cwd=tmp_path,
+            base_url="https://litellm.example.com",
+            env={"LITELLM_API_KEY": "test-key"},
+        )
+    ).run("prompt")
+
+    assert result.final_message == "ok"
+    settings_path = captured["settings_path"]
+    assert isinstance(settings_path, Path)
+    assert not settings_path.exists()
+    aliases = captured["settings"]["modelConfigs"]["customAliases"]  # type: ignore[index]
+    assert aliases["web-search"]["modelConfig"]["model"] == "gcp/gemini-3.1-pro-preview"
 
 
 def test_cli_resolution_preserves_posix_command_shape(monkeypatch) -> None:

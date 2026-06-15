@@ -173,7 +173,7 @@ GEMINI_CLI_TRUST_WORKSPACE=true
 EOF
 ```
 
-Then pin Gemini CLI to API-key auth and map every internal flash-tier alias to one allowed flash model from your LiteLLM gateway. The alias keys below are Gemini CLI helper names, not extra models selected by Spotlights. The model IDs are examples; replace both `gcp/...` values with the public model names exposed by your LiteLLM deployment.
+Then pin Gemini CLI to API-key auth and remap the internal web-tool aliases to a public model name from your LiteLLM gateway. Gemini CLI implements `google_web_search` and `web_fetch` through the helper aliases `web-search`, `web-fetch`, and `web-fetch-fallback`; remap those aliases directly so they do not fall back to unqualified model names such as `gemini-3-flash-preview`.
 
 ```bash
 cat > ~/.gemini/settings.json <<'JSON'
@@ -181,17 +181,23 @@ cat > ~/.gemini/settings.json <<'JSON'
   "model": { "name": "gcp/gemini-3.1-pro-preview" },
   "modelConfigs": {
     "customAliases": {
-      "gemini-3-flash-base": {
-        "modelConfig": { "model": "gcp/gemini-3.5-flash" }
+      "web-search": {
+        "extends": "base",
+        "modelConfig": {
+          "model": "gcp/gemini-3.1-pro-preview",
+          "generateContentConfig": { "tools": [ { "googleSearch": {} } ] }
+        }
       },
-      "gemini-3.5-flash-base": {
-        "modelConfig": { "model": "gcp/gemini-3.5-flash" }
+      "web-fetch": {
+        "extends": "base",
+        "modelConfig": {
+          "model": "gcp/gemini-3.1-pro-preview",
+          "generateContentConfig": { "tools": [ { "urlContext": {} } ] }
+        }
       },
-      "gemini-2.5-flash-base": {
-        "modelConfig": { "model": "gcp/gemini-3.5-flash" }
-      },
-      "classifier": {
-        "modelConfig": { "model": "gcp/gemini-3.5-flash" }
+      "web-fetch-fallback": {
+        "extends": "base",
+        "modelConfig": { "model": "gcp/gemini-3.1-pro-preview" }
       }
     }
   },
@@ -200,20 +206,23 @@ cat > ~/.gemini/settings.json <<'JSON'
 }
 JSON
 
-gemini --prompt "Reply with exactly: OK" --output-format json
+gemini --prompt "Use google_web_search once for Gemini CLI docs, then reply OK." --output-format json --approval-mode yolo
 ```
 
 Notes:
 
 - `GOOGLE_GEMINI_BASE_URL` is the LiteLLM proxy root; do not append `/v1`.
 - `advanced.ignoreLocalEnv` prevents a repo-level `.env` from shadowing the Gemini credentials above.
-- If your LiteLLM deployment uses different public model names, replace both `gcp/...` values.
+- If your LiteLLM deployment uses different public model names, replace `gcp/gemini-3.1-pro-preview` with a public model that supports `googleSearch` and `urlContext`.
+- `GeminiExecOptions.litellm_proxy(...)` writes an equivalent temporary settings file for managed Python runs when `settings_path` is not supplied.
 
-For LiteLLM-backed live research from Python, use an explicit
-`GeminiExecOptions` with the proxy root, bearer auth, and your gateway model IDs.
-`GeminiExecOptions.ibm_litellm(...)` is only a convenience preset for this
-project's IBM-hosted LiteLLM gateway. Plain `GeminiExecOptions()` keeps native
-Gemini CLI auth/model/proxy behavior.
+For LiteLLM-backed live research from Python, use
+`GeminiExecOptions.litellm_proxy(...)` with the proxy root, bearer auth, and your
+gateway model IDs. Plain `GeminiExecOptions()` keeps native Gemini CLI
+auth/model/proxy behavior. Do not cap real module deep-research runs with short
+smoke-test timeouts; the subprocess wrappers default to no timeout, and explicit
+timeouts for live research should be long enough for web/literature retrieval
+(15+ minutes is a reasonable floor).
 
 Swap the host and model IDs for your LiteLLM deployment. After editing config or
 environment, re-run `claude --version` / `codex --version` / `gemini --version`
