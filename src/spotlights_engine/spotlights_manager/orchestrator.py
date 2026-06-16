@@ -62,6 +62,7 @@ from spotlights_engine.schemas.pipeline import (
     SpotlightsManagerInput,
 )
 from spotlights_engine.schemas.project import Module, ProjectTree
+from spotlights_engine.schemas.spotlight_report import RunInfo
 from spotlights_engine.spotlights_manager.api import (
     ModuleTelemetry,
     SpotlightsManagerConfig,
@@ -1444,6 +1445,18 @@ async def _run_async(
         cost_str,
     )
 
+    duration_s = round(time.monotonic() - run_start, 3)
+    _emit_spotlight_report(
+        paths=paths,
+        manifest=manifest,
+        input=input,
+        tree=tree,
+        module_runs=module_runs,
+        manager_issues=manager_issues,
+        total_cost_usd=total_cost or None,
+        duration_s=duration_s,
+    )
+
     return SpotlightsManagerResult(
         project_tree=tree,
         context=input.context,
@@ -1453,6 +1466,63 @@ async def _run_async(
         manager_issues=manager_issues,
         renderer_result=renderer_result,
     )
+
+
+def _emit_spotlight_report(
+    *,
+    paths: P.ManagerPaths,
+    manifest: dict[str, Any],
+    input: SpotlightsManagerInput,
+    tree: ProjectTree,
+    module_runs: dict[str, ModuleRun],
+    manager_issues: list[StepIssue],
+    total_cost_usd: float | None,
+    duration_s: float,
+) -> None:
+    """Convert the assembled DR result to a `SpotlightReport` and persist it
+    next to `result.json`. Failures are surfaced as a log warning; they
+    don't fail the run since `SpotlightsResult` is the canonical output."""
+
+    # Late import to avoid spreading the new schema into modules that don't
+    # already need it.
+    from spotlights_engine.schemas.pipeline import SpotlightsResult
+    from spotlights_engine.spotlights_manager.spotlight_report_adapter import (
+        to_spotlight_report,
+    )
+
+    try:
+        result = SpotlightsResult(
+            project_tree=tree,
+            context=input.context,
+            module_runs=module_runs,
+        )
+        run_info = RunInfo(
+            pipeline="deep_research",
+            run_id=paths.artifacts_dir.name or "spotlights-run",
+            started_at=str(manifest.get("created_at") or ""),
+            finished_at=str(manifest.get("updated_at") or ""),
+            cost_usd=total_cost_usd,
+            duration_s=duration_s,
+            parameters={
+                "max_findings_per_module": input.max_findings_per_module,
+                "continue_on_module_failure": input.continue_on_module_failure,
+            },
+        )
+        report = to_spotlight_report(result, run=run_info)
+        if manager_issues:
+            report = report.model_copy(
+                update={"issues": list(report.issues) + list(manager_issues)}
+            )
+        target = paths.artifacts_dir / "spotlight_report.json"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(
+            report.model_dump_json(indent=2) + "\n", encoding="utf-8"
+        )
+        _log.info("spotlight_report: wrote %s", target)
+    except Exception as exc:  # noqa: BLE001 — never fail the run on the new artifact
+        _log.warning(
+            "spotlight_report: skipped: %s: %s", type(exc).__name__, exc
+        )
 
 
 def _render_results(

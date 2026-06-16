@@ -965,6 +965,18 @@ def run_pipeline(
     except Exception as exc:  # noqa: BLE001 — never fail the pipeline on rollup
         aggregate_issues.append(f"findings rollup failed: {exc}")
 
+    # Best-effort SpotlightReport emission — writes
+    # `<run_dir>/spotlight_report.json` next to the existing artifacts.
+    # Pure adapter call after a disk-only read; never fails the pipeline.
+    try:
+        _emit_spotlight_report(
+            layout=layout,
+            status=status,
+            signal_input=input,
+        )
+    except Exception as exc:  # noqa: BLE001 — never fail the pipeline on the new artifact
+        aggregate_issues.append(f"spotlight_report failed: {exc}")
+
     # Sort to keep the result deterministic across runs — under the
     # parallel scheduler these lists' append order depends on which
     # future finishes first, but the stage IDs are zero-padded so
@@ -975,6 +987,101 @@ def run_pipeline(
         completed_stages=sorted(completed),
         skipped_stages=sorted(skipped),
         issues=aggregate_issues,
+    )
+
+
+def _emit_spotlight_report(
+    *,
+    layout: RunDirLayout,
+    status: PipelineStatus,
+    signal_input: SignalPipelineInput,
+) -> None:
+    """Read on-disk signal-pipeline artifacts and persist a `SpotlightReport`
+    at `<run_dir>/spotlight_report.json`. Skips silently if any required
+    artifact (signals, project_tree, candidates) is missing.
+    """
+    from spotlights_engine.schemas.common import SpotlightContext
+    from spotlights_engine.schemas.spotlight_report import RunInfo
+    from spotlights_engine.signal_pipeline.schemas import Change, Signals
+    from spotlights_engine.signal_pipeline.spotlight_report_adapter import (
+        to_spotlight_report,
+    )
+    from spotlights_engine.signal_pipeline.stages import STAGES
+
+    # Required upstreams. Bail out if any are missing.
+    signals = _try_load("01", STAGES, layout)
+    project_tree = _try_load("02", STAGES, layout)
+    candidates = _try_load("03", STAGES, layout)
+    if signals is None or project_tree is None or candidates is None:
+        return
+    if not isinstance(signals, Signals):
+        return
+
+    # Stage 04 fan-out is per-candidate. Missing or partial is allowed —
+    # candidates without a corresponding change get an empty proposal list.
+    changes_raw = _try_load("04", STAGES, layout) or {}
+    changes: dict[str, Change] = {
+        cand_id: c for cand_id, c in changes_raw.items() if isinstance(c, Change)
+    }
+
+    started_at = ""
+    finished_at: str | None = None
+    cost_total: float = 0.0
+    duration_total: float = 0.0
+    saw_cost = False
+    saw_duration = False
+    models: list[str] = []
+    for stage_id in ALL_STAGES:
+        s = status.get(stage_id)
+        if s.started_at and not started_at:
+            started_at = s.started_at
+        if s.ended_at:
+            finished_at = s.ended_at
+        if s.cost_usd is not None:
+            cost_total += float(s.cost_usd)
+            saw_cost = True
+        if s.duration_s is not None:
+            duration_total += float(s.duration_s)
+            saw_duration = True
+        if s.model and s.model not in models:
+            models.append(s.model)
+
+    objective = (
+        signals.workload.description
+        or "Optimize telemetry-detected anomalies"
+    )
+    context = SpotlightContext(objective=objective)
+
+    run_info = RunInfo(
+        pipeline="signal",
+        run_id=layout.root.name or "signal-run",
+        started_at=started_at or "",
+        finished_at=finished_at,
+        model=(
+            models[0] if len(models) == 1 else (",".join(models) if models else None)
+        ),
+        cost_usd=round(cost_total, 4) if saw_cost else None,
+        duration_s=round(duration_total, 3) if saw_duration else None,
+        parameters={
+            "max_candidates": signal_input.max_candidates,
+            "projecttree_cache": signal_input.projecttree_cache,
+            "backend_id": signal_input.backend_id,
+        },
+    )
+
+    report = to_spotlight_report(
+        signals=signals,
+        project_tree=project_tree,
+        candidates=candidates,
+        changes=changes,
+        context=context,
+        run=run_info,
+    )
+
+    target = layout.root / "spotlight_report.json"
+    atomic_write_text(
+        target,
+        report.model_dump_json(indent=2) + "\n",
     )
 
 
