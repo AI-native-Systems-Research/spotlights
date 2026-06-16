@@ -1,16 +1,21 @@
-# PR Data Filtering Rules
+# Exploring vLLM PRs historical data
+
+## Motivation
+
+A large open-source project like vLLM merges thousands of PRs per release window, but only a small fraction represent intentional performance work. To build a credible benchmark validation dataset we need to isolate those PRs — the ones that claim a measurable speedup and can be reproduced — from the overwhelming majority that are bug fixes, CI tweaks, documentation, bot updates, and feature work unrelated to throughput or latency.
+
+This document specifies the automated filtering rules that reduce ~5,500 raw PRs (per time window of 7 last months) to ~650 performance-relevant candidates (≈12%), then rank them by specificity and magnitude so the most reproducible optimizations surface first. It also documents the workload characterization step that classifies *how* each PR was benchmarked (synthetic traffic vs. recorded traces, which tool, which parameters), enabling us to group PRs into reproducible benchmark cohorts.
+
+## PR Data Filtering Rules
 
 The filtering pipeline used by `repo_bench` to surface performance-relevant PRs. The sample data throughout this document was fetched from the [vLLM repository](https://github.com/vllm-project/vllm).
 
-## Overview
 
 Rules are applied as: **predicate chain + ranker**. The four predicates are AND'd (a PR must pass all four), then the ranker scores and sorts survivors.
 
 ```
 not-bot,not-revert,not-chore,any-perf-signal-or-label,rank-spec-mag
 ```
-
-## Predicates
 
 ### `not-bot`
 
