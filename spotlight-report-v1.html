@@ -1,0 +1,717 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>SpotlightReport — deck</title>
+<style>
+  :root {
+    --fg: #1a1a1a;
+    --muted: #6a6a6a;
+    --line: #d0d0d0;
+    --bg: #ffffff;
+    --soft: #f6f6f7;
+    --blue: #0b6e9b;
+    --blue-bg: #e6f0f6;
+    --green: #2a7a3f;
+    --green-bg: #e7f1ea;
+    --orange: #b86b1a;
+    --orange-bg: #f6ecdf;
+    --gold: #b89a3a;
+    --gold-bg: #faf3dd;
+    --purple: #6a3a8a;
+    --neutral: #4a4a4a;
+    --del: #a13a3a;
+  }
+  html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body {
+    margin: 0; background: #e8e8ec;
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+    color: var(--fg);
+  }
+  .deck { display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 20px 0; }
+  .slide {
+    width: 920px; min-height: 580px;
+    background: var(--bg); padding: 36px 44px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    box-sizing: border-box; display: flex; flex-direction: column;
+  }
+  .slide-num {
+    font-size: 10px; color: var(--muted);
+    letter-spacing: 0.1em; text-transform: uppercase; font-weight: 600;
+  }
+  .slide-title { font-size: 28px; margin: 4px 0 6px; letter-spacing: -0.01em; font-weight: 600; }
+  .slide-sub { font-size: 13px; color: var(--muted); margin-bottom: 22px; }
+  .slide-body { flex: 1; }
+  code { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px; background: var(--soft); padding: 1px 4px; border-radius: 2px; }
+  .mono { font-family: "SF Mono", Menlo, Consolas, monospace; }
+
+  /* slide 1 — cover */
+  .cover { background: var(--bg); }
+  .cover .lead { font-size: 16px; color: var(--fg); margin: 30px 0 0; line-height: 1.55; max-width: 760px; }
+  .cover .meta { color: var(--muted); font-size: 12px; margin-top: 24px; }
+  .cover-keywords {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 10px; margin-top: 28px;
+  }
+  .cover-keywords .kw {
+    border: 1px solid var(--line); border-radius: 4px;
+    padding: 14px 16px 13px; background: var(--bg);
+    display: flex; flex-direction: column; gap: 6px;
+    box-shadow: 0 1px 0 rgba(0,0,0,0.02);
+  }
+  .cover-keywords .kw-k {
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 9.5px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.12em; font-weight: 600;
+    padding-bottom: 6px; border-bottom: 1px solid var(--line);
+  }
+  .cover-keywords .kw-v {
+    color: var(--fg); font-weight: 600; font-size: 14.5px;
+    line-height: 1.2;
+  }
+  .cover-keywords .kw-d {
+    color: var(--muted); font-size: 11.5px; line-height: 1.4;
+    margin-top: -1px;
+  }
+
+  .cover-legend {
+    margin-top: 28px; padding: 14px 16px;
+    border: 1px solid var(--line); border-left: 3px solid var(--fg);
+    border-radius: 3px; background: var(--soft);
+  }
+  .cover-legend .cl-label {
+    font-size: 11px; color: var(--muted); font-weight: 600;
+    text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 10px;
+  }
+  .cover-legend .cl-sub {
+    font-size: 11px; color: var(--fg); font-weight: 600;
+    margin-bottom: 6px;
+  }
+  .cover-legend .cl-row { display: flex; gap: 28px; flex-wrap: wrap; }
+  .cover-legend .cl-item {
+    display: flex; align-items: baseline; gap: 8px;
+    font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px;
+  }
+  .cover-legend .cl-item b { color: var(--fg); font-weight: 600; }
+  .cover-legend .cl-item .cl-d {
+    color: var(--muted); font-family: -apple-system, system-ui, sans-serif;
+    font-size: 11.5px;
+  }
+  .cover-legend .cl-sw {
+    width: 14px; height: 14px; border-radius: 3px; display: inline-block;
+    flex-shrink: 0; align-self: center;
+  }
+  .cover-legend .cl-b { background: var(--blue); }
+  .cover-legend .cl-g { background: var(--green); }
+  .cover-legend .cl-o { background: var(--orange); }
+  .cover-legend .cl-y { background: var(--gold); }
+  .kw {
+    border: 1px solid var(--line); padding: 6px 12px; border-radius: 18px;
+    font-size: 12.5px; background: var(--soft);
+  }
+  .kw b { color: var(--fg); }
+  .kw.b { background: var(--blue-bg); border-color: var(--blue); color: var(--blue); }
+  .kw.g { background: var(--green-bg); border-color: var(--green); color: var(--green); }
+  .kw.o { background: var(--orange-bg); border-color: var(--orange); color: var(--orange); }
+
+  /* TL;DR slide */
+  .tldr-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 6px; }
+  .tldr-item {
+    border: 1px solid var(--line); border-left: 4px solid var(--neutral);
+    padding: 14px 18px; border-radius: 3px;
+  }
+  .tldr-item .n { font-size: 26px; font-weight: 200; color: var(--neutral); float: left; margin: -2px 14px 0 0; line-height: 1; }
+  .tldr-item .t { font-weight: 600; font-size: 14px; margin-bottom: 3px; }
+  .tldr-item .d { color: var(--muted); font-size: 13px; line-height: 1.45; }
+
+  /* schema slide */
+  .schema {
+    border: 2px solid var(--fg); border-radius: 4px; padding: 22px 26px;
+    background: var(--soft); margin-top: 4px;
+  }
+  .schema .head { font-size: 18px; font-weight: 600; margin-bottom: 8px; }
+  .schema .sub { font-size: 12px; color: var(--muted); margin-bottom: 18px; }
+  .schema-row { display: grid; grid-template-columns: 140px 1fr; gap: 16px; align-items: start; padding: 6px 0; border-top: 1px dashed var(--line); }
+  .schema-row:first-of-type { border-top: 0; padding-top: 0; }
+  .schema-row .lbl { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 13px; padding-top: 6px; }
+  .schema-row .lbl .name { font-weight: 600; }
+  .schema-row .lbl .desc { color: var(--muted); font-size: 11px; display: block; margin-top: 2px; line-height: 1.3; }
+  .typebox {
+    border: 1.5px solid; border-radius: 3px;
+    padding: 10px 14px; background: var(--bg);
+    font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px;
+    line-height: 1.55;
+  }
+  .typebox b { color: var(--fg); }
+  .typebox .field-row { color: var(--muted); }
+  .typebox .field-row b { color: var(--fg); }
+  .typebox.cand { border-color: var(--neutral); }
+  .typebox.find { border-color: var(--gold); }
+  .typebox.anom { border-color: var(--orange); }
+  .typebox.run  { border-color: var(--neutral); }
+  .typebox.chg  { border-color: var(--muted); margin-top: 8px; background: var(--soft); }
+
+  /* before/after slide */
+  .ba { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 6px; }
+  .ba > div { border: 1px solid var(--line); border-radius: 4px; padding: 18px 20px; background: var(--bg); }
+  .ba .head { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; margin-bottom: 14px; }
+  .ba .left .head { color: var(--del); }
+  .ba .right .head { color: var(--fg); }
+  .tree { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12.5px; line-height: 1.7; }
+  .tree .key { color: var(--fg); font-weight: 600; }
+  .tree .mod { color: var(--fg); font-weight: 600; font-style: italic; }
+  .tree .id  { color: var(--fg); font-weight: 600; }
+  .tree .meta { color: var(--muted); }
+  .indent-1 { padding-left: 14px; }
+  .indent-2 { padding-left: 28px; }
+  .indent-3 { padding-left: 42px; }
+  .indent-4 { padding-left: 56px; }
+
+  .pellet { width: 12px; height: 12px; border-radius: 2px; display: inline-block; margin-right: 1px; vertical-align: -2px; }
+  .pellet.b { background: var(--blue); }
+  .pellet.g { background: var(--green); }
+  .pellet.o { background: var(--orange); }
+
+  /* worked example slide */
+  .worked { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 6px; }
+  .pane { border: 1px solid var(--line); border-radius: 4px; padding: 18px; background: var(--bg); }
+  .pane .head { font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; margin-bottom: 12px; }
+  .pane.old .head { color: var(--del); }
+  .pane.new .head { color: var(--fg); }
+  .candbox {
+    border: 2px solid var(--neutral); border-radius: 3px;
+    background: #f0f0f3; padding: 10px 12px; font-size: 12.5px;
+  }
+  .candbox .id { font-family: "SF Mono", Menlo, Consolas, monospace; font-weight: 600; color: var(--fg); }
+  .candbox .sym { font-family: "SF Mono", Menlo, Consolas, monospace; }
+  .candbox .meta { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .inner-list { margin-top: 12px; }
+  .lbl { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 11px; color: var(--muted); margin-bottom: 5px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .change-card {
+    background: var(--bg); border: 1px solid var(--line); border-left: 4px solid;
+    padding: 7px 10px; font-size: 12px; margin-bottom: 5px;
+    border-radius: 2px;
+    display: flex; gap: 10px; align-items: baseline;
+  }
+  .change-card .cid { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 11px; color: var(--muted); flex-shrink: 0; min-width: 130px; }
+  .change-card.b { border-left-color: var(--blue); }
+  .change-card.g { border-left-color: var(--green); }
+  .change-card.o { border-left-color: var(--orange); }
+  .ref-tag {
+    display: inline-block; background: var(--gold-bg); color: #6a5a1a;
+    border: 1px solid var(--gold); border-radius: 9px; padding: 0 6px;
+    font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 10px;
+    margin-left: 6px;
+  }
+
+  /* adapters slide */
+  .pipe-block { margin-top: 14px; }
+  .pipe { display: grid; grid-template-columns: 1fr 30px 1fr 30px 1fr; gap: 0; align-items: stretch; }
+  .pipe .step {
+    border: 1.5px solid var(--line); border-radius: 4px;
+    padding: 14px 16px; background: var(--bg); font-size: 12.5px;
+  }
+  .pipe .step .h { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; font-weight: 600; margin-bottom: 5px; }
+  .pipe .step .li { font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+  .pipe .step.in    { border-color: var(--neutral); }
+  .pipe .step.in .h { color: var(--fg); }
+  .pipe .step.adapt    { border-color: var(--purple); background: #f6effa; }
+  .pipe .step.adapt .h { color: var(--purple); }
+  .pipe .step.out    { border-color: var(--neutral); background: var(--bg); }
+  .pipe .step.out .h { color: var(--fg); }
+  .pipe .a { display: flex; align-items: center; justify-content: center; color: var(--muted); font-size: 22px; }
+  .pipe-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600; margin-bottom: 6px; }
+
+  /* questions slide */
+  .questions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-top: 6px; }
+  .qcard {
+    border: 1px solid var(--line); border-top: 4px solid var(--gold);
+    padding: 16px 18px; border-radius: 3px; background: var(--bg);
+  }
+  .qcard .qn { font-size: 11px; color: var(--muted); letter-spacing: 0.07em; text-transform: uppercase; font-weight: 600; }
+  .qcard .qt { font-weight: 600; font-size: 14px; margin: 4px 0 8px; }
+  .qcard .qd { font-size: 12.5px; line-height: 1.5; color: var(--fg); }
+  .qcard .qref { font-size: 10px; color: var(--muted); margin-top: 10px; padding-top: 8px; border-top: 1px dashed var(--line); }
+
+  /* scope slide */
+  .scope-list { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 6px; }
+  .scope-item {
+    border: 1px solid var(--line); padding: 10px 14px; border-radius: 3px;
+    font-size: 12.5px; background: var(--soft); display: flex; gap: 12px;
+  }
+  .scope-item .x { color: var(--del); font-weight: 600; flex-shrink: 0; width: 14px; }
+  .scope-item b { font-weight: 600; }
+  .scope-item .d { color: var(--muted); font-size: 11.5px; margin-top: 2px; display: block; }
+
+  .legend-row { display: flex; gap: 18px; font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .legend-row span b { color: var(--fg); }
+
+  @media print {
+    body { background: var(--bg); }
+    .deck { gap: 0; padding: 0; }
+    .slide {
+      width: auto; min-height: 0; height: 100vh;
+      box-shadow: none; padding: 22mm;
+      page-break-after: always;
+    }
+  }
+</style>
+</head>
+<body>
+
+<div class="deck">
+
+  <!-- Slide 1 — Cover -->
+  <section class="slide cover">
+    <div class="slide-num">design proposal · 2026-06-15</div>
+    <h1 class="slide-title">SpotlightReport</h1>
+    <div class="slide-sub">A unified, additive output schema both pipelines emit alongside their existing artifacts.</div>
+    <p class="lead">
+      The deep-research and signal pipelines today produce two different output shapes for the same conceptual work-list. Consumers want one. <strong>Add one new top-level type that both pipelines emit</strong> — keeping every existing schema and on-disk artifact untouched.
+    </p>
+    <div class="cover-keywords">
+      <div class="kw">
+        <div class="kw-k">scope</div>
+        <div class="kw-v">additive</div>
+        <div class="kw-d">replaces nothing existing</div>
+      </div>
+      <div class="kw">
+        <div class="kw-k">shape</div>
+        <div class="kw-v">flat top-level</div>
+        <div class="kw-d">no <code style="font-size:10.5px;">module_runs</code> nesting</div>
+      </div>
+      <div class="kw">
+        <div class="kw-k">adapters</div>
+        <div class="kw-v">two, thin</div>
+        <div class="kw-d">one per pipeline; pure</div>
+      </div>
+      <div class="kw">
+        <div class="kw-k">prompts</div>
+        <div class="kw-v">unchanged</div>
+        <div class="kw-d">no LLM-side edits</div>
+      </div>
+    </div>
+
+    <div class="meta">spec: <code>docs/_review-notes/2026-06-15_spotlight_report_schema.md</code></div>
+  </section>
+
+  <!-- Slide 2 — TL;DR -->
+  <section class="slide">
+    <div class="slide-num">slide 2 · TL;DR</div>
+    <h2 class="slide-title">What's changing</h2>
+    <div class="slide-sub">Five points that capture the proposal.</div>
+    <div class="slide-body">
+      <div class="tldr-grid">
+        <div class="tldr-item">
+          <div class="n">1</div>
+          <div class="t">Additive, not replacing</div>
+          <div class="d">One new top-level type — <code>SpotlightReport</code>. Both pipelines emit it next to existing outputs. <code>SpotlightsResult</code>, <code>SignalPipelineResult</code>, today's <code>Candidate</code>, prompts, and the renderer are all unchanged.</div>
+        </div>
+        <div class="tldr-item">
+          <div class="n">2</div>
+          <div class="t">Flat top-level lists</div>
+          <div class="d"><code>candidates</code>, <code>findings</code>, <code>anomalies</code>. No <code>module_runs</code> nesting. Each candidate/finding carries <code>module_qualified_name</code> as a string label.</div>
+        </div>
+        <div class="tldr-item">
+          <div class="n">3</div>
+          <div class="t">One <code>changes[]</code> per candidate</div>
+          <div class="d">DR's <code>deep_research_proposals</code> + <code>agent_proposals</code> fold into a single provenance-tagged <code>changes</code> list. Signal pipeline's stage-04 changes use the same shape.</div>
+        </div>
+        <div class="tldr-item">
+          <div class="n">4</div>
+          <div class="t">Globally-unique ids</div>
+          <div class="d">Adapter renumbers <code>cand-NNNN</code> / <code>find-NNNN</code> across the whole report; originals preserved on <code>original_id</code> / <code>original_finding_id</code>. <code>source_refs</code> rewritten consistently.</div>
+        </div>
+        <div class="tldr-item" style="grid-column: span 2;">
+          <div class="n">5</div>
+          <div class="t">Two thin adapters at the output boundary</div>
+          <div class="d">DR adapter: <code>SpotlightsResult</code> → <code>SpotlightReport</code>. Signal adapter: <code>SignalPipelineResult</code> + run-dir → <code>SpotlightReport</code>. Both pure (no I/O, no LLM, no prompt changes). New consumers read the report; old consumers ignore it.</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Slide 3 — Schema (row layout, polished) -->
+  <section class="slide">
+    <style>
+      /* polish over the existing .schema layout */
+      .schema .field-row { display: block; margin: 1px 0; line-height: 1.5; }
+      .schema .grp {
+        display: grid; grid-template-columns: 84px 1fr; gap: 10px;
+        padding: 2px 0; line-height: 1.5;
+      }
+      .schema .grp .gh {
+        font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 11px;
+        color: var(--muted); font-style: italic; padding-top: 1px;
+      }
+      .schema .grp .gv {
+        font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px;
+        color: var(--fg);
+      }
+      .schema .grp .gv b { font-weight: 600; }
+      .schema .grp .gv .mute { color: var(--muted); font-style: italic; }
+
+      /* reference fields shown as colored chips so the eye finds them */
+      .schema .ref-chip {
+        display: inline-block; padding: 1px 7px; border-radius: 9px;
+        background: var(--bg); border: 1.2px solid;
+        font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 11px;
+        font-weight: 600;
+      }
+      .schema .ref-chip.b { color: var(--blue);   border-color: var(--blue); }
+      .schema .ref-chip.n { color: var(--fg);     border-color: var(--neutral); }
+      .schema .ref-chip.o { color: var(--orange); border-color: var(--orange); }
+
+      /* embedded changes block: clearly distinct from the parent box */
+      .schema .typebox.chg {
+        margin-top: 10px; margin-left: 0; margin-right: 0;
+        padding: 16px 12px 10px;
+        background: linear-gradient(to bottom, #f4edf8 0%, #ebe2f3 100%);
+        border: 1.5px dashed var(--purple);
+        border-radius: 3px;
+        position: relative;
+      }
+      .schema .typebox.chg::before {
+        content: "EMBEDDED — list[Change], N per candidate";
+        position: absolute; top: -9px; left: 14px; padding: 1px 8px;
+        background: var(--purple); color: #fff;
+        font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 9.5px;
+        letter-spacing: 0.06em; border-radius: 2px;
+        font-weight: 600;
+      }
+
+      /* prominent source legend at top */
+      .schema .legend-row {
+        display: flex; flex-direction: column; gap: 3px;
+        padding: 8px 12px; margin-bottom: 12px;
+        background: #f0f0f3; border-left: 3px solid var(--fg); border-radius: 2px;
+        font-size: 12px;
+      }
+      .schema .legend-row .lhead {
+        font-size: 10px; color: var(--muted); font-weight: 600;
+        text-transform: uppercase; letter-spacing: 0.08em;
+        margin-bottom: 3px;
+      }
+      .schema .legend-row .lkey {
+        display: grid; grid-template-columns: 156px 1fr;
+        column-gap: 8px; align-items: baseline;
+        line-height: 1.45; white-space: nowrap;
+      }
+      .schema .legend-row .lkey .lname { display: inline-flex; align-items: baseline; gap: 6px; }
+      .schema .legend-row .lkey b {
+        color: var(--fg); font-weight: 600;
+        font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 11.5px;
+      }
+      .schema .legend-row .lkey .ld { color: var(--muted); font-size: 11px; }
+      .schema .legend-row .pellet {
+        width: 12px; height: 12px; border-radius: 2px; display: inline-block;
+        vertical-align: -1px; margin-right: 2px; flex-shrink: 0;
+      }
+      .schema .legend-row .pellet.b { background: var(--blue); }
+      .schema .legend-row .pellet.g { background: var(--green); }
+      .schema .legend-row .pellet.o { background: var(--orange); }
+      .schema .legend-row .pellet.y { background: var(--gold); }
+    </style>
+
+    <div class="slide-num">slide 3 · the shape</div>
+    <h2 class="slide-title">SpotlightReport schema</h2>
+    <div class="slide-sub">New module — <code>src/spotlights_engine/schemas/spotlight_report.py</code>. No edits to existing schemas.</div>
+
+    <div class="schema" style="margin-top: 12px;">
+      <div class="head">SpotlightReport</div>
+      <div class="sub">schema_version: "1" &nbsp;·&nbsp; echoed inputs: <code>project_tree</code>, <code>context</code>&nbsp; · &nbsp;diagnostics: <code>run</code>, <code>issues</code></div>
+
+      <div class="legend-row">
+        <div class="lhead">Color language used throughout the deck</div>
+        <span class="lkey"><span class="lname"><span class="pellet b"></span><b>research_finding</b></span><span class="ld">— Change synthesized from a literature finding</span></span>
+        <span class="lkey"><span class="lname"><span class="pellet g"></span><b>agent_knowledge</b></span><span class="ld">— Change proposed by an agent (claude / codex)</span></span>
+        <span class="lkey"><span class="lname"><span class="pellet o"></span><b>telemetry_anomaly</b></span><span class="ld">— Change derived from a signal-pipeline anomaly</span></span>
+        <span class="lkey"><span class="lname"><span class="pellet y"></span><b>finding ref</b></span><span class="ld">— <code>find-NNNN</code> id pointing at <code>ResultFinding</code></span></span>
+      </div>
+
+      <div class="schema-row">
+        <div class="lbl"><span class="name">candidates[]</span><span class="desc">flat, top-level</span></div>
+        <div>
+          <div class="typebox cand">
+            <b>ResultCandidate</b>
+            <div class="grp"><span class="gh">identity</span><span class="gv"><b>id</b>: cand-NNNN &nbsp;·&nbsp; <b>original_id</b>: cand-NNNN <span class="mute">(source pipeline's per-module-scoped id)</span></span></div>
+            <div class="grp"><span class="gh">module</span><span class="gv"><b>module_qualified_name</b>: str | <b>None</b> <span class="mute">(None when no module matches)</span></span></div>
+            <div class="grp"><span class="gh">location</span><span class="gv">file, line_start/end, symbol, kind</span></div>
+            <div class="grp"><span class="gh">narrative</span><span class="gv">description, current_approach, evolve_rationale</span></div>
+            <div class="grp"><span class="gh">impact</span><span class="gv">estimated_impact[_explanation]</span></div>
+            <div class="grp"><span class="gh">refs in</span><span class="gv"><span class="ref-chip o">anomaly_refs</span> <span class="mute">→ <code>Anomaly.anomaly_id</code></span></span></div>
+            <div class="grp"><span class="gh">state</span><span class="gv">CandidateState</span></div>
+
+            <div class="typebox chg">
+              <div class="grp"><span class="gh">identity</span><span class="gv"><b>id</b>: chg-cand-NNNN-NN <span class="mute">(globally unique within the report)</span></span></div>
+              <div class="grp"><span class="gh">provenance</span><span class="gv"><b>source</b>: <span class="pellet b" style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--blue);vertical-align:-1px;"></span> | <span class="pellet g" style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--green);vertical-align:-1px;"></span> | <span class="pellet o" style="display:inline-block;width:10px;height:10px;border-radius:2px;background:var(--orange);vertical-align:-1px;"></span> &nbsp; <span class="ref-chip n">source_refs</span> <span class="mute">→ <code>finding_id</code> | <code>anomaly_id</code></span></span></div>
+              <div class="grp"><span class="gh">agent</span><span class="gv"><b>author</b>: str | None <span class="mute">— populated only when source = <span style="color: var(--green);">agent_knowledge</span> (e.g. "claude", "codex")</span></span></div>
+              <div class="grp"><span class="gh">narrative</span><span class="gv"><b>title, description, rationale</b> <span class="mute">(always populated)</span></span></div>
+              <div class="grp"><span class="gh">structured</span><span class="gv mute">change_type · mechanism · required_changes · expected_effect · evaluation_metric &nbsp;(Optional)</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="schema-row">
+        <div class="lbl"><span class="name">findings[]</span><span class="desc">flat, top-level</span></div>
+        <div>
+          <div class="typebox find">
+            <b>ResultFinding</b>
+            <div class="grp"><span class="gh">identity</span><span class="gv"><b>finding_id</b>: find-NNNN &nbsp;·&nbsp; <b>original_finding_id</b>: find-NNNN</span></div>
+            <div class="grp"><span class="gh">module</span><span class="gv"><b>module_qualified_name</b>: str</span></div>
+            <div class="grp"><span class="gh">payload</span><span class="gv">title, url, source_type, technique_summary, supporting_evidence</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="schema-row">
+        <div class="lbl"><span class="name">anomalies[]</span><span class="desc">flat, signal-only</span></div>
+        <div>
+          <div class="typebox anom">
+            <b>Anomaly</b> <span style="color: var(--muted); font-family: 'SF Mono', Menlo, Consolas, monospace; font-size: 11px;">(extra="allow")</span>
+            <div class="grp"><span class="gh">identity</span><span class="gv"><b>anomaly_id</b>: str</span></div>
+            <div class="grp"><span class="gh">payload</span><span class="gv">type, description</span></div>
+            <div class="grp"><span class="gh">refs in</span><span class="gv mute">ResultCandidate.anomaly_refs · Change.source_refs <span style="color: var(--orange);">(telemetry_anomaly)</span></span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="schema-row">
+        <div class="lbl"><span class="name">run</span><span class="desc">RunInfo</span></div>
+        <div>
+          <div class="typebox run">
+            <b>RunInfo</b>
+            <div class="grp"><span class="gh">pipeline</span><span class="gv"><b>"deep_research"</b> | <b>"signal"</b></span></div>
+            <div class="grp"><span class="gh">id / time</span><span class="gv">run_id, started_at, finished_at, model</span></div>
+            <div class="grp"><span class="gh">aggregate</span><span class="gv">cost_usd, duration_s <span class="mute">— per-step diag stays in side-files</span></span></div>
+            <div class="grp"><span class="gh">knobs</span><span class="gv mute">parameters: dict[str, object]</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Slide 4 — Before / After tree -->
+  <section class="slide">
+    <div class="slide-num">slide 4 · before vs after</div>
+    <h2 class="slide-title">Structural difference</h2>
+    <div class="slide-sub">Same work, different envelope. Today's per-module nesting collapses; module identity becomes a string label on each record.</div>
+
+    <div class="ba">
+      <div class="left">
+        <div class="head">Today — SpotlightsResult (DR)</div>
+<div class="tree">
+SpotlightsResult<br>
+<span class="indent-1">├─ <span class="key">project_tree</span>, <span class="key">context</span></span><br>
+<span class="indent-1">├─ <span class="key">module_runs</span> {</span><br>
+<span class="indent-2">│  <span class="mod">"v1.kv_offload"</span></span><br>
+<span class="indent-3">│  ├─ candidates [</span><br>
+<span class="indent-4">│  │  <span class="id">cand-0001</span> &nbsp;<span class="pellet b"></span><span class="pellet b"></span><span class="pellet b"></span><span class="pellet b"></span><span class="pellet g"></span><span class="pellet g"></span></span><br>
+<span class="indent-4">│  │     <span class="meta">└─ deep_research_proposals[4]</span></span><br>
+<span class="indent-4">│  │     <span class="meta">└─ agent_proposals[2]</span></span><br>
+<span class="indent-4">│  │  <span class="id">cand-0002</span> &nbsp;<span class="pellet g"></span><span class="pellet g"></span></span><br>
+<span class="indent-4">│  │  <span class="id">cand-0003</span> &nbsp;…</span><br>
+<span class="indent-3">│  └─ findings [<span class="id">find-0001</span>…<span class="id">find-0011</span>]</span><br>
+<span class="indent-2">│  <span class="mod">"v1.engine"</span></span><br>
+<span class="indent-3">│  ├─ candidates [<span class="id">cand-0001</span>, …] <span class="meta">← collide</span></span><br>
+<span class="indent-3">│  └─ findings [<span class="id">find-0001</span>, …]</span><br>
+<span class="indent-1">├─ <span class="meta">renderer_result</span></span><br>
+<span class="indent-1">├─ <span class="meta">extractor_invocation</span></span><br>
+<span class="indent-1">└─ <span class="meta">per_module_telemetry</span></span><br>
+</div>
+      </div>
+
+      <div class="right">
+        <div class="head">Proposed — SpotlightReport</div>
+<div class="tree">
+SpotlightReport<br>
+<span class="indent-1">├─ <span class="key">project_tree</span>, <span class="key">context</span></span><br>
+<span class="indent-1">├─ <span class="key">candidates</span> [</span><br>
+<span class="indent-2">│  <span class="id">cand-0001</span> <span class="meta">[v1.kv_offload]</span> &nbsp;<span class="pellet b"></span><span class="pellet b"></span><span class="pellet b"></span><span class="pellet b"></span><span class="pellet g"></span><span class="pellet g"></span></span><br>
+<span class="indent-2">│  <span class="id">cand-0002</span> <span class="meta">[v1.kv_offload]</span> &nbsp;<span class="pellet g"></span><span class="pellet g"></span></span><br>
+<span class="indent-2">│  <span class="id">cand-0003</span> <span class="meta">[v1.kv_offload]</span></span><br>
+<span class="indent-2">│  <span class="id">cand-NNNN</span> <span class="meta">[v1.engine]</span> <span class="meta">← unique globally</span></span><br>
+<span class="indent-1">│ ]</span><br>
+<span class="indent-1">├─ <span class="key">findings</span> [<span class="id">find-0001</span>…<span class="id">find-NNNN</span>]</span><br>
+<span class="indent-1">├─ <span class="key">anomalies</span> [] &nbsp;<span class="meta">— DR has none</span></span><br>
+<span class="indent-1">├─ <span class="key">run</span> {pipeline, cost_usd, duration_s, …}</span><br>
+<span class="indent-1">└─ <span class="key">issues</span></span><br>
+</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Slide 5 — Worked example -->
+  <section class="slide">
+    <style>
+      .s5-note {
+        margin-top: 14px; padding: 10px 14px;
+        border: 1px solid var(--line); border-left: 3px solid var(--neutral);
+        border-radius: 3px; background: #f5f5f7;
+        font-size: 12px; line-height: 1.5; color: var(--fg);
+      }
+      .s5-note .nh {
+        font-size: 10px; color: var(--muted); font-weight: 600;
+        text-transform: uppercase; letter-spacing: 0.08em;
+        margin-bottom: 4px;
+      }
+      .s5-note code { font-size: 11px; }
+      .s5-note .nrow { display: grid; grid-template-columns: 110px 1fr; gap: 10px; padding: 1px 0; }
+      .s5-note .nrow .nk { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 10.5px; color: var(--muted); font-style: italic; }
+    </style>
+
+    <div class="slide-num">slide 5 · worked example</div>
+    <h2 class="slide-title">cand-0001 — _CACHE_POLICIES (v1.kv_offload)</h2>
+    <div class="slide-sub">Four DR proposals + two agent proposals → six provenance-tagged changes. The right-pane ids are illustrative — they assume an earlier-walked module contributed 2 candidates and 9 findings, so this candidate lands at <code>cand-0003</code> in the global list.</div>
+
+    <div class="worked">
+      <div class="pane old">
+        <div class="head">Today — embedded under module_runs</div>
+        <div class="candbox">
+          <span class="id">cand-0001</span> · <span class="sym">_CACHE_POLICIES</span>
+          <div class="meta">module_runs["v1.kv_offload"].candidates[0] &nbsp;·&nbsp; module-scoped ids</div>
+        </div>
+        <div class="inner-list">
+          <div class="lbl">deep_research_proposals[4] &nbsp;<span style="color: var(--muted); text-transform: none; font-style: italic;">findings 8–11 of v1.kv_offload's 11 findings</span></div>
+          <div class="change-card b"><span class="cid">[0]</span><span>S3-FIFO<span class="ref-tag">find-0008</span></span></div>
+          <div class="change-card b"><span class="cid">[1]</span><span>TinyLFU<span class="ref-tag">find-0009</span></span></div>
+          <div class="change-card b"><span class="cid">[2]</span><span>GreedyDual-Size<span class="ref-tag">find-0010</span></span></div>
+          <div class="change-card b"><span class="cid">[3]</span><span>SIEVE<span class="ref-tag">find-0011</span></span></div>
+        </div>
+        <div class="inner-list">
+          <div class="lbl">agent_proposals[2]</div>
+          <div class="change-card g"><span class="cid">[0] claude</span><span>PrefixChainCachePolicy</span></div>
+          <div class="change-card g"><span class="cid">[1] codex</span><span>KVGroupStripeCachePolicy</span></div>
+        </div>
+      </div>
+
+      <div class="pane new">
+        <div class="head">Proposed — flat with provenance tags</div>
+        <div class="candbox">
+          <span class="id">cand-0003</span> · <span class="sym">_CACHE_POLICIES</span>
+          <div class="meta">module_qualified_name = "v1.kv_offload" &nbsp;·&nbsp; <b style="color: var(--fg);">original_id = "cand-0001"</b> &nbsp;·&nbsp; globally-unique ids</div>
+        </div>
+        <div class="inner-list">
+          <div class="lbl">changes[6] &nbsp;<span style="color: var(--muted); text-transform: none; font-style: italic;">two proposal lists folded into one provenance-tagged list</span></div>
+          <div class="change-card b"><span class="cid">chg-cand-0003-01</span><span>S3-FIFO<span class="ref-tag">find-0017</span><span style="color: var(--muted); font-size: 10px; margin-left: 6px;">← find-0008</span></span></div>
+          <div class="change-card b"><span class="cid">chg-cand-0003-02</span><span>TinyLFU<span class="ref-tag">find-0018</span><span style="color: var(--muted); font-size: 10px; margin-left: 6px;">← find-0009</span></span></div>
+          <div class="change-card b"><span class="cid">chg-cand-0003-03</span><span>GreedyDual-Size<span class="ref-tag">find-0019</span><span style="color: var(--muted); font-size: 10px; margin-left: 6px;">← find-0010</span></span></div>
+          <div class="change-card b"><span class="cid">chg-cand-0003-04</span><span>SIEVE<span class="ref-tag">find-0020</span><span style="color: var(--muted); font-size: 10px; margin-left: 6px;">← find-0011</span></span></div>
+          <div class="change-card g"><span class="cid">chg-cand-0003-05</span><span>PrefixChainCachePolicy <span style="color: var(--muted);">· author=<b style="color: var(--fg);">claude</b></span></span></div>
+          <div class="change-card g"><span class="cid">chg-cand-0003-06</span><span>KVGroupStripeCachePolicy <span style="color: var(--muted);">· author=<b style="color: var(--fg);">codex</b></span></span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="s5-note">
+      <div class="nh">Renumbering — what the right pane shows</div>
+      <div class="nrow">
+        <span class="nk">candidate id</span>
+        <span><code>cand-0001</code> (module-scoped) → <code>cand-0003</code> (global). Old id preserved on <code>original_id</code>; the <code>chg-cand-NNNN-NN</code> pattern picks up the new id in every embedded change.</span>
+      </div>
+      <div class="nrow">
+        <span class="nk">finding ids</span>
+        <span><code>find-0008..find-0011</code> (module-scoped) → <code>find-0017..find-0020</code> (global). <code>source_refs</code> on each Change is rewritten to the new ids; old ids preserved on each <code>ResultFinding.original_finding_id</code>.</span>
+      </div>
+      <div class="nrow">
+        <span class="nk">why these numbers</span>
+        <span>Illustrative — assumes one earlier-walked module contributed 2 candidates and 9 findings. Actual offsets depend on alphabetical walk order across all modules in the run (open question Q1, slide 7).</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Slide 6 — Adapters -->
+  <section class="slide">
+    <div class="slide-num">slide 6 · adapters</div>
+    <h2 class="slide-title">Output-boundary adapters</h2>
+    <div class="slide-sub">One per pipeline. Pure: no I/O at the schema layer, no LLM calls, no prompt changes. Existing internal artifacts and result types stay exactly as they are.</div>
+
+    <div class="pipe-block">
+      <div class="pipe-label">Deep-research pipeline</div>
+      <div class="pipe">
+        <div class="step in">
+          <div class="h">SpotlightsResult</div>
+          <div class="li">module_runs · per-module candidates with deep_research_proposals[] + agent_proposals[] · diagnostic envelopes</div>
+        </div>
+        <div class="a">→</div>
+        <div class="step adapt">
+          <div class="h">DR adapter</div>
+          <div class="li">walk module_runs in deterministic order · renumber globally · merge proposal lists with provenance tags · rewrite source_refs to renumbered finding ids · sum cost/duration into RunInfo</div>
+        </div>
+        <div class="a">→</div>
+        <div class="step out">
+          <div class="h">SpotlightReport</div>
+          <div class="li">written to <code>&lt;artifacts_dir&gt;/spotlight_report.json</code> — existing <code>result.json</code> unchanged</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="pipe-block">
+      <div class="pipe-label">Signal pipeline</div>
+      <div class="pipe">
+        <div class="step in">
+          <div class="h">SignalPipelineResult + run-dir</div>
+          <div class="li">01_signals/anomalies.json · 03_candidates/candidates.json · 04_changes/&lt;cand-id&gt;.json</div>
+        </div>
+        <div class="a">→</div>
+        <div class="step adapt">
+          <div class="h">Signal adapter</div>
+          <div class="li">map Candidate.file → ProjectTree.modules[*] (deepest prefix wins; None if no match) · renumber · convert stage-04 Change → unified Change with source = telemetry_anomaly</div>
+        </div>
+        <div class="a">→</div>
+        <div class="step out">
+          <div class="h">SpotlightReport</div>
+          <div class="li">written to <code>runs/&lt;id&gt;/spotlight_report.json</code> — all per-stage files unchanged</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Slide 7 — Open questions -->
+  <section class="slide">
+    <div class="slide-num">slide 7 · open</div>
+    <h2 class="slide-title">For tomorrow's walk-through</h2>
+    <div class="slide-sub">The spec locks most of §4. These three are still open and worth discussing live.</div>
+
+    <div class="questions">
+      <div class="qcard">
+        <div class="qn">Q1 — renumbering</div>
+        <div class="qt">Deterministic id order across re-runs?</div>
+        <div class="qd">Spec recommendation: alphabetical by <code>module_qualified_name</code>, then in-module stored order. Two re-conversions of the same <code>SpotlightsResult</code> would then produce identical reports.</div>
+        <div class="qref">spec §4.3</div>
+      </div>
+      <div class="qcard">
+        <div class="qn">Q2 — unmapped candidates</div>
+        <div class="qt"><code>None</code> over a sentinel string?</div>
+        <div class="qd">Signal candidates whose <code>file</code> matches no extracted module: <code>module_qualified_name = None</code>. Sentinel (<code>"_unassigned"</code>) was rejected because it can collide with real names. Confirm.</div>
+        <div class="qref">spec §4.5</div>
+      </div>
+      <div class="qcard">
+        <div class="qn">Q3 — relation to PR #A</div>
+        <div class="qt">Replace, supersede, or land alongside?</div>
+        <div class="qd">PR #A from the 2026-06-14 unification plan introduces a flat <code>changes.json</code> with <code>candidate_ref</code>. This proposal embeds <code>Change</code> and drops <code>candidate_ref</code>.</div>
+        <div class="qref">spec §4.4</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Slide 8 — Out of scope -->
+  <section class="slide">
+    <div class="slide-num">slide 8 · out of scope</div>
+    <h2 class="slide-title">What this proposal explicitly does NOT change</h2>
+    <div class="slide-sub">If it isn't in this list, it isn't in this proposal. The report is additive only.</div>
+
+    <div class="scope-list">
+      <div class="scope-item"><span class="x">×</span><div><b>Existing schemas</b><span class="d">Candidate, DeepResearchProposal, AgentProposal, SpotlightsResult, ModuleRun, signal Change, SignalPipelineResult — all unchanged.</span></div></div>
+      <div class="scope-item"><span class="x">×</span><div><b>Prompts</b><span class="d">No changes anywhere. No new fields the LLMs must produce.</span></div></div>
+      <div class="scope-item"><span class="x">×</span><div><b>Per-stage on-disk artifacts</b><span class="d">DR per-module pages, signal-pipeline 01_signals / 03_candidates / 04_changes — all left as today.</span></div></div>
+      <div class="scope-item"><span class="x">×</span><div><b>Renderer</b><span class="d">Keeps reading the per-module-nested SpotlightsResult. Renderer migration is a separate project.</span></div></div>
+      <div class="scope-item"><span class="x">×</span><div><b>v2 Change fields</b><span class="d">Required change_type, must_preserve, additional_files — separate decision driven by executor / validation needs.</span></div></div>
+      <div class="scope-item"><span class="x">×</span><div><b>Pipeline-level changes</b><span class="d">No orchestrator merge, no folder reorg (PR #B), no stage 05 resurrection.</span></div></div>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>
