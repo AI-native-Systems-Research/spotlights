@@ -864,7 +864,7 @@ async def _run_module(
             P.clear_agent_proposals_artifacts(module_paths)
 
         if run_step3:
-            _log.info("[%s] deep_research: start (Codex session)", qn)
+            _log.info("[%s] deep_research: start", qn)
             try:
                 research_output, dr_duration = await _do_step3(
                     qn=qn,
@@ -909,7 +909,7 @@ async def _run_module(
                 return cp
 
             _log.info(
-                "[%s] deep_research: complete in %.1fs — %d findings",
+                "[%s] deep_research: complete in %.1fs — %d findings (after dedup)",
                 qn,
                 dr_duration,
                 len(research_output.findings),

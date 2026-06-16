@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import shutil
 import subprocess
 import sys
 import tempfile
@@ -13,6 +12,11 @@ from pathlib import Path
 from typing import IO
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from spotlights_engine.module_deep_research.agent_exec import (
+    AgentExecResult,
+    resolve_cli_executable,
+)
 
 
 class CodexExecOptions(BaseModel):
@@ -37,21 +41,10 @@ class CodexExecOptions(BaseModel):
     stream_logs: bool = False
 
 
-class CodexExecResult(BaseModel):
+class CodexExecResult(AgentExecResult):
     """Captured result from one `codex exec` invocation."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    command: list[str]
-    returncode: int
-    stdout: str
-    stderr: str
-    final_message: str | None
     output_last_message: Path | None
-
-    @property
-    def ok(self) -> bool:
-        return self.returncode == 0
 
     def raise_for_status(self) -> None:
         if self.returncode != 0:
@@ -64,6 +57,8 @@ class CodexExecResult(BaseModel):
 
 class CodexExecClient:
     """Run Codex in non-interactive mode from Python."""
+
+    name = "codex"
 
     def __init__(self, options: CodexExecOptions | None = None) -> None:
         self.options = options or CodexExecOptions()
@@ -82,12 +77,7 @@ class CodexExecClient:
             output_last_message = Path(opt.output_last_message).expanduser().resolve()
             output_last_message.parent.mkdir(parents=True, exist_ok=True)
 
-        # Resolve via shutil.which so Windows finds the .CMD/.ps1 shim.
-        # Python's subprocess on Windows doesn't follow PATHEXT for an
-        # unqualified argv[0], so a bare "codex" → FileNotFoundError
-        # even when the CLI is on PATH.
-        codex_resolved = shutil.which(opt.codex_bin) or opt.codex_bin
-        cmd = [codex_resolved]
+        cmd = [resolve_cli_executable(opt.codex_bin)]
         if opt.model:
             cmd += ["--model", opt.model]
         if opt.profile:
