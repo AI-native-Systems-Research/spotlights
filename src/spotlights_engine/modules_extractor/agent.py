@@ -210,6 +210,15 @@ def run_extraction(
         output_tokens=_as_int(usage.get("output_tokens")),
     )
 
+    if artifacts_dir is not None:
+        _write_meta(
+            artifacts_dir,
+            model=_extract_init_model(result.stdout),
+            cost_usd=invocation.cost_usd,
+            duration_s=invocation.duration_s,
+            num_turns=_as_int(result_event.get("num_turns")),
+        )
+
     return ExtractionRunResult(project_tree=tree, invocation=invocation, raw_payload=payload)
 
 
@@ -283,6 +292,46 @@ def _as_float(v: object) -> float | None:
         return float(v)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return None
+
+
+def _extract_init_model(stdout: bytes) -> str | None:
+    """First stream-json line carries the resolved model id on `system/init`.
+    Returns None when the line is unparseable, missing, or not an init event."""
+    for raw_line in stdout.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            return None
+        if isinstance(obj, dict) and obj.get("type") == "system" and obj.get("subtype") == "init":
+            model = obj.get("model")
+            return model if isinstance(model, str) else None
+        return None
+    return None
+
+
+def _write_meta(
+    artifacts_dir: Path,
+    *,
+    model: str | None,
+    cost_usd: float | None,
+    duration_s: float,
+    num_turns: int | None,
+) -> None:
+    """Persist meta.json next to raw_stdout.log so the signal_pipeline runner's
+    `_aggregate_meta` populates `status.json` with model + cost for stage 02.
+    Same shape as `signal_pipeline.claude_subprocess._write_meta`."""
+    meta = {
+        "model": model,
+        "cost_usd": cost_usd,
+        "duration_s": round(duration_s, 3),
+        "num_turns": num_turns,
+    }
+    (artifacts_dir / "meta.json").write_text(
+        json.dumps(meta, indent=2) + "\n", encoding="utf-8"
+    )
 
 
 __all__ = [

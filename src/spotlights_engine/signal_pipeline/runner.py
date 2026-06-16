@@ -193,9 +193,8 @@ class StageStatus(BaseModel):
     error: str | None = None
     issues: list[str] = Field(default_factory=list)
     # Populated post-stage from `_logs/<stage>/**/meta.json` written by
-    # `claude_subprocess.run_claude`. Stage 02 goes through main's
-    # `modules_extractor` (no meta.json), so these stay None for it until
-    # main grows equivalent metadata.
+    # `claude_subprocess.run_claude` (and by `modules_extractor.agent` for
+    # stage 02, in the same shape).
     model: str | None = None
     cost_usd: float | None = None
     duration_s: float | None = None
