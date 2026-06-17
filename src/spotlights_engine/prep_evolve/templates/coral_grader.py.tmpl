@@ -68,15 +68,27 @@ class Grader(TaskGrader):
         )
 
     def _changed_files(self) -> list[str]:
-        """Files changed in the agent worktree relative to its base commit."""
-        proc = subprocess.run(
-            ["git", "diff", "--name-only", "HEAD"],
-            cwd=self.codebase_path,
-            capture_output=True,
-            text=True,
-        )
-        names = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
-        # Include staged/untracked too (best effort).
+        """Files the agent changed, relative to the fork point.
+
+        CORAL grades each attempt in a *detached* worktree checked out at the
+        agent's commit (`git worktree add --detach <commit>`), so the agent's
+        edits are already in HEAD — `git diff HEAD` and `git status` are both
+        empty here. To see what the agent actually changed we diff HEAD against
+        the base commit it branched from (the post-seed default-branch tip),
+        located via merge-base. Falls back to the root commit if no default
+        branch ref resolves.
+        """
+        base = self._base_commit()
+        names: list[str] = []
+        if base:
+            proc = subprocess.run(
+                ["git", "diff", "--name-only", base, "HEAD"],
+                cwd=self.codebase_path,
+                capture_output=True,
+                text=True,
+            )
+            names = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
+        # Include any uncommitted working-tree changes too (best effort).
         proc2 = subprocess.run(
             ["git", "status", "--porcelain"],
             cwd=self.codebase_path,
@@ -88,3 +100,28 @@ class Grader(TaskGrader):
             if name and name not in names:
                 names.append(name)
         return names
+
+    def _base_commit(self) -> str:
+        """Resolve the commit the agent branched from (fork point).
+
+        Tries merge-base of HEAD against each likely default-branch ref; falls
+        back to the repository's root commit. Returns "" if nothing resolves.
+        """
+        for ref in ("origin/HEAD", "main", "master", "origin/main", "origin/master"):
+            mb = subprocess.run(
+                ["git", "merge-base", "HEAD", ref],
+                cwd=self.codebase_path,
+                capture_output=True,
+                text=True,
+            )
+            base = mb.stdout.strip()
+            if mb.returncode == 0 and base:
+                return base
+        root = subprocess.run(
+            ["git", "rev-list", "--max-parents=0", "HEAD"],
+            cwd=self.codebase_path,
+            capture_output=True,
+            text=True,
+        )
+        lines = [ln.strip() for ln in root.stdout.splitlines() if ln.strip()]
+        return lines[-1] if lines else ""
