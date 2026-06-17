@@ -24,8 +24,8 @@ from . import _fixtures as fx
 
 def _candidate(tmp_path: Path):
     loaded = load_result(fx.write_result(tmp_path))
-    run = resolve_module_run(loaded, "v1.attention")
-    candidates = resolve_candidates(run, "v1.attention")
+    run = resolve_module_run(loaded, "v1/attention")
+    candidates = resolve_candidates(run, "v1/attention")
     return resolve_candidate(candidates, "cand-0002")
 
 

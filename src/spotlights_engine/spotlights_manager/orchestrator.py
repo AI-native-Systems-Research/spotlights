@@ -93,10 +93,6 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def _slash_to_dot(qn: str) -> str:
-    return qn.replace("/", ".")
-
-
 def _issue(
     step: PipelineStep, message: str, *, recoverable: bool, severity: str = "error"
 ) -> StepIssue:
@@ -259,6 +255,17 @@ def _ensure_resume_compatible(
             "spotlights_manager run dir exists and resume=False; "
             "remove the directory or pass a fresh artifacts_dir",
             run_dir=str(paths.root),
+        )
+
+    existing_schema_version = existing.get("schema_version", 1)
+    if existing_schema_version != P.SCHEMA_VERSION:
+        raise ResumeMismatchError(
+            "manager run dir schema_version "
+            f"{existing_schema_version!r} is incompatible with the current "
+            f"schema_version {P.SCHEMA_VERSION!r} (qualified-name format "
+            "changed); start a fresh artifacts_dir",
+            existing=existing_schema_version,
+            current=P.SCHEMA_VERSION,
         )
 
     if existing.get("input_fingerprint") != input_fp:
@@ -1309,14 +1316,14 @@ async def _run_async(
     # Step 1.
     tree, invocation = _run_extractor_if_needed(input, config, paths, manifest)
 
-    # Compute target list (dot-form keys).
-    leaves: list[tuple[str, Module]] = [
-        (_slash_to_dot(qn), m) for qn, m in tree.leaves()
-    ]
+    # Compute target list. Qualified names are slash-form (source-root-relative
+    # paths) and are the single canonical key throughout — `module_runs`, slugs,
+    # the CLI filter, and `EvolveSpec` all key on this string.
+    leaves: list[tuple[str, Module]] = list(tree.leaves())
     leaf_qns = [qn for qn, _ in leaves]
     selected = apply_filter(leaf_qns, config.module_filter)
 
-    # Slug collision check (theoretical — dot form is unique by construction).
+    # Slug collision check (theoretical — slash form is unique by construction).
     seen_slugs: dict[str, str] = {}
     for qn in selected:
         slug = P.slug_for(qn)

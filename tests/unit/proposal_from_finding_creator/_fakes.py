@@ -30,7 +30,7 @@ def make_candidate(idx: int = 0) -> Candidate:
     )
 
 
-def make_candidates(n: int = 1, qn: str = "v1.kv_offload") -> Candidates:
+def make_candidates(n: int = 1, qn: str = "v1/kv_offload") -> Candidates:
     return Candidates(
         module_qualified_name=qn,
         candidates=[make_candidate(i) for i in range(n)],

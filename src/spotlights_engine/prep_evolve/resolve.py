@@ -3,9 +3,9 @@
 This module is the only place that knows how to:
 - read a `result.json` (CLI sidecar `SpotlightsManagerResult` shape or the
   architecture-shaped `SpotlightsResult`) into the core fields we need,
-- convert dot-form qualified names to slash-form for `ProjectTree` lookups,
 - resolve the target repo path from `--repo` or the rendered `index.md`,
-- locate a module run + candidate, raising clear errors on a miss.
+- locate a module run + candidate by slash-form qualified name, raising clear
+  errors on a miss.
 
 Everything here is pure over its inputs (no bundle writes, no live-repo reads
 beyond the optional `index.md` text passed in by the caller).
@@ -32,7 +32,7 @@ from spotlights_engine.schemas.project import Module, ProjectTree
 class LoadedResult:
     """The core slice of a Spotlights result the extractor consumes.
 
-    `module_runs_raw` keeps the raw per-module dicts (keyed by dot-form qn) so
+    `module_runs_raw` keeps the raw per-module dicts (keyed by slash-form qn) so
     we can pull `candidates`/`findings` without depending on the manager's
     telemetry-rich `ModuleRun` wrapper being importable.
     """
@@ -86,55 +86,44 @@ def load_result(path: Path) -> LoadedResult:
     )
 
 
-def dot_to_slash(dot_qn: str) -> str:
-    """`v1.attention` -> `v1/attention` for `ProjectTree` lookups."""
-    return dot_qn.replace(".", "/")
-
-
-def slash_to_dot(slash_qn: str) -> str:
-    """`v1/attention` -> `v1.attention` for `module_runs` keys / output paths."""
-    return slash_qn.replace("/", ".")
-
-
-def resolve_module(tree: ProjectTree, dot_qn: str) -> Module:
-    """Resolve a `Module` from a dot-form qn via the slash-form tree key."""
-    slash_qn = dot_to_slash(dot_qn)
-    module = tree.resolve(slash_qn)
+def resolve_module(tree: ProjectTree, qn: str) -> Module:
+    """Resolve a `Module` by its slash-form qualified name (the canonical key)."""
+    module = tree.resolve(qn)
     if module is None:
-        available = ", ".join(slash_to_dot(qn) for qn, _ in tree.walk())
+        available = ", ".join(node_qn for node_qn, _ in tree.walk())
         raise SelectionError(
-            f"module {dot_qn!r} not found in project_tree. "
+            f"module {qn!r} not found in project_tree. "
             f"Available modules: {available or '(none)'}"
         )
     return module
 
 
-def resolve_module_run(loaded: LoadedResult, dot_qn: str) -> dict:
-    """Return the raw module-run dict keyed by dot-form qn."""
-    run = loaded.module_runs_raw.get(dot_qn)
+def resolve_module_run(loaded: LoadedResult, qn: str) -> dict:
+    """Return the raw module-run dict keyed by slash-form qn."""
+    run = loaded.module_runs_raw.get(qn)
     if run is None:
         available = ", ".join(sorted(loaded.module_runs_raw)) or "(none)"
         raise SelectionError(
-            f"no module run for {dot_qn!r} in module_runs. "
+            f"no module run for {qn!r} in module_runs. "
             f"Available runs: {available}"
         )
     if not isinstance(run, dict):
-        raise SelectionError(f"module run for {dot_qn!r} is not an object")
+        raise SelectionError(f"module run for {qn!r} is not an object")
     return run
 
 
-def resolve_candidates(run: dict, dot_qn: str) -> Candidates:
+def resolve_candidates(run: dict, qn: str) -> Candidates:
     """Validate and return the `Candidates` object from a raw module run."""
     raw = run.get("candidates")
     if not raw:
         raise SelectionError(
-            f"module run {dot_qn!r} has no candidates (discovery may have failed)"
+            f"module run {qn!r} has no candidates (discovery may have failed)"
         )
     try:
         return Candidates.model_validate(raw)
     except Exception as exc:  # noqa: BLE001
         raise SelectionError(
-            f"candidates for {dot_qn!r} did not validate: "
+            f"candidates for {qn!r} did not validate: "
             f"{type(exc).__name__}: {exc}"
         ) from exc
 
@@ -151,7 +140,7 @@ def resolve_candidate(candidates: Candidates, candidate_id: str) -> Candidate:
     )
 
 
-def resolve_findings(run: dict, dot_qn: str) -> list[Finding]:
+def resolve_findings(run: dict, qn: str) -> list[Finding]:
     """Validate and return the module's findings list (may be empty)."""
     raw = run.get("findings") or []
     findings: list[Finding] = []
@@ -160,7 +149,7 @@ def resolve_findings(run: dict, dot_qn: str) -> list[Finding]:
             findings.append(Finding.model_validate(entry))
         except Exception as exc:  # noqa: BLE001
             raise SelectionError(
-                f"finding in module {dot_qn!r} did not validate: "
+                f"finding in module {qn!r} did not validate: "
                 f"{type(exc).__name__}: {exc}"
             ) from exc
     return findings
@@ -223,7 +212,6 @@ def resolve_repo_path(
 
 __all__ = [
     "LoadedResult",
-    "dot_to_slash",
     "load_result",
     "parse_repo_path_from_index",
     "resolve_candidate",
@@ -232,5 +220,4 @@ __all__ = [
     "resolve_module",
     "resolve_module_run",
     "resolve_repo_path",
-    "slash_to_dot",
 ]

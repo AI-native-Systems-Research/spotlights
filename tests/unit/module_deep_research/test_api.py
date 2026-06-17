@@ -32,7 +32,7 @@ class FakeRunner:
 
 def _tree() -> ProjectTree:
     return ProjectTree(
-        repository=Repository(name="demo", summary="Demo repository."),
+        repository=Repository(name="demo", summary="Demo repository.", source_root="src"),
         modules=[
             Module(
                 name="inference",
@@ -49,7 +49,7 @@ def _tree() -> ProjectTree:
     )
 
 
-def _request(module_qualified_name: str = "inference.attention") -> ModuleDeepResearchInput:
+def _request(module_qualified_name: str = "inference/attention") -> ModuleDeepResearchInput:
     return ModuleDeepResearchInput(
         project_tree=_tree(),
         module_qualified_name=module_qualified_name,
@@ -59,8 +59,8 @@ def _request(module_qualified_name: str = "inference.attention") -> ModuleDeepRe
     )
 
 
-def test_resolve_target_module_accepts_dot_qualified_name() -> None:
-    module = resolve_target_module(_tree(), "inference.attention")
+def test_resolve_target_module_by_slash_qualified_name() -> None:
+    module = resolve_target_module(_tree(), "inference/attention")
 
     assert module is not None
     assert module.path == "src/inference/attention"

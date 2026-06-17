@@ -34,7 +34,11 @@ def _build_argparser() -> argparse.ArgumentParser:
         default=None,
         help="Rendered index.md; used only as a --repo fallback.",
     )
-    p.add_argument("--module", required=True, help="Dot-form qn, e.g. v1.attention.")
+    p.add_argument(
+        "--module",
+        required=True,
+        help="Slash-form qualified name, e.g. v1/attention.",
+    )
     p.add_argument("--candidate", required=True, help="Candidate id, e.g. cand-0002.")
     p.add_argument(
         "--repo",

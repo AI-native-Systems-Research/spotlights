@@ -14,7 +14,6 @@ from spotlights_engine.prep_evolve.extract import (
     parse_performance_oracle,
 )
 from spotlights_engine.prep_evolve.resolve import (
-    dot_to_slash,
     load_result,
     parse_repo_path_from_index,
     resolve_candidate,
@@ -23,7 +22,6 @@ from spotlights_engine.prep_evolve.resolve import (
     resolve_module,
     resolve_module_run,
     resolve_repo_path,
-    slash_to_dot,
 )
 from spotlights_engine.prep_evolve.spec import SourceRevision
 from spotlights_engine.prep_evolve.validate_target import ValidatedCandidate
@@ -35,29 +33,24 @@ def _load(tmp_path: Path):
     return load_result(fx.write_result(tmp_path))
 
 
-def test_dot_slash_roundtrip() -> None:
-    assert dot_to_slash("v1.attention") == "v1/attention"
-    assert slash_to_dot("v1/attention") == "v1.attention"
-
-
 def test_resolve_nested_submodule(tmp_path: Path) -> None:
     loaded = _load(tmp_path)
-    module = resolve_module(loaded.project_tree, "v1.attention")
+    module = resolve_module(loaded.project_tree, "v1/attention")
     assert module.name == "attention"
-    assert module.path == "pkg/attn"
+    assert module.path == "v1/attention"
 
 
 def test_missing_module_lists_available(tmp_path: Path) -> None:
     loaded = _load(tmp_path)
     with pytest.raises(SelectionError) as exc:
-        resolve_module(loaded.project_tree, "v1.nope")
-    assert "v1.attention" in str(exc.value)
+        resolve_module(loaded.project_tree, "v1/nope")
+    assert "v1/attention" in str(exc.value)
 
 
 def test_missing_candidate_lists_available(tmp_path: Path) -> None:
     loaded = _load(tmp_path)
-    run = resolve_module_run(loaded, "v1.attention")
-    candidates = resolve_candidates(run, "v1.attention")
+    run = resolve_module_run(loaded, "v1/attention")
+    candidates = resolve_candidates(run, "v1/attention")
     with pytest.raises(SelectionError) as exc:
         resolve_candidate(candidates, "cand-9999")
     assert "cand-0002" in str(exc.value)
@@ -65,16 +58,16 @@ def test_missing_candidate_lists_available(tmp_path: Path) -> None:
 
 def test_findings_ordering_candidate_linked_first(tmp_path: Path) -> None:
     loaded = _load(tmp_path)
-    run = resolve_module_run(loaded, "v1.attention")
-    candidates = resolve_candidates(run, "v1.attention")
+    run = resolve_module_run(loaded, "v1/attention")
+    candidates = resolve_candidates(run, "v1/attention")
     candidate = resolve_candidate(candidates, "cand-0002")
-    findings = resolve_findings(run, "v1.attention")
-    module = resolve_module(loaded.project_tree, "v1.attention")
+    findings = resolve_findings(run, "v1/attention")
+    module = resolve_module(loaded.project_tree, "v1/attention")
 
     spec = build_spec(
         loaded=loaded,
         module=module,
-        dot_qn="v1.attention",
+        qn="v1/attention",
         candidate=candidate,
         findings=findings,
         repo_path="/tmp/repo",
@@ -94,16 +87,16 @@ def test_findings_ordering_candidate_linked_first(tmp_path: Path) -> None:
 
 def test_proposal_provenance(tmp_path: Path) -> None:
     loaded = _load(tmp_path)
-    run = resolve_module_run(loaded, "v1.attention")
-    candidates = resolve_candidates(run, "v1.attention")
+    run = resolve_module_run(loaded, "v1/attention")
+    candidates = resolve_candidates(run, "v1/attention")
     candidate = resolve_candidate(candidates, "cand-0002")
-    module = resolve_module(loaded.project_tree, "v1.attention")
+    module = resolve_module(loaded.project_tree, "v1/attention")
     spec = build_spec(
         loaded=loaded,
         module=module,
-        dot_qn="v1.attention",
+        qn="v1/attention",
         candidate=candidate,
-        findings=resolve_findings(run, "v1.attention"),
+        findings=resolve_findings(run, "v1/attention"),
         repo_path="/tmp/repo",
         validated=ValidatedCandidate(fx.CAND_START, fx.CAND_END, "x"),
         revision=SourceRevision(git_commit=None, dirty=None, captured_at="t"),
@@ -120,16 +113,16 @@ def test_proposal_provenance(tmp_path: Path) -> None:
 
 def test_scope_main_files_adds_whole_file_targets(tmp_path: Path) -> None:
     loaded = _load(tmp_path)
-    run = resolve_module_run(loaded, "v1.attention")
-    candidates = resolve_candidates(run, "v1.attention")
+    run = resolve_module_run(loaded, "v1/attention")
+    candidates = resolve_candidates(run, "v1/attention")
     candidate = resolve_candidate(candidates, "cand-0002")
-    module = resolve_module(loaded.project_tree, "v1.attention")
+    module = resolve_module(loaded.project_tree, "v1/attention")
     spec = build_spec(
         loaded=loaded,
         module=module,
-        dot_qn="v1.attention",
+        qn="v1/attention",
         candidate=candidate,
-        findings=resolve_findings(run, "v1.attention"),
+        findings=resolve_findings(run, "v1/attention"),
         repo_path="/tmp/repo",
         validated=ValidatedCandidate(fx.CAND_START, fx.CAND_END, "x"),
         revision=SourceRevision(git_commit=None, dirty=None, captured_at="t"),

@@ -40,8 +40,9 @@ class MainFile(_SpecModel):
 
 
 class ModuleInfo(_SpecModel):
+    # Slash-form, source-root-relative (e.g. `v1/attention`) — the single
+    # canonical qualified name; matches `ProjectTree.walk` keys.
     qualified_name: str
-    tree_qualified_name: str
     name: str
     path: str
     description: str = ""

@@ -36,7 +36,7 @@ from spotlights_engine.schemas.project import (
 def make_tree() -> ProjectTree:
     """Two-leaf tree: v1.kv_offload, v1.attention.paged_kv."""
     return ProjectTree(
-        repository=Repository(name="demo", summary="fixture"),
+        repository=Repository(name="demo", summary="fixture", source_root="src"),
         modules=[
             Module(
                 name="v1",

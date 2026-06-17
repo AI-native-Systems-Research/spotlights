@@ -255,15 +255,15 @@ Design and contracts: [`docs/architecture/spotlights_validation_design.md`](docs
 
 ## Evolve bundles (`prep-evolve`)
 
-Spotlights decides *what* to optimize; **evolvers** (evolutionary code-search backends) do the *how*. The `prep-evolve` subcommand is the bridge: pick a candidate from a finished run and it generates a self-contained, ready-to-run **evolve bundle** for one of three external evolvers — the native config, a seed/target laid out the way that evolver expects, the findings/proposals digest folded into the prompt the evolver reads, and an evaluator scaffold. It does **not** run the evolve; it hands you a directory to `cd` into plus the exact launch command.
+Spotlights decides *what* to optimize; **evolvers** (evolutionary code-search backends) do the *how*. The `prep-evolve` subcommand is the bridge: pick a candidate from a finished run and it generates a self-contained, ready-to-run **evolve bundle** for one of three external evolvers. Each bundle contains the native config, a seed/target laid out the way that evolver expects, the findings/proposals digest folded into the prompt the evolver reads, and an evaluator scaffold. It does **not** run the evolve; it hands you a directory to `cd` into plus the exact launch command.
 
 | Evolver (`--evolver`) | Edit scope | Native config | Run command |
 |---|---|---|---|
-| `skydiscover` | single file (mutates the `# EVOLVE-BLOCK-START/END` region) | `config.yaml` + `seed.<ext>` + `evaluator.py` | `skydiscover-run seed.py evaluator.py -c config.yaml` |
+| `skydiscover` | single file (mutates the `# EVOLVE-BLOCK-START/END` region) | `config.yaml` + `seed.<ext>` + `evaluator.py` | `skydiscover-run seed.<ext> evaluator.py -c config.yaml` |
 | `coral` | multi-file (agent edits a git worktree) | `task.yaml` + `grader/` package | `coral start --config task.yaml` |
-| `nous` (alias `agentic-strategy-evolution`) | multi-file (experiment arms with `code_changes[]`) | `campaign.yaml` (+ optional `bundle.yaml`) | `NOUS_CAMPAIGN_PARENT=$PWD/nous_runs nous run campaign.yaml` |
+| `nous` (alias `agentic-strategy-evolution`) | multi-file (experiment arms with `code_changes[]`) | `campaign.yaml` + `bundle.yaml` + `prompts/methodology/` | `NOUS_CAMPAIGN_PARENT=$PWD/nous_runs nous run campaign.yaml --bundle bundle.yaml` |
 
-Pass `--evolver all` to emit one bundle per compatible evolver (skydiscover is skipped, with a warning, for multi-file selections).
+Pass `--evolver all` to emit one bundle per compatible evolver (skydiscover is reported as skipped for multi-file selections).
 
 ### Usage
 

@@ -39,8 +39,8 @@ def test_discover_against_real_clis(tmp_path: Path) -> None:
     )
 
     repo = tmp_path / "repo"
-    (repo / "src" / "foo").mkdir(parents=True)
-    (repo / "src" / "foo" / "core.py").write_text(
+    (repo / "src" / "v1" / "foo").mkdir(parents=True)
+    (repo / "src" / "v1" / "foo" / "core.py").write_text(
         "def hot_loop():\n    total = 0\n"
         + "".join(f"    total += {i}\n" for i in range(1, 75))
         + "    return total\n"
@@ -49,7 +49,9 @@ def test_discover_against_real_clis(tmp_path: Path) -> None:
     artifacts.mkdir()
 
     project_tree = ProjectTree(
-        repository=Repository(name="demo", summary="single-file hot-loop demo"),
+        repository=Repository(
+            name="demo", summary="single-file hot-loop demo", source_root="src"
+        ),
         modules=[
             Module(
                 name="v1",
@@ -58,9 +60,9 @@ def test_discover_against_real_clis(tmp_path: Path) -> None:
                 submodules=[
                     Module(
                         name="foo",
-                        path="src/foo",
+                        path="src/v1/foo",
                         description="single-file hot loop fixture.",
-                        main_files=[File(path="src/foo/core.py", role="entry")],
+                        main_files=[File(path="src/v1/foo/core.py", role="entry")],
                     ),
                 ],
             )

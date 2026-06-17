@@ -19,7 +19,7 @@ from spotlights_engine.schemas.project import File, Module, ProjectTree, Reposit
 
 def _tree() -> ProjectTree:
     return ProjectTree(
-        repository=Repository(name="demo", summary="d"),
+        repository=Repository(name="demo", summary="d", source_root="src"),
         modules=[
             Module(
                 name="foo",
@@ -56,11 +56,11 @@ def test_resolve_target_module_slash_form() -> None:
     assert m.path == "src/foo"
 
 
-def test_resolve_target_module_dot_form() -> None:
-    """Architecture spec uses dot-joined qualified names; ProjectTree.walk
-    yields slash-joined names. The resolver must accept both."""
+def test_resolve_target_module_nested_slash_form() -> None:
+    """Qualified names are the slash-joined names `ProjectTree.walk` yields —
+    the single canonical form the resolver keys on."""
     tree = ProjectTree(
-        repository=Repository(name="demo", summary="d"),
+        repository=Repository(name="demo", summary="d", source_root="src"),
         modules=[
             Module(
                 name="inference",
@@ -73,7 +73,7 @@ def test_resolve_target_module_dot_form() -> None:
     )
     inp = CandidateDiscoveryInput(
         project_tree=tree,
-        module_qualified_name="inference.attention",
+        module_qualified_name="inference/attention",
         context=_ctx(),
     )
     m = resolve_target_module(inp)

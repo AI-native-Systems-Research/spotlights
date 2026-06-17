@@ -67,7 +67,7 @@ def test_max_parallel_sessions_respected(tmp_path: Path, monkeypatch) -> None:
         output_folder=artifacts.parent / "output",
         max_parallel_sessions=2,
         module_filter=ModuleFilter(
-            include=["v1.kv_offload", "v1.attention.paged_kv"]
+            include=["v1/kv_offload", "v1/attention/paged_kv"]
         ),
     )
     run_with_telemetry(make_input(repo), config=cfg)

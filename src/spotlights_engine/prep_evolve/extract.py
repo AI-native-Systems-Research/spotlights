@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-from spotlights_engine.prep_evolve.resolve import LoadedResult, dot_to_slash
+from spotlights_engine.prep_evolve.resolve import LoadedResult
 from spotlights_engine.prep_evolve.spec import (
     EvolveSpec,
     FindingRef,
@@ -230,7 +230,7 @@ def build_spec(
     *,
     loaded: LoadedResult,
     module: Module,
-    dot_qn: str,
+    qn: str,
     candidate: Candidate,
     findings: list[Finding],
     repo_path: str,
@@ -261,8 +261,7 @@ def build_spec(
             direction=direction,
         ),
         module=ModuleInfo(
-            qualified_name=dot_qn,
-            tree_qualified_name=dot_to_slash(dot_qn),
+            qualified_name=qn,
             name=module.name,
             path=module.path,
             description=module.description,

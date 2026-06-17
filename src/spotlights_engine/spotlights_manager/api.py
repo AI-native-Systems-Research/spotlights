@@ -79,8 +79,8 @@ class ModuleTelemetry(BaseModel):
 class SpotlightsManagerResult(SpotlightsResult):
     """Adds telemetry on top of `SpotlightsResult`.
 
-    `module_runs` keys are module qualified names in dot form (e.g.
-    `v1.kv_offload`).
+    `module_runs` keys are module qualified names in slash form (e.g.
+    `v1/kv_offload`).
 
     `ExtractionInvocation` is a dataclass (not a pydantic model), so this
     subclass redeclares `model_config` with `arbitrary_types_allowed=True`

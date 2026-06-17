@@ -30,10 +30,10 @@ from . import _fixtures as fx
 
 def _spec(tmp_path: Path, scope="candidate", repo: Path | None = None):
     loaded = load_result(fx.write_result(tmp_path))
-    run = resolve_module_run(loaded, "v1.attention")
-    candidates = resolve_candidates(run, "v1.attention")
+    run = resolve_module_run(loaded, "v1/attention")
+    candidates = resolve_candidates(run, "v1/attention")
     candidate = resolve_candidate(candidates, "cand-0002")
-    module = resolve_module(loaded.project_tree, "v1.attention")
+    module = resolve_module(loaded.project_tree, "v1/attention")
     if repo is not None:
         validated = validate_candidate_target(repo, candidate)
         repo_path = str(repo)
@@ -43,9 +43,9 @@ def _spec(tmp_path: Path, scope="candidate", repo: Path | None = None):
     return build_spec(
         loaded=loaded,
         module=module,
-        dot_qn="v1.attention",
+        qn="v1/attention",
         candidate=candidate,
-        findings=resolve_findings(run, "v1.attention"),
+        findings=resolve_findings(run, "v1/attention"),
         repo_path=repo_path,
         validated=validated,
         revision=SourceRevision(git_commit=None, dirty=None, captured_at="t"),

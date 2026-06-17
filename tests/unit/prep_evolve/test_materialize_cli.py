@@ -27,7 +27,7 @@ _CFG = PrepEvolveConfig(captured_at="2026-06-16T00:00:00+00:00")
 def _input(tmp_path: Path, repo: Path, **kw) -> PrepEvolveInput:
     base = dict(
         result=fx.write_result(tmp_path),
-        module="v1.attention",
+        module="v1/attention",
         candidate="cand-0002",
         repo=str(repo),
         evolver="skydiscover",
@@ -69,7 +69,7 @@ def test_force_refused_without_prior_manifest(tmp_path: Path) -> None:
     repo = fx.make_repo(tmp_path)
     out = tmp_path / "bundles"
     # Pre-create a bundle dir with no manifest.
-    bundle = out / "demo__v1.attention__cand-0002__coral"
+    bundle = out / "demo__v1_attention__cand-0002__coral"
     bundle.mkdir(parents=True)
     with pytest.raises(BundleExistsError):
         prep_evolve(_input(tmp_path, repo, evolver="coral", out=out, force=True), _CFG)
@@ -161,7 +161,7 @@ def test_cli_main_success(tmp_path: Path) -> None:
             "--result",
             str(result_json),
             "--module",
-            "v1.attention",
+            "v1/attention",
             "--candidate",
             "cand-0002",
             "--repo",
@@ -186,7 +186,7 @@ def test_top_level_cli_dispatch(tmp_path: Path) -> None:
             "--result",
             str(result_json),
             "--module",
-            "v1.attention",
+            "v1/attention",
             "--candidate",
             "cand-0002",
             "--repo",
@@ -208,7 +208,7 @@ def test_cli_main_clean_error(tmp_path: Path, capsys) -> None:
             "--result",
             str(result_json),
             "--module",
-            "v1.nope",
+            "v1/nope",
             "--candidate",
             "cand-0002",
             "--repo",

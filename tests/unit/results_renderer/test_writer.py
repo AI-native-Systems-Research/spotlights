@@ -27,12 +27,12 @@ def test_render_writes_index_and_module_pages(tmp_path: Path) -> None:
 
     assert result.index_path == output / "index.md"
     assert result.index_path.exists()
-    assert (output / "modules" / "v1.kv_offload.md").exists()
+    assert (output / "modules" / "v1_kv_offload.md").exists()
     assert (output / "modules" / "kernels.md").exists()
 
     text = result.index_path.read_text()
     assert "# Spotlights Run — demo" in text
-    assert "[v1.kv_offload](modules/v1.kv_offload.md)" in text
+    assert "[v1/kv_offload](modules/v1_kv_offload.md)" in text
     assert "[kernels](modules/kernels.md)" in text
     assert "reduce latency" in text  # context objective
 
@@ -45,16 +45,16 @@ def test_module_page_contents(tmp_path: Path) -> None:
 
     result = render(RendererInput(artifacts_dir=artifacts, output_folder=output))
 
-    page = (output / "modules" / "v1.kv_offload.md").read_text()
-    assert "# v1.kv_offload" in page
+    page = (output / "modules" / "v1_kv_offload.md").read_text()
+    assert "# v1/kv_offload" in page
     assert "[← All modules](../index.md)" in page
 
     # Candidates table header + rows.
     assert "| Candidate | Impact | Deep research proposals |" in page
     # Symbol cell links to candidate page; impact column shows enum values.
-    assert "[`hot_1`](v1.kv_offload/hot_1__cand-0001.md)" in page
-    assert "[`hot_2`](v1.kv_offload/hot_2__cand-0002.md)" in page
-    assert "[`hot_3`](v1.kv_offload/hot_3__cand-0003.md)" in page
+    assert "[`hot_1`](v1_kv_offload/hot_1__cand-0001.md)" in page
+    assert "[`hot_2`](v1_kv_offload/hot_2__cand-0002.md)" in page
+    assert "[`hot_3`](v1_kv_offload/hot_3__cand-0003.md)" in page
     # Sort: most deep_research_proposals first. cand-0001 has 2; others 0.
     table_start = page.index("| Candidate | Impact | Deep research proposals |")
     table_block = page[table_start:]
@@ -64,20 +64,20 @@ def test_module_page_contents(tmp_path: Path) -> None:
     assert pos_h1 < pos_h2 < pos_h3
 
     # Per-candidate pages exist for every candidate.
-    cand_dir = output / "modules" / "v1.kv_offload"
+    cand_dir = output / "modules" / "v1_kv_offload"
     assert (cand_dir / "hot_1__cand-0001.md").exists()
     assert (cand_dir / "hot_2__cand-0002.md").exists()
     assert (cand_dir / "hot_3__cand-0003.md").exists()
 
     # candidate_pages on RendererResult is populated.
-    cps = result.candidate_pages["v1.kv_offload"]
+    cps = result.candidate_pages["v1/kv_offload"]
     assert cps["cand-0001"] == cand_dir / "hot_1__cand-0001.md"
     assert cps["cand-0002"] == cand_dir / "hot_2__cand-0002.md"
 
     # Candidate page contents — H1 + breadcrumb + sections.
     cpage = (cand_dir / "hot_1__cand-0001.md").read_text()
     assert "# hot_1" in cpage
-    assert "[← v1.kv_offload](../v1.kv_offload.md)" in cpage
+    assert "[← v1/kv_offload](../v1_kv_offload.md)" in cpage
     assert "## Description" in cpage
     assert "## Current approach" in cpage
     assert "## Estimated impact explanation" in cpage
@@ -159,4 +159,4 @@ def test_atomic_index_write(monkeypatch, tmp_path: Path) -> None:
 
     assert not (output / "index.md").exists()
     # Module pages still got written before index.
-    assert (output / "modules" / "v1.kv_offload.md").exists()
+    assert (output / "modules" / "v1_kv_offload.md").exists()

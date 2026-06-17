@@ -35,15 +35,8 @@ def _issue(message: str, *, recoverable: bool) -> StepIssue:
 
 
 def resolve_target_module(project_tree: ProjectTree, module_qualified_name: str) -> Module | None:
-    """Resolve slash-qualified names and dot-qualified names used by the architecture."""
-    direct = project_tree.resolve(module_qualified_name)
-    if direct is not None:
-        return direct
-
-    if "." in module_qualified_name and "/" not in module_qualified_name:
-        return project_tree.resolve(module_qualified_name.replace(".", "/"))
-
-    return None
+    """Resolve a module by its slash-form qualified name (the canonical key)."""
+    return project_tree.resolve(module_qualified_name)
 
 
 def research_module(

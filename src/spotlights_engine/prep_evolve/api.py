@@ -52,7 +52,7 @@ class PrepEvolveInput(BaseModel):
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
     result: Path
-    module: str  # dot-form qn
+    module: str  # slash-form qn
     candidate: str
     evolver: str
     out: Path
@@ -102,8 +102,11 @@ def _sha256(text: str) -> str:
 
 
 def _bundle_dir_name(spec: EvolveSpec, evolver: str) -> str:
+    # The qn is slash-form (`v1/attention`); collapse separators to `_` so the
+    # bundle is a single directory, not a nested path.
+    module_seg = spec.module.qualified_name.replace("/", "_")
     return (
-        f"{spec.run.repo_name}__{spec.module.qualified_name}__"
+        f"{spec.run.repo_name}__{module_seg}__"
         f"{_candidate_id(spec)}__{evolver}"
     )
 
@@ -183,7 +186,7 @@ def prep_evolve(
     spec = build_spec(
         loaded=loaded,
         module=module,
-        dot_qn=input.module,
+        qn=input.module,
         candidate=candidate,
         findings=findings,
         repo_path=str(repo_path),

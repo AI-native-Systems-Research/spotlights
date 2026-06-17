@@ -2,7 +2,7 @@
 
 `make_result_dict()` returns a minimal `result.json`-shaped payload (the
 architecture `SpotlightsResult` shape, which `load_result` also accepts). It
-contains a nested project tree (so dot↔slash + submodule resolution is
+contains a nested project tree (so slash-form submodule resolution is
 exercised), one candidate with both deep-research and agent proposals, and a
 findings list with one candidate-linked finding and one unlinked finding.
 
@@ -81,24 +81,29 @@ def make_result_dict() -> dict:
         },
     ]
 
-    # Nested tree: attention is a submodule of v1.
+    # Nested tree: attention is a submodule of v1. With source_root="" the
+    # qualified names are the (normalized) repo-relative paths, so the leaf is
+    # `v1/attention` — the single canonical (slash-form) qualified name. Module
+    # `name` must equal the normalized basename of `path`. The candidate/main_files
+    # paths under `pkg/attn/` are independent on-disk file references (see make_repo).
     tree = {
         "repository": {
             "name": "demo",
             "summary": "Demo repo.",
+            "source_root": "",
             "external_dependencies": ["torch"],
         },
         "modules": [
             {
                 "name": "v1",
-                "path": "pkg",
+                "path": "v1",
                 "description": "v1 core.",
                 "depends_on": [],
                 "main_files": [],
                 "submodules": [
                     {
                         "name": "attention",
-                        "path": "pkg/attn",
+                        "path": "v1/attention",
                         "description": "Attention kernels.",
                         "depends_on": [],
                         "main_files": [
@@ -120,11 +125,11 @@ def make_result_dict() -> dict:
             "validation_plan": [],
         },
         "module_runs": {
-            "v1.attention": {
-                "module_qualified_name": "v1.attention",
+            "v1/attention": {
+                "module_qualified_name": "v1/attention",
                 "status": "SUCCEEDED",
                 "candidates": {
-                    "module_qualified_name": "v1.attention",
+                    "module_qualified_name": "v1/attention",
                     "candidates": [candidate],
                 },
                 "findings": findings,
