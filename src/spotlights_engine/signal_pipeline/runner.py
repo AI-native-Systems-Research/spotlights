@@ -1046,11 +1046,9 @@ def _emit_spotlight_report(
         if s.model and s.model not in models:
             models.append(s.model)
 
-    objective = (
-        signals.workload.description
-        or "Optimize telemetry-detected anomalies"
-    )
-    context = SpotlightContext(objective=objective)
+    # Signal pipeline has no caller-supplied objective; pass through
+    # the workload description (may be empty).
+    context = SpotlightContext(objective=signals.workload.description)
 
     run_info = RunInfo(
         pipeline="signal",

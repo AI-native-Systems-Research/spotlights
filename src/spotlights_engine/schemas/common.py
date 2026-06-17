@@ -29,7 +29,9 @@ class SpotlightContext(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    objective: str = Field(min_length=1)
+    # May be empty for callers that don't have a stated objective
+    # (e.g. the signal pipeline, where the work is anomaly-driven).
+    objective: str = ""
     workload_hints: list[str] = Field(default_factory=list)
     validation_plan: list[str] = Field(default_factory=list)
 
