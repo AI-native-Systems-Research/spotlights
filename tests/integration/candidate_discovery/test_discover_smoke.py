@@ -29,9 +29,9 @@ def test_discover_against_real_clis(tmp_path: Path) -> None:
         DiscoveryResult,
         discover,
     )
-    from spotlights_engine.schemas.common import SpotlightContext
-    from spotlights_engine.schemas.pipeline import CandidateDiscoveryInput
-    from spotlights_engine.schemas.project import (
+    from spotlights_engine.schemas.legacy.common import SpotlightContext
+    from spotlights_engine.schemas.legacy.pipeline import CandidateDiscoveryInput
+    from spotlights_engine.schemas.legacy.project import (
         File,
         Module,
         ProjectTree,

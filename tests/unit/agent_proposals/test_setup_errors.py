@@ -12,9 +12,9 @@ from spotlights_engine.agent_proposals import (
     AgentProposalsValidationError,
     create_agent_proposals_with_telemetry,
 )
-from spotlights_engine.schemas.candidate import Candidates
-from spotlights_engine.schemas.common import SpotlightContext
-from spotlights_engine.schemas.pipeline import AgentProposalsInput
+from spotlights_engine.schemas.legacy.candidate import Candidates
+from spotlights_engine.schemas.legacy.common import SpotlightContext
+from spotlights_engine.schemas.legacy.pipeline import AgentProposalsInput
 from tests.unit.agent_proposals._fakes import (
     fake_claude_runner_factory,
     fake_codex_runner_factory,

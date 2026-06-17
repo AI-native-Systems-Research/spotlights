@@ -512,7 +512,7 @@ def test_stages_01_and_02_overlap_in_wall_clock(tmp_path, monkeypatch):
     """
     import time as _time
 
-    from spotlights_engine.schemas.project import Module, ProjectTree, Repository
+    from spotlights_engine.schemas.legacy.project import Module, ProjectTree, Repository
     from spotlights_engine.signal_pipeline.schemas import (
         AnomalyLite,
         Signals,

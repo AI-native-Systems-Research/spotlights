@@ -8,9 +8,9 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from spotlights_engine.schemas.common import StepIssue
-from spotlights_engine.schemas.finding import Finding
-from spotlights_engine.schemas.pipeline import ModuleDeepResearchOutput
+from spotlights_engine.schemas.legacy.common import StepIssue
+from spotlights_engine.schemas.legacy.finding import Finding
+from spotlights_engine.schemas.legacy.pipeline import ModuleDeepResearchOutput
 
 _JSON_FENCE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE)
 

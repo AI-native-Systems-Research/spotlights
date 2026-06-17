@@ -18,9 +18,9 @@ from spotlights_engine.module_deep_research.validation import (
     normalize_module_deep_research_output,
     parse_module_deep_research_output,
 )
-from spotlights_engine.schemas.common import StepIssue
-from spotlights_engine.schemas.pipeline import ModuleDeepResearchOutput
-from spotlights_engine.schemas.project import Module, ProjectTree
+from spotlights_engine.schemas.legacy.common import StepIssue
+from spotlights_engine.schemas.legacy.pipeline import ModuleDeepResearchOutput
+from spotlights_engine.schemas.legacy.project import Module, ProjectTree
 
 _log = logging.getLogger(__name__)
 

@@ -5,11 +5,11 @@ from __future__ import annotations
 import hashlib
 
 from spotlights_engine.module_knowledge.schemas import KnowledgeRecord, Provenance, SourceRef
-from spotlights_engine.schemas.candidate import Candidate, Candidates
-from spotlights_engine.schemas.finding import Finding
-from spotlights_engine.schemas.pipeline import ModuleDeepResearchOutput, ModuleRun, SpotlightsResult
-from spotlights_engine.schemas.project import Module, ProjectTree
-from spotlights_engine.schemas.proposals import AgentProposal, DeepResearchProposal
+from spotlights_engine.schemas.legacy.candidate import Candidate, Candidates
+from spotlights_engine.schemas.legacy.finding import Finding
+from spotlights_engine.schemas.legacy.pipeline import ModuleDeepResearchOutput, ModuleRun, SpotlightsResult
+from spotlights_engine.schemas.legacy.project import Module, ProjectTree
+from spotlights_engine.schemas.legacy.proposals import AgentProposal, DeepResearchProposal
 
 
 def records_from_findings(

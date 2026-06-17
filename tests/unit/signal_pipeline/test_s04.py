@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from spotlights_engine.schemas.candidate import Candidate
+from spotlights_engine.schemas.legacy.candidate import Candidate
 from spotlights_engine.signal_pipeline import (
     SignalPipelineInput,
     StageSelection,

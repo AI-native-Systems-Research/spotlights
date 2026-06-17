@@ -29,8 +29,8 @@ from spotlights_engine.modules_extractor.agent import (
 )
 from spotlights_engine.modules_extractor.errors import ExtractorSetupError
 from spotlights_engine.modules_extractor.prompts import EXTRACTION_PROMPT
-from spotlights_engine.schemas.pipeline import ModulesExtractorInput
-from spotlights_engine.schemas.project import ProjectTree
+from spotlights_engine.schemas.legacy.pipeline import ModulesExtractorInput
+from spotlights_engine.schemas.legacy.project import ProjectTree
 
 
 class ExtractorConfig(BaseModel):

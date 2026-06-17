@@ -34,7 +34,7 @@ from spotlights_engine.modules_extractor.errors import (
     ExtractorSetupError,
     ExtractorValidationError,
 )
-from spotlights_engine.schemas.project import ProjectTree
+from spotlights_engine.schemas.legacy.project import ProjectTree
 from spotlights_engine.signal_pipeline._subprocess_util import (
     ClaudeResolutionError,
     StreamingTimeout,

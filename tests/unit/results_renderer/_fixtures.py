@@ -14,21 +14,21 @@ from pathlib import Path
 from typing import Any
 
 from spotlights_engine.modules_extractor.agent import ExtractionInvocation
-from spotlights_engine.schemas.candidate import Candidate, Candidates
-from spotlights_engine.schemas.common import SpotlightContext, StepIssue
-from spotlights_engine.schemas.finding import Finding
-from spotlights_engine.schemas.pipeline import (
+from spotlights_engine.schemas.legacy.candidate import Candidate, Candidates
+from spotlights_engine.schemas.legacy.common import SpotlightContext, StepIssue
+from spotlights_engine.schemas.legacy.finding import Finding
+from spotlights_engine.schemas.legacy.pipeline import (
     AgentProposalsOutput,
     ModuleDeepResearchOutput,
     ProposalFromFindingCreatorOutput,
 )
-from spotlights_engine.schemas.project import (
+from spotlights_engine.schemas.legacy.project import (
     File,
     Module,
     ProjectTree,
     Repository,
 )
-from spotlights_engine.schemas.proposals import AgentProposal, DeepResearchProposal
+from spotlights_engine.schemas.legacy.proposals import AgentProposal, DeepResearchProposal
 from spotlights_engine.spotlights_manager import persistence as P
 from spotlights_engine.spotlights_manager.persistence import (
     ManagerPaths,

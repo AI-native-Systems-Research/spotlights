@@ -12,8 +12,8 @@ from pathlib import Path
 from typing import Any
 
 from spotlights_engine.modules_extractor.agent import ExtractionInvocation
-from spotlights_engine.schemas.common import SpotlightContext
-from spotlights_engine.schemas.project import ProjectTree
+from spotlights_engine.schemas.legacy.common import SpotlightContext
+from spotlights_engine.schemas.legacy.project import ProjectTree
 from spotlights_engine.spotlights_manager.persistence import (
     LoadedModuleState,
     ManagerPaths,

@@ -19,8 +19,8 @@ from __future__ import annotations
 import re
 from importlib import resources
 
-from spotlights_engine.schemas.common import SpotlightContext
-from spotlights_engine.schemas.project import File, Module
+from spotlights_engine.schemas.legacy.common import SpotlightContext
+from spotlights_engine.schemas.legacy.project import File, Module
 
 _PLACEHOLDER = re.compile(r"\{(\w+)\}")
 

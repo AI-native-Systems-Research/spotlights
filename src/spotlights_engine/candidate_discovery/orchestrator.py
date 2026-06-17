@@ -43,9 +43,9 @@ from spotlights_engine.candidate_discovery.telemetry import (
     render_diff_markdown,
 )
 from spotlights_engine.candidate_discovery.validation import Validator
-from spotlights_engine.schemas.candidate import Candidate, Candidates
-from spotlights_engine.schemas.pipeline import CandidateDiscoveryInput
-from spotlights_engine.schemas.project import Module
+from spotlights_engine.schemas.legacy.candidate import Candidate, Candidates
+from spotlights_engine.schemas.legacy.pipeline import CandidateDiscoveryInput
+from spotlights_engine.schemas.legacy.project import Module
 
 
 _log = logging.getLogger(__name__)

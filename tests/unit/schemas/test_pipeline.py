@@ -8,10 +8,10 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from spotlights_engine.schemas.candidate import Candidate, Candidates
-from spotlights_engine.schemas.common import SpotlightContext, StepIssue
-from spotlights_engine.schemas.finding import Finding
-from spotlights_engine.schemas.pipeline import (
+from spotlights_engine.schemas.legacy.candidate import Candidate, Candidates
+from spotlights_engine.schemas.legacy.common import SpotlightContext, StepIssue
+from spotlights_engine.schemas.legacy.finding import Finding
+from spotlights_engine.schemas.legacy.pipeline import (
     AgentProposalsInput,
     AgentProposalsOutput,
     CandidateDiscoveryInput,
@@ -23,8 +23,8 @@ from spotlights_engine.schemas.pipeline import (
     SpotlightsManagerInput,
     SpotlightsResult,
 )
-from spotlights_engine.schemas.project import File, Module, ProjectTree, Repository
-from spotlights_engine.schemas.proposals import AgentProposal, DeepResearchProposal
+from spotlights_engine.schemas.legacy.project import File, Module, ProjectTree, Repository
+from spotlights_engine.schemas.legacy.proposals import AgentProposal, DeepResearchProposal
 
 
 def _tree() -> ProjectTree:

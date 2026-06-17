@@ -11,7 +11,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from spotlights_engine.schemas.candidate import Candidate, Candidates
+from spotlights_engine.schemas.legacy.candidate import Candidate, Candidates
 
 
 @dataclass

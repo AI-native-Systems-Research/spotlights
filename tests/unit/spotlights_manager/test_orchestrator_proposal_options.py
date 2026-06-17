@@ -74,8 +74,8 @@ def test_proposal_from_finding_options_per_module_override(
         from spotlights_engine.proposal_from_finding_creator.api import (
             ProposalFromFindingCreatorResult,
         )
-        from spotlights_engine.schemas.candidate import Candidates
-        from spotlights_engine.schemas.pipeline import (
+        from spotlights_engine.schemas.legacy.candidate import Candidates
+        from spotlights_engine.schemas.legacy.pipeline import (
             ProposalFromFindingCreatorOutput,
         )
 

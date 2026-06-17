@@ -12,7 +12,7 @@ from spotlights_engine.modules_extractor import ExtractorConfig
 from spotlights_engine.proposal_from_finding_creator import (
     ProposalFromFindingConfig,
 )
-from spotlights_engine.schemas.common import SpotlightContext
+from spotlights_engine.schemas.legacy.common import SpotlightContext
 from spotlights_engine.spotlights_manager import persistence as P
 from spotlights_engine.spotlights_manager.persistence import (
     ManagerPaths,
@@ -83,8 +83,8 @@ def test_candidates_and_deep_research_round_trip(tmp_path: Path) -> None:
 
 
 def test_proposal_from_finding_round_trip(tmp_path: Path) -> None:
-    from spotlights_engine.schemas.candidate import Candidates
-    from spotlights_engine.schemas.pipeline import (
+    from spotlights_engine.schemas.legacy.candidate import Candidates
+    from spotlights_engine.schemas.legacy.pipeline import (
         ProposalFromFindingCreatorOutput,
     )
 
@@ -120,8 +120,8 @@ def test_proposal_from_finding_round_trip(tmp_path: Path) -> None:
 def test_clear_proposal_from_finding_artifacts_removes_sidecar_and_dir(
     tmp_path: Path,
 ) -> None:
-    from spotlights_engine.schemas.candidate import Candidates
-    from spotlights_engine.schemas.pipeline import (
+    from spotlights_engine.schemas.legacy.candidate import Candidates
+    from spotlights_engine.schemas.legacy.pipeline import (
         ProposalFromFindingCreatorOutput,
     )
 

@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import json
 
-from spotlights_engine.schemas.pipeline import (
+from spotlights_engine.schemas.legacy.pipeline import (
     ModuleDeepResearchInput,
     ModuleDeepResearchOutput,
 )
-from spotlights_engine.schemas.project import File, Module, Repository
+from spotlights_engine.schemas.legacy.project import File, Module, Repository
 
 
 def _format_main_files(files: list[File]) -> str:

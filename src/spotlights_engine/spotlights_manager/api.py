@@ -23,8 +23,8 @@ from spotlights_engine.modules_extractor.agent import ExtractionInvocation
 from spotlights_engine.proposal_from_finding_creator import (
     ProposalFromFindingConfig,
 )
-from spotlights_engine.schemas.common import StepIssue
-from spotlights_engine.schemas.pipeline import (
+from spotlights_engine.schemas.legacy.common import StepIssue
+from spotlights_engine.schemas.legacy.pipeline import (
     SpotlightsManagerInput,
     SpotlightsResult,
 )

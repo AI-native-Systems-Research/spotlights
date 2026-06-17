@@ -16,10 +16,10 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from spotlights_engine.schemas.candidate import Candidate
-from spotlights_engine.schemas.common import SpotlightContext, StepIssue
-from spotlights_engine.schemas.finding import Finding
-from spotlights_engine.schemas.project import Module, Repository
+from spotlights_engine.schemas.legacy.candidate import Candidate
+from spotlights_engine.schemas.legacy.common import SpotlightContext, StepIssue
+from spotlights_engine.schemas.legacy.finding import Finding
+from spotlights_engine.schemas.legacy.project import Module, Repository
 
 from spotlights_engine.results_renderer.aggregator import (
     IndexRow,

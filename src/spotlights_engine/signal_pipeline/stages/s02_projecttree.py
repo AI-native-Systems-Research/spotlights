@@ -44,7 +44,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from spotlights_engine.schemas.project import ProjectTree
+from spotlights_engine.schemas.legacy.project import ProjectTree
 from spotlights_engine.signal_pipeline.stages._types import StageContext, StageSpec
 
 
@@ -160,7 +160,7 @@ def _extract_project_tree(
 
     # Lazy import per the safety order in the approved plan.
     from spotlights_engine.modules_extractor import ExtractorConfig, extract
-    from spotlights_engine.schemas.pipeline import ModulesExtractorInput
+    from spotlights_engine.schemas.legacy.pipeline import ModulesExtractorInput
 
     artifacts_dir = log_dir / _ts_subdir()
     tree = extract(

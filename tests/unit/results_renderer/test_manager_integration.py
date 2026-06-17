@@ -13,7 +13,7 @@ from spotlights_engine.spotlights_manager import (
     run_with_telemetry,
 )
 from spotlights_engine.spotlights_manager import orchestrator as orch
-from spotlights_engine.schemas.pipeline import SpotlightsResult
+from spotlights_engine.schemas.legacy.pipeline import SpotlightsResult
 
 from tests.unit.spotlights_manager._fakes import (
     make_discovery_result,

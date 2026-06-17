@@ -14,7 +14,7 @@ from spotlights_engine.module_deep_research.orchestration import (
     select_runners,
 )
 from spotlights_engine.module_deep_research.prompts import render_module_deep_research_prompt
-from spotlights_engine.schemas.pipeline import ModuleDeepResearchInput, ModuleDeepResearchOutput
+from spotlights_engine.schemas.legacy.pipeline import ModuleDeepResearchInput, ModuleDeepResearchOutput
 
 
 def research_module(

@@ -13,10 +13,10 @@ so the agent can situate the candidate's module within the project.
 
 from __future__ import annotations
 
-from spotlights_engine.schemas.candidate import Candidate
-from spotlights_engine.schemas.common import SpotlightContext
-from spotlights_engine.schemas.project import Module, ProjectTree
-from spotlights_engine.schemas.proposals import (
+from spotlights_engine.schemas.legacy.candidate import Candidate
+from spotlights_engine.schemas.legacy.common import SpotlightContext
+from spotlights_engine.schemas.legacy.project import Module, ProjectTree
+from spotlights_engine.schemas.legacy.proposals import (
     AgentProposal,
     DeepResearchProposal,
 )

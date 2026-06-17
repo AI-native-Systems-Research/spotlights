@@ -30,14 +30,14 @@ from spotlights_engine.modules_extractor.agent import ExtractionInvocation
 from spotlights_engine.proposal_from_finding_creator import (
     ProposalFromFindingConfig,
 )
-from spotlights_engine.schemas.candidate import Candidates
-from spotlights_engine.schemas.common import PipelineStep, SpotlightContext, StepIssue
-from spotlights_engine.schemas.pipeline import (
+from spotlights_engine.schemas.legacy.candidate import Candidates
+from spotlights_engine.schemas.legacy.common import PipelineStep, SpotlightContext, StepIssue
+from spotlights_engine.schemas.legacy.pipeline import (
     AgentProposalsOutput,
     ModuleDeepResearchOutput,
     ProposalFromFindingCreatorOutput,
 )
-from spotlights_engine.schemas.project import ProjectTree
+from spotlights_engine.schemas.legacy.project import ProjectTree
 
 
 _SLUG_SAFE = re.compile(r"[^A-Za-z0-9._-]")

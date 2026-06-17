@@ -42,14 +42,14 @@ from spotlights_engine.proposal_from_finding_creator import (
     ProposalFromFindingValidationError,
     create_proposals_with_telemetry,
 )
-from spotlights_engine.schemas.candidate import Candidate, Candidates
-from spotlights_engine.schemas.common import (
+from spotlights_engine.schemas.legacy.candidate import Candidate, Candidates
+from spotlights_engine.schemas.legacy.common import (
     ModuleRunStatus,
     PipelineStep,
     SpotlightContext,
     StepIssue,
 )
-from spotlights_engine.schemas.pipeline import (
+from spotlights_engine.schemas.legacy.pipeline import (
     AgentProposalsInput,
     AgentProposalsOutput,
     CandidateDiscoveryInput,
@@ -61,7 +61,7 @@ from spotlights_engine.schemas.pipeline import (
     ProposalFromFindingCreatorOutput,
     SpotlightsManagerInput,
 )
-from spotlights_engine.schemas.project import Module, ProjectTree
+from spotlights_engine.schemas.legacy.project import Module, ProjectTree
 from spotlights_engine.spotlights_manager.api import (
     ModuleTelemetry,
     SpotlightsManagerConfig,

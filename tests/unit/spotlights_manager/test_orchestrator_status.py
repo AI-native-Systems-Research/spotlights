@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from spotlights_engine.candidate_discovery import DiscoverySetupError
-from spotlights_engine.schemas.common import StepIssue
+from spotlights_engine.schemas.legacy.common import StepIssue
 from spotlights_engine.spotlights_manager import (
     ModuleFilter,
     SpotlightsManagerConfig,
@@ -167,9 +167,9 @@ def test_degraded_on_step4_recoverable_issue(
         from spotlights_engine.proposal_from_finding_creator.api import (
             ProposalFromFindingCreatorResult,
         )
-        from spotlights_engine.schemas.candidate import Candidates
-        from spotlights_engine.schemas.common import StepIssue
-        from spotlights_engine.schemas.pipeline import (
+        from spotlights_engine.schemas.legacy.candidate import Candidates
+        from spotlights_engine.schemas.legacy.common import StepIssue
+        from spotlights_engine.schemas.legacy.pipeline import (
             ProposalFromFindingCreatorOutput,
         )
 

@@ -87,7 +87,7 @@ def _check_layout() -> None:
     """
     try:
         from spotlights_engine.modules_extractor import extract  # noqa: F401
-        from spotlights_engine.schemas import (  # noqa: F401
+        from spotlights_engine.schemas.legacy import (  # noqa: F401
             candidate,
             common,
             project,

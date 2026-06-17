@@ -20,9 +20,9 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from spotlights_engine.candidate_discovery.errors import DiscoverySetupError
-from spotlights_engine.schemas.candidate import Candidates
-from spotlights_engine.schemas.pipeline import CandidateDiscoveryInput
-from spotlights_engine.schemas.project import Module
+from spotlights_engine.schemas.legacy.candidate import Candidates
+from spotlights_engine.schemas.legacy.pipeline import CandidateDiscoveryInput
+from spotlights_engine.schemas.legacy.project import Module
 
 
 class DiscoveryConfig(BaseModel):

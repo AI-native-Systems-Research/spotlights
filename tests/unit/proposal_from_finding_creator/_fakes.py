@@ -7,10 +7,10 @@ from pathlib import Path
 from spotlights_engine.proposal_from_finding_creator.claude_exec import (
     PairRunResult,
 )
-from spotlights_engine.schemas.candidate import Candidate, Candidates
-from spotlights_engine.schemas.common import SpotlightContext
-from spotlights_engine.schemas.finding import Finding
-from spotlights_engine.schemas.pipeline import ProposalFromFindingCreatorInput
+from spotlights_engine.schemas.legacy.candidate import Candidate, Candidates
+from spotlights_engine.schemas.legacy.common import SpotlightContext
+from spotlights_engine.schemas.legacy.finding import Finding
+from spotlights_engine.schemas.legacy.pipeline import ProposalFromFindingCreatorInput
 
 
 def make_candidate(idx: int = 0) -> Candidate:

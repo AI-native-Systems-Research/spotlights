@@ -14,7 +14,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from spotlights_engine.schemas.proposals import DeepResearchProposal
+from spotlights_engine.schemas.legacy.proposals import DeepResearchProposal
 
 
 @dataclass

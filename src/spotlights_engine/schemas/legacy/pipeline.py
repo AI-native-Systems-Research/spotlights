@@ -14,14 +14,14 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from spotlights_engine.schemas.candidate import Candidates
-from spotlights_engine.schemas.common import (
+from spotlights_engine.schemas.legacy.candidate import Candidates
+from spotlights_engine.schemas.legacy.common import (
     ModuleRunStatus,
     SpotlightContext,
     StepIssue,
 )
-from spotlights_engine.schemas.finding import Finding
-from spotlights_engine.schemas.project import ProjectTree
+from spotlights_engine.schemas.legacy.finding import Finding
+from spotlights_engine.schemas.legacy.project import ProjectTree
 
 
 class ModulesExtractorInput(BaseModel):

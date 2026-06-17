@@ -7,7 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from spotlights_engine.candidate_discovery.validation import Validator
-from spotlights_engine.schemas.candidate import Candidate, Candidates
+from spotlights_engine.schemas.legacy.candidate import Candidate, Candidates
 
 
 def _validator(repo_path: Path, module_path: str) -> Validator:

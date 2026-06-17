@@ -2,7 +2,9 @@
 
 `Change` and `ExecutionResult` are introduced here because main does not yet
 have them. Once they stabilize they should move under
-`spotlights_engine.schemas/` proper.
+`spotlights_engine.schemas/` proper (alongside the new SpotlightReport
+types; `spotlights_engine.schemas.legacy/` holds the previous
+generation).
 
 `Signals` / `WorkloadProfileLite` / `TraceSummaryLite` / `AnomalyLite` are
 **placeholders** for the locked Bundle A schemas in

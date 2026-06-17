@@ -6,10 +6,10 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from spotlights_engine.schemas.candidate import Candidate
-from spotlights_engine.schemas.common import StepIssue
-from spotlights_engine.schemas.finding import Finding
-from spotlights_engine.schemas.project import Module
+from spotlights_engine.schemas.legacy.candidate import Candidate
+from spotlights_engine.schemas.legacy.common import StepIssue
+from spotlights_engine.schemas.legacy.finding import Finding
+from spotlights_engine.schemas.legacy.project import Module
 
 from spotlights_engine.results_renderer.api import RendererConfig
 from spotlights_engine.results_renderer.loader import LoadedRun

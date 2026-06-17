@@ -2,7 +2,7 @@
 
 The schemas package re-exports types from `spotlight_observability`, which is
 a sibling repository not always installed when developing Stage 1 in
-isolation. Provide a minimal stub so importing `spotlights_engine.schemas`
+isolation. Provide a minimal stub so importing `spotlights_engine.schemas.legacy`
 does not blow up before tests run. If the real package is installed, this
 no-op early-exits.
 """

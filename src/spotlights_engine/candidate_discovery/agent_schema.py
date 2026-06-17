@@ -1,6 +1,6 @@
 """Discovery-only output schema handed to the Claude / codex subprocess agents.
 
-The full `Candidate` schema in `spotlights_engine.schemas.candidate` carries
+The full `Candidate` schema in `spotlights_engine.schemas.legacy.candidate` carries
 fields (`state`, `deep_research_proposals`, `agent_proposals`) that are only
 filled in by later pipeline steps. They default to sensible empty values,
 which makes pydantic emit a JSON schema where those properties are *not* in
@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from spotlights_engine.schemas.candidate import (
+from spotlights_engine.schemas.legacy.candidate import (
     Candidate,
     CandidateKind,
     Candidates,

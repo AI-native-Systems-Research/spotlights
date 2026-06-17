@@ -33,14 +33,14 @@ from spotlights_engine.proposal_from_finding_creator.prompts import build_prompt
 from spotlights_engine.proposal_from_finding_creator.validation import (
     parse_pair_payload,
 )
-from spotlights_engine.schemas.candidate import Candidate, Candidates
-from spotlights_engine.schemas.common import StepIssue
-from spotlights_engine.schemas.finding import Finding
-from spotlights_engine.schemas.pipeline import (
+from spotlights_engine.schemas.legacy.candidate import Candidate, Candidates
+from spotlights_engine.schemas.legacy.common import StepIssue
+from spotlights_engine.schemas.legacy.finding import Finding
+from spotlights_engine.schemas.legacy.pipeline import (
     ProposalFromFindingCreatorInput,
     ProposalFromFindingCreatorOutput,
 )
-from spotlights_engine.schemas.proposals import DeepResearchProposal
+from spotlights_engine.schemas.legacy.proposals import DeepResearchProposal
 
 
 _log = logging.getLogger(__name__)

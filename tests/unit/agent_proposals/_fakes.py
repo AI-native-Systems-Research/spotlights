@@ -5,10 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from spotlights_engine.agent_proposals.claude_exec import CandidateAgentRunResult
-from spotlights_engine.schemas.candidate import Candidate, Candidates
-from spotlights_engine.schemas.common import SpotlightContext
-from spotlights_engine.schemas.pipeline import AgentProposalsInput
-from spotlights_engine.schemas.project import (
+from spotlights_engine.schemas.legacy.candidate import Candidate, Candidates
+from spotlights_engine.schemas.legacy.common import SpotlightContext
+from spotlights_engine.schemas.legacy.pipeline import AgentProposalsInput
+from spotlights_engine.schemas.legacy.project import (
     Module,
     ProjectTree,
     Repository,

@@ -24,8 +24,8 @@ from spotlights_engine.candidate_discovery.prompts import (
     render_review,
     wrap,
 )
-from spotlights_engine.schemas.common import SpotlightContext
-from spotlights_engine.schemas.project import File, Module
+from spotlights_engine.schemas.legacy.common import SpotlightContext
+from spotlights_engine.schemas.legacy.project import File, Module
 
 _PLACEHOLDER = re.compile(r"\{(\w+)\}")
 

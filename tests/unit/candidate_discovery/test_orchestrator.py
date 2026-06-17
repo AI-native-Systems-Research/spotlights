@@ -24,10 +24,10 @@ from spotlights_engine.candidate_discovery.errors import (
     DiscoverySetupError,
     DiscoveryValidationError,
 )
-from spotlights_engine.schemas.candidate import Candidates
-from spotlights_engine.schemas.common import SpotlightContext
-from spotlights_engine.schemas.pipeline import CandidateDiscoveryInput
-from spotlights_engine.schemas.project import File, Module, ProjectTree, Repository
+from spotlights_engine.schemas.legacy.candidate import Candidates
+from spotlights_engine.schemas.legacy.common import SpotlightContext
+from spotlights_engine.schemas.legacy.pipeline import CandidateDiscoveryInput
+from spotlights_engine.schemas.legacy.project import File, Module, ProjectTree, Repository
 
 
 # ----- Test scaffolding -----------------------------------------------------

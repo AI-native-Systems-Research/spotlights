@@ -9,12 +9,12 @@ from spotlights_engine.module_knowledge import (
     records_from_project_tree,
     records_from_spotlights_result,
 )
-from spotlights_engine.schemas.candidate import Candidate, Candidates
-from spotlights_engine.schemas.common import SpotlightContext
-from spotlights_engine.schemas.finding import Finding
-from spotlights_engine.schemas.pipeline import ModuleDeepResearchOutput, ModuleRun, SpotlightsResult
-from spotlights_engine.schemas.project import File, Module, ProjectTree, Repository
-from spotlights_engine.schemas.proposals import AgentProposal, DeepResearchProposal
+from spotlights_engine.schemas.legacy.candidate import Candidate, Candidates
+from spotlights_engine.schemas.legacy.common import SpotlightContext
+from spotlights_engine.schemas.legacy.finding import Finding
+from spotlights_engine.schemas.legacy.pipeline import ModuleDeepResearchOutput, ModuleRun, SpotlightsResult
+from spotlights_engine.schemas.legacy.project import File, Module, ProjectTree, Repository
+from spotlights_engine.schemas.legacy.proposals import AgentProposal, DeepResearchProposal
 
 
 def test_records_from_module_deep_research_preserve_source_and_module_context() -> None:

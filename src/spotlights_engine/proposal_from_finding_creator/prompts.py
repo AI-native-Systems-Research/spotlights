@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from spotlights_engine.schemas.candidate import Candidate
-from spotlights_engine.schemas.common import SpotlightContext
-from spotlights_engine.schemas.finding import Finding
+from spotlights_engine.schemas.legacy.candidate import Candidate
+from spotlights_engine.schemas.legacy.common import SpotlightContext
+from spotlights_engine.schemas.legacy.finding import Finding
 
 
 def _format_list(values: list[str]) -> str:

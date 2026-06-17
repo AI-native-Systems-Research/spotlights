@@ -43,13 +43,13 @@ from spotlights_engine.agent_proposals.prompts import (
 from spotlights_engine.agent_proposals.validation import (
     parse_candidate_payload,
 )
-from spotlights_engine.schemas.candidate import Candidate, Candidates
-from spotlights_engine.schemas.common import StepIssue
-from spotlights_engine.schemas.pipeline import (
+from spotlights_engine.schemas.legacy.candidate import Candidate, Candidates
+from spotlights_engine.schemas.legacy.common import StepIssue
+from spotlights_engine.schemas.legacy.pipeline import (
     AgentProposalsInput,
     AgentProposalsOutput,
 )
-from spotlights_engine.schemas.proposals import AgentProposal
+from spotlights_engine.schemas.legacy.proposals import AgentProposal
 
 
 _log = logging.getLogger(__name__)

@@ -13,7 +13,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from spotlights_engine.schemas.proposals import AgentProposal
+from spotlights_engine.schemas.legacy.proposals import AgentProposal
 
 
 @dataclass

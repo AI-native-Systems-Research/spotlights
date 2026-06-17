@@ -29,8 +29,8 @@ from spotlights_engine.module_knowledge import KnowledgeBase, KnowledgeRecord, R
 from spotlights_engine.proposal_from_finding_creator import (
     ProposalFromFindingConfig,
 )
-from spotlights_engine.schemas.common import SpotlightContext
-from spotlights_engine.schemas.pipeline import SpotlightsManagerInput
+from spotlights_engine.schemas.legacy.common import SpotlightContext
+from spotlights_engine.schemas.legacy.pipeline import SpotlightsManagerInput
 from spotlights_engine.spotlights_manager import (
     ModuleFilter,
     SpotlightsManagerConfig,

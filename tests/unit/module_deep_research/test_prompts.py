@@ -5,9 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 from spotlights_engine.module_deep_research.prompts import render_module_deep_research_prompt
-from spotlights_engine.schemas.common import SpotlightContext
-from spotlights_engine.schemas.pipeline import ModuleDeepResearchInput
-from spotlights_engine.schemas.project import File, Module, ProjectTree, Repository
+from spotlights_engine.schemas.legacy.common import SpotlightContext
+from spotlights_engine.schemas.legacy.pipeline import ModuleDeepResearchInput
+from spotlights_engine.schemas.legacy.project import File, Module, ProjectTree, Repository
 
 
 def test_prompt_is_built_from_repository_module_and_context() -> None:

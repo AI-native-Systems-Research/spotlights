@@ -21,7 +21,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from spotlights_engine.schemas.candidate import Candidate
+from spotlights_engine.schemas.legacy.candidate import Candidate
 from spotlights_engine.signal_pipeline.schemas import Change, ChangeType
 from spotlights_engine.signal_pipeline.stages._types import StageContext, StageSpec
 

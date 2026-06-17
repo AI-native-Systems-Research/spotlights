@@ -17,7 +17,7 @@ from spotlights_engine.candidate_discovery.agents import (
 )
 from spotlights_engine.candidate_discovery.api import DiscoveryConfig
 from spotlights_engine.candidate_discovery.errors import DiscoverySetupError
-from spotlights_engine.schemas.project import File, Module
+from spotlights_engine.schemas.legacy.project import File, Module
 
 
 def _config(tmp_path: Path, **overrides) -> DiscoveryConfig:

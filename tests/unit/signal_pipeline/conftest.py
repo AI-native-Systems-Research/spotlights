@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from spotlights_engine.schemas.project import Module, ProjectTree, Repository
+from spotlights_engine.schemas.legacy.project import Module, ProjectTree, Repository
 
 
 def pytest_configure(config):
@@ -109,7 +109,7 @@ def _default_stage_stubs(request, monkeypatch):
     monkeypatch.setattr(s02_projecttree, "_extract_project_tree", _fake_extract)
 
     # ── Stage 03 ─────────────────────────────────────────────────────
-    from spotlights_engine.schemas.candidate import Candidate
+    from spotlights_engine.schemas.legacy.candidate import Candidate
     from spotlights_engine.signal_pipeline.stages import s03_candidate_generation
 
     def _fake_candidates(

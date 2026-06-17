@@ -12,8 +12,8 @@ from spotlights_engine.results_renderer.errors import (
     RendererSetupError,
 )
 from spotlights_engine.results_renderer.loader import load_run
-from spotlights_engine.schemas.candidate import Candidates
-from spotlights_engine.schemas.common import SpotlightContext
+from spotlights_engine.schemas.legacy.candidate import Candidates
+from spotlights_engine.schemas.legacy.common import SpotlightContext
 from spotlights_engine.spotlights_manager.persistence import ManagerPaths
 
 from tests.unit.results_renderer._fixtures import (

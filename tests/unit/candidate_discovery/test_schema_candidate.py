@@ -1,4 +1,4 @@
-"""Unit tests for `spotlights_engine.schemas.candidate`."""
+"""Unit tests for `spotlights_engine.schemas.legacy.candidate`."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from spotlights_engine.schemas.candidate import Candidate, Candidates
+from spotlights_engine.schemas.legacy.candidate import Candidate, Candidates
 
 
 def _valid_candidate(**overrides):

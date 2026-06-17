@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from spotlights_engine.candidate_discovery.api import IterationTelemetry
-from spotlights_engine.schemas.candidate import Candidates
+from spotlights_engine.schemas.legacy.candidate import Candidates
 
 if TYPE_CHECKING:  # pragma: no cover
     from spotlights_engine.candidate_discovery.agents import AgentInvocation

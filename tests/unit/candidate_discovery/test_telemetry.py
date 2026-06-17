@@ -7,7 +7,7 @@ from spotlights_engine.candidate_discovery.telemetry import (
     _compute_diff,
     render_diff_markdown,
 )
-from spotlights_engine.schemas.candidate import Candidate, Candidates
+from spotlights_engine.schemas.legacy.candidate import Candidate, Candidates
 
 
 def _c(

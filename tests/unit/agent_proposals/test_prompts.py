@@ -6,8 +6,8 @@ from spotlights_engine.agent_proposals.prompts import (
     build_claude_prompt,
     build_codex_prompt,
 )
-from spotlights_engine.schemas.common import SpotlightContext
-from spotlights_engine.schemas.proposals import AgentProposal, DeepResearchProposal
+from spotlights_engine.schemas.legacy.common import SpotlightContext
+from spotlights_engine.schemas.legacy.proposals import AgentProposal, DeepResearchProposal
 from tests.unit.agent_proposals._fakes import make_candidate, make_project_tree
 
 
