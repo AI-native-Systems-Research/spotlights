@@ -486,6 +486,10 @@ def main(argv: list[str] | None = None) -> int:
         return init_main(raw_argv[1:])
     if raw_argv and raw_argv[0] == "knowledge":
         return _knowledge_main(raw_argv[1:])
+    if raw_argv and raw_argv[0] == "prep-evolve":
+        from spotlights_engine.prep_evolve.cli import main as prep_main
+
+        return prep_main(raw_argv[1:])
 
     args = _build_argparser().parse_args(argv)
 
