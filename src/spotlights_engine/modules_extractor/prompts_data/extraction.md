@@ -24,7 +24,7 @@ You are analyzing this repository to produce a structured architectural map. Wor
    - A "submodule" is a nested logical unit inside a module. Nest recursively as deep as the architecture warrants.
    - Use directory structure as the primary signal, but VERIFY with imports/exports. Directories nothing imports from may be dead code; directories imported across the codebase are likely core.
    - Ignore: node_modules, vendor, .git, dist, build, target, __pycache__, .venv, generated code, test fixtures, lock files.
-   - Tests: include a top-level "tests" module if tests are centralized; otherwise note testing per-module in its description.
+   - Tests: if tests live under the selected source root, model them like any other module when they have architectural weight. If tests are centralized outside a non-empty `source_root`, do not emit them as a top-level module in this v1 shape; mention their coverage in module descriptions or later oracles instead.
 
    **For each candidate directory, pick exactly one of three outcomes — FOLD, LEAF, or SPLIT — by applying the tests below in order.**
 

@@ -191,7 +191,7 @@ Clone vLLM next to this repo, then:
 ```bash
 spotlights-engine \
   --repo ../vllm \
-  --include v1.kv_offload \
+  --include vllm/v1/kv_offload \
   --objective "reduce the median TTFT and median TPOT (Time Per Output Token)" \
   --hint "Multi-turn agentic workload" \
   --output-folder ./spotlights-out \
@@ -205,18 +205,18 @@ spotlights-out/
   index.md                          # repo-level summary, one row per module
   result.json                       # full structured run output
   modules/
-    v1.kv_offload.md                # module page: candidates table
-    v1.kv_offload/
+    vllm_v1_kv_offload.md           # module page: candidates table
+    vllm_v1_kv_offload/
       <symbol-slug>__<candidate-id>.md   # full per-candidate write-up + proposals
 artifacts/
   spotlights_manager/               # checkpoints, raw transcripts (resumable)
 ```
 
-`--include` accepts one or more dot-form leaf qualified names. Repeat the flag or pass several values after a single flag:
+`--include` accepts one or more slash-form leaf qualified names. Repeat the flag or pass several values after a single flag:
 
 ```bash
-spotlights-engine --include v1.kv_offload v1.attention.paged_kv ...
-spotlights-engine --include v1.kv_offload --include v1.attention.paged_kv ...
+spotlights-engine --include vllm/v1/kv_offload vllm/v1/attention/paged_kv ...
+spotlights-engine --include vllm/v1/kv_offload --include vllm/v1/attention/paged_kv ...
 ```
 
 ### Example output
@@ -272,14 +272,14 @@ Pass `--evolver all` to emit one bundle per compatible evolver (skydiscover is r
 ```bash
 spotlights-engine prep-evolve \
   --result   ./spotlights-out/result.json \
-  --module   v1.kv_offload \
+  --module   vllm/v1/kv_offload \
   --candidate cand-0002 \
   --repo     ../vllm \
   --evolver  skydiscover \
   --out      ./evolve_bundles
 ```
 
-`--module` takes the dot-form qualified name shown in `index.md`; `--candidate` takes the candidate id from the module page. The target repo is resolved from `--repo` (preferred); if omitted, `--index path/to/index.md` supplies the `Repo path:` recorded by the run. One of the two must resolve to an existing directory, or the command fails before writing anything.
+`--module` takes the slash-form qualified name shown in `index.md`; `--candidate` takes the candidate id from the module page. The target repo is resolved from `--repo` (preferred); if omitted, `--index path/to/index.md` supplies the `Repo path:` recorded by the run. One of the two must resolve to an existing directory, or the command fails before writing anything.
 
 ### What lands on disk
 
@@ -297,7 +297,7 @@ One directory per `(candidate × evolver)`, named `<repo>__<module>__<candidate>
 | Flag | Default | Purpose |
 |---|---|---|
 | `--result` | (required) | Path to a finished run's `result.json`. |
-| `--module` | (required) | Dot-form qualified name, e.g. `v1.attention`. |
+| `--module` | (required) | Slash-form qualified name, e.g. `vllm/v1/attention`. |
 | `--candidate` | (required) | Candidate id, e.g. `cand-0002`. |
 | `--evolver` | (required) | `skydiscover` \| `coral` \| `nous` \| `agentic-strategy-evolution` \| `all`. |
 | `--out` | (required) | Parent directory the bundle dir is written under. |
@@ -319,7 +319,7 @@ All flags are optional once `--repo` and the agent CLIs are available.
 | Flag | Default | Purpose |
 |---|---|---|
 | `--repo` | `../vllm` | Target repo path. |
-| `--include` | (all modules) | Restrict to dot-form leaf qualified names. |
+| `--include` | (all modules) | Restrict to slash-form leaf qualified names. |
 | `--objective` | `"reduce hot-path latency on common workloads"` | Threaded into discovery + deep research. |
 | `--hint` (repeatable) | `[]` | Workload hints; map to `SpotlightContext.workload_hints`. |
 | `--output-folder` | `./spotlights-out` | Where `index.md` and module pages land. |
