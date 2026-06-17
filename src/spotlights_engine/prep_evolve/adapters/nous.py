@@ -18,9 +18,7 @@ from spotlights_engine.prep_evolve.spec import EvolveSpec, Target
 from spotlights_engine.prep_evolve.yaml_emit import dump_yaml
 
 # Repo-root-relative source of the methodology prompts we vendor.
-_METHODOLOGY_REL = Path(
-    "other_repos/agentic-strategy-evolution/prompts/methodology"
-)
+_METHODOLOGY_REL = Path("other_repos/agentic-strategy-evolution/prompts/methodology")
 
 
 def _find_methodology_dir() -> Path | None:
@@ -82,8 +80,7 @@ class NousAdapter:
     def _build_campaign(self, spec: EvolveSpec, cand: Target, digest: str) -> str:
         research_question = self._research_question(spec, cand)
         run_id = _slug(
-            f"{spec.run.repo_name}-{spec.module.qualified_name}-"
-            f"{cand.candidate_id or 'cand'}"
+            f"{spec.run.repo_name}-{spec.module.qualified_name}-{cand.candidate_id or 'cand'}"
         )
 
         target_system: dict = {
@@ -126,10 +123,7 @@ class NousAdapter:
 
     def _research_question(self, spec: EvolveSpec, cand: Target) -> str:
         sym = cand.symbol or cand.file
-        return (
-            f"Does changing `{sym}` in {spec.run.repo_name} achieve: "
-            f"{spec.objective.goal}?"
-        )
+        return f"Does changing `{sym}` in {spec.run.repo_name} achieve: {spec.objective.goal}?"
 
     def _target_description(self, spec: EvolveSpec, digest: str) -> str:
         lines = []
@@ -152,7 +146,7 @@ class NousAdapter:
     def _observable_metrics(self, spec: EvolveSpec, cand: Target) -> list[str]:
         metrics: list[str] = []
         if cand.oracles.performance:
-            for part in re.split(r"[,/]", cand.oracles.performance):
+            for part in cand.oracles.performance.split(","):
                 part = part.strip()
                 if part and part not in metrics:
                     metrics.append(part)

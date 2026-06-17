@@ -39,7 +39,8 @@ Direction = Literal["minimize", "maximize"]
 _TEST_PATH_RE = re.compile(
     r"(?:tests?/[\w./-]+?\.py|[\w./-]+?_test\.py|test_[\w./-]+?\.py)",
 )
-_PYTEST_RE = re.compile(r"pytest[^\n`]*", re.IGNORECASE)
+_PYTEST_RE = re.compile(r"\bpytest\b[^\n`]*", re.IGNORECASE)
+_SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z][A-Za-z])")
 
 # Performance metric phrases worth surfacing. Deliberately specific (the plan
 # names TTFT/TPOT/latency/throughput) so noisy words like "memory locality" in
@@ -58,7 +59,10 @@ def parse_correctness_oracles(rationale: str) -> list[str]:
     found: list[str] = []
     seen: set[str] = set()
     for match in _PYTEST_RE.finditer(rationale):
-        token = match.group(0).strip().rstrip(".,;:)")
+        # The rationale often continues with prose on the same line
+        # ("pytest tests/foo.py -q. Performance oracle is ..."). Keep the
+        # command-shaped first sentence, not the whole paragraph.
+        token = _SENTENCE_BOUNDARY_RE.split(match.group(0).strip(), maxsplit=1)[0].rstrip(".,;:)")
         if token and token not in seen:
             seen.add(token)
             found.append(token)
@@ -109,9 +113,7 @@ def infer_direction(objective: str) -> Direction:
 # --- Spec construction ----------------------------------------------------
 
 
-def _build_oracles(
-    candidate: Candidate, context: SpotlightContext
-) -> Oracles:
+def _build_oracles(candidate: Candidate, context: SpotlightContext) -> Oracles:
     return Oracles(
         correctness=parse_correctness_oracles(candidate.evolve_rationale),
         performance=parse_performance_oracle(
@@ -167,9 +169,7 @@ def _main_file_targets(module: Module, exclude_file: str) -> list[Target]:
     return targets
 
 
-def _ordered_findings(
-    candidate: Candidate, findings: list[Finding]
-) -> list[FindingRef]:
+def _ordered_findings(candidate: Candidate, findings: list[Finding]) -> list[FindingRef]:
     """Candidate-linked findings first, then remaining module findings."""
     linked_ids = [p.finding_id for p in candidate.deep_research_proposals]
     by_id = {f.finding_id: f for f in findings}
@@ -265,9 +265,7 @@ def build_spec(
             name=module.name,
             path=module.path,
             description=module.description,
-            main_files=[
-                MainFile(path=mf.path, role=mf.role) for mf in module.main_files
-            ],
+            main_files=[MainFile(path=mf.path, role=mf.role) for mf in module.main_files],
         ),
         targets=targets,
         findings=_ordered_findings(candidate, findings),

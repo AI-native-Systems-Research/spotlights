@@ -54,6 +54,22 @@ def test_path_escape_rejected(tmp_path: Path) -> None:
         validate_candidate_target(repo, cand)
 
 
+def test_absolute_candidate_file_rejected(tmp_path: Path) -> None:
+    repo = fx.make_repo(tmp_path)
+    cand = _candidate(tmp_path)
+    cand.file = str((repo / fx.CAND_FILE).resolve())
+    with pytest.raises(StalenessError):
+        validate_candidate_target(repo, cand)
+
+
+def test_relative_repo_path_validates(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    fx.make_repo(tmp_path)
+    cand = _candidate(tmp_path)
+    monkeypatch.chdir(tmp_path)
+    validated = validate_candidate_target(Path("repo"), cand)
+    assert validated.line_start == fx.CAND_START
+
+
 def test_line_range_out_of_bounds(tmp_path: Path) -> None:
     repo = fx.make_repo(tmp_path)
     cand = _candidate(tmp_path)

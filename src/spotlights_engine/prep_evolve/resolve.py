@@ -62,17 +62,14 @@ def load_result(path: Path) -> LoadedResult:
 
     for key in ("project_tree", "context", "module_runs"):
         if key not in raw:
-            raise SelectionError(
-                f"result.json missing required field {key!r}: {path}"
-            )
+            raise SelectionError(f"result.json missing required field {key!r}: {path}")
 
     try:
         project_tree = ProjectTree.model_validate(raw["project_tree"])
         context = SpotlightContext.model_validate(raw["context"])
     except Exception as exc:  # noqa: BLE001 - surface as a clean selection error
         raise SelectionError(
-            f"result.json project_tree/context did not validate: "
-            f"{type(exc).__name__}: {exc}"
+            f"result.json project_tree/context did not validate: {type(exc).__name__}: {exc}"
         ) from exc
 
     module_runs = raw["module_runs"]
@@ -92,8 +89,7 @@ def resolve_module(tree: ProjectTree, qn: str) -> Module:
     if module is None:
         available = ", ".join(node_qn for node_qn, _ in tree.walk())
         raise SelectionError(
-            f"module {qn!r} not found in project_tree. "
-            f"Available modules: {available or '(none)'}"
+            f"module {qn!r} not found in project_tree. Available modules: {available or '(none)'}"
         )
     return module
 
@@ -104,8 +100,7 @@ def resolve_module_run(loaded: LoadedResult, qn: str) -> dict:
     if run is None:
         available = ", ".join(sorted(loaded.module_runs_raw)) or "(none)"
         raise SelectionError(
-            f"no module run for {qn!r} in module_runs. "
-            f"Available runs: {available}"
+            f"no module run for {qn!r} in module_runs. Available runs: {available}"
         )
     if not isinstance(run, dict):
         raise SelectionError(f"module run for {qn!r} is not an object")
@@ -116,15 +111,12 @@ def resolve_candidates(run: dict, qn: str) -> Candidates:
     """Validate and return the `Candidates` object from a raw module run."""
     raw = run.get("candidates")
     if not raw:
-        raise SelectionError(
-            f"module run {qn!r} has no candidates (discovery may have failed)"
-        )
+        raise SelectionError(f"module run {qn!r} has no candidates (discovery may have failed)")
     try:
         return Candidates.model_validate(raw)
     except Exception as exc:  # noqa: BLE001
         raise SelectionError(
-            f"candidates for {qn!r} did not validate: "
-            f"{type(exc).__name__}: {exc}"
+            f"candidates for {qn!r} did not validate: {type(exc).__name__}: {exc}"
         ) from exc
 
 
@@ -149,8 +141,7 @@ def resolve_findings(run: dict, qn: str) -> list[Finding]:
             findings.append(Finding.model_validate(entry))
         except Exception as exc:  # noqa: BLE001
             raise SelectionError(
-                f"finding in module {qn!r} did not validate: "
-                f"{type(exc).__name__}: {exc}"
+                f"finding in module {qn!r} did not validate: {type(exc).__name__}: {exc}"
             ) from exc
     return findings
 
@@ -190,9 +181,7 @@ def resolve_repo_path(
         try:
             text = index_path.read_text(encoding="utf-8")
         except OSError as exc:
-            raise RepoResolutionError(
-                f"could not read --index {index_path}: {exc}"
-            ) from exc
+            raise RepoResolutionError(f"could not read --index {index_path}: {exc}") from exc
         candidate = parse_repo_path_from_index(text)
         source = f"--index ({index_path})"
 
@@ -204,9 +193,7 @@ def resolve_repo_path(
 
     path = Path(candidate).expanduser()
     if not path.is_dir():
-        raise RepoResolutionError(
-            f"resolved repo path from {source} is not a directory: {path}"
-        )
+        raise RepoResolutionError(f"resolved repo path from {source} is not a directory: {path}")
     return path.resolve()
 
 

@@ -139,8 +139,7 @@ def _make_repo_overlay():
     Prefers a git worktree when REPO_PATH is a git checkout; falls back to a
     temp copytree otherwise. Returns (path, cleanup_callable).
     """
-    is_git = os.path.isdir(os.path.join(REPO_PATH, ".git"))
-    if is_git:
+    if _is_git_checkout(REPO_PATH):
         tmp = tempfile.mkdtemp(prefix="skydiscover-wt-")
         wt = os.path.join(tmp, "wt")
         proc = subprocess.run(
@@ -171,6 +170,16 @@ def _make_repo_overlay():
         shutil.rmtree(tmp, ignore_errors=True)
 
     return dst, cleanup
+
+
+def _is_git_checkout(path):
+    proc = subprocess.run(
+        ["git", "rev-parse", "--is-inside-work-tree"],
+        cwd=path,
+        capture_output=True,
+        text=True,
+    )
+    return proc.returncode == 0 and proc.stdout.strip() == "true"
 
 
 if __name__ == "__main__":

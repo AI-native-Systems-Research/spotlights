@@ -38,11 +38,15 @@ class ValidatedCandidate:
 
 def _resolve_inside(repo_path: Path, rel_file: str) -> Path:
     """Resolve `rel_file` inside `repo_path`, rejecting path escapes."""
-    resolved = (repo_path / rel_file).resolve()
-    if not resolved.is_relative_to(repo_path):
+    rel_path = Path(rel_file)
+    if rel_path.is_absolute():
+        raise StalenessError(f"target file {rel_file!r} must be repo-relative, not absolute")
+
+    repo_root = repo_path.resolve()
+    resolved = (repo_root / rel_path).resolve()
+    if not resolved.is_relative_to(repo_root):
         raise StalenessError(
-            f"target file {rel_file!r} resolves outside the repo "
-            f"({resolved} not under {repo_path})"
+            f"target file {rel_file!r} resolves outside the repo ({resolved} not under {repo_root})"
         )
     return resolved
 
@@ -51,9 +55,7 @@ def validate_scope_file(repo_path: Path, rel_file: str) -> None:
     """Validate a scope-only (whole-file) target: containment + existence."""
     resolved = _resolve_inside(repo_path, rel_file)
     if not resolved.is_file():
-        raise StalenessError(
-            f"scope target file does not exist in repo: {rel_file}"
-        )
+        raise StalenessError(f"scope target file does not exist in repo: {rel_file}")
 
 
 def validate_candidate_target(
@@ -68,9 +70,7 @@ def validate_candidate_target(
     """
     resolved = _resolve_inside(repo_path, candidate.file)
     if not resolved.is_file():
-        raise StalenessError(
-            f"candidate file does not exist in repo: {candidate.file}"
-        )
+        raise StalenessError(f"candidate file does not exist in repo: {candidate.file}")
 
     lines = resolved.read_text(encoding="utf-8", errors="replace").splitlines()
     n = len(lines)

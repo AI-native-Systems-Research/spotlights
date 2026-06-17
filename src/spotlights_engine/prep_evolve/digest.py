@@ -50,9 +50,7 @@ def render_digest(spec: EvolveSpec) -> str:
         if t.evolve_rationale:
             lines.append(f"Why it's worth evolving: {t.evolve_rationale}")
         if t.oracles.correctness:
-            lines.append(
-                "Correctness oracle: " + ", ".join(t.oracles.correctness)
-            )
+            lines.append("Correctness oracle: " + ", ".join(t.oracles.correctness))
         if t.oracles.performance:
             lines.append(f"Performance oracle: {t.oracles.performance}")
     lines.append("")

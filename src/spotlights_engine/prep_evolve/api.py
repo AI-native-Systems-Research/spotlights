@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -46,6 +47,7 @@ from spotlights_engine.prep_evolve.validate_target import (
 )
 
 _MANIFEST_NAME = "generated_files.json"
+_BUNDLE_SEGMENT_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 class PrepEvolveInput(BaseModel):
@@ -101,14 +103,19 @@ def _sha256(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _path_segment(value: str, default: str) -> str:
+    segment = _BUNDLE_SEGMENT_RE.sub("_", value).strip("._-")
+    return segment or default
+
+
 def _bundle_dir_name(spec: EvolveSpec, evolver: str) -> str:
-    # The qn is slash-form (`v1/attention`); collapse separators to `_` so the
-    # bundle is a single directory, not a nested path.
-    module_seg = spec.module.qualified_name.replace("/", "_")
-    return (
-        f"{spec.run.repo_name}__{module_seg}__"
-        f"{_candidate_id(spec)}__{evolver}"
-    )
+    # Collapse path separators and other unsafe characters so the bundle is a
+    # single directory, not a nested or escapable path.
+    repo_seg = _path_segment(spec.run.repo_name, "repo")
+    module_seg = _path_segment(spec.module.qualified_name, "module")
+    candidate_seg = _path_segment(_candidate_id(spec), "candidate")
+    evolver_seg = _path_segment(evolver, "evolver")
+    return f"{repo_seg}__{module_seg}__{candidate_seg}__{evolver_seg}"
 
 
 def _candidate_id(spec: EvolveSpec) -> str:
@@ -118,9 +125,7 @@ def _candidate_id(spec: EvolveSpec) -> str:
     return "candidate"
 
 
-def prep_evolve(
-    input: PrepEvolveInput, config: PrepEvolveConfig | None = None
-) -> PrepEvolveResult:
+def prep_evolve(input: PrepEvolveInput, config: PrepEvolveConfig | None = None) -> PrepEvolveResult:
     config = config or PrepEvolveConfig()
     captured_at = config.captured_at or _now_iso()
     warnings: list[str] = []
@@ -161,16 +166,15 @@ def prep_evolve(
             skipped.append(
                 SkippedEvolver(
                     evolver="skydiscover",
-                    reason="skydiscover is single-file; skipped for "
-                    "--scope module-main-files",
+                    reason="skydiscover is single-file; skipped for --scope module-main-files",
                 )
             )
 
     # 5. live-target validation (before any render/write).
     validated = validate_candidate_target(repo_path, candidate)
-    for t_file in {
-        mf.path for mf in module.main_files
-    } if input.scope == "module-main-files" else set():
+    for t_file in (
+        {mf.path for mf in module.main_files} if input.scope == "module-main-files" else set()
+    ):
         if t_file != candidate.file:
             validate_scope_file(repo_path, t_file)
 
@@ -179,8 +183,7 @@ def prep_evolve(
     direction = input.direction or infer_direction(loaded.context.objective)
     if input.direction is None:
         warnings.append(
-            f"direction inferred as {direction!r} from the objective; "
-            "pass --direction to override"
+            f"direction inferred as {direction!r} from the objective; pass --direction to override"
         )
 
     spec = build_spec(
@@ -242,10 +245,7 @@ def _run_command(evolver: str, ext: str = ".py") -> str:
     if evolver == "coral":
         return "coral start --config task.yaml"
     if evolver == "nous":
-        return (
-            "NOUS_CAMPAIGN_PARENT=$PWD/nous_runs nous run campaign.yaml "
-            "--bundle bundle.yaml"
-        )
+        return "NOUS_CAMPAIGN_PARENT=$PWD/nous_runs nous run campaign.yaml --bundle bundle.yaml"
     return "(see bundle files)"
 
 
@@ -274,8 +274,7 @@ def _always_emitted(spec: EvolveSpec, evolver: str) -> list[GeneratedFile]:
         candidate_id=cand.candidate_id or "(unknown)",
         evolver=evolver,
         run_command=_run_command(evolver, ext),
-        correctness_oracle=", ".join(cand.oracles.correctness)
-        or "(none parsed — add one)",
+        correctness_oracle=", ".join(cand.oracles.correctness) or "(none parsed — add one)",
         performance_oracle=cand.oracles.performance or "(none parsed — see objective)",
         direction=spec.objective.direction,
         evaluator_file=_evaluator_file(evolver),
@@ -339,13 +338,15 @@ def _materialize(
             "generator cannot safely determine ownership of existing files."
         )
 
+    bundle_root = bundle_path.resolve()
+    destinations = [(gf, _generated_destination(bundle_path, bundle_root, gf.path)) for gf in files]
+
     bundle_path.mkdir(parents=True, exist_ok=True)
 
     # Build the new manifest as we go.
     new_manifest: dict[str, dict] = {}
 
-    for gf in files:
-        dest = bundle_path / gf.path
+    for gf, dest in destinations:
         new_hash = _sha256(gf.text)
         prior_entry = prior.get(gf.path) if prior else None
 
@@ -379,6 +380,19 @@ def _materialize(
     return list(new_manifest.keys()) + [_MANIFEST_NAME]
 
 
+def _generated_destination(bundle_path: Path, bundle_root: Path, path: str) -> Path:
+    """Resolve a generated file path and reject bundle path escapes."""
+    rel = Path(path)
+    if rel.is_absolute() or not rel.parts or ".." in rel.parts:
+        raise BundleExistsError(f"invalid generated file path: {path!r}")
+
+    dest = bundle_path / rel
+    resolved_dest = dest.parent.resolve() / dest.name
+    if not resolved_dest.is_relative_to(bundle_root):
+        raise BundleExistsError(f"generated file path escapes bundle directory: {path!r}")
+    return dest
+
+
 def _decide_write(
     dest: Path,
     gf: GeneratedFile,
@@ -392,9 +406,7 @@ def _decide_write(
     # File exists on disk.
     if prior_entry is None:
         # Pre-existing, non-owned file -> never clobber.
-        warnings.append(
-            f"left pre-existing non-owned file untouched: {gf.path}"
-        )
+        warnings.append(f"left pre-existing non-owned file untouched: {gf.path}")
         return "skip"
 
     if gf.overwrite == "always":
@@ -406,9 +418,7 @@ def _decide_write(
     prior_hash = prior_entry.get("sha256")
     if current_hash == prior_hash:
         return "write"
-    warnings.append(
-        f"preserved user-modified file (not overwritten): {gf.path}"
-    )
+    warnings.append(f"preserved user-modified file (not overwritten): {gf.path}")
     return "preserve"
 
 

@@ -179,8 +179,7 @@ def write_index(tmp_path: Path, repo_path: Path) -> Path:
     """A minimal index.md carrying the Repo path line."""
     index = tmp_path / "index.md"
     index.write_text(
-        "# Spotlights Run\n\n## Repository\n"
-        f"- **Repo path:** {repo_path}\n",
+        f"# Spotlights Run\n\n## Repository\n- **Repo path:** {repo_path}\n",
         encoding="utf-8",
     )
     return index

@@ -155,10 +155,7 @@ def test_direction_inference(objective: str, expected: str) -> None:
 
 
 def test_oracle_parsing() -> None:
-    rationale = (
-        "Correctness oracle: tests/kernels/test_tile.py. "
-        "Performance oracle is median TPOT."
-    )
+    rationale = "Correctness oracle: tests/kernels/test_tile.py. Performance oracle is median TPOT."
     assert "pytest tests/kernels/test_tile.py" in parse_correctness_oracles(rationale)
     perf = parse_performance_oracle(rationale, "objective", "expl")
     assert perf is not None and "TPOT" in perf
@@ -166,9 +163,15 @@ def test_oracle_parsing() -> None:
 
 def test_oracle_parsing_preserves_explicit_pytest_command() -> None:
     rationale = "Correctness oracle: pytest tests/kernels/test_tile.py -q."
-    assert parse_correctness_oracles(rationale) == [
-        "pytest tests/kernels/test_tile.py -q"
-    ]
+    assert parse_correctness_oracles(rationale) == ["pytest tests/kernels/test_tile.py -q"]
+
+
+def test_oracle_parsing_trims_pytest_command_before_following_prose() -> None:
+    rationale = (
+        "Correctness oracle: pytest tests/kernels/test_tile.py -q. "
+        "Performance oracle is median TPOT."
+    )
+    assert parse_correctness_oracles(rationale) == ["pytest tests/kernels/test_tile.py -q"]
 
 
 def test_load_result_missing_field(tmp_path: Path) -> None:

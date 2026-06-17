@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ast
+import subprocess
 from pathlib import Path
 
 import yaml
@@ -112,6 +113,32 @@ def test_skydiscover_evaluator_marker_split_roundtrips_seed(tmp_path: Path) -> N
     assert namespace["_split_markers"](missing_end) is None
 
 
+def test_skydiscover_evaluator_recognizes_git_worktree(tmp_path: Path) -> None:
+    repo = fx.make_repo(tmp_path)
+    worktree = tmp_path / "repo-worktree"
+    subprocess.run(
+        ["git", "worktree", "add", "--detach", str(worktree), "HEAD"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    try:
+        spec = _spec(tmp_path, repo=repo)
+        files = _by_path(SkydiscoverAdapter().render(spec))
+        namespace = {"__name__": "generated_evaluator"}
+        exec(files["evaluator.py"].text, namespace)
+        assert namespace["_is_git_checkout"](str(worktree)) is True
+    finally:
+        subprocess.run(
+            ["git", "worktree", "remove", "--force", str(worktree)],
+            cwd=repo,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+
 def test_skydiscover_rejects_multi_file_scope(tmp_path: Path) -> None:
     spec = _spec(tmp_path, scope="module-main-files")
     ok, reason = SkydiscoverAdapter().supports(spec)
@@ -187,6 +214,15 @@ def test_nous_omits_empty_observable_metrics(tmp_path: Path) -> None:
     files = _by_path(NousAdapter().render(spec))
     camp = yaml.safe_load(files["campaign.yaml"].text)
     assert "observable_metrics" not in camp["target_system"]
+
+
+def test_nous_preserves_tokens_per_second_metric(tmp_path: Path) -> None:
+    spec = _spec(tmp_path)
+    for t in spec.targets:
+        t.oracles.performance = "tokens/s"
+    files = _by_path(NousAdapter().render(spec))
+    camp = yaml.safe_load(files["campaign.yaml"].text)
+    assert camp["target_system"]["observable_metrics"] == ["tokens/s"]
 
 
 def test_nous_bundle_required_fields(tmp_path: Path) -> None:

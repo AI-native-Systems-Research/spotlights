@@ -7,9 +7,11 @@ from pathlib import Path
 
 import pytest
 
+from spotlights_engine.prep_evolve.adapters.base import GeneratedFile
 from spotlights_engine.prep_evolve.api import (
     PrepEvolveConfig,
     PrepEvolveInput,
+    _materialize,
     prep_evolve,
 )
 from spotlights_engine.prep_evolve.cli import main as prep_main
@@ -75,6 +77,36 @@ def test_force_refused_without_prior_manifest(tmp_path: Path) -> None:
         prep_evolve(_input(tmp_path, repo, evolver="coral", out=out, force=True), _CFG)
 
 
+def test_generated_path_escape_rejected_before_writing(tmp_path: Path) -> None:
+    bundle = tmp_path / "bundle"
+    with pytest.raises(BundleExistsError):
+        _materialize(
+            bundle,
+            [GeneratedFile(path="../escape.txt", text="x")],
+            force=False,
+            warnings=[],
+        )
+    assert not bundle.exists()
+    assert not (tmp_path / "escape.txt").exists()
+
+
+def test_bundle_dir_name_sanitizes_repo_name(tmp_path: Path) -> None:
+    repo = fx.make_repo(tmp_path)
+    payload = fx.make_result_dict()
+    payload["project_tree"]["repository"]["name"] = "../demo repo"
+    result_json = tmp_path / "custom_result.json"
+    result_json.write_text(json.dumps(payload), encoding="utf-8")
+
+    out = tmp_path / "bundles"
+    result = prep_evolve(
+        _input(tmp_path, repo, result=result_json, evolver="coral", out=out),
+        _CFG,
+    )
+    bundle = Path(result.bundles[0].path)
+    assert bundle.parent == out
+    assert bundle.name.startswith("demo_repo__")
+
+
 def test_hand_edited_evaluator_survives_force(tmp_path: Path) -> None:
     repo = fx.make_repo(tmp_path)
     result = prep_evolve(_input(tmp_path, repo, evolver="skydiscover"), _CFG)
@@ -101,9 +133,7 @@ def test_always_file_rewritten_on_force(tmp_path: Path) -> None:
 
 def test_all_skips_skydiscover_for_multi_file(tmp_path: Path) -> None:
     repo = fx.make_repo(tmp_path)
-    result = prep_evolve(
-        _input(tmp_path, repo, evolver="all", scope="module-main-files"), _CFG
-    )
+    result = prep_evolve(_input(tmp_path, repo, evolver="all", scope="module-main-files"), _CFG)
     evolvers = {b.evolver for b in result.bundles}
     assert evolvers == {"coral", "nous"}
     assert any(s.evolver == "skydiscover" for s in result.skipped)
@@ -126,9 +156,7 @@ def test_unknown_evolver(tmp_path: Path) -> None:
 
 def test_alias_resolves(tmp_path: Path) -> None:
     repo = fx.make_repo(tmp_path)
-    result = prep_evolve(
-        _input(tmp_path, repo, evolver="agentic-strategy-evolution"), _CFG
-    )
+    result = prep_evolve(_input(tmp_path, repo, evolver="agentic-strategy-evolution"), _CFG)
     assert result.bundles[0].evolver == "nous"
 
 
@@ -143,9 +171,7 @@ def test_repo_from_index_fallback(tmp_path: Path) -> None:
 
 def test_direction_override(tmp_path: Path) -> None:
     repo = fx.make_repo(tmp_path)
-    result = prep_evolve(
-        _input(tmp_path, repo, evolver="coral", direction="maximize"), _CFG
-    )
+    result = prep_evolve(_input(tmp_path, repo, evolver="coral", direction="maximize"), _CFG)
     bundle = Path(result.bundles[0].path)
     spec = json.loads((bundle / "evolve_spec.json").read_text())
     assert spec["objective"]["direction"] == "maximize"

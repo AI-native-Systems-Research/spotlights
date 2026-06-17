@@ -67,8 +67,7 @@ class SkydiscoverAdapter:
         if suffix not in _HASH_COMMENT_SUFFIXES:
             return (
                 False,
-                f"file suffix {suffix!r} is not safe for literal '#' "
-                "EVOLVE-BLOCK markers",
+                f"file suffix {suffix!r} is not safe for literal '#' EVOLVE-BLOCK markers",
             )
         return (True, "")
 
@@ -103,9 +102,7 @@ class SkydiscoverAdapter:
 
     # --- seed ---
 
-    def _build_seed(
-        self, spec: EvolveSpec, t: Target
-    ) -> tuple[str, str, str]:
+    def _build_seed(self, spec: EvolveSpec, t: Target) -> tuple[str, str, str]:
         """Insert EVOLVE-BLOCK markers around the 1-indexed inclusive range.
 
         Returns (seed_text, prefix, suffix) where prefix/suffix are the text
@@ -140,9 +137,7 @@ class SkydiscoverAdapter:
 
     # --- config ---
 
-    def _build_config(
-        self, spec: EvolveSpec, t: Target, digest: str, language: str
-    ) -> str:
+    def _build_config(self, spec: EvolveSpec, t: Target, digest: str, language: str) -> str:
         system_message = self._system_message(spec, t, digest)
         config = {
             "language": language,
@@ -172,11 +167,9 @@ class SkydiscoverAdapter:
 
     def _system_message(self, spec: EvolveSpec, t: Target, digest: str) -> str:
         parts = [
-            f"You are optimizing `{t.symbol or t.file}` in repository "
-            f"{spec.run.repo_name}.",
+            f"You are optimizing `{t.symbol or t.file}` in repository {spec.run.repo_name}.",
             "",
-            f"Objective: {spec.objective.goal} "
-            f"(direction: {spec.objective.direction}).",
+            f"Objective: {spec.objective.goal} (direction: {spec.objective.direction}).",
             "",
         ]
         if t.description:
@@ -198,9 +191,7 @@ class SkydiscoverAdapter:
 
     # --- evaluator ---
 
-    def _build_evaluator(
-        self, spec: EvolveSpec, t: Target, prefix: str, suffix: str
-    ) -> str:
+    def _build_evaluator(self, spec: EvolveSpec, t: Target, prefix: str, suffix: str) -> str:
         correctness = t.oracles.correctness
         return render_template(
             "skydiscover_evaluator.py.tmpl",
