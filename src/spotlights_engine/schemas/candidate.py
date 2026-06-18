@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 CandidateKind = Literal[
     "function",
@@ -47,6 +47,12 @@ class CodeSpan(BaseModel):
     line_end: int = Field(ge=1)
     symbol: str = Field(min_length=1, max_length=200)
     kind: CodeKind
+
+    @model_validator(mode="after")
+    def _check_range(self) -> "CodeSpan":
+        if self.line_end < self.line_start:
+            raise ValueError("line_end must be >= line_start")
+        return self
 
 
 class CodeLocation(BaseModel):

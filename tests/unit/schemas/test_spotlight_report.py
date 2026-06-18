@@ -258,6 +258,15 @@ def test_code_location_rejects_empty_spans() -> None:
         _location(spans=[])
 
 
+def test_code_span_rejects_inverted_range() -> None:
+    with pytest.raises(ValidationError):
+        _span(line_start=10, line_end=5)
+
+
+def test_code_span_accepts_equal_start_and_end() -> None:
+    assert _span(line_start=7, line_end=7).line_end == 7
+
+
 # JSON round-trip backstop (frozen fixture) ----------------------------------
 
 def test_fixture_round_trips() -> None:
