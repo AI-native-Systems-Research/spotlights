@@ -63,22 +63,10 @@ class CoralAdapter:
         pyproject = render_template("coral_grader_pyproject.toml.tmpl")
 
         return [
-            GeneratedFile(path="task.yaml", text=task_yaml, overwrite="always"),
-            GeneratedFile(
-                path=f"grader/src/{_GRADER_PKG}/__init__.py",
-                text="",
-                overwrite="always",
-            ),
-            GeneratedFile(
-                path=f"grader/src/{_GRADER_PKG}/grader.py",
-                text=grader_py,
-                overwrite="preserve_if_modified",
-            ),
-            GeneratedFile(
-                path="grader/pyproject.toml",
-                text=pyproject,
-                overwrite="always",
-            ),
+            GeneratedFile(path="task.yaml", text=task_yaml),
+            GeneratedFile(path=f"grader/src/{_GRADER_PKG}/__init__.py", text=""),
+            GeneratedFile(path=f"grader/src/{_GRADER_PKG}/grader.py", text=grader_py),
+            GeneratedFile(path="grader/pyproject.toml", text=pyproject),
         ]
 
     def _build_task_yaml(

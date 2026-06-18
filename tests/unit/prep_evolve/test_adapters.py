@@ -89,12 +89,11 @@ def test_skydiscover_config_keys(tmp_path: Path) -> None:
     assert "\n" in sm and len(sm) > 256
 
 
-def test_skydiscover_evaluator_parses_and_preserved(tmp_path: Path) -> None:
+def test_skydiscover_evaluator_parses(tmp_path: Path) -> None:
     repo = fx.make_repo(tmp_path)
     spec = _spec(tmp_path, repo=repo)
     files = _by_path(SkydiscoverAdapter().render(spec))
     ast.parse(files["evaluator.py"].text)
-    assert files["evaluator.py"].overwrite == "preserve_if_modified"
 
 
 def test_skydiscover_evaluator_marker_split_roundtrips_seed(tmp_path: Path) -> None:
@@ -170,7 +169,6 @@ def test_coral_grader_package_layout(tmp_path: Path) -> None:
     assert "grader/src/spotlights_evolve_grader/__init__.py" in files
     grader_py = files["grader/src/spotlights_evolve_grader/grader.py"]
     ast.parse(grader_py.text)
-    assert grader_py.overwrite == "preserve_if_modified"
     assert "class Grader(TaskGrader)" in grader_py.text
 
 

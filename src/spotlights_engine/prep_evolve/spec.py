@@ -1,8 +1,7 @@
-"""`EvolveSpec` — the evolver-agnostic intermediate.
+"""`EvolveSpec` — the evolver-agnostic, in-memory intermediate.
 
-Pydantic models so we get free JSON (de)serialization for `evolve_spec.json`
-and round-trip re-render. Field names here are the contract the adapters bind
-to; see the implementation plan §3.
+Pydantic models built once per run and handed to each adapter. Field names here
+are the contract the adapters bind to; see the implementation plan §3.
 """
 
 from __future__ import annotations

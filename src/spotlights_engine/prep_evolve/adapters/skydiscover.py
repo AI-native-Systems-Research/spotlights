@@ -82,20 +82,14 @@ class SkydiscoverAdapter:
         language = _LANG_BY_SUFFIX.get(suffix_ext, "python")
 
         files = [
-            GeneratedFile(
-                path=f"seed{suffix_ext}",
-                text=seed_text,
-                overwrite="always",
-            ),
+            GeneratedFile(path=f"seed{suffix_ext}", text=seed_text),
             GeneratedFile(
                 path="config.yaml",
                 text=self._build_config(spec, t, digest, language),
-                overwrite="always",
             ),
             GeneratedFile(
                 path="evaluator.py",
                 text=self._build_evaluator(spec, t, prefix, suffix),
-                overwrite="preserve_if_modified",
             ),
         ]
         return files
