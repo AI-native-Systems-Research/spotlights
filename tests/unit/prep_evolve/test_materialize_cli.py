@@ -39,22 +39,14 @@ def _input(tmp_path: Path, repo: Path, **kw) -> PrepEvolveInput:
     return PrepEvolveInput(**base)
 
 
-def test_emits_always_files(tmp_path: Path) -> None:
+def test_emits_readme_not_metadata_files(tmp_path: Path) -> None:
     repo = fx.make_repo(tmp_path)
     result = prep_evolve(_input(tmp_path, repo, evolver="coral"), _CFG)
     assert len(result.bundles) == 1
     bundle = Path(result.bundles[0].path)
-    for name in ("evolve_spec.json", "findings_digest.md", "generated_files.json", "README.md"):
-        assert (bundle / name).exists()
-
-
-def test_manifest_excludes_itself(tmp_path: Path) -> None:
-    repo = fx.make_repo(tmp_path)
-    result = prep_evolve(_input(tmp_path, repo, evolver="coral"), _CFG)
-    bundle = Path(result.bundles[0].path)
-    manifest = json.loads((bundle / "generated_files.json").read_text())
-    assert "generated_files.json" not in manifest["files"]
-    assert "evolve_spec.json" in manifest["files"]
+    assert (bundle / "README.md").exists()
+    for name in ("evolve_spec.json", "findings_digest.md", "generated_files.json"):
+        assert not (bundle / name).exists()
 
 
 def test_force_required_for_existing_bundle(tmp_path: Path) -> None:
@@ -67,14 +59,15 @@ def test_force_required_for_existing_bundle(tmp_path: Path) -> None:
     assert result.bundles
 
 
-def test_force_refused_without_prior_manifest(tmp_path: Path) -> None:
+def test_force_overwrites_bundle_without_prior_manifest(tmp_path: Path) -> None:
     repo = fx.make_repo(tmp_path)
     out = tmp_path / "bundles"
-    # Pre-create a bundle dir with no manifest.
+    # Pre-create a bundle dir with no manifest; --force overwrites it.
     bundle = out / "demo__v1_attention__cand-0002__coral"
     bundle.mkdir(parents=True)
-    with pytest.raises(BundleExistsError):
-        prep_evolve(_input(tmp_path, repo, evolver="coral", out=out, force=True), _CFG)
+    result = prep_evolve(_input(tmp_path, repo, evolver="coral", out=out, force=True), _CFG)
+    assert result.bundles
+    assert (bundle / "task.yaml").exists()
 
 
 def test_generated_path_escape_rejected_before_writing(tmp_path: Path) -> None:
@@ -84,7 +77,6 @@ def test_generated_path_escape_rejected_before_writing(tmp_path: Path) -> None:
             bundle,
             [GeneratedFile(path="../escape.txt", text="x")],
             force=False,
-            warnings=[],
         )
     assert not bundle.exists()
     assert not (tmp_path / "escape.txt").exists()
@@ -107,17 +99,16 @@ def test_bundle_dir_name_sanitizes_repo_name(tmp_path: Path) -> None:
     assert bundle.name.startswith("demo_repo__")
 
 
-def test_hand_edited_evaluator_survives_force(tmp_path: Path) -> None:
+def test_force_overwrites_hand_edited_config(tmp_path: Path) -> None:
     repo = fx.make_repo(tmp_path)
     result = prep_evolve(_input(tmp_path, repo, evolver="skydiscover"), _CFG)
     bundle = Path(result.bundles[0].path)
-    evaluator = bundle / "evaluator.py"
-    evaluator.write_text("# HAND EDITED\n", encoding="utf-8")
+    config = bundle / "config.yaml"
+    config.write_text("# HAND EDITED\n", encoding="utf-8")
 
-    result2 = prep_evolve(_input(tmp_path, repo, evolver="skydiscover", force=True), _CFG)
-    assert evaluator.read_text() == "# HAND EDITED\n"
-    assert any("preserved user-modified" in w for w in result2.warnings)
-    # config.yaml (overwrite=always) was rewritten, not preserved.
+    prep_evolve(_input(tmp_path, repo, evolver="skydiscover", force=True), _CFG)
+    # Bundles are fully generator-owned: --force overwrites everything.
+    assert config.read_text() != "# HAND EDITED\n"
     assert (bundle / "config.yaml").exists()
 
 
@@ -170,11 +161,13 @@ def test_repo_from_index_fallback(tmp_path: Path) -> None:
 
 
 def test_direction_override(tmp_path: Path) -> None:
+    import yaml
+
     repo = fx.make_repo(tmp_path)
     result = prep_evolve(_input(tmp_path, repo, evolver="coral", direction="maximize"), _CFG)
     bundle = Path(result.bundles[0].path)
-    spec = json.loads((bundle / "evolve_spec.json").read_text())
-    assert spec["objective"]["direction"] == "maximize"
+    task = yaml.safe_load((bundle / "task.yaml").read_text())
+    assert task["grader"]["direction"] == "maximize"
     # No inference warning when explicitly given.
     assert not any("inferred" in w for w in result.warnings)
 

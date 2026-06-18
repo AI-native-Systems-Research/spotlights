@@ -7,8 +7,8 @@ emit only schema-allowed keys; URLs/evidence stay in the digest /
 `target_system.description`.
 
 The bundle is deliberately just `campaign.yaml` — no `bundle.yaml`, no vendored
-methodology prompts, and none of the shared metadata files. Everything the run
-needs is inlined into the campaign.
+methodology prompts, and no shared README. Everything the run needs is inlined
+into the campaign.
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ class NousAdapter:
     name = "nous"
 
     # Nous bundles are a single self-contained campaign.yaml; api.py keys off
-    # this to skip the shared metadata files and the manifest force-guard.
+    # this to skip the shared README.
     minimal_bundle = True
 
     def __init__(self, model: str | None = None) -> None:
@@ -54,7 +54,6 @@ class NousAdapter:
             GeneratedFile(
                 path="campaign.yaml",
                 text=self._build_campaign(spec, cand, digest),
-                overwrite="always",
             )
         ]
 

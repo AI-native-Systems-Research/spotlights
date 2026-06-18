@@ -346,8 +346,8 @@ Spotlights decides *what* to optimize; **evolvers** (evolutionary code-search ba
 
 | Evolver (`--evolver`) | Edit scope | Native config | Run command |
 |---|---|---|---|
-| `skydiscover` | single file (mutates the `# EVOLVE-BLOCK-START/END` region) | `config.yaml` + `seed.<ext>` + `evaluator.py` | `skydiscover-run seed.<ext> evaluator.py -c config.yaml` |
-| `coral` | multi-file (agent edits a git worktree) | `task.yaml` + `grader/` package | `coral start --config task.yaml` |
+| `skydiscover` | single file (mutates the `# EVOLVE-BLOCK-START/END` region) | `config.yaml` + `seed.<ext>` (you write `evaluator.py`) | `skydiscover-run seed.<ext> evaluator.py -c config.yaml` |
+| `coral` | multi-file (agent edits a git worktree) | `task.yaml` (you write `eval/grader.py`) | `coral start --config task.yaml` |
 | `nous` (alias `agentic-strategy-evolution`) | multi-file (experiment arms with `code_changes[]`) | `campaign.yaml` + `bundle.yaml` + `prompts/methodology/` | `NOUS_CAMPAIGN_PARENT=$PWD/nous_runs nous run campaign.yaml --bundle bundle.yaml` |
 
 Pass `--evolver all` to emit one bundle per compatible evolver (skydiscover is reported as skipped for multi-file selections).
@@ -370,12 +370,11 @@ spotlights-engine prep-evolve \
 
 ### What lands on disk
 
-One directory per `(candidate × evolver)`, named `<repo>__<module>__<candidate>__<evolver>/`. Alongside the evolver-native files, every bundle always includes:
+One directory per `(candidate × evolver)`, named `<repo>__<module>__<candidate>__<evolver>/`. Alongside the evolver-native files, every bundle (except the single-file Nous campaign) includes:
 
-- `evolve_spec.json` — the evolver-agnostic intermediate, so you can re-render for another evolver without re-reading `result.json`.
-- `findings_digest.md` — the human-readable findings/proposals digest (also embedded in the native config).
-- `generated_files.json` — the generator-owned file manifest that makes `--force` rewrites narrow and auditable.
 - `README.md` — the copy-paste run command, the in-scope files, and the **evaluation-gap warning**.
+
+The findings/proposals digest is embedded directly in each evolver's native config (the grader/evaluator prompt or system message) rather than written as a standalone file.
 
 > **The evaluation gap is real.** Every evolver needs a project-specific measurement loop (build the target, run a benchmark, parse the metric). `prep-evolve` parses the correctness/performance oracle out of the candidate's `evolve_rationale` and objective and pre-fills the evaluator/grader scaffold, but the performance measurement is left as a clearly-marked `# TODO`. The bundle is launchable end-to-end immediately, but **results are not meaningful until you complete the evaluator** — each bundle's `README.md` states what Spotlights believes the oracle is.
 
@@ -393,9 +392,9 @@ One directory per `(candidate × evolver)`, named `<repo>__<module>__<candidate>
 | `--scope` | `candidate` | `candidate` or `module-main-files` (CORAL/Nous only — adds the module's `main_files` as editable targets). |
 | `--direction` | (inferred) | `minimize` \| `maximize`; overrides the direction inferred from the objective verb. |
 | `--model` | (evolver default) | Override the default evolver LLM model. |
-| `--force` | off | Re-run over an existing bundle, rewriting only generator-owned files (user-edited evaluators are preserved). |
+| `--force` | off | Re-run over an existing bundle, overwriting every generated file. |
 
-Re-runs are non-destructive by default: if the bundle directory already exists, the command fails unless `--force` is set. With `--force`, only files recorded in the prior `generated_files.json` are rewritten, so a completed evaluator is never silently clobbered.
+Re-runs are guarded by default: if the bundle directory already exists, the command fails unless `--force` is set. With `--force`, every generated file is overwritten — including a hand-edited evaluator/grader — so copy out any evaluator work you want to keep before re-running.
 
 Design and contract: [`design/integration_with_evolvers_high_level_plan.md`](design/integration_with_evolvers_high_level_plan.md) and [`design/integration_with_evolvers_impl_plan.md`](design/integration_with_evolvers_impl_plan.md).
 

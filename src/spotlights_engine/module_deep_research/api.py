@@ -23,12 +23,6 @@ from spotlights_engine.schemas.pipeline import (
 from spotlights_engine.schemas.project import Module, ProjectTree
 
 
-class ModuleResearchRunner(Protocol):
-    """Minimal runner protocol used by `research_module`."""
-
-    def run(self, prompt: str, *, check: bool = True) -> CodexExecResult: ...
-
-
 def _issue(message: str, *, recoverable: bool) -> StepIssue:
     return StepIssue(
         step="module_deep_research",
