@@ -35,7 +35,7 @@ def make_candidate(idx: int = 0) -> Candidate:
     )
 
 
-def make_candidates(n: int = 1, qn: str = "v1.kv_offload") -> Candidates:
+def make_candidates(n: int = 1, qn: str = "v1/kv_offload") -> Candidates:
     return Candidates(
         module_qualified_name=qn,
         candidates=[make_candidate(i) for i in range(n)],
@@ -54,12 +54,12 @@ def make_project_tree() -> ProjectTree:
         submodules=[leaf],
     )
     return ProjectTree(
-        repository=Repository(name="repo", summary="x"),
+        repository=Repository(name="repo", summary="x", source_root="src"),
         modules=[parent],
     )
 
 
-def make_input(n_candidates: int = 1, qn: str = "v1.kv_offload") -> AgentProposalsInput:
+def make_input(n_candidates: int = 1, qn: str = "v1/kv_offload") -> AgentProposalsInput:
     return AgentProposalsInput(
         project_tree=make_project_tree(),
         candidates=make_candidates(n_candidates, qn=qn),

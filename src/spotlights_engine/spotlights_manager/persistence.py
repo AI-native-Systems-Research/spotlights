@@ -42,6 +42,14 @@ from spotlights_engine.schemas.project import ProjectTree
 
 _SLUG_SAFE = re.compile(r"[^A-Za-z0-9._-]")
 
+# Bumped to 2 when qualified names became source-root-relative (the package
+# prefix is now retained, e.g. `spotlights_engine/modules_extractor`). Run dirs
+# written under the old name-chain layout carry version 1 and are not
+# resume-compatible — their per-module slugs and `module_runs` keys differ.
+# `_ensure_resume_compatible` reads and compares this; pre-change dirs are
+# rejected cleanly rather than silently reloaded.
+SCHEMA_VERSION = 2
+
 
 CheckpointStatus = Literal[
     "PENDING",
@@ -73,10 +81,10 @@ def _atomic_write_json(path: Path, payload: Any) -> None:
 
 
 def slug_for(qualified_name: str) -> str:
-    """Slug used as the per-module directory name. Dot-form name with any
-    char outside `[A-Za-z0-9._-]` replaced by `_`. Dot-form is unique by
-    construction so collisions are theoretical, but the orchestrator still
-    checks at filter-resolution time."""
+    """Slug used as the per-module directory name. Slash-form qualified name
+    with any char outside `[A-Za-z0-9._-]` replaced by `_` (so path separators
+    collapse to `_`). Slash-form is unique by construction so collisions are
+    theoretical, but the orchestrator still checks at filter-resolution time."""
     return _SLUG_SAFE.sub("_", qualified_name)
 
 
@@ -314,7 +322,7 @@ def init_manifest(
 ) -> dict[str, Any]:
     now = _now_iso()
     manifest: dict[str, Any] = {
-        "schema_version": 1,
+        "schema_version": SCHEMA_VERSION,
         "created_at": now,
         "updated_at": now,
         "status": "RUNNING",
@@ -605,6 +613,7 @@ def clear_extractor_artifacts(paths: ManagerPaths) -> None:
 
 
 __all__ = [
+    "SCHEMA_VERSION",
     "CheckpointStatus",
     "LoadedModuleState",
     "ManagerPaths",

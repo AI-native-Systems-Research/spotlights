@@ -80,8 +80,12 @@ def run_candidate_codex(
 
     # Codex runs with `cwd=repo_path` and `-C <repo_path>`, so any relative
     # path here would resolve under the target repo. Pass absolutes.
+    # Resolve via shutil.which so Windows finds the .CMD/.ps1 shim; bare
+    # "codex" → FileNotFoundError because subprocess on Windows doesn't
+    # follow PATHEXT for unqualified argv[0].
+    codex_resolved = shutil.which("codex") or "codex"
     argv: list[str] = [
-        "codex",
+        codex_resolved,
         "exec",
         "-",
         "--json",

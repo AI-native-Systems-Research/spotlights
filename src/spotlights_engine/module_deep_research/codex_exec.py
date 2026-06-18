@@ -13,6 +13,11 @@ from typing import IO
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from spotlights_engine.module_deep_research.agent_exec import (
+    AgentExecResult,
+    resolve_cli_executable,
+)
+
 
 class CodexExecOptions(BaseModel):
     """Options for running Codex in non-interactive mode."""
@@ -36,21 +41,10 @@ class CodexExecOptions(BaseModel):
     stream_logs: bool = False
 
 
-class CodexExecResult(BaseModel):
+class CodexExecResult(AgentExecResult):
     """Captured result from one `codex exec` invocation."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    command: list[str]
-    returncode: int
-    stdout: str
-    stderr: str
-    final_message: str | None
     output_last_message: Path | None
-
-    @property
-    def ok(self) -> bool:
-        return self.returncode == 0
 
     def raise_for_status(self) -> None:
         if self.returncode != 0:
@@ -63,6 +57,8 @@ class CodexExecResult(BaseModel):
 
 class CodexExecClient:
     """Run Codex in non-interactive mode from Python."""
+
+    name = "codex"
 
     def __init__(self, options: CodexExecOptions | None = None) -> None:
         self.options = options or CodexExecOptions()
@@ -81,7 +77,7 @@ class CodexExecClient:
             output_last_message = Path(opt.output_last_message).expanduser().resolve()
             output_last_message.parent.mkdir(parents=True, exist_ok=True)
 
-        cmd = [opt.codex_bin]
+        cmd = [resolve_cli_executable(opt.codex_bin)]
         if opt.model:
             cmd += ["--model", opt.model]
         if opt.profile:
@@ -119,6 +115,13 @@ class CodexExecClient:
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
+            # Pin UTF-8 for stdin/stdout/stderr. Without this, Python's
+            # text mode uses locale.getpreferredencoding() — cp1252 on
+            # Windows — and any non-cp1252 char in codex's response
+            # (arrows, quotes, em-dashes, accented chars, …) crashes
+            # the reader thread with a 'charmap' codec error.
+            encoding="utf-8",
+            errors="replace",
             cwd=str(Path(self.options.cwd).expanduser().resolve()),
             env=env,
             bufsize=1,

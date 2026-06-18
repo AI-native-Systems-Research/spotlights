@@ -307,6 +307,17 @@ def _ensure_resume_compatible(
             run_dir=str(paths.root),
         )
 
+    existing_schema_version = existing.get("schema_version", 1)
+    if existing_schema_version != P.SCHEMA_VERSION:
+        raise ResumeMismatchError(
+            "manager run dir schema_version "
+            f"{existing_schema_version!r} is incompatible with the current "
+            f"schema_version {P.SCHEMA_VERSION!r} (qualified-name format "
+            "changed); start a fresh artifacts_dir",
+            existing=existing_schema_version,
+            current=P.SCHEMA_VERSION,
+        )
+
     if existing.get("input_fingerprint") != input_fp:
         raise ResumeMismatchError(
             "input fingerprint changed since the manager run dir was created",
@@ -936,7 +947,7 @@ async def _run_module(
                     prior_synthesis = _format_query_results(results)
 
         if run_step3:
-            _log.info("[%s] deep_research: start (Codex session)", qn)
+            _log.info("[%s] deep_research: start", qn)
             try:
                 research_output, dr_duration = await _do_step3(
                     qn=qn,
@@ -983,7 +994,7 @@ async def _run_module(
                 return cp
 
             _log.info(
-                "[%s] deep_research: complete in %.1fs — %d findings",
+                "[%s] deep_research: complete in %.1fs — %d findings (after dedup)",
                 qn,
                 dr_duration,
                 len(research_output.findings),
@@ -1383,14 +1394,14 @@ async def _run_async(
     # Step 1.
     tree, invocation = _run_extractor_if_needed(input, config, paths, manifest)
 
-    # Compute target list (dot-form keys).
-    leaves: list[tuple[str, Module]] = [
-        (_slash_to_dot(qn), m) for qn, m in tree.leaves()
-    ]
+    # Compute target list. Qualified names are slash-form (source-root-relative
+    # paths) and are the single canonical key throughout — `module_runs`, slugs,
+    # the CLI filter, and `EvolveSpec` all key on this string.
+    leaves: list[tuple[str, Module]] = list(tree.leaves())
     leaf_qns = [qn for qn, _ in leaves]
     selected = apply_filter(leaf_qns, config.module_filter)
 
-    # Slug collision check (theoretical — dot form is unique by construction).
+    # Slug collision check (theoretical — slash form is unique by construction).
     seen_slugs: dict[str, str] = {}
     for qn in selected:
         slug = P.slug_for(qn)

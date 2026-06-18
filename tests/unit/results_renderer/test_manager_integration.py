@@ -74,14 +74,14 @@ def test_manager_renders_index_md(
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
         output_folder=output,
-        module_filter=ModuleFilter(include=["v1.kv_offload"]),
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
     )
     result = run_with_telemetry(make_input(repo), config=cfg)
 
     assert result.renderer_result is not None
     assert result.renderer_result.index_path == output / "index.md"
     assert (output / "index.md").exists()
-    assert (output / "modules" / "v1.kv_offload.md").exists()
+    assert (output / "modules" / "v1_kv_offload.md").exists()
     assert result.manager_issues == []
 
 
@@ -93,11 +93,11 @@ def test_run_returns_architecture_shape(
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
         output_folder=output,
-        module_filter=ModuleFilter(include=["v1.kv_offload"]),
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
     )
     arch_result = run(make_input(repo), config=cfg)
     assert isinstance(arch_result, SpotlightsResult)
-    assert "v1.kv_offload" in arch_result.module_runs
+    assert "v1/kv_offload" in arch_result.module_runs
 
 
 def test_renderer_failure_recorded_as_manager_issue(
@@ -116,7 +116,7 @@ def test_renderer_failure_recorded_as_manager_issue(
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
         output_folder=output,
-        module_filter=ModuleFilter(include=["v1.kv_offload"]),
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
     )
     result = run_with_telemetry(make_input(repo), config=cfg)
 
@@ -125,4 +125,4 @@ def test_renderer_failure_recorded_as_manager_issue(
         iss.step == "results_renderer" for iss in result.manager_issues
     )
     # The pipeline did not fail just because the renderer did.
-    assert "v1.kv_offload" in result.module_runs
+    assert "v1/kv_offload" in result.module_runs
