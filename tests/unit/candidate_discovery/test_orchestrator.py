@@ -92,24 +92,24 @@ class FakeAgentRunner:
         return text
 
 
-def _module(path: str = "src/foo") -> Module:
+def _module(path: str = "src/v1/foo") -> Module:
     return Module(
         name="foo",
         path=path,
         description="hot path",
-        main_files=[File(path="src/foo/x.py", role="entry")],
+        main_files=[File(path="src/v1/foo/x.py", role="entry")],
     )
 
 
 def _project_tree() -> ProjectTree:
     """Tree shaped so that qualified name `v1/foo` resolves to a `foo` leaf.
 
-    The architecture's `module_qualified_name` is the dot/slash-joined chain
-    of `Module.name` values. Tests assert against the slash form `v1/foo`,
-    so build a parent `v1` containing the leaf `foo`.
+    The `module_qualified_name` is the module path relative to `source_root`
+    (`"src"` here), so a leaf `foo` at `src/v1/foo` has qualified name
+    `v1/foo`. Child paths must nest under their parent's path.
     """
     return ProjectTree(
-        repository=Repository(name="demo", summary="demo repo"),
+        repository=Repository(name="demo", summary="demo repo", source_root="src"),
         modules=[
             Module(
                 name="v1",
@@ -122,9 +122,9 @@ def _project_tree() -> ProjectTree:
 
 
 def _seed_module_files(repo: Path) -> None:
-    (repo / "src" / "foo").mkdir(parents=True, exist_ok=True)
+    (repo / "src" / "v1" / "foo").mkdir(parents=True, exist_ok=True)
     for name in ("x.py", "y.py", "z.py"):
-        (repo / "src" / "foo" / name).write_text(
+        (repo / "src" / "v1" / "foo" / name).write_text(
             "\n".join(f"line {i}" for i in range(1, 101)) + "\n"
         )
 
@@ -206,19 +206,19 @@ def test_happy_path_four_iterations(repo_artifacts, monkeypatch):
     claude = FakeAgentRunner(
         "claude_code",
         responses=[
-            _cands([("cand-0001", "src/foo/x.py")]),
-            _cands([("cand-0001", "src/foo/x.py"), ("cand-0003", "src/foo/z.py")]),
+            _cands([("cand-0001", "src/v1/foo/x.py")]),
+            _cands([("cand-0001", "src/v1/foo/x.py"), ("cand-0003", "src/v1/foo/z.py")]),
         ],
     )
     codex = FakeAgentRunner(
         "codex",
         responses=[
-            _cands([("cand-0001", "src/foo/x.py"), ("cand-0002", "src/foo/y.py")]),
+            _cands([("cand-0001", "src/v1/foo/x.py"), ("cand-0002", "src/v1/foo/y.py")]),
             _cands(
                 [
-                    ("cand-0001", "src/foo/x.py"),
-                    ("cand-0003", "src/foo/z.py"),
-                    ("cand-0004", "src/foo/x.py"),
+                    ("cand-0001", "src/v1/foo/x.py"),
+                    ("cand-0003", "src/v1/foo/z.py"),
+                    ("cand-0004", "src/v1/foo/x.py"),
                 ]
             ),
         ],
@@ -262,14 +262,14 @@ def test_schema_parse_retry_succeeds(repo_artifacts, monkeypatch):
     claude = FakeAgentRunner(
         "claude_code",
         responses=[
-            _cands([("cand-0001", "src/foo/x.py")]),
+            _cands([("cand-0001", "src/v1/foo/x.py")]),
         ],
     )
     codex = FakeAgentRunner(
         "codex",
         responses=[
             "not-json-on-first-attempt",  # forces a retry
-            _cands([("cand-0001", "src/foo/x.py"), ("cand-0002", "src/foo/y.py")]),
+            _cands([("cand-0001", "src/v1/foo/x.py"), ("cand-0002", "src/v1/foo/y.py")]),
         ],
     )
     _install_runners(monkeypatch, claude, codex)
@@ -284,7 +284,7 @@ def test_schema_parse_retry_fails_twice(repo_artifacts, monkeypatch):
     claude = FakeAgentRunner(
         "claude_code",
         responses=[
-            _cands([("cand-0001", "src/foo/x.py")]),
+            _cands([("cand-0001", "src/v1/foo/x.py")]),
         ],
     )
     codex = FakeAgentRunner(
@@ -303,11 +303,11 @@ def test_mutation_guard_fires(repo_artifacts, monkeypatch):
     repo, artifacts = repo_artifacts
 
     def _write_into_repo(_iter_dir: Path) -> None:
-        (repo / "src" / "foo" / "x.py").write_text("mutated\n")
+        (repo / "src" / "v1" / "foo" / "x.py").write_text("mutated\n")
 
     claude = FakeAgentRunner(
         "claude_code",
-        responses=[_cands([("cand-0001", "src/foo/x.py")])],
+        responses=[_cands([("cand-0001", "src/v1/foo/x.py")])],
         repo_writer=_write_into_repo,
     )
     codex = FakeAgentRunner("codex", responses=[])
@@ -325,7 +325,7 @@ def test_qualified_name_mismatch(repo_artifacts, monkeypatch):
     repo, artifacts = repo_artifacts
     claude = FakeAgentRunner(
         "claude_code",
-        responses=[_cands([("cand-0001", "src/foo/x.py")], qn="wrong/name")],
+        responses=[_cands([("cand-0001", "src/v1/foo/x.py")], qn="wrong/name")],
     )
     codex = FakeAgentRunner("codex", responses=[])
     _install_runners(monkeypatch, claude, codex)
@@ -345,7 +345,7 @@ def test_containment_drop(repo_artifacts, monkeypatch):
         responses=[
             _cands(
                 [
-                    ("cand-0001", "src/foo/x.py"),
+                    ("cand-0001", "src/v1/foo/x.py"),
                     ("cand-0002", "src/bar/y.py"),
                 ]
             )
@@ -366,7 +366,7 @@ def test_all_candidates_dropped(repo_artifacts, monkeypatch):
     repo, artifacts = repo_artifacts
     claude = FakeAgentRunner(
         "claude_code",
-        responses=[_cands([("cand-0001", "src/foo/missing.py")])],
+        responses=[_cands([("cand-0001", "src/v1/foo/missing.py")])],
     )
     codex = FakeAgentRunner("codex", responses=[])
     _install_runners(monkeypatch, claude, codex)
@@ -381,11 +381,11 @@ def test_id_monotonicity_violation(repo_artifacts, monkeypatch):
     claude = FakeAgentRunner(
         "claude_code",
         responses=[
-            _cands([("cand-0001", "src/foo/x.py"), ("cand-0005", "src/foo/y.py")]),
+            _cands([("cand-0001", "src/v1/foo/x.py"), ("cand-0005", "src/v1/foo/y.py")]),
             _cands(
                 [
-                    ("cand-0001", "src/foo/x.py"),
-                    ("cand-0005", "src/foo/y.py"),
+                    ("cand-0001", "src/v1/foo/x.py"),
+                    ("cand-0005", "src/v1/foo/y.py"),
                 ]
             ),
         ],
@@ -395,9 +395,9 @@ def test_id_monotonicity_violation(repo_artifacts, monkeypatch):
         responses=[
             _cands(
                 [
-                    ("cand-0001", "src/foo/x.py"),
-                    ("cand-0005", "src/foo/y.py"),
-                    ("cand-0003", "src/foo/z.py"),  # 0003 <= 0005 max_seen — violation
+                    ("cand-0001", "src/v1/foo/x.py"),
+                    ("cand-0005", "src/v1/foo/y.py"),
+                    ("cand-0003", "src/v1/foo/z.py"),  # 0003 <= 0005 max_seen — violation
                 ]
             ),
         ],
@@ -417,8 +417,8 @@ def test_within_iter_duplicate_ids_raises(repo_artifacts, monkeypatch):
         responses=[
             _cands(
                 [
-                    ("cand-0001", "src/foo/x.py"),
-                    ("cand-0001", "src/foo/y.py"),
+                    ("cand-0001", "src/v1/foo/x.py"),
+                    ("cand-0001", "src/v1/foo/y.py"),
                 ]
             )
         ],
@@ -437,13 +437,13 @@ def test_carry_over_id_must_retain_file(repo_artifacts, monkeypatch):
     claude = FakeAgentRunner(
         "claude_code",
         responses=[
-            _cands([("cand-0001", "src/foo/x.py")]),
+            _cands([("cand-0001", "src/v1/foo/x.py")]),
         ],
     )
     codex = FakeAgentRunner(
         "codex",
         responses=[
-            _cands([("cand-0001", "src/foo/y.py")]),  # same id, different file → raise
+            _cands([("cand-0001", "src/v1/foo/y.py")]),  # same id, different file → raise
         ],
     )
     _install_runners(monkeypatch, claude, codex)
@@ -452,8 +452,8 @@ def test_carry_over_id_must_retain_file(repo_artifacts, monkeypatch):
     with pytest.raises(DiscoveryValidationError, match="carry-over") as exc:
         discover(_make_input(), config=cfg)
     assert exc.value.context["id"] == "cand-0001"
-    assert exc.value.context["prev_file"] == "src/foo/x.py"
-    assert exc.value.context["new_file"] == "src/foo/y.py"
+    assert exc.value.context["prev_file"] == "src/v1/foo/x.py"
+    assert exc.value.context["new_file"] == "src/v1/foo/y.py"
 
 
 def test_pre_existing_run_dir_raises(repo_artifacts, monkeypatch):
@@ -502,13 +502,13 @@ def test_final_artifact_copy_byte_identical(repo_artifacts, monkeypatch):
     claude = FakeAgentRunner(
         "claude_code",
         responses=[
-            _cands([("cand-0001", "src/foo/x.py")]),
+            _cands([("cand-0001", "src/v1/foo/x.py")]),
         ],
     )
     codex = FakeAgentRunner(
         "codex",
         responses=[
-            _cands([("cand-0001", "src/foo/x.py"), ("cand-0002", "src/foo/y.py")]),
+            _cands([("cand-0001", "src/v1/foo/x.py"), ("cand-0002", "src/v1/foo/y.py")]),
         ],
     )
     _install_runners(monkeypatch, claude, codex)
@@ -527,7 +527,7 @@ def test_total_duration_starts_at_run_entry(repo_artifacts, monkeypatch):
     repo, artifacts = repo_artifacts
     claude = FakeAgentRunner(
         "claude_code",
-        responses=[_cands([("cand-0001", "src/foo/x.py")])],
+        responses=[_cands([("cand-0001", "src/v1/foo/x.py")])],
     )
     codex = FakeAgentRunner("codex", responses=[])
 
@@ -585,7 +585,7 @@ def test_repo_context_persisted_when_supplied(repo_artifacts, monkeypatch):
     repo, artifacts = repo_artifacts
     claude = FakeAgentRunner(
         "claude_code",
-        responses=[_cands([("cand-0001", "src/foo/x.py")])],
+        responses=[_cands([("cand-0001", "src/v1/foo/x.py")])],
     )
     codex = FakeAgentRunner("codex", responses=[])
     _install_runners(monkeypatch, claude, codex)
@@ -602,7 +602,7 @@ def test_repo_context_not_persisted_when_none(repo_artifacts, monkeypatch):
     repo, artifacts = repo_artifacts
     claude = FakeAgentRunner(
         "claude_code",
-        responses=[_cands([("cand-0001", "src/foo/x.py")])],
+        responses=[_cands([("cand-0001", "src/v1/foo/x.py")])],
     )
     codex = FakeAgentRunner("codex", responses=[])
     _install_runners(monkeypatch, claude, codex)
@@ -622,14 +622,14 @@ def test_repo_context_reaches_every_iteration_prompt(repo_artifacts, monkeypatch
     claude = FakeAgentRunner(
         "claude_code",
         responses=[
-            _cands([("cand-0001", "src/foo/x.py")]),
-            _cands([("cand-0001", "src/foo/x.py"), ("cand-0003", "src/foo/z.py")]),
+            _cands([("cand-0001", "src/v1/foo/x.py")]),
+            _cands([("cand-0001", "src/v1/foo/x.py"), ("cand-0003", "src/v1/foo/z.py")]),
         ],
     )
     codex = FakeAgentRunner(
         "codex",
         responses=[
-            _cands([("cand-0001", "src/foo/x.py"), ("cand-0002", "src/foo/y.py")]),
+            _cands([("cand-0001", "src/v1/foo/x.py"), ("cand-0002", "src/v1/foo/y.py")]),
         ],
     )
     _install_runners(monkeypatch, claude, codex)

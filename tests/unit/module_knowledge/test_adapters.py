@@ -60,11 +60,14 @@ def test_records_from_project_tree_create_queryable_module_map_records() -> None
 
     assert len(records) == 1
     record = records[0]
-    assert record.record_id == "module_map:vllm:engine"
+    # Root-layout repo (source_root=""): qualified name retains the package
+    # prefix, so it is `vllm/engine` (the `/` is sanitized to `:` in the id).
+    assert record.record_id == "module_map:vllm:vllm:engine"
     assert record.source_type == "module_map"
     assert "Request scheduling" in record.text
     assert record.provenance.artifact_path == "artifacts/ProjectTree.json"
     assert record.metadata["module_path"] == "vllm/engine"
+    assert record.metadata["module_qualified_name"] == "vllm/engine"
 
 
 def _candidate_with_proposals() -> Candidate:

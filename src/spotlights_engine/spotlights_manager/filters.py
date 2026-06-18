@@ -15,8 +15,8 @@ class ModuleFilter(BaseModel):
     """Limit which leaf modules the manager pipelines.
 
     Empty `include` = run every leaf. Non-empty entries match either an
-    exact leaf or any leaf nested beneath them (e.g. `v1.worker` expands
-    to `v1.worker.gpu`). User-supplied order is preserved across entries
+    exact leaf or any leaf nested beneath them (e.g. `v1/worker` expands
+    to `v1/worker/gpu`). User-supplied order is preserved across entries
     so smoke runs are reproducible.
     """
 
@@ -31,7 +31,7 @@ def apply_filter(
     """Return the subset of `qualified_names` selected by `filt`.
 
     Each name in `filt.include` matches either an exact leaf or any leaf
-    nested beneath it (e.g. `v1.worker` matches `v1.worker.gpu`). Unknown
+    nested beneath it (e.g. `v1/worker` matches `v1/worker/gpu`). Unknown
     names raise `ValueError` so a typo in the CLI fails fast before any
     per-module step runs.
     """
@@ -47,7 +47,7 @@ def apply_filter(
         if name in available:
             matches = [name]
         else:
-            prefix = name + "."
+            prefix = name + "/"
             matches = [qn for qn in qns if qn.startswith(prefix)]
         if not matches:
             unknown.append(name)

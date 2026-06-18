@@ -51,13 +51,13 @@ def test_manager_runs_subset_and_resumes(tmp_path: Path) -> None:
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
         output_folder=artifacts.parent / "output",
-        module_filter=ModuleFilter(include=["v1.foo"]),
+        module_filter=ModuleFilter(include=["v1/foo"]),
     )
 
     result = run_with_telemetry(inp, config=cfg)
-    mr = result.module_runs.get("v1.foo")
+    mr = result.module_runs.get("v1/foo")
     assert mr is not None
-    mp = artifacts / "spotlights_manager" / "modules" / "v1.foo"
+    mp = artifacts / "spotlights_manager" / "modules" / "v1_foo"
     assert (mp / "status.json").exists()
 
     # Resume: delete deep_research sidecar; only step 3 should re-run.

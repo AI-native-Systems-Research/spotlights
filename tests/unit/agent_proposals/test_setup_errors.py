@@ -84,7 +84,7 @@ def test_candidate_in_wrong_state_raises_validation_error(
     inp = AgentProposalsInput(
         project_tree=make_project_tree(),
         candidates=Candidates(
-            module_qualified_name="v1.kv_offload",
+            module_qualified_name="v1/kv_offload",
             candidates=[bad],
         ),
         context=SpotlightContext(objective="reduce latency"),

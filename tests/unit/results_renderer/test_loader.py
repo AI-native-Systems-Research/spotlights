@@ -33,8 +33,8 @@ def test_load_full_run(tmp_path: Path) -> None:
 
     assert loaded.context is not None
     assert loaded.context.objective == "reduce latency"
-    assert set(loaded.modules.keys()) == {"v1.kv_offload", "kernels"}
-    kv = loaded.modules["v1.kv_offload"]
+    assert set(loaded.modules.keys()) == {"v1/kv_offload", "kernels"}
+    kv = loaded.modules["v1/kv_offload"]
     assert kv.candidates is not None
     assert len(kv.candidates.candidates) == 3
     assert kv.deep_research is not None

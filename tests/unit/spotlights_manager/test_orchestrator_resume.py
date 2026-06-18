@@ -75,11 +75,11 @@ def test_resume_skips_completed_module(monkeypatch, repo: Path, artifacts: Path)
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
         output_folder=artifacts.parent / "output",
-        module_filter=ModuleFilter(include=["v1.kv_offload"]),
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
     )
     run_with_telemetry(make_input(repo), config=cfg)
-    assert discover_calls == ["v1.kv_offload"]
-    assert research_calls == ["v1.kv_offload"]
+    assert discover_calls == ["v1/kv_offload"]
+    assert research_calls == ["v1/kv_offload"]
 
     # Re-run: extractor + module fully cached.
     discover_calls.clear()
@@ -105,13 +105,13 @@ def test_resume_reruns_only_step3_when_research_artifact_missing(
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
         output_folder=artifacts.parent / "output",
-        module_filter=ModuleFilter(include=["v1.kv_offload"]),
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
     )
     run_with_telemetry(make_input(repo), config=cfg)
 
     # Delete only the research output and downgrade checkpoint to DEEP_RESEARCHED.
     paths = P.ManagerPaths(artifacts)
-    mp = paths.for_module("v1.kv_offload")
+    mp = paths.for_module("v1/kv_offload")
     mp.deep_research_path.unlink()
     cp = P.ModuleCheckpoint.model_validate_json(
         mp.status_path.read_text(encoding="utf-8")
@@ -123,7 +123,7 @@ def test_resume_reruns_only_step3_when_research_artifact_missing(
     research_calls.clear()
     run_with_telemetry(make_input(repo), config=cfg)
     assert discover_calls == []
-    assert research_calls == ["v1.kv_offload"]
+    assert research_calls == ["v1/kv_offload"]
 
 
 def test_resume_reruns_step2_when_candidates_missing(
@@ -142,12 +142,12 @@ def test_resume_reruns_step2_when_candidates_missing(
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
         output_folder=artifacts.parent / "output",
-        module_filter=ModuleFilter(include=["v1.kv_offload"]),
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
     )
     run_with_telemetry(make_input(repo), config=cfg)
 
     paths = P.ManagerPaths(artifacts)
-    mp = paths.for_module("v1.kv_offload")
+    mp = paths.for_module("v1/kv_offload")
     mp.candidates_path.unlink()
     mp.deep_research_path.unlink()
     cp = P.ModuleCheckpoint.model_validate_json(
@@ -159,8 +159,8 @@ def test_resume_reruns_step2_when_candidates_missing(
     discover_calls.clear()
     research_calls.clear()
     run_with_telemetry(make_input(repo), config=cfg)
-    assert discover_calls == ["v1.kv_offload"]
-    assert research_calls == ["v1.kv_offload"]
+    assert discover_calls == ["v1/kv_offload"]
+    assert research_calls == ["v1/kv_offload"]
 
 
 def test_redoing_step2_clears_stale_research_output(
@@ -194,12 +194,12 @@ def test_redoing_step2_clears_stale_research_output(
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
         output_folder=artifacts.parent / "output",
-        module_filter=ModuleFilter(include=["v1.kv_offload"]),
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
     )
     run_with_telemetry(make_input(repo), config=cfg)
 
     paths = P.ManagerPaths(artifacts)
-    mp = paths.for_module("v1.kv_offload")
+    mp = paths.for_module("v1/kv_offload")
     assert mp.agent_proposals_path.exists()
     mp.candidates_path.unlink()
     cp = P.ModuleCheckpoint.model_validate_json(
@@ -209,11 +209,11 @@ def test_redoing_step2_clears_stale_research_output(
     mp.status_path.write_text(cp.model_dump_json(indent=2), encoding="utf-8")
 
     result = run_with_telemetry(make_input(repo), config=cfg)
-    mr = result.module_runs["v1.kv_offload"]
+    mr = result.module_runs["v1/kv_offload"]
     assert mr.status == "SKIPPED"
     assert mr.findings == []
     assert not mp.agent_proposals_path.exists()
-    assert research_calls == ["v1.kv_offload"]
+    assert research_calls == ["v1/kv_offload"]
 
 
 def test_resume_false_refuses_existing_run_dir(
@@ -232,7 +232,7 @@ def test_resume_false_refuses_existing_run_dir(
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
         output_folder=artifacts.parent / "output",
-        module_filter=ModuleFilter(include=["v1.kv_offload"]),
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
     )
     run_with_telemetry(make_input(repo), config=cfg)
 
@@ -252,13 +252,42 @@ def test_resume_mismatch_on_changed_input(
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
         output_folder=artifacts.parent / "output",
-        module_filter=ModuleFilter(include=["v1.kv_offload"]),
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
     )
     run_with_telemetry(make_input(repo), config=cfg)
 
     inp2 = make_input(repo).model_copy(update={"max_findings_per_module": 99})
     with pytest.raises(ResumeMismatchError):
         run_with_telemetry(inp2, config=cfg)
+
+
+def test_resume_rejects_pre_change_schema_version(
+    monkeypatch, repo: Path, artifacts: Path
+) -> None:
+    """A run dir written under the old (pre-source-root) qualified-name layout
+    carries `schema_version: 1` and must be rejected cleanly on resume rather
+    than silently reloaded with mismatched `module_runs` keys."""
+    tree = make_tree()
+    _wire_step_doubles(
+        monkeypatch, tree=tree, discover_calls=[], research_calls=[]
+    )
+
+    cfg = SpotlightsManagerConfig(
+        artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
+    )
+    run_with_telemetry(make_input(repo), config=cfg)
+
+    # Simulate a pre-change manifest by downgrading the on-disk schema_version.
+    paths = P.ManagerPaths(artifacts)
+    manifest = P.read_manifest(paths)
+    assert manifest is not None
+    manifest["schema_version"] = 1
+    P.write_manifest(paths, manifest)
+
+    with pytest.raises(ResumeMismatchError, match="schema_version"):
+        run_with_telemetry(make_input(repo), config=cfg)
 
 
 def test_resume_reruns_only_step4_when_proposal_artifact_missing(
@@ -292,14 +321,14 @@ def test_resume_reruns_only_step4_when_proposal_artifact_missing(
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
         output_folder=artifacts.parent / "output",
-        module_filter=ModuleFilter(include=["v1.kv_offload"]),
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
     )
     run_with_telemetry(make_input(repo), config=cfg)
-    assert pf_calls == ["v1.kv_offload"]
+    assert pf_calls == ["v1/kv_offload"]
 
     # Delete only the step-4 sidecar and downgrade checkpoint to DEEP_RESEARCHED.
     paths = P.ManagerPaths(artifacts)
-    mp = paths.for_module("v1.kv_offload")
+    mp = paths.for_module("v1/kv_offload")
     mp.proposal_from_finding_path.unlink()
     cp = P.ModuleCheckpoint.model_validate_json(
         mp.status_path.read_text(encoding="utf-8")
@@ -313,7 +342,7 @@ def test_resume_reruns_only_step4_when_proposal_artifact_missing(
     run_with_telemetry(make_input(repo), config=cfg)
     assert discover_calls == []
     assert research_calls == []
-    assert pf_calls == ["v1.kv_offload"]
+    assert pf_calls == ["v1/kv_offload"]
 
 
 def test_resume_skips_step4_when_finding_proposals_created_intact(
@@ -346,10 +375,10 @@ def test_resume_skips_step4_when_finding_proposals_created_intact(
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
         output_folder=artifacts.parent / "output",
-        module_filter=ModuleFilter(include=["v1.kv_offload"]),
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
     )
     run_with_telemetry(make_input(repo), config=cfg)
-    assert pf_calls == ["v1.kv_offload"]
+    assert pf_calls == ["v1/kv_offload"]
 
     # Re-run: everything cached, no further work.
     discover_calls.clear()
@@ -391,13 +420,13 @@ def test_resume_redoes_step4_only_when_failed_step_is_step4(
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
         output_folder=artifacts.parent / "output",
-        module_filter=ModuleFilter(include=["v1.kv_offload"]),
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
     )
     run_with_telemetry(make_input(repo), config=cfg)
 
     # Edit the checkpoint to FAILED+retryable on step 4. Sidecar still on disk.
     paths = P.ManagerPaths(artifacts)
-    mp = paths.for_module("v1.kv_offload")
+    mp = paths.for_module("v1/kv_offload")
     cp = P.ModuleCheckpoint.model_validate_json(
         mp.status_path.read_text(encoding="utf-8")
     )
@@ -418,4 +447,4 @@ def test_resume_redoes_step4_only_when_failed_step_is_step4(
     run_with_telemetry(make_input(repo), config=cfg)
     assert discover_calls == []
     assert research_calls == []
-    assert pf_calls == ["v1.kv_offload"]
+    assert pf_calls == ["v1/kv_offload"]
