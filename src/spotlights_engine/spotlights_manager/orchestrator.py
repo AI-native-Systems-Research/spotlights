@@ -101,10 +101,6 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def _slash_to_dot(qn: str) -> str:
-    return qn.replace("/", ".")
-
-
 def _chunks(lst: list, n: int):
     for i in range(0, max(len(lst), 1), n):
         yield lst[i : i + n]
