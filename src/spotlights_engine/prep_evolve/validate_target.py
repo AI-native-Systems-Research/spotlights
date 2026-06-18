@@ -10,6 +10,7 @@ making the staleness gate explicit (plan §4).
 from __future__ import annotations
 
 import hashlib
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -25,6 +26,21 @@ from spotlights_engine.schemas.candidate import Candidate
 # checking staleness. result.json does not carry the original excerpt, so the
 # check is intentionally heuristic.
 _SYMBOL_WINDOW = 5
+
+# Splits a recorded symbol into its component identifiers. A `region`
+# candidate's symbol is a *compound* qualified name describing the multiple
+# symbols the region spans, e.g. "GatewayQueue.sloDeadline/dequeueFromBandSLODeadline"
+# names a receiver type plus two methods. The recorded string never appears
+# verbatim in source (Go writes `func (q *GatewayQueue) sloDeadline(...)`), so
+# the staleness check tokenizes on the structural separators ("." "/" "::" "#"
+# and whitespace) and confirms the components are present, rather than matching
+# the whole string.
+_SYMBOL_SEPARATORS = re.compile(r"[./#\s]+|::")
+
+
+def _symbol_components(symbol: str) -> list[str]:
+    """Split a (possibly compound/qualified) symbol into component identifiers."""
+    return [part for part in _SYMBOL_SEPARATORS.split(symbol) if part]
 
 
 @dataclass
@@ -92,12 +108,18 @@ def validate_candidate_target(
     win_start = max(0, start - 1 - _SYMBOL_WINDOW)
     win_end = min(n, end + _SYMBOL_WINDOW)
     window_text = "\n".join(lines[win_start:win_end])
-    if candidate.symbol and candidate.symbol not in window_text:
+    # Tokenize the (possibly compound) symbol and require every component to be
+    # present in the window. A whole-string match would false-positive on
+    # `region` candidates whose symbol is a qualified name spanning several
+    # symbols (e.g. "Type.methodA/methodB"), which never appears verbatim.
+    components = _symbol_components(candidate.symbol) if candidate.symbol else []
+    missing = [c for c in components if c not in window_text]
+    if missing:
         raise StalenessError(
             f"recorded symbol {candidate.symbol!r} not found near lines "
-            f"[{start}, {end}] of {candidate.file}. result.json is stale "
-            f"relative to the repo; re-run spotlights or correct the selected "
-            f"result."
+            f"[{start}, {end}] of {candidate.file} (missing component(s): "
+            f"{', '.join(missing)}). result.json is stale relative to the repo; "
+            f"re-run spotlights or correct the selected result."
         )
 
     return ValidatedCandidate(
