@@ -84,6 +84,62 @@ def test_fanout_manifest_records_upstream_hash(tmp_path):
     assert sorted(manifest_04["covered_ids"]) == ["cand-0001", "cand-0002"]
 
 
+def test_spotlight_report_emitted_after_full_run(tmp_path):
+    """The unified `SpotlightReport` lands at `<run_dir>/spotlight_report.json`
+    next to the existing per-stage artifacts. Per-stage artifacts are
+    unchanged. See docs/specs/spotlight_report.md section 5 PR 2."""
+    from spotlights_engine.schemas.pipeline import SpotlightReport
+
+    run_dir = tmp_path / "run"
+    run_pipeline(_input(tmp_path), run_dir=run_dir)
+
+    report_path = run_dir / "spotlight_report.json"
+    assert report_path.exists(), "spotlight_report.json should be written by the runner"
+
+    report = SpotlightReport.model_validate_json(report_path.read_text())
+    assert report.run.pipeline == "signal"
+    assert report.run.run_id == run_dir.resolve().name
+    # Two stub candidates, two stub changes -> two proposals total
+    assert [c.id for c in report.candidates] == ["cand-0001", "cand-0002"]
+    assert all(c.origin == "telemetry_anomaly" for c in report.candidates)
+    proposals = [p for c in report.candidates for p in c.proposals]
+    assert [p.id for p in proposals] == ["prop-0001", "prop-0002"]
+    assert all(p.source == "telemetry_anomaly" for p in proposals)
+    # One stub anomaly carries through into the closed-shape `Anomaly`
+    # (synthetic fallback path -- telemetry_from is None in `_input(...)`).
+    assert len(report.anomalies) == 1
+    assert report.anomalies[0].anomaly_id == "stub-anomaly-1"
+
+
+def test_spotlight_report_skipped_for_partial_run(tmp_path):
+    """When the selection ends before stage 03 produces candidates, no
+    report is written -- it's best-effort like the findings rollup."""
+    run_dir = tmp_path / "run"
+    run_pipeline(
+        _input(tmp_path),
+        run_dir=run_dir,
+        stages=StageSelection(from_stage="01", to_stage="02"),
+    )
+    assert not (run_dir / "spotlight_report.json").exists()
+
+
+def test_spotlight_report_emitted_when_stage_04_partial(tmp_path):
+    """A run scoped through stage 03 (no stage 04) still emits a report --
+    candidates without changes have empty `proposals` lists."""
+    run_dir = tmp_path / "run"
+    run_pipeline(
+        _input(tmp_path),
+        run_dir=run_dir,
+        stages=StageSelection(from_stage="01", to_stage="03"),
+    )
+    from spotlights_engine.schemas.pipeline import SpotlightReport
+
+    report = SpotlightReport.model_validate_json(
+        (run_dir / "spotlight_report.json").read_text()
+    )
+    assert all(c.proposals == [] for c in report.candidates)
+
+
 # ── Resume / no-resume ───────────────────────────────────────────────────
 
 
@@ -199,9 +255,7 @@ def test_inject_single_artifact_substitutes_payload(tmp_path):
             "evolve_rationale": "injected",
             "estimated_impact": "high",
             "estimated_impact_explanation": "injected",
-            "state": "DISCOVERED",
-            "deep_research_proposals": [],
-            "agent_proposals": [],
+            "anomaly_refs": [],
         }
     ]
     src = tmp_path / "candidates.json"
@@ -477,9 +531,7 @@ def test_inject_then_run_downstream(tmp_path):
         "evolve_rationale": "r",
         "estimated_impact": "low",
         "estimated_impact_explanation": "e",
-        "state": "DISCOVERED",
-        "deep_research_proposals": [],
-        "agent_proposals": [],
+        "anomaly_refs": [],
     }
     cand_path = tmp_path / "cand.json"
     cand_path.write_text(json.dumps([c]))
