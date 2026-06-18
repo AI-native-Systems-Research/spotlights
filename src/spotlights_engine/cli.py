@@ -64,9 +64,9 @@ def _build_argparser() -> argparse.ArgumentParser:
         nargs="+",
         metavar="QN",
         help=(
-            "Restrict to one or more dot-form qualified names (e.g. "
-            "v1.kv_offload). A parent name expands to all leaves beneath "
-            "it (e.g. v1.worker matches v1.worker.gpu). Repeat the flag "
+            "Restrict to one or more slash-form qualified names (e.g. "
+            "v1/kv_offload). A parent name expands to all leaves beneath "
+            "it (e.g. v1/worker matches v1/worker/gpu). Repeat the flag "
             "or pass multiple values after one flag. Default: all modules."
         ),
     )
@@ -486,6 +486,10 @@ def main(argv: list[str] | None = None) -> int:
         return init_main(raw_argv[1:])
     if raw_argv and raw_argv[0] == "knowledge":
         return _knowledge_main(raw_argv[1:])
+    if raw_argv and raw_argv[0] == "prep-evolve":
+        from spotlights_engine.prep_evolve.cli import main as prep_main
+
+        return prep_main(raw_argv[1:])
 
     args = _build_argparser().parse_args(argv)
 

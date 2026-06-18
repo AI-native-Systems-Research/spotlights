@@ -67,11 +67,11 @@ def test_succeeded_happy_path(monkeypatch, repo: Path, artifacts: Path) -> None:
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
         output_folder=artifacts.parent / "output",
-        module_filter=ModuleFilter(include=["v1.kv_offload"]),
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
     )
     result = run_with_telemetry(make_input(repo), config=cfg)
 
-    mr = result.module_runs["v1.kv_offload"]
+    mr = result.module_runs["v1/kv_offload"]
     assert mr.status == "SUCCEEDED"
     assert len(mr.findings) == 2
     assert mr.candidates is not None and len(mr.candidates.candidates) == 1
@@ -99,11 +99,11 @@ def test_skipped_when_no_candidates(monkeypatch, repo: Path, artifacts: Path) ->
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
         output_folder=artifacts.parent / "output",
-        module_filter=ModuleFilter(include=["v1.kv_offload"]),
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
     )
     result = run_with_telemetry(make_input(repo), config=cfg)
 
-    mr = result.module_runs["v1.kv_offload"]
+    mr = result.module_runs["v1/kv_offload"]
     assert mr.status == "SKIPPED"
     assert mr.findings == []
     assert research_called["n"] == 0
@@ -138,11 +138,11 @@ def test_degraded_on_recoverable_issue(monkeypatch, repo: Path, artifacts: Path)
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
         output_folder=artifacts.parent / "output",
-        module_filter=ModuleFilter(include=["v1.kv_offload"]),
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
     )
     result = run_with_telemetry(make_input(repo), config=cfg)
 
-    mr = result.module_runs["v1.kv_offload"]
+    mr = result.module_runs["v1/kv_offload"]
     assert mr.status == "DEGRADED"
     assert len(mr.findings) == 1
 
@@ -208,10 +208,10 @@ def test_degraded_on_step4_recoverable_issue(
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
         output_folder=artifacts.parent / "output",
-        module_filter=ModuleFilter(include=["v1.kv_offload"]),
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
     )
     result = run_with_telemetry(make_input(repo), config=cfg)
-    mr = result.module_runs["v1.kv_offload"]
+    mr = result.module_runs["v1/kv_offload"]
     assert mr.status == "DEGRADED"
     assert any(
         iss.step == "proposal_from_finding_creator" and iss.recoverable
@@ -247,11 +247,11 @@ def test_failed_on_unrecoverable_issue(monkeypatch, repo: Path, artifacts: Path)
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
         output_folder=artifacts.parent / "output",
-        module_filter=ModuleFilter(include=["v1.kv_offload"]),
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
     )
     result = run_with_telemetry(make_input(repo), config=cfg)
 
-    mr = result.module_runs["v1.kv_offload"]
+    mr = result.module_runs["v1/kv_offload"]
     assert mr.status == "FAILED"
     assert any(not iss.recoverable for iss in mr.issues)
 
@@ -270,11 +270,11 @@ def test_step2_exception_marks_failed_retryable(
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
         output_folder=artifacts.parent / "output",
-        module_filter=ModuleFilter(include=["v1.kv_offload"]),
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
     )
     result = run_with_telemetry(make_input(repo), config=cfg)
 
-    mr = result.module_runs["v1.kv_offload"]
+    mr = result.module_runs["v1/kv_offload"]
     assert mr.status == "FAILED"
     assert mr.candidates is None
     assert any(iss.recoverable for iss in mr.issues)
@@ -289,7 +289,7 @@ def test_fail_fast_writes_retryable_checkpoint_for_not_started_module(
 
     def _discover(inp, *, config):
         discover_calls.append(inp.module_qualified_name)
-        if inp.module_qualified_name == "v1.kv_offload":
+        if inp.module_qualified_name == "v1/kv_offload":
             raise DiscoverySetupError("bad discovery config")
         return make_discovery_result(inp.module_qualified_name)
 
@@ -305,14 +305,14 @@ def test_fail_fast_writes_retryable_checkpoint_for_not_started_module(
         output_folder=artifacts.parent / "output",
         max_parallel_sessions=1,
         module_filter=ModuleFilter(
-            include=["v1.kv_offload", "v1.attention.paged_kv"]
+            include=["v1/kv_offload", "v1/attention/paged_kv"]
         ),
     )
     inp = make_input(repo).model_copy(update={"continue_on_module_failure": False})
     result = run_with_telemetry(inp, config=cfg)
 
-    assert discover_calls == ["v1.kv_offload"]
-    mr = result.module_runs["v1.attention.paged_kv"]
+    assert discover_calls == ["v1/kv_offload"]
+    mr = result.module_runs["v1/attention/paged_kv"]
     assert mr.status == "FAILED"
     assert mr.candidates is None
     assert mr.issues and all(iss.recoverable for iss in mr.issues)
@@ -321,7 +321,7 @@ def test_fail_fast_writes_retryable_checkpoint_for_not_started_module(
         artifacts
         / "spotlights_manager"
         / "modules"
-        / "v1.attention.paged_kv"
+        / "v1_attention_paged_kv"
         / "status.json"
     )
     assert status_path.exists()
@@ -353,7 +353,7 @@ def test_fail_fast_cancels_after_unhandled_task_exception(
     def _write_checkpoint(module_paths, checkpoint):
         original_write_checkpoint(module_paths, checkpoint)
         if (
-            checkpoint.module_qualified_name == "v1.kv_offload"
+            checkpoint.module_qualified_name == "v1/kv_offload"
             and checkpoint.status == "PENDING"
         ):
             raise RuntimeError("checkpoint write failed")
@@ -365,13 +365,13 @@ def test_fail_fast_cancels_after_unhandled_task_exception(
         output_folder=artifacts.parent / "output",
         max_parallel_sessions=1,
         module_filter=ModuleFilter(
-            include=["v1.kv_offload", "v1.attention.paged_kv"]
+            include=["v1/kv_offload", "v1/attention/paged_kv"]
         ),
     )
     inp = make_input(repo).model_copy(update={"continue_on_module_failure": False})
     result = run_with_telemetry(inp, config=cfg)
 
-    failed = result.module_runs["v1.kv_offload"]
+    failed = result.module_runs["v1/kv_offload"]
     assert failed.status == "FAILED"
     assert any(
         "checkpoint write failed" in iss.message and not iss.recoverable
@@ -379,6 +379,6 @@ def test_fail_fast_cancels_after_unhandled_task_exception(
     )
     assert discover_calls == []
 
-    cancelled = result.module_runs["v1.attention.paged_kv"]
+    cancelled = result.module_runs["v1/attention/paged_kv"]
     assert cancelled.status == "FAILED"
     assert cancelled.issues and all(iss.recoverable for iss in cancelled.issues)

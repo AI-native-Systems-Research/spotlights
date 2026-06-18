@@ -25,14 +25,14 @@ from spotlights_engine.schemas.project import File, Module, ProjectTree, Reposit
 
 def _tree() -> ProjectTree:
     return ProjectTree(
-        repository=Repository(name="demo", summary="Demo repository."),
+        repository=Repository(name="demo", summary="Demo repository.", source_root="src"),
         modules=[Module(name="core", path="src/core")],
     )
 
 
 def _research_tree() -> ProjectTree:
     return ProjectTree(
-        repository=Repository(name="demo", summary="Demo repository."),
+        repository=Repository(name="demo", summary="Demo repository.", source_root="src"),
         modules=[
             Module(
                 name="inference",
@@ -118,7 +118,7 @@ def test_candidate_discovery_input_rejects_empty_qualified_name() -> None:
 def test_module_deep_research_input_accepts_project_tree_and_context() -> None:
     request = ModuleDeepResearchInput(
         project_tree=_research_tree(),
-        module_qualified_name="inference.attention",
+        module_qualified_name="inference/attention",
         context=SpotlightContext(
             objective="reduce decode latency",
             workload_hints=["batch size 1-8"],

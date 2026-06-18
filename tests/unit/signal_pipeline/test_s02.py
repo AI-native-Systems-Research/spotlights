@@ -203,7 +203,7 @@ def test_projecttree_cache_hits_on_second_call(monkeypatch, tmp_path, redirect_c
     assert first.repository.name == second.repository.name
     cached_files = list(redirect_cache.iterdir())
     assert len(cached_files) == 1
-    assert cached_files[0].name.endswith(".v1.json")
+    assert cached_files[0].name.endswith(".v2.json")
 
 
 @pytest.mark.no_stub_stages

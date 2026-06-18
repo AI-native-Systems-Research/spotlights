@@ -14,13 +14,17 @@ You are analyzing this repository to produce a structured architectural map. Wor
    - Read the root listing and any manifest files (package.json, pyproject.toml, Cargo.toml, go.mod, pom.xml, *.csproj, Gemfile, etc.) to determine language, framework, and build system.
    - Read the README and any docs/ or ARCHITECTURE.md for stated structure.
    - Locate the source root(s): src/, lib/, app/, internal/, pkg/, or the language-default layout.
+   - **Determine `source_root`** — the single repo-relative directory the package(s) live under, used to derive every module's qualified name (qualified name = module path relative to `source_root`). Decide it as follows:
+     - src-layout (`src/<pkg>/…`, or a pyproject `package-dir` / `tool.setuptools` declaration): set `source_root` to that directory, e.g. `"src"` or `"lib"`.
+     - packages at the repo root (e.g. vLLM-style `vllm/…`): set `source_root` to `""` (empty string = repo root).
+   - Emit only modules **under** that source root. When `source_root` is non-empty, every module `path` must start with `source_root + "/"` (and must not equal `source_root` itself). Do not emit a centralized `tests/` directory that sits outside `src/` as a top-level module in this shape; mention tests in descriptions instead.
 
 2. **Discover modules**
    - A "module" is a logical unit with a coherent responsibility — typically a top-level directory under the source root, a package, or a namespace.
    - A "submodule" is a nested logical unit inside a module. Nest recursively as deep as the architecture warrants.
    - Use directory structure as the primary signal, but VERIFY with imports/exports. Directories nothing imports from may be dead code; directories imported across the codebase are likely core.
    - Ignore: node_modules, vendor, .git, dist, build, target, __pycache__, .venv, generated code, test fixtures, lock files.
-   - Tests: include a top-level "tests" module if tests are centralized; otherwise note testing per-module in its description.
+   - Tests: if tests live under the selected source root, model them like any other module when they have architectural weight. If tests are centralized outside a non-empty `source_root`, do not emit them as a top-level module in this v1 shape; mention their coverage in module descriptions or later oracles instead.
 
    **For each candidate directory, pick exactly one of three outcomes — FOLD, LEAF, or SPLIT — by applying the tests below in order.**
 
@@ -57,6 +61,7 @@ Return ONLY this JSON, no markdown fences, no commentary. The shape mirrors the
   "repository": {
     "name": "string — repo name",
     "summary": "2–4 sentences: what the repo does, its project type (e.g. 'Python ML library', 'Rust CLI tool', 'Node.js GraphQL API'), the primary languages/frameworks, and the high-level architectural shape (layered, hexagonal, monorepo with packages, microservices, MVC, etc.)",
+    "source_root": "repo-relative directory the package(s) live under, used to derive qualified names (qualified name = module path relative to source_root). 'src' for a src-layout, '' (empty) when packages sit at the repo root, 'lib' if that is the package dir. No leading/trailing slash.",
     "external_dependencies": ["primary external packages, frameworks, and key libraries the repo depends on — flat list of names"]
   },
   "modules": [
@@ -64,7 +69,7 @@ Return ONLY this JSON, no markdown fences, no commentary. The shape mirrors the
       "name": "string — must match ^[a-z][a-z0-9_]*$; defaults to the basename of `path`",
       "path": "path/from/repo/root",
       "description": "1–2 sentences on responsibility",
-      "depends_on": ["qualified names of other modules it imports from (e.g. 'engine/attention'), or names of entries from repository.external_dependencies"],
+      "depends_on": ["source-root-relative qualified names of other modules it imports from (e.g. 'vllm/attention' for a root-layout repo, 'spotlights_engine/schemas' for a src-layout one), or names of entries from repository.external_dependencies"],
       "main_files": [
         { "path": "full/path/from/repo/root.ext", "role": "what this file does" }
       ],
@@ -94,10 +99,10 @@ PARENT — the directory contains 2+ logical units that each deserve their own e
 
 ## Rules
 - All paths are relative to the repo root, no leading "./" or "/".
-- Module/submodule `name` must match `^[a-z][a-z0-9_]*$` — lowercase, starts with a letter, only letters/digits/underscore. If the directory name violates the pattern (e.g. has dashes), normalize by replacing offending characters with underscores; the human-readable basename still goes in `path`.
+- Module/submodule `name` must match `^[a-z][a-z0-9_]*$` — lowercase, starts with a letter, only letters/digits/underscore — and must equal the normalized basename of `path`. If the directory name violates the pattern (e.g. has dashes, dots, or a leading digit), normalize by lowercasing and replacing offending characters with underscores (a leading digit gets an `m_` prefix); the human-readable basename still goes in `path`. The same per-segment normalization is applied to every segment of the derived qualified name.
 - A LEAF submodule has no `submodules` key at all (or an empty list). A PARENT submodule has `submodules` with ≥2 entries. Never emit a parent with only one child — collapse it. `main_files` on a parent lists files that belong to the parent itself, not files that belong to any child.
 - `main_files` is required and 1–5 entries, on every module and every submodule. If you cannot name a central file, it isn't a (sub)module.
 - Top-level modules use the full schema with `depends_on`. Submodules omit `depends_on` (it is implied by the parent module's dependencies).
 - Aim for 5–15 top-level modules. If the repo is genuinely flatter or larger, follow the code.
-- `depends_on` lists peer top-level modules (qualified names) and/or entries from `repository.external_dependencies`. Empty array if none.
+- `depends_on` lists peer top-level modules by their source-root-relative qualified name (e.g. `vllm/attention`, `spotlights_engine/schemas` — not the bare `attention`) and/or entries from `repository.external_dependencies`. Empty array if none.
 - Output valid JSON, parseable by `JSON.parse` — no trailing commas, no comments.
