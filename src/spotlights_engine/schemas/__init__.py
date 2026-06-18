@@ -18,6 +18,7 @@ Layout:
 
 from __future__ import annotations
 
+from spotlights_engine.schemas.anomaly import Anomaly, AnomalySeverity
 from spotlights_engine.schemas.candidate import (
     Candidate,
     CandidateKind,
@@ -62,6 +63,8 @@ __all__ = [
     "AgentProposal",
     "AgentProposalsInput",
     "AgentProposalsOutput",
+    "Anomaly",
+    "AnomalySeverity",
     "Candidate",
     "CandidateDiscoveryInput",
     "CandidateKind",

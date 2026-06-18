@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from typing import Literal
 
+from spotlights_engine.schemas.anomaly import Anomaly
 from spotlights_engine.schemas.candidate import Candidate, Candidates
 from spotlights_engine.schemas.common import (
     ModuleRunStatus,
@@ -181,6 +182,8 @@ class SpotlightReport(BaseModel):
     context: SpotlightContext
 
     candidates: list[Candidate] = Field(default_factory=list)
+    findings: list[Finding] = Field(default_factory=list)
+    anomalies: list[Anomaly] = Field(default_factory=list)
 
     run: RunInfo
     issues: list[StepIssue] = Field(default_factory=list)

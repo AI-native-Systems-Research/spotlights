@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from spotlights_engine.schemas.anomaly import Anomaly, AnomalySeverity
 from spotlights_engine.schemas.candidate import (
     Candidate,
     CandidateOrigin,
@@ -17,6 +18,7 @@ from spotlights_engine.schemas.candidate import (
     EstimatedImpact,
 )
 from spotlights_engine.schemas.common import SpotlightContext, StepIssue
+from spotlights_engine.schemas.finding import Finding
 from spotlights_engine.schemas.pipeline import RunInfo, SpotlightReport
 from spotlights_engine.schemas.project import Module, ProjectTree, Repository
 from spotlights_engine.schemas.proposal import Proposal, ProposalSource
@@ -290,3 +292,105 @@ def test_report_issues_accepts_step_issue() -> None:
         issues=[issue],
     )
     assert rep.issues[0].step == "candidate_discovery"
+
+
+# Anomaly --------------------------------------------------------------------
+
+def _anomaly(**overrides) -> Anomaly:
+    payload = {"anomaly_id": "anom-0001", "type": "latency_spike"}
+    payload.update(overrides)
+    return Anomaly.model_validate(payload)
+
+
+def test_anomaly_extra_forbid_rejects_unknown_field() -> None:
+    with pytest.raises(ValidationError):
+        Anomaly.model_validate(
+            {"anomaly_id": "anom-0001", "type": "x", "garbage": "y"}
+        )
+
+
+def test_anomaly_requires_id_and_type() -> None:
+    with pytest.raises(ValidationError):
+        Anomaly.model_validate({"type": "latency_spike"})
+    with pytest.raises(ValidationError):
+        Anomaly.model_validate({"anomaly_id": "anom-0001"})
+
+
+def test_anomaly_rejects_empty_id_or_type() -> None:
+    with pytest.raises(ValidationError):
+        _anomaly(anomaly_id="")
+    with pytest.raises(ValidationError):
+        _anomaly(type="")
+
+
+@pytest.mark.parametrize("value", ["high", "medium", "low"])
+def test_anomaly_severity_accepts_each_member(value: AnomalySeverity) -> None:
+    assert _anomaly(severity=value).severity == value
+
+
+def test_anomaly_severity_accepts_none() -> None:
+    assert _anomaly().severity is None
+
+
+def test_anomaly_severity_rejects_non_member() -> None:
+    with pytest.raises(ValidationError):
+        _anomaly(severity="critical")
+
+
+@pytest.mark.parametrize("value", [0.0, 0.5, 1.0])
+def test_anomaly_confidence_accepts_in_range(value: float) -> None:
+    assert _anomaly(confidence=value).confidence == value
+
+
+@pytest.mark.parametrize("value", [-0.01, 1.01])
+def test_anomaly_confidence_rejects_out_of_range(value: float) -> None:
+    with pytest.raises(ValidationError):
+        _anomaly(confidence=value)
+
+
+def test_anomaly_optional_string_fields_default_to_empty() -> None:
+    a = _anomaly()
+    assert a.description == ""
+    assert a.evidence_pointer == ""
+    assert a.magnitude == ""
+
+
+# SpotlightReport — findings + anomalies lists -------------------------------
+
+def _finding(**overrides) -> Finding:
+    payload = {
+        "finding_id": "find-0001",
+        "title": "t",
+        "url": "https://example.com",
+        "source_type": "paper",
+        "technique_summary": "ts",
+    }
+    payload.update(overrides)
+    return Finding.model_validate(payload)
+
+
+def test_report_findings_default_empty() -> None:
+    rep = SpotlightReport(
+        project_tree=_tree(), context=_ctx(), run=_run()
+    )
+    assert rep.findings == []
+
+
+def test_report_anomalies_default_empty() -> None:
+    rep = SpotlightReport(
+        project_tree=_tree(), context=_ctx(), run=_run()
+    )
+    assert rep.anomalies == []
+
+
+def test_report_carries_findings_and_anomalies() -> None:
+    rep = SpotlightReport(
+        project_tree=_tree(),
+        context=_ctx(),
+        run=_run(),
+        findings=[_finding()],
+        anomalies=[_anomaly(severity="high", confidence=0.9)],
+    )
+    assert rep.findings[0].finding_id == "find-0001"
+    assert rep.anomalies[0].anomaly_id == "anom-0001"
+    assert rep.anomalies[0].severity == "high"

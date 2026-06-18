@@ -4,6 +4,7 @@
     "repository": {
       "name": "demo",
       "summary": "Demo repository for the SpotlightReport round-trip backstop.",
+      "source_root": "",
       "external_dependencies": []
     },
     "modules": [
@@ -75,6 +76,27 @@
           "evaluation_metric": null
         }
       ]
+    }
+  ],
+  "findings": [
+    {
+      "finding_id": "find-0001",
+      "title": "Parallel-friendly hot path",
+      "url": "https://example.com/papers/parallel-hot-path",
+      "source_type": "paper",
+      "technique_summary": "Workloads dominated by an embarrassingly parallel hot path benefit from pool-based concurrency.",
+      "supporting_evidence": ""
+    }
+  ],
+  "anomalies": [
+    {
+      "anomaly_id": "anom-0001",
+      "type": "latency_spike",
+      "description": "p99 latency on core.x.run is 8x p50.",
+      "severity": "high",
+      "confidence": 0.92,
+      "evidence_pointer": "traces.jsonl span=core.x.run percentile=99",
+      "magnitude": "p99 latency 1.2s vs p50 0.15s"
     }
   ],
   "run": {
