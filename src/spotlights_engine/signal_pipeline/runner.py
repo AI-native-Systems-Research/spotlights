@@ -40,6 +40,7 @@ from spotlights_engine.signal_pipeline.schemas import (
     SignalPipelineInput,
     SignalPipelineResult,
 )
+from spotlights_engine.signal_pipeline.spotlight_report import emit_spotlight_report
 
 
 __all__ = [
@@ -291,6 +292,21 @@ def _aggregate_meta(log_dir: Path) -> dict[str, Any]:
     if saw_cost:
         out["cost_usd"] = round(cost_total, 4)
     return out
+
+
+def _aggregate_run_cost(status: "PipelineStatus") -> float | None:
+    """Sum `cost_usd` across every stage that recorded one.
+
+    Returns None if no stage carried cost (e.g. the run only exercised the
+    pre-cooked-JSON branches that don't go through claude_subprocess).
+    """
+    total = 0.0
+    saw_any = False
+    for stage_status in status.stages.values():
+        if stage_status.cost_usd is not None:
+            total += float(stage_status.cost_usd)
+            saw_any = True
+    return round(total, 4) if saw_any else None
 
 
 # ── Artifact load / completeness ─────────────────────────────────────────
@@ -743,6 +759,7 @@ def run_pipeline(
     resolved_output_folder = (
         output_folder.resolve() if output_folder is not None else layout.root / "report"
     )
+    run_started_at = _now_iso()
 
     # Persist the input contract (idempotent).
     if not layout.input_path.exists():
@@ -964,6 +981,24 @@ def run_pipeline(
         emit_findings(layout, resolved_output_folder)
     except Exception as exc:  # noqa: BLE001 — never fail the pipeline on rollup
         aggregate_issues.append(f"findings rollup failed: {exc}")
+
+    # Best-effort SpotlightReport emission — produces the unified report at
+    # `<run_dir>/spotlight_report.json` per docs/specs/spotlight_report.md.
+    # Skipped silently when the run didn't get far enough to have the upstream
+    # artifacts (signals + project_tree + candidates); a partial run that
+    # ended before stage 04 still produces a valid report with empty
+    # `proposals` lists. Errors here are recorded but never abort the run.
+    try:
+        cost_total = _aggregate_run_cost(status)
+        emit_spotlight_report(
+            layout,
+            run_id=layout.root.name,
+            started_at=run_started_at,
+            finished_at=_now_iso(),
+            cost_usd=cost_total,
+        )
+    except Exception as exc:  # noqa: BLE001
+        aggregate_issues.append(f"spotlight_report emission failed: {exc}")
 
     # Sort to keep the result deterministic across runs — under the
     # parallel scheduler these lists' append order depends on which
