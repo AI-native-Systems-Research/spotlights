@@ -36,11 +36,3 @@ def test_campaign_validates(tmp_path: Path) -> None:
     campaign = yaml.safe_load(files["campaign.yaml"].text)
     schema = yaml.safe_load((_SCHEMA_DIR / "campaign.schema.yaml").read_text())
     jsonschema.validate(campaign, schema)
-
-
-def test_bundle_validates(tmp_path: Path) -> None:
-    spec = _spec(tmp_path)
-    files = _by_path(NousAdapter().render(spec))
-    bundle = yaml.safe_load(files["bundle.yaml"].text)
-    schema = yaml.safe_load((_SCHEMA_DIR / "bundle.schema.yaml").read_text())
-    jsonschema.validate(bundle, schema)

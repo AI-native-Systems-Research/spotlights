@@ -56,7 +56,7 @@ def test_missing_candidate_lists_available(tmp_path: Path) -> None:
     assert "cand-0002" in str(exc.value)
 
 
-def test_findings_ordering_candidate_linked_first(tmp_path: Path) -> None:
+def test_findings_only_candidate_linked(tmp_path: Path) -> None:
     loaded = _load(tmp_path)
     run = resolve_module_run(loaded, "v1/attention")
     candidates = resolve_candidates(run, "v1/attention")
@@ -81,8 +81,9 @@ def test_findings_ordering_candidate_linked_first(tmp_path: Path) -> None:
         direction="minimize",
     )
 
-    # find-0001 is candidate-linked -> first; find-0002 second.
-    assert [f.finding_id for f in spec.findings] == ["find-0001", "find-0002"]
+    # Only find-0001 is candidate-linked; the unlinked module finding
+    # find-0002 is dropped rather than appended.
+    assert [f.finding_id for f in spec.findings] == ["find-0001"]
 
 
 def test_proposal_provenance(tmp_path: Path) -> None:

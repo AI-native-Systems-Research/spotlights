@@ -211,9 +211,14 @@ def prep_evolve(input: PrepEvolveInput, config: PrepEvolveConfig | None = None) 
             raise UnsupportedEvolverError(f"{key} cannot run this selection: {reason}")
 
         native_files = adapter.render(spec)
-        all_files = native_files + _always_emitted(spec, key)
+        # Minimal bundles (e.g. nous: a single self-contained campaign.yaml)
+        # opt out of the shared metadata files and the manifest force-guard.
+        minimal = getattr(adapter, "minimal_bundle", False)
+        all_files = native_files if minimal else native_files + _always_emitted(spec, key)
         bundle_path = input.out / _bundle_dir_name(spec, key)
-        written = _materialize(bundle_path, all_files, force=input.force, warnings=warnings)
+        written = _materialize(
+            bundle_path, all_files, force=input.force, warnings=warnings, manifest=not minimal
+        )
         bundles.append(
             BundleResult(
                 evolver=key,
@@ -245,7 +250,7 @@ def _run_command(evolver: str, ext: str = ".py") -> str:
     if evolver == "coral":
         return "coral start --config task.yaml"
     if evolver == "nous":
-        return "NOUS_CAMPAIGN_PARENT=$PWD/nous_runs nous run campaign.yaml --bundle bundle.yaml"
+        return "NOUS_CAMPAIGN_PARENT=$PWD/nous_runs nous run campaign.yaml"
     return "(see bundle files)"
 
 
@@ -254,7 +259,7 @@ def _evaluator_file(evolver: str) -> str:
         return "evaluator.py"
     if evolver == "coral":
         return "grader/src/spotlights_evolve_grader/grader.py"
-    return "ground_truth in campaign.yaml + optional bundle.yaml"
+    return "ground_truth in campaign.yaml"
 
 
 def _candidate_target(spec: EvolveSpec) -> Target:
@@ -319,20 +324,26 @@ def _materialize(
     *,
     force: bool,
     warnings: list[str],
+    manifest: bool = True,
 ) -> list[str]:
     """Write `files` into `bundle_path`, honoring --force/manifest ownership.
 
     Returns the bundle-relative paths actually present in the (new) manifest.
+
+    With `manifest=False` the bundle is treated as a flat set of fully
+    generator-owned files (used for minimal single-file bundles): no
+    `generated_files.json` is written and `--force` re-runs simply overwrite,
+    since there are no hand-editable scaffolds to protect.
     """
     exists = bundle_path.exists()
-    prior = _load_prior_manifest(bundle_path) if exists else None
+    prior = _load_prior_manifest(bundle_path) if (exists and manifest) else None
 
     if exists and not force:
         raise BundleExistsError(
             f"bundle dir already exists: {bundle_path}. Re-run with --force to "
             "rewrite generator-owned files."
         )
-    if exists and force and prior is None:
+    if exists and force and manifest and prior is None:
         raise BundleExistsError(
             f"--force refused: {bundle_path} has no {_MANIFEST_NAME}; the "
             "generator cannot safely determine ownership of existing files."
@@ -342,6 +353,15 @@ def _materialize(
     destinations = [(gf, _generated_destination(bundle_path, bundle_root, gf.path)) for gf in files]
 
     bundle_path.mkdir(parents=True, exist_ok=True)
+
+    if not manifest:
+        # Flat, fully-owned bundle: write everything, no manifest bookkeeping.
+        written: list[str] = []
+        for gf, dest in destinations:
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(gf.text, encoding="utf-8")
+            written.append(gf.path)
+        return written
 
     # Build the new manifest as we go.
     new_manifest: dict[str, dict] = {}

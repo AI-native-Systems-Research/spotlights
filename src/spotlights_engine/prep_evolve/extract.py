@@ -170,7 +170,14 @@ def _main_file_targets(module: Module, exclude_file: str) -> list[Target]:
 
 
 def _ordered_findings(candidate: Candidate, findings: list[Finding]) -> list[FindingRef]:
-    """Candidate-linked findings first, then remaining module findings."""
+    """Only findings linked to this candidate's deep-research proposals.
+
+    Findings are attached at the module level, so the same list is shared by
+    every candidate in the module. Including all of them buries the few that
+    actually motivated this candidate under unrelated module-wide research, so
+    we keep only the ones referenced by `candidate.deep_research_proposals`,
+    in proposal order.
+    """
     linked_ids = [p.finding_id for p in candidate.deep_research_proposals]
     by_id = {f.finding_id: f for f in findings}
 
@@ -179,10 +186,6 @@ def _ordered_findings(candidate: Candidate, findings: list[Finding]) -> list[Fin
     for fid in linked_ids:
         f = by_id.get(fid)
         if f is not None and f.finding_id not in seen:
-            seen.add(f.finding_id)
-            ordered.append(f)
-    for f in findings:
-        if f.finding_id not in seen:
             seen.add(f.finding_id)
             ordered.append(f)
 

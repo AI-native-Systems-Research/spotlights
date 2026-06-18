@@ -44,7 +44,7 @@ def test_digest_sections_present(tmp_path: Path) -> None:
     md = render_digest(_spec(tmp_path))
     assert "## Optimization goal" in md
     assert "## Target" in md
-    assert "## Research findings (2)" in md
+    assert "## Research findings (1)" in md
     assert "## Existing proposals (2)" in md
 
 

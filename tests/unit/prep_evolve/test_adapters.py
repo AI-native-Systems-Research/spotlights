@@ -205,6 +205,14 @@ def test_nous_campaign_required_fields(tmp_path: Path) -> None:
     assert camp["prompts"]["methodology_layer"] == "prompts/methodology"
 
 
+def test_nous_bundle_is_only_campaign(tmp_path: Path) -> None:
+    # The nous bundle is a single self-contained campaign.yaml — no bundle.yaml
+    # and no vendored methodology prompts.
+    spec = _spec(tmp_path)
+    files = NousAdapter().render(spec)
+    assert [f.path for f in files] == ["campaign.yaml"]
+
+
 def test_nous_omits_empty_observable_metrics(tmp_path: Path) -> None:
     # A spec whose performance oracle parses to nothing should omit the key
     # entirely (minItems: 1) rather than emit [].
@@ -225,23 +233,3 @@ def test_nous_preserves_tokens_per_second_metric(tmp_path: Path) -> None:
     assert camp["target_system"]["observable_metrics"] == ["tokens/s"]
 
 
-def test_nous_bundle_required_fields(tmp_path: Path) -> None:
-    spec = _spec(tmp_path)
-    files = _by_path(NousAdapter().render(spec))
-    bundle = yaml.safe_load(files["bundle.yaml"].text)
-    assert bundle["metadata"]["iteration"] == 1
-    assert bundle["metadata"]["family"]
-    assert bundle["metadata"]["research_question"]
-    arm = bundle["arms"][0]
-    assert arm["type"] == "h-main"
-    for k in ("prediction", "mechanism", "diagnostic"):
-        assert arm[k]
-    for cc in arm["code_changes"]:
-        assert set(cc) == {"file", "intent", "rationale"}
-
-
-def test_nous_vendors_methodology(tmp_path: Path) -> None:
-    spec = _spec(tmp_path)
-    files = _by_path(NousAdapter().render(spec))
-    methodology = [p for p in files if p.startswith("prompts/methodology/")]
-    assert methodology  # either vendored prompts or the README fallback
