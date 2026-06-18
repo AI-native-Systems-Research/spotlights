@@ -99,16 +99,16 @@ def test_bundle_dir_name_sanitizes_repo_name(tmp_path: Path) -> None:
     assert bundle.name.startswith("demo_repo__")
 
 
-def test_force_overwrites_hand_edited_evaluator(tmp_path: Path) -> None:
+def test_force_overwrites_hand_edited_config(tmp_path: Path) -> None:
     repo = fx.make_repo(tmp_path)
     result = prep_evolve(_input(tmp_path, repo, evolver="skydiscover"), _CFG)
     bundle = Path(result.bundles[0].path)
-    evaluator = bundle / "evaluator.py"
-    evaluator.write_text("# HAND EDITED\n", encoding="utf-8")
+    config = bundle / "config.yaml"
+    config.write_text("# HAND EDITED\n", encoding="utf-8")
 
     prep_evolve(_input(tmp_path, repo, evolver="skydiscover", force=True), _CFG)
     # Bundles are fully generator-owned: --force overwrites everything.
-    assert evaluator.read_text() != "# HAND EDITED\n"
+    assert config.read_text() != "# HAND EDITED\n"
     assert (bundle / "config.yaml").exists()
 
 

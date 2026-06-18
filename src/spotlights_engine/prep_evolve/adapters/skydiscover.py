@@ -11,7 +11,6 @@ from pathlib import Path
 from spotlights_engine.prep_evolve.adapters.base import GeneratedFile
 from spotlights_engine.prep_evolve.digest import render_digest
 from spotlights_engine.prep_evolve.spec import EvolveSpec, Target
-from spotlights_engine.prep_evolve.templates import render_template
 from spotlights_engine.prep_evolve.yaml_emit import dump_yaml
 
 _DEFAULT_MODEL = "anthropic/claude-sonnet-4-6"
@@ -77,7 +76,7 @@ class SkydiscoverAdapter:
             raise ValueError("skydiscover.render called on an unsupported spec")
 
         digest = render_digest(spec)
-        seed_text, prefix, suffix = self._build_seed(spec, t)
+        seed_text = self._build_seed(spec, t)
         suffix_ext = Path(t.file).suffix.lower() or ".py"
         language = _LANG_BY_SUFFIX.get(suffix_ext, "python")
 
@@ -87,22 +86,13 @@ class SkydiscoverAdapter:
                 path="config.yaml",
                 text=self._build_config(spec, t, digest, language),
             ),
-            GeneratedFile(
-                path="evaluator.py",
-                text=self._build_evaluator(spec, t, prefix, suffix),
-            ),
         ]
         return files
 
     # --- seed ---
 
-    def _build_seed(self, spec: EvolveSpec, t: Target) -> tuple[str, str, str]:
-        """Insert EVOLVE-BLOCK markers around the 1-indexed inclusive range.
-
-        Returns (seed_text, prefix, suffix) where prefix/suffix are the text
-        outside the block (markers excluded) — exactly what the evaluator
-        compares against to reject out-of-scope edits.
-        """
+    def _build_seed(self, spec: EvolveSpec, t: Target) -> str:
+        """Insert EVOLVE-BLOCK markers around the 1-indexed inclusive range."""
         repo = Path(spec.run.repo_path)
         src = (repo / t.file).read_text(encoding="utf-8")
         lines = src.splitlines(keepends=True)
@@ -112,22 +102,13 @@ class SkydiscoverAdapter:
         block = "".join(lines[start - 1 : end])
         rest = "".join(lines[end:])
 
-        # The evaluator splits on the marker strings; prefix/suffix are what
-        # surrounds the markers. We keep the block body unchanged.
         marker_start = "# EVOLVE-BLOCK-START\n"
         marker_end = "# EVOLVE-BLOCK-END\n"
         # Ensure the block body ends with a newline so the end marker sits on
         # its own line.
         if block and not block.endswith("\n"):
             block += "\n"
-        seed_text = prefix + marker_start + block + marker_end + rest
-
-        # What the evaluator sees after stripping markers: prefix and
-        # (block + rest). Split the same way the evaluator does — on the marker
-        # strings — so its byte comparison matches.
-        eval_prefix = prefix
-        eval_suffix = rest
-        return seed_text, eval_prefix, eval_suffix
+        return prefix + marker_start + block + marker_end + rest
 
     # --- config ---
 
@@ -182,25 +163,6 @@ class SkydiscoverAdapter:
         # Keep it well over 256 chars and multi-line so skydiscover treats it
         # as an inline string, not a file path.
         return "\n".join(parts)
-
-    # --- evaluator ---
-
-    def _build_evaluator(self, spec: EvolveSpec, t: Target, prefix: str, suffix: str) -> str:
-        correctness = t.oracles.correctness
-        return render_template(
-            "skydiscover_evaluator.py.tmpl",
-            repo_name=spec.run.repo_name,
-            module_qn=spec.module.qualified_name,
-            candidate_id=t.candidate_id or "(unknown)",
-            correctness_oracle=", ".join(correctness) or "(none parsed — add one)",
-            performance_oracle=t.oracles.performance or "(none parsed — see objective)",
-            direction=spec.objective.direction,
-            target_file_repr=repr(t.file),
-            repo_path_repr=repr(spec.run.repo_path),
-            correctness_commands_repr=repr(correctness),
-            seed_prefix_repr=repr(prefix),
-            seed_suffix_repr=repr(suffix),
-        )
 
 
 __all__ = ["SkydiscoverAdapter"]

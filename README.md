@@ -346,8 +346,8 @@ Spotlights decides *what* to optimize; **evolvers** (evolutionary code-search ba
 
 | Evolver (`--evolver`) | Edit scope | Native config | Run command |
 |---|---|---|---|
-| `skydiscover` | single file (mutates the `# EVOLVE-BLOCK-START/END` region) | `config.yaml` + `seed.<ext>` + `evaluator.py` | `skydiscover-run seed.<ext> evaluator.py -c config.yaml` |
-| `coral` | multi-file (agent edits a git worktree) | `task.yaml` + `grader/` package | `coral start --config task.yaml` |
+| `skydiscover` | single file (mutates the `# EVOLVE-BLOCK-START/END` region) | `config.yaml` + `seed.<ext>` (you write `evaluator.py`) | `skydiscover-run seed.<ext> evaluator.py -c config.yaml` |
+| `coral` | multi-file (agent edits a git worktree) | `task.yaml` (you write `eval/grader.py`) | `coral start --config task.yaml` |
 | `nous` (alias `agentic-strategy-evolution`) | multi-file (experiment arms with `code_changes[]`) | `campaign.yaml` + `bundle.yaml` + `prompts/methodology/` | `NOUS_CAMPAIGN_PARENT=$PWD/nous_runs nous run campaign.yaml --bundle bundle.yaml` |
 
 Pass `--evolver all` to emit one bundle per compatible evolver (skydiscover is reported as skipped for multi-file selections).

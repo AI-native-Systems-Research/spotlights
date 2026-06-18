@@ -14,7 +14,7 @@ _DIR = Path(__file__).parent
 
 
 def load_template(name: str) -> str:
-    """Return the raw template text for `name` (e.g. `coral_grader.py.tmpl`)."""
+    """Return the raw template text for `name` (e.g. `readme.md.tmpl`)."""
     return (_DIR / name).read_text(encoding="utf-8")
 
 

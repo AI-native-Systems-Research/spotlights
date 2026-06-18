@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import ast
-import subprocess
 from pathlib import Path
 
 import yaml
@@ -89,53 +87,11 @@ def test_skydiscover_config_keys(tmp_path: Path) -> None:
     assert "\n" in sm and len(sm) > 256
 
 
-def test_skydiscover_evaluator_parses(tmp_path: Path) -> None:
+def test_skydiscover_emits_only_seed_and_config(tmp_path: Path) -> None:
     repo = fx.make_repo(tmp_path)
     spec = _spec(tmp_path, repo=repo)
     files = _by_path(SkydiscoverAdapter().render(spec))
-    ast.parse(files["evaluator.py"].text)
-
-
-def test_skydiscover_evaluator_marker_split_roundtrips_seed(tmp_path: Path) -> None:
-    repo = fx.make_repo(tmp_path)
-    spec = _spec(tmp_path, repo=repo)
-    files = _by_path(SkydiscoverAdapter().render(spec))
-    namespace = {"__name__": "generated_evaluator"}
-    exec(files["evaluator.py"].text, namespace)
-
-    parts = namespace["_split_markers"](files["seed.py"].text)
-    assert parts is not None
-    prefix, body, suffix = parts
-    assert prefix + body + suffix == (repo / fx.CAND_FILE).read_text(encoding="utf-8")
-
-    missing_end = files["seed.py"].text.replace("# EVOLVE-BLOCK-END\n", "")
-    assert namespace["_split_markers"](missing_end) is None
-
-
-def test_skydiscover_evaluator_recognizes_git_worktree(tmp_path: Path) -> None:
-    repo = fx.make_repo(tmp_path)
-    worktree = tmp_path / "repo-worktree"
-    subprocess.run(
-        ["git", "worktree", "add", "--detach", str(worktree), "HEAD"],
-        cwd=repo,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    try:
-        spec = _spec(tmp_path, repo=repo)
-        files = _by_path(SkydiscoverAdapter().render(spec))
-        namespace = {"__name__": "generated_evaluator"}
-        exec(files["evaluator.py"].text, namespace)
-        assert namespace["_is_git_checkout"](str(worktree)) is True
-    finally:
-        subprocess.run(
-            ["git", "worktree", "remove", "--force", str(worktree)],
-            cwd=repo,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+    assert set(files) == {"seed.py", "config.yaml"}
 
 
 def test_skydiscover_rejects_multi_file_scope(tmp_path: Path) -> None:
@@ -153,8 +109,9 @@ def test_coral_task_yaml_mapping(tmp_path: Path) -> None:
     files = _by_path(CoralAdapter().render(spec))
     task = yaml.safe_load(files["task.yaml"].text)
     assert task["grader"]["direction"] == "minimize"
-    assert task["grader"]["entrypoint"] == "spotlights_evolve_grader.grader:Grader"
-    assert task["grader"]["setup"] == ["uv pip install -e ./grader"]
+    # CORAL auto-discovers eval/grader.py — no entrypoint / package install.
+    assert "entrypoint" not in task["grader"]
+    assert "setup" not in task["grader"]
     assert task["grader"]["timeout"] == 600
     assert task["workspace"]["repo_path"] == "/tmp/repo"
     assert task["workspace"]["results_dir"] == "./results"
@@ -162,14 +119,10 @@ def test_coral_task_yaml_mapping(tmp_path: Path) -> None:
     assert fx.CAND_FILE in task["grader"]["args"]["target_files"]
 
 
-def test_coral_grader_package_layout(tmp_path: Path) -> None:
+def test_coral_emits_only_task_yaml(tmp_path: Path) -> None:
     spec = _spec(tmp_path)
     files = _by_path(CoralAdapter().render(spec))
-    assert "grader/pyproject.toml" in files
-    assert "grader/src/spotlights_evolve_grader/__init__.py" in files
-    grader_py = files["grader/src/spotlights_evolve_grader/grader.py"]
-    ast.parse(grader_py.text)
-    assert "class Grader(TaskGrader)" in grader_py.text
+    assert set(files) == {"task.yaml"}
 
 
 def test_coral_multi_file_scope_supported(tmp_path: Path) -> None:
