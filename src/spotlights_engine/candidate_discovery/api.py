@@ -79,13 +79,11 @@ class DiscoveryResult(BaseModel):
 def resolve_target_module(input: CandidateDiscoveryInput) -> Module:
     """Look up the target `Module` inside `input.project_tree`.
 
-    Accepts both architecture dot-form (`a.b.c`) and `ProjectTree.walk`
-    slash-form (`a/b/c`).
+    The qualified name is `ProjectTree.walk` slash-form (`a/b/c`) — the single
+    canonical key.
     """
     qn = input.module_qualified_name
     resolved = input.project_tree.resolve(qn)
-    if resolved is None and "." in qn:
-        resolved = input.project_tree.resolve(qn.replace(".", "/"))
     if resolved is None:
         raise ValueError(
             f"module_qualified_name {qn!r} not found in project_tree"

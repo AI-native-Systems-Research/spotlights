@@ -60,27 +60,37 @@ def _project_tree_breadcrumb(
 ) -> str:
     """Return a short breadcrumb of parent + sibling module names.
 
-    The qualified name uses `/` internally (see `ProjectTree.walk`), but the
-    manager passes dot-form names through. Accept both.
+    The qualified name is the module's slash-form path relative to `source_root`
+    (see `ProjectTree.walk`) — the single canonical form throughout. Resolve the
+    target by its full qualified name and read its parent/siblings off the actual
+    tree structure. Source-root prefix segments (e.g. `spotlights_engine`) have no
+    corresponding node, so we cannot match segment-by-segment on `Module.name`.
     """
-    qn = module_qualified_name.replace(".", "/")
-    parts = qn.split("/")
-    if not parts:
+    qn = module_qualified_name
+    if not qn:
         return "(unknown)"
 
-    parents: list[Module] = []
-    siblings: list[Module] = []
-    cursor: list[Module] = list(tree.modules)
-    for idx, segment in enumerate(parts):
-        match = next((m for m in cursor if m.name == segment), None)
-        if match is None:
-            break
-        if idx == len(parts) - 1:
-            siblings = [m for m in cursor if m.name != segment]
-        else:
-            parents.append(match)
-            cursor = list(match.submodules)
+    # Qualified name per module identity, so we can read parent/siblings off
+    # the actual tree structure without parsing prefix segments.
+    qn_by_id: dict[int, str] = {id(m): node_qn for node_qn, m in tree.walk()}
+    ancestors_of: dict[str, list[Module]] = {}
+    siblings_of: dict[str, list[Module]] = {}
 
+    def _index(modules: list[Module], chain: list[Module]) -> None:
+        for m in modules:
+            node_qn = qn_by_id.get(id(m))
+            if node_qn is not None:
+                ancestors_of[node_qn] = list(chain)
+                siblings_of[node_qn] = [s for s in modules if s is not m]
+            _index(m.submodules, chain + [m])
+
+    _index(tree.modules, [])
+
+    if qn not in ancestors_of:
+        return "(unknown)"
+
+    parents = ancestors_of[qn]
+    siblings = siblings_of[qn]
     parent_chain = " > ".join(p.name for p in parents) or "(top-level)"
     sibling_names = ", ".join(sorted(m.name for m in siblings)) or "(none)"
     return f"parents: {parent_chain}\nsiblings: {sibling_names}"

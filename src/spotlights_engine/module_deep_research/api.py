@@ -14,7 +14,27 @@ from spotlights_engine.module_deep_research.orchestration import (
     select_runners,
 )
 from spotlights_engine.module_deep_research.prompts import render_module_deep_research_prompt
-from spotlights_engine.schemas.pipeline import ModuleDeepResearchInput, ModuleDeepResearchOutput
+from spotlights_engine.module_deep_research.validation import parse_module_deep_research_output
+from spotlights_engine.schemas.common import StepIssue
+from spotlights_engine.schemas.pipeline import (
+    ModuleDeepResearchInput,
+    ModuleDeepResearchOutput,
+)
+from spotlights_engine.schemas.project import Module, ProjectTree
+
+
+def _issue(message: str, *, recoverable: bool) -> StepIssue:
+    return StepIssue(
+        step="module_deep_research",
+        severity="error",
+        message=message,
+        recoverable=recoverable,
+    )
+
+
+def resolve_target_module(project_tree: ProjectTree, module_qualified_name: str) -> Module | None:
+    """Resolve a module by its slash-form qualified name (the canonical key)."""
+    return project_tree.resolve(module_qualified_name)
 
 
 def research_module(
