@@ -1,15 +1,13 @@
 """Stage C: `prep_evolve(input, config) -> PrepEvolveResult`.
 
 Orchestrates extract → validate → render → materialize. The materializer is one
-central writer that enforces `--force`/manifest ownership rules and always
-emits `evolve_spec.json`, `findings_digest.md`, `generated_files.json`, and
-`README.md`.
+central writer: a bundle dir is refused unless `--force` is set, and with
+`--force` every generated file is overwritten. Besides each evolver's native
+config it emits a single shared `README.md`.
 """
 
 from __future__ import annotations
 
-import hashlib
-import json
 import re
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,7 +19,6 @@ from spotlights_engine.prep_evolve.adapters import (
     normalize_evolver,
 )
 from spotlights_engine.prep_evolve.adapters.base import GeneratedFile
-from spotlights_engine.prep_evolve.digest import render_digest
 from spotlights_engine.prep_evolve.errors import (
     BundleExistsError,
     ScopeError,
@@ -46,7 +43,6 @@ from spotlights_engine.prep_evolve.validate_target import (
     validate_scope_file,
 )
 
-_MANIFEST_NAME = "generated_files.json"
 _BUNDLE_SEGMENT_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
@@ -97,10 +93,6 @@ class PrepEvolveResult(BaseModel):
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
-
-
-def _sha256(text: str) -> str:
-    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _path_segment(value: str, default: str) -> str:
@@ -211,14 +203,12 @@ def prep_evolve(input: PrepEvolveInput, config: PrepEvolveConfig | None = None) 
             raise UnsupportedEvolverError(f"{key} cannot run this selection: {reason}")
 
         native_files = adapter.render(spec)
-        # Minimal bundles (e.g. nous: a single self-contained campaign.yaml)
-        # opt out of the shared metadata files and the manifest force-guard.
+        # Minimal bundles (e.g. nous: a single self-contained campaign.yaml) are
+        # just their native config — no shared README.
         minimal = getattr(adapter, "minimal_bundle", False)
         all_files = native_files if minimal else native_files + _always_emitted(spec, key)
         bundle_path = input.out / _bundle_dir_name(spec, key)
-        written = _materialize(
-            bundle_path, all_files, force=input.force, warnings=warnings, manifest=not minimal
-        )
+        written = _materialize(bundle_path, all_files, force=input.force)
         bundles.append(
             BundleResult(
                 evolver=key,
@@ -258,7 +248,7 @@ def _evaluator_file(evolver: str) -> str:
     if evolver == "skydiscover":
         return "evaluator.py"
     if evolver == "coral":
-        return "grader/src/spotlights_evolve_grader/grader.py"
+        return "eval/grader.py"
     return "ground_truth in campaign.yaml"
 
 
@@ -286,36 +276,10 @@ def _always_emitted(spec: EvolveSpec, evolver: str) -> list[GeneratedFile]:
         scope_files=_scope_files_md(spec),
         objective=spec.objective.goal,
     )
-    return [
-        GeneratedFile(
-            path="evolve_spec.json",
-            text=spec.model_dump_json(indent=2) + "\n",
-            overwrite="always",
-        ),
-        GeneratedFile(
-            path="findings_digest.md",
-            text=render_digest(spec),
-            overwrite="always",
-        ),
-        GeneratedFile(path="README.md", text=readme, overwrite="always"),
-    ]
+    return [GeneratedFile(path="README.md", text=readme)]
 
 
 # --- materialization / writer --------------------------------------------
-
-
-def _load_prior_manifest(bundle_path: Path) -> dict[str, dict] | None:
-    manifest_path = bundle_path / _MANIFEST_NAME
-    if not manifest_path.exists():
-        return None
-    try:
-        raw = json.loads(manifest_path.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return None
-    files = raw.get("files") if isinstance(raw, dict) else None
-    if not isinstance(files, dict):
-        return None
-    return files
 
 
 def _materialize(
@@ -323,30 +287,17 @@ def _materialize(
     files: list[GeneratedFile],
     *,
     force: bool,
-    warnings: list[str],
-    manifest: bool = True,
 ) -> list[str]:
-    """Write `files` into `bundle_path`, honoring --force/manifest ownership.
+    """Write `files` into `bundle_path`.
 
-    Returns the bundle-relative paths actually present in the (new) manifest.
-
-    With `manifest=False` the bundle is treated as a flat set of fully
-    generator-owned files (used for minimal single-file bundles): no
-    `generated_files.json` is written and `--force` re-runs simply overwrite,
-    since there are no hand-editable scaffolds to protect.
+    The bundle is a flat set of generator-owned files. An existing bundle dir is
+    refused unless `--force` is set; with `--force` every file is overwritten.
+    Returns the bundle-relative paths written.
     """
-    exists = bundle_path.exists()
-    prior = _load_prior_manifest(bundle_path) if (exists and manifest) else None
-
-    if exists and not force:
+    if bundle_path.exists() and not force:
         raise BundleExistsError(
             f"bundle dir already exists: {bundle_path}. Re-run with --force to "
-            "rewrite generator-owned files."
-        )
-    if exists and force and manifest and prior is None:
-        raise BundleExistsError(
-            f"--force refused: {bundle_path} has no {_MANIFEST_NAME}; the "
-            "generator cannot safely determine ownership of existing files."
+            "overwrite generated files."
         )
 
     bundle_root = bundle_path.resolve()
@@ -354,50 +305,12 @@ def _materialize(
 
     bundle_path.mkdir(parents=True, exist_ok=True)
 
-    if not manifest:
-        # Flat, fully-owned bundle: write everything, no manifest bookkeeping.
-        written: list[str] = []
-        for gf, dest in destinations:
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(gf.text, encoding="utf-8")
-            written.append(gf.path)
-        return written
-
-    # Build the new manifest as we go.
-    new_manifest: dict[str, dict] = {}
-
+    written: list[str] = []
     for gf, dest in destinations:
-        new_hash = _sha256(gf.text)
-        prior_entry = prior.get(gf.path) if prior else None
-
-        decision = _decide_write(dest, gf, prior_entry, warnings)
-        if decision == "write":
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(gf.text, encoding="utf-8")
-            new_manifest[gf.path] = {
-                "path": gf.path,
-                "sha256": new_hash,
-                "overwrite": gf.overwrite,
-            }
-        elif decision == "preserve":
-            # Carry forward the prior GENERATED hash so future force-runs still
-            # recognize the file as user-modified.
-            carried = (prior_entry or {}).get("sha256", new_hash)
-            new_manifest[gf.path] = {
-                "path": gf.path,
-                "sha256": carried,
-                "overwrite": gf.overwrite,
-            }
-        # decision == "skip" -> not generator-owned; leave out of manifest.
-
-    # Write the manifest last, atomically; exclude itself from its own listing.
-    manifest_path = bundle_path / _MANIFEST_NAME
-    payload = {"version": "1", "files": new_manifest}
-    tmp = manifest_path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
-    tmp.replace(manifest_path)
-
-    return list(new_manifest.keys()) + [_MANIFEST_NAME]
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(gf.text, encoding="utf-8")
+        written.append(gf.path)
+    return written
 
 
 def _generated_destination(bundle_path: Path, bundle_root: Path, path: str) -> Path:
@@ -411,35 +324,6 @@ def _generated_destination(bundle_path: Path, bundle_root: Path, path: str) -> P
     if not resolved_dest.is_relative_to(bundle_root):
         raise BundleExistsError(f"generated file path escapes bundle directory: {path!r}")
     return dest
-
-
-def _decide_write(
-    dest: Path,
-    gf: GeneratedFile,
-    prior_entry: dict | None,
-    warnings: list[str],
-) -> str:
-    """Return 'write' | 'preserve' | 'skip' for one file."""
-    if not dest.exists():
-        return "write"
-
-    # File exists on disk.
-    if prior_entry is None:
-        # Pre-existing, non-owned file -> never clobber.
-        warnings.append(f"left pre-existing non-owned file untouched: {gf.path}")
-        return "skip"
-
-    if gf.overwrite == "always":
-        return "write"
-
-    # preserve_if_modified: rewrite only if the on-disk file still matches the
-    # prior generated hash (i.e. the user hasn't edited it).
-    current_hash = _sha256(dest.read_text(encoding="utf-8"))
-    prior_hash = prior_entry.get("sha256")
-    if current_hash == prior_hash:
-        return "write"
-    warnings.append(f"preserved user-modified file (not overwritten): {gf.path}")
-    return "preserve"
 
 
 __all__ = [
