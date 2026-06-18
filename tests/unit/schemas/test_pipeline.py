@@ -12,19 +12,15 @@ from spotlights_engine.schemas.candidate import Candidate, Candidates
 from spotlights_engine.schemas.common import SpotlightContext, StepIssue
 from spotlights_engine.schemas.finding import Finding
 from spotlights_engine.schemas.pipeline import (
-    AgentProposalsInput,
-    AgentProposalsOutput,
     CandidateDiscoveryInput,
     ModuleDeepResearchInput,
     ModuleDeepResearchOutput,
     ModuleRun,
     ProposalFromFindingCreatorInput,
-    ProposalFromFindingCreatorOutput,
     SpotlightsManagerInput,
     SpotlightsResult,
 )
 from spotlights_engine.schemas.project import File, Module, ProjectTree, Repository
-from spotlights_engine.schemas.proposals import AgentProposal, DeepResearchProposal
 
 
 def _tree() -> ProjectTree:
@@ -65,11 +61,21 @@ def _ctx() -> SpotlightContext:
 def _candidate(**overrides) -> Candidate:
     payload = {
         "id": "cand-0001",
-        "file": "src/core/x.py",
-        "line_start": 1,
-        "line_end": 2,
-        "symbol": "core.x.run",
-        "kind": "function",
+        "module_qualified_name": "core",
+        "origin": "code_agent",
+        "locations": [
+            {
+                "file": "src/core/x.py",
+                "spans": [
+                    {
+                        "line_start": 1,
+                        "line_end": 2,
+                        "symbol": "core.x.run",
+                        "kind": "function",
+                    }
+                ],
+            }
+        ],
         "description": "d",
         "current_approach": "ca",
         "evolve_rationale": "er",
@@ -152,45 +158,9 @@ def test_module_deep_research_output_schema_round_trips_through_json() -> None:
     assert json.loads(json.dumps(schema)) == schema
 
 
-def test_proposal_from_finding_creator_io() -> None:
-    cs = _candidates()
-    cs.candidates[0].deep_research_proposals.append(
-        DeepResearchProposal(
-            title="t",
-            detailed_description="d",
-            finding_id="find-0001",
-            proposal_rationale="pr",
-            created_by="claude",
-        )
-    )
-    inp = ProposalFromFindingCreatorInput(
-        candidates=cs, findings=[_finding()], context=_ctx()
-    )
-    out = ProposalFromFindingCreatorOutput(candidates=cs)
-    assert inp.candidates is cs
-    assert inp.findings[0].finding_id == "find-0001"
-    assert out.candidates.candidates[0].deep_research_proposals[0].finding_id == "find-0001"
-
-
 def test_proposal_from_finding_creator_requires_findings_field() -> None:
     with pytest.raises(ValidationError):
         ProposalFromFindingCreatorInput(candidates=_candidates(), context=_ctx())
-
-
-def test_agent_proposals_io() -> None:
-    cs = _candidates()
-    cs.candidates[0].agent_proposals.append(
-        AgentProposal(
-            title="t",
-            detailed_description="d",
-            agent_name="claude",
-            novelty_rationale="nr",
-        )
-    )
-    inp = AgentProposalsInput(project_tree=_tree(), candidates=cs, context=_ctx())
-    out = AgentProposalsOutput(candidates=cs)
-    assert inp.project_tree.modules[0].name == "core"
-    assert out.candidates.candidates[0].agent_proposals[0].agent_name == "claude"
 
 
 def test_module_run_status_constraints() -> None:
