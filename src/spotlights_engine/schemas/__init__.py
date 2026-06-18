@@ -7,18 +7,27 @@ Layout:
     common     — SpotlightContext, StepIssue, PipelineStep, ModuleRunStatus
     project    — File, Module, Repository, ProjectTree
     finding    — Finding, FindingSourceType
-    proposals  — DeepResearchProposal, AgentProposal
-    candidate  — Candidate, Candidates, CandidateKind, CandidateState, EstimatedImpact
-    pipeline   — Per-step I/O contracts + ModuleRun + SpotlightsManagerInput/Result
+    proposals  — DeepResearchProposal, AgentProposal (DR pipeline-internal)
+    proposal   — Proposal, ProposalSource (unified report shape)
+    candidate  — Candidate, Candidates, CandidateKind, CandidateState,
+                 EstimatedImpact, CodeKind, CodeSpan, CodeLocation,
+                 CandidateOrigin
+    pipeline   — Per-step DR I/O contracts + ModuleRun + SpotlightsManagerInput/Result;
+                 plus the cross-pipeline `SpotlightReport` and `RunInfo`.
 """
 
 from __future__ import annotations
 
+from spotlights_engine.schemas.anomaly import Anomaly, AnomalySeverity
 from spotlights_engine.schemas.candidate import (
     Candidate,
     CandidateKind,
+    CandidateOrigin,
     CandidateState,
     Candidates,
+    CodeKind,
+    CodeLocation,
+    CodeSpan,
     EstimatedImpact,
 )
 from spotlights_engine.schemas.common import (
@@ -40,10 +49,13 @@ from spotlights_engine.schemas.pipeline import (
     ModuleRun,
     ProposalFromFindingCreatorInput,
     ProposalFromFindingCreatorOutput,
+    RunInfo,
+    SpotlightReport,
     SpotlightsManagerInput,
     SpotlightsResult,
 )
 from spotlights_engine.schemas.project import File, Module, ProjectTree, Repository
+from spotlights_engine.schemas.proposal import Proposal, ProposalSource
 from spotlights_engine.schemas.proposals import AgentProposal, DeepResearchProposal
 from spotlights_engine.objectives.schemas import Objective, ObjectiveIntent
 
@@ -51,29 +63,39 @@ __all__ = [
     "AgentProposal",
     "AgentProposalsInput",
     "AgentProposalsOutput",
+    "Anomaly",
+    "AnomalySeverity",
     "Candidate",
     "CandidateDiscoveryInput",
     "CandidateKind",
+    "CandidateOrigin",
     "CandidateState",
     "Candidates",
+    "CodeKind",
+    "CodeLocation",
+    "CodeSpan",
     "DeepResearchProposal",
     "EstimatedImpact",
     "File",
     "Finding",
     "FindingSourceType",
     "Module",
-    "Objective",
-    "ObjectiveIntent",
     "ModuleDeepResearchInput",
     "ModuleDeepResearchOutput",
     "ModuleRun",
     "ModuleRunStatus",
+    "Objective",
+    "ObjectiveIntent",
     "PipelineStep",
     "ProjectTree",
+    "Proposal",
     "ProposalFromFindingCreatorInput",
     "ProposalFromFindingCreatorOutput",
+    "ProposalSource",
     "Repository",
+    "RunInfo",
     "SpotlightContext",
+    "SpotlightReport",
     "SpotlightsManagerInput",
     "SpotlightsResult",
     "StepIssue",
