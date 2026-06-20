@@ -85,7 +85,7 @@ def test_generated_path_escape_rejected_before_writing(tmp_path: Path) -> None:
 def test_bundle_dir_name_sanitizes_repo_name(tmp_path: Path) -> None:
     repo = fx.make_repo(tmp_path)
     payload = fx.make_result_dict()
-    payload["project_tree"]["repository"]["name"] = "../demo repo"
+    payload["report"]["project_tree"]["repository"]["name"] = "../demo repo"
     result_json = tmp_path / "custom_result.json"
     result_json.write_text(json.dumps(payload), encoding="utf-8")
 

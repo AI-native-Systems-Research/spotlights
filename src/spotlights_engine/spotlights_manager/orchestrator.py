@@ -10,6 +10,8 @@ truth; in-memory state is only there to drive the scheduling.
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -42,13 +44,14 @@ from spotlights_engine.proposal_from_finding_creator import (
     ProposalFromFindingValidationError,
     create_proposals_with_telemetry,
 )
-from spotlights_engine.schemas.candidate import Candidates
+from spotlights_engine.schemas.candidate import Candidate, Candidates
 from spotlights_engine.schemas.common import (
     ModuleRunStatus,
     PipelineStep,
     SpotlightContext,
     StepIssue,
 )
+from spotlights_engine.schemas.finding import Finding
 from spotlights_engine.schemas.pipeline import (
     AgentProposalsInput,
     AgentProposalsOutput,
@@ -59,6 +62,8 @@ from spotlights_engine.schemas.pipeline import (
     ModulesExtractorInput,
     ProposalFromFindingCreatorInput,
     ProposalFromFindingCreatorOutput,
+    RunInfo,
+    SpotlightReport,
     SpotlightsManagerInput,
 )
 from spotlights_engine.schemas.project import Module, ProjectTree
@@ -96,6 +101,73 @@ _log = logging.getLogger(__name__)
 
 def _now_iso() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
+
+
+def _run_id_from_manifest(manifest: dict[str, Any]) -> str:
+    """Deterministic, resume-stable run id derived from the input fingerprint.
+
+    The input fingerprint is content-addressed and reused on resume
+    (`_ensure_resume_compatible` rejects mismatches), so the same logical run
+    keeps the same id across resumes. Falls back to a `created_at` hash, then a
+    constant, so the field is never empty (`RunInfo.run_id` requires
+    `min_length=1`).
+    """
+    fp = manifest.get("input_fingerprint")
+    if fp:
+        payload = json.dumps(fp, sort_keys=True, separators=(",", ":"))
+        return "run-" + hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+    created = manifest.get("created_at")
+    if created:
+        return "run-" + hashlib.sha256(created.encode("utf-8")).hexdigest()[:16]
+    return "run-unknown"
+
+
+def _build_report(
+    *,
+    tree: ProjectTree,
+    context: SpotlightContext,
+    module_runs: dict[str, ModuleRun],
+    manager_issues: list[StepIssue],
+    total_cost: float,
+    manifest: dict[str, Any],
+) -> SpotlightReport:
+    """Assemble the cross-pipeline `SpotlightReport` from a completed DR run.
+
+    Candidates already carry unified `proposals` and globally-unique,
+    slug-segmented ids, so flattening preserves uniqueness with no renumbering.
+    Iteration follows `module_runs` insertion order (mirrors `ordered_qns` /
+    tree leaf order), giving a deterministic, run-stable ordering.
+    """
+    candidates: list[Candidate] = []
+    findings: list[Finding] = []
+    issues: list[StepIssue] = []
+
+    for run_record in module_runs.values():
+        if run_record.candidates is not None:
+            candidates.extend(run_record.candidates.candidates)
+        findings.extend(run_record.findings)
+        issues.extend(run_record.issues)
+
+    # Manager-level issues (renderer, etc.) come after per-module step issues.
+    issues.extend(manager_issues)
+
+    run_info = RunInfo(
+        pipeline="deep_research",
+        run_id=_run_id_from_manifest(manifest),
+        started_at=manifest.get("created_at") or _now_iso(),
+        finished_at=_now_iso(),
+        cost_usd=total_cost or None,
+    )
+
+    return SpotlightReport(
+        project_tree=tree,
+        context=context,
+        candidates=candidates,
+        findings=findings,
+        anomalies=[],  # the DR pipeline produces no anomalies
+        run=run_info,
+        issues=issues,
+    )
 
 
 def _issue(
@@ -1518,9 +1590,17 @@ async def _run_async(
         cost_str,
     )
 
-    return SpotlightsManagerResult(
-        project_tree=tree,
+    report = _build_report(
+        tree=tree,
         context=input.context,
+        module_runs=module_runs,
+        manager_issues=manager_issues,
+        total_cost=total_cost,
+        manifest=manifest,
+    )
+
+    return SpotlightsManagerResult(
+        report=report,
         module_runs=module_runs,
         extractor_invocation=invocation,
         per_module_telemetry=per_module_telemetry,

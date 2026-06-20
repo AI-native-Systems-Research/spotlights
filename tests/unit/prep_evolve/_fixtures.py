@@ -1,7 +1,8 @@
 """Fixture builders for prep_evolve tests.
 
 `make_result_dict()` returns a minimal `result.json`-shaped payload (the
-architecture `SpotlightsResult` shape, which `load_result` also accepts). It
+current `SpotlightsManagerResult` sidecar shape: `project_tree`/`context`
+nested under `report`, `module_runs` top-level). It
 contains a nested project tree (so slash-form submodule resolution is
 exercised), one candidate (new shape: `origin="code_agent"`, nested
 `locations`, unified `proposals`) carrying one research-backed and one
@@ -130,11 +131,13 @@ def make_result_dict() -> dict:
     }
 
     return {
-        "project_tree": tree,
-        "context": {
-            "objective": "reduce the median TTFT and median TPOT",
-            "workload_hints": ["multi-turn agentic workload"],
-            "validation_plan": [],
+        "report": {
+            "project_tree": tree,
+            "context": {
+                "objective": "reduce the median TTFT and median TPOT",
+                "workload_hints": ["multi-turn agentic workload"],
+                "validation_plan": [],
+            },
         },
         "module_runs": {
             "v1/attention": {

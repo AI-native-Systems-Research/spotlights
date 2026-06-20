@@ -144,20 +144,6 @@ class SpotlightsManagerInput(BaseModel):
     continue_on_module_failure: bool = True
 
 
-class SpotlightsResult(BaseModel):
-    """Top-level result echoed back to the caller.
-
-    `context` is echoed verbatim from the input so a result is self-describing
-    for audit and repro. `module_runs` is keyed by module qualified name.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    project_tree: ProjectTree
-    context: SpotlightContext
-    module_runs: dict[str, ModuleRun] = Field(default_factory=dict)
-
-
 class RunInfo(BaseModel):
     """Info about the run that produced a `SpotlightReport`."""
 
@@ -202,5 +188,4 @@ __all__ = [
     "RunInfo",
     "SpotlightReport",
     "SpotlightsManagerInput",
-    "SpotlightsResult",
 ]

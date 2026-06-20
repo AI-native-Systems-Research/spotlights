@@ -18,7 +18,6 @@ from spotlights_engine.schemas.pipeline import (
     ModuleRun,
     ProposalFromFindingCreatorInput,
     SpotlightsManagerInput,
-    SpotlightsResult,
 )
 from spotlights_engine.schemas.project import File, Module, ProjectTree, Repository
 
@@ -190,10 +189,9 @@ def test_spotlights_manager_input_defaults() -> None:
     assert inp.continue_on_module_failure is True
 
 
-def test_spotlights_result_keys_module_runs_by_qualified_name() -> None:
+def test_module_run_round_trips_through_json() -> None:
     mr = ModuleRun(module_qualified_name="core", status="SUCCEEDED", candidates=_candidates())
-    result = SpotlightsResult(project_tree=_tree(), context=_ctx(), module_runs={"core": mr})
 
-    again = SpotlightsResult.model_validate_json(result.model_dump_json())
-    assert "core" in again.module_runs
-    assert again.module_runs["core"].status == "SUCCEEDED"
+    again = ModuleRun.model_validate_json(mr.model_dump_json())
+    assert again.module_qualified_name == "core"
+    assert again.status == "SUCCEEDED"

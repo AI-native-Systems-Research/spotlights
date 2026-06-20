@@ -9,12 +9,19 @@ from spotlights_engine.module_knowledge import (
     records_from_project_tree,
     records_from_spotlights_result,
 )
+from spotlights_engine.modules_extractor.agent import ExtractionInvocation
 from spotlights_engine.schemas.candidate import Candidate, Candidates
 from spotlights_engine.schemas.common import SpotlightContext
 from spotlights_engine.schemas.finding import Finding
-from spotlights_engine.schemas.pipeline import ModuleDeepResearchOutput, ModuleRun, SpotlightsResult
+from spotlights_engine.schemas.pipeline import (
+    ModuleDeepResearchOutput,
+    ModuleRun,
+    RunInfo,
+    SpotlightReport,
+)
 from spotlights_engine.schemas.project import File, Module, ProjectTree, Repository
 from spotlights_engine.schemas.proposals import AgentProposal, DeepResearchProposal
+from spotlights_engine.spotlights_manager.api import SpotlightsManagerResult
 
 
 def test_records_from_module_deep_research_preserve_source_and_module_context() -> None:
@@ -137,10 +144,24 @@ def test_records_from_module_run_and_spotlights_result_collect_memory_records() 
         candidates=Candidates(module_qualified_name="engine/cache", candidates=[candidate]),
         findings=[finding],
     )
-    result = SpotlightsResult(
-        project_tree=ProjectTree(repository=Repository(name="vllm", summary="serving")),
-        context=SpotlightContext(objective="Improve decode latency"),
+    tree = ProjectTree(repository=Repository(name="vllm", summary="serving"))
+    context = SpotlightContext(objective="Improve decode latency")
+    result = SpotlightsManagerResult(
+        report=SpotlightReport(
+            project_tree=tree,
+            context=context,
+            candidates=[candidate],
+            findings=[finding],
+            run=RunInfo(pipeline="deep_research", run_id="run-test", started_at="2026-06-20T00:00:00+00:00"),
+        ),
         module_runs={"engine/cache": module_run},
+        extractor_invocation=ExtractionInvocation(
+            session_id=None,
+            duration_s=0.0,
+            cost_usd=None,
+            input_tokens=None,
+            output_tokens=None,
+        ),
     )
 
     module_records = records_from_module_run(module_run)
