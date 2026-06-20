@@ -6,13 +6,13 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from spotlights_engine.results_renderer.api import RendererConfig
+from spotlights_engine.results_renderer.loader import LoadedRun
 from spotlights_engine.schemas.candidate import Candidate
 from spotlights_engine.schemas.common import StepIssue
 from spotlights_engine.schemas.finding import Finding
 from spotlights_engine.schemas.project import Module
-
-from spotlights_engine.results_renderer.api import RendererConfig
-from spotlights_engine.results_renderer.loader import LoadedRun
+from spotlights_engine.utils.schema_compat import primary_span, proposals_from
 
 
 class IndexRow(BaseModel):
@@ -98,7 +98,7 @@ def aggregate(
 
         candidates_sorted = sorted(
             candidates,
-            key=lambda c: (-len(c.deep_research_proposals), c.id),
+            key=lambda c: (-len(proposals_from(c, "research_finding")), c.id),
         )
 
         n_high = sum(1 for c in candidates if c.estimated_impact == "high")
@@ -120,10 +120,12 @@ def aggregate(
         candidate_rows = [
             CandidateRow(
                 candidate_id=c.id,
-                symbol=c.symbol,
+                symbol=primary_span(c).symbol,
                 candidate_page_path=f"{module_slug}/{_candidate_page_filename(c)}",
                 estimated_impact=str(c.estimated_impact),
-                n_deep_research_proposals=len(c.deep_research_proposals),
+                n_deep_research_proposals=len(
+                    proposals_from(c, "research_finding")
+                ),
             )
             for c in candidates_sorted
         ]
@@ -162,7 +164,7 @@ def _candidate_page_filename(candidate: Candidate) -> str:
     slugify to the same base (e.g. overloaded names, unicode collapsing)."""
     from spotlights_engine.spotlights_manager.persistence import slug_for
 
-    return f"{slug_for(candidate.symbol)}__{candidate.id}.md"
+    return f"{slug_for(primary_span(candidate).symbol)}__{candidate.id}.md"
 
 
 def _module_status(
@@ -202,7 +204,10 @@ def _count_relevant_findings(
     candidates: list[Candidate], findings: list[Finding]
 ) -> int:
     referenced = {
-        p.finding_id for c in candidates for p in c.deep_research_proposals
+        p.finding_ref_id
+        for c in candidates
+        for p in proposals_from(c, "research_finding")
+        if p.finding_ref_id is not None
     }
     if not referenced:
         return 0

@@ -72,7 +72,7 @@ class Candidate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    id: str = Field(pattern=r"^cand-\d{4}$")
+    id: str
 
     module_qualified_name: str | None = None
 

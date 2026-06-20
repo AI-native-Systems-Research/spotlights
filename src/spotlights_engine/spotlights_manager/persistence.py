@@ -11,10 +11,9 @@ import dataclasses
 import hashlib
 import json
 import os
-import re
 import shutil
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -38,17 +37,25 @@ from spotlights_engine.schemas.pipeline import (
     ProposalFromFindingCreatorOutput,
 )
 from spotlights_engine.schemas.project import ProjectTree
-
-
-_SLUG_SAFE = re.compile(r"[^A-Za-z0-9._-]")
+from spotlights_engine.utils.id_helpers import slug_for
 
 # Bumped to 2 when qualified names became source-root-relative (the package
 # prefix is now retained, e.g. `spotlights_engine/modules_extractor`). Run dirs
 # written under the old name-chain layout carry version 1 and are not
 # resume-compatible — their per-module slugs and `module_runs` keys differ.
-# `_ensure_resume_compatible` reads and compares this; pre-change dirs are
-# rejected cleanly rather than silently reloaded.
-SCHEMA_VERSION = 2
+# Bumped to 3 for the new `Candidate`/`Proposal` shapes: candidates now nest
+# their location under `locations[].spans[]`, drop the per-candidate `state`,
+# and merge `deep_research_proposals`/`agent_proposals` into one
+# `proposals: list[Proposal]`. On-disk `candidates.json` /
+# `proposal_from_finding_creator.json` / `agent_proposals.json` from version-2
+# runs fail `model_validate`, so a hard cutover (re-run from scratch) is the
+# back-compat strategy. `_ensure_resume_compatible` reads and compares this;
+# pre-change dirs are rejected cleanly rather than silently reloaded.
+# Bumped to 4 for the module-name-prefix id scheme: ids are now
+# `<type>-<slug>[.s<k>]-NNNN` instead of bare `cand-0001`/`find-0001`/`prop-0001`.
+# Old run dirs hold bare ids that fail the widened schema patterns, so they ride
+# the same hard cutover.
+SCHEMA_VERSION = 4
 
 
 CheckpointStatus = Literal[
@@ -65,7 +72,7 @@ CheckpointStatus = Literal[
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def _atomic_write_text(path: Path, text: str) -> None:
@@ -80,20 +87,20 @@ def _atomic_write_json(path: Path, payload: Any) -> None:
     _atomic_write_text(path, json.dumps(payload, indent=2, sort_keys=True) + "\n")
 
 
-def slug_for(qualified_name: str) -> str:
-    """Slug used as the per-module directory name. Slash-form qualified name
-    with any char outside `[A-Za-z0-9._-]` replaced by `_` (so path separators
-    collapse to `_`). Slash-form is unique by construction so collisions are
-    theoretical, but the orchestrator still checks at filter-resolution time."""
-    return _SLUG_SAFE.sub("_", qualified_name)
-
-
 class ModuleCheckpoint(BaseModel):
     """Persisted per-module run state (`modules/<slug>/status.json`).
 
     `last_step` is the most recent step that completed successfully.
     `failed_step` is the step to retry when `status == FAILED` and
     `retryable` is True.
+
+    `session_index` is the per-module discovery/run session counter used to
+    build the id segment (decision D3): the first/only session uses `1` (or
+    `None`), which maps to the bare-slug segment, and a genuinely new session of
+    an already-present module increments it so its ids carry a distinct `.s<k>`
+    sub-segment. It is persisted so resume re-derives the same segment and the
+    prefix stays idempotent. (Today no run trigger creates a second session, so
+    this stays `1`; the field reserves the hook — see the manager docstring.)
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -105,6 +112,7 @@ class ModuleCheckpoint(BaseModel):
     error: str | None = None
     retryable: bool = False
     issues: list[StepIssue] = Field(default_factory=list)
+    session_index: int = Field(default=1, ge=1)
     started_at: str
     updated_at: str
 
@@ -139,7 +147,7 @@ class ManagerPaths:
     def modules_root(self) -> Path:
         return self.root / "modules"
 
-    def for_module(self, qualified_name: str) -> "ModulePaths":
+    def for_module(self, qualified_name: str) -> ModulePaths:
         return ModulePaths(self.modules_root / slug_for(qualified_name))
 
 

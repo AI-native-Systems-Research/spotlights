@@ -22,7 +22,7 @@ class DeepResearchProposal(BaseModel):
 
     title: str = Field(min_length=1)
     detailed_description: str = Field(min_length=1)
-    finding_id: str = Field(pattern=r"^find-\d{4}$")
+    finding_id: str
     proposal_rationale: str = Field(min_length=1)
     created_by: str = Field(min_length=1)
 

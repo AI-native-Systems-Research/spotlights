@@ -14,7 +14,7 @@ class Proposal(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    id: str = Field(pattern=r"^prop-\d{4}$")
+    id: str
 
     source: ProposalSource
 

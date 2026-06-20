@@ -16,11 +16,6 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from spotlights_engine.schemas.candidate import Candidate
-from spotlights_engine.schemas.common import SpotlightContext, StepIssue
-from spotlights_engine.schemas.finding import Finding
-from spotlights_engine.schemas.project import Module, Repository
-
 from spotlights_engine.results_renderer.aggregator import (
     IndexRow,
     ModulePageView,
@@ -33,6 +28,15 @@ from spotlights_engine.results_renderer.api import (
 )
 from spotlights_engine.results_renderer.errors import RendererSetupError
 from spotlights_engine.results_renderer.loader import LoadedRun
+from spotlights_engine.schemas.candidate import Candidate
+from spotlights_engine.schemas.common import SpotlightContext, StepIssue
+from spotlights_engine.schemas.finding import Finding
+from spotlights_engine.schemas.project import Repository
+from spotlights_engine.utils.schema_compat import (
+    primary_file,
+    primary_span,
+    proposals_from,
+)
 
 
 def emit(
@@ -310,21 +314,21 @@ def _render_candidate_page(
     config: RendererConfig,
     findings_by_id: dict[str, Finding],
 ) -> str:
+    span = primary_span(cand)
     lines: list[str] = []
-    lines.append(f"# {cand.symbol}")
+    lines.append(f"# {span.symbol}")
     lines.append("")
     module_page = _page_filename_for_view(view)
     lines.append(f"[← {view.qualified_name}](../{module_page})")
     lines.append("")
 
-    file_link = _file_link(cand.file, config)
+    file_link = _file_link(primary_file(cand), config)
     lines.append(
-        f"- **File:** {file_link} (lines {cand.line_start}–{cand.line_end})"
+        f"- **File:** {file_link} (lines {span.line_start}–{span.line_end})"
     )
-    lines.append(f"- **Symbol:** `{cand.symbol}`")
-    lines.append(f"- **Kind:** {cand.kind}")
+    lines.append(f"- **Symbol:** `{span.symbol}`")
+    lines.append(f"- **Kind:** {span.kind}")
     lines.append(f"- **Estimated impact:** {cand.estimated_impact}")
-    lines.append(f"- **State:** {cand.state}")
     lines.append(f"- **Id:** `{cand.id}`")
     lines.append("")
 
@@ -344,52 +348,60 @@ def _render_candidate_page(
     lines.append(cand.evolve_rationale)
     lines.append("")
 
+    research_proposals = proposals_from(cand, "research_finding")
+    agent_knowledge_proposals = proposals_from(cand, "agent_knowledge")
+
     lines.append("## Deep research proposals")
     lines.append("")
-    if not cand.deep_research_proposals:
+    if not research_proposals:
         lines.append("_No proposals._")
         lines.append("")
     else:
-        for n, p in enumerate(cand.deep_research_proposals, start=1):
+        for n, p in enumerate(research_proposals, start=1):
             lines.append(f"### {n}. {p.title}")
-            finding = findings_by_id.get(p.finding_id)
+            finding = (
+                findings_by_id.get(p.finding_ref_id)
+                if p.finding_ref_id is not None
+                else None
+            )
             if finding is not None:
                 lines.append(
-                    f"- **Finding:** `{p.finding_id}` — *{finding.title}*"
+                    f"- **Finding:** `{p.finding_ref_id}` — *{finding.title}*"
                 )
                 lines.append(f"- **Source URL:** <{finding.url}>")
-            else:
-                lines.append(f"- **Finding:** `{p.finding_id}`")
-            lines.append(f"- **Created by:** {p.created_by}")
+            elif p.finding_ref_id is not None:
+                lines.append(f"- **Finding:** `{p.finding_ref_id}`")
+            if p.author:
+                lines.append(f"- **Created by:** {p.author}")
             lines.append("")
             lines.append("**Detailed description.**")
             lines.append("")
-            lines.append(p.detailed_description)
+            lines.append(p.description)
             lines.append("")
             lines.append("**Proposal rationale.**")
             lines.append("")
-            lines.append(p.proposal_rationale)
+            lines.append(p.rationale)
             lines.append("")
             lines.append("---")
             lines.append("")
 
     lines.append("## Agent proposals")
     lines.append("")
-    if not cand.agent_proposals:
+    if not agent_knowledge_proposals:
         lines.append("_No proposals._")
         lines.append("")
     else:
-        for n, p in enumerate(cand.agent_proposals, start=1):
+        for n, p in enumerate(agent_knowledge_proposals, start=1):
             lines.append(f"### {n}. {p.title}")
-            lines.append(f"- **Agent:** {p.agent_name}")
+            lines.append(f"- **Agent:** {p.author or '(unknown)'}")
             lines.append("")
             lines.append("**Detailed description.**")
             lines.append("")
-            lines.append(p.detailed_description)
+            lines.append(p.description)
             lines.append("")
             lines.append("**Novelty rationale.**")
             lines.append("")
-            lines.append(p.novelty_rationale)
+            lines.append(p.rationale)
             lines.append("")
             lines.append("---")
             lines.append("")

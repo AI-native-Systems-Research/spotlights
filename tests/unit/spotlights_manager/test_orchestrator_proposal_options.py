@@ -58,13 +58,20 @@ def test_proposal_from_finding_options_per_module_override(
     monkeypatch.setattr(
         orch,
         "research_module",
-        lambda inp, options=None: make_research_output(n_findings=1),
+        lambda inp, options=None, **_kw: make_research_output(n_findings=1),
     )
 
     seen_cfgs: list[ProposalFromFindingConfig] = []
-    base_fake = None
 
-    def _capture(inp, *, config, runner=None):
+    def _capture(
+        inp,
+        *,
+        config,
+        runner=None,
+        candidate_states=None,
+        proposal_id_start=1,
+        segment=None,
+    ):
         seen_cfgs.append(config)
         return _fake_result(inp)
 
@@ -80,17 +87,11 @@ def test_proposal_from_finding_options_per_module_override(
         )
 
         cands = inp.candidates
+        # New-shape candidates carry no `state`; a step-4 run minting no
+        # research-backed proposals returns them unchanged.
         advanced = Candidates(
             module_qualified_name=cands.module_qualified_name,
-            candidates=[
-                c.model_copy(
-                    update={
-                        "state": "FINDING_PROPOSALS_CREATED",
-                        "deep_research_proposals": [],
-                    }
-                )
-                for c in cands.candidates
-            ],
+            candidates=[c.model_copy(deep=True) for c in cands.candidates],
         )
         return ProposalFromFindingCreatorResult(
             output=ProposalFromFindingCreatorOutput(
@@ -147,7 +148,7 @@ def test_proposal_from_finding_default_when_caller_none(
     monkeypatch.setattr(
         orch,
         "research_module",
-        lambda inp, options=None: make_research_output(n_findings=1),
+        lambda inp, options=None, **_kw: make_research_output(n_findings=1),
     )
     patch_proposal_from_finding(monkeypatch, orch)
     patch_agent_proposals(monkeypatch, orch)

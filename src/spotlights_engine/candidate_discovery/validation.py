@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from spotlights_engine.schemas.candidate import Candidate, Candidates
+from spotlights_engine.utils.schema_compat import primary_file, primary_span
 
 
 @dataclass
@@ -78,7 +79,7 @@ class Validator:
     ) -> list[Candidate]:
         survivors: list[Candidate] = []
         for c in candidates:
-            file_path = Path(c.file)
+            file_path = Path(primary_file(c))
             if file_path.is_absolute():
                 counters.dropped_outside_module += 1
                 continue
@@ -97,7 +98,7 @@ class Validator:
     ) -> list[Candidate]:
         survivors: list[Candidate] = []
         for c in candidates:
-            resolved = (repo_root / c.file).resolve(strict=False)
+            resolved = (repo_root / primary_file(c)).resolve(strict=False)
             if not resolved.is_file():
                 counters.dropped_missing_file += 1
                 continue
@@ -113,9 +114,9 @@ class Validator:
     ) -> list[Candidate]:
         survivors: list[Candidate] = []
         for c in candidates:
-            resolved = (repo_root / c.file).resolve(strict=False)
+            resolved = (repo_root / primary_file(c)).resolve(strict=False)
             line_count = line_cache.get(resolved)
-            if c.line_end > line_count:
+            if primary_span(c).line_end > line_count:
                 counters.dropped_invalid_ranges += 1
                 continue
             survivors.append(c)

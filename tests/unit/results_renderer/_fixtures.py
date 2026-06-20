@@ -8,8 +8,6 @@ focused on the renderer.
 
 from __future__ import annotations
 
-import json
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -28,12 +26,13 @@ from spotlights_engine.schemas.project import (
     ProjectTree,
     Repository,
 )
-from spotlights_engine.schemas.proposals import AgentProposal, DeepResearchProposal
+from spotlights_engine.schemas.proposal import Proposal
 from spotlights_engine.spotlights_manager import persistence as P
 from spotlights_engine.spotlights_manager.persistence import (
     ManagerPaths,
     ModuleCheckpoint,
 )
+from spotlights_engine.utils.schema_compat import make_location
 
 
 def make_tree() -> ProjectTree:
@@ -78,31 +77,33 @@ def make_candidate(
     *,
     impact: str = "medium",
     file: str = "src/v1/kv_offload/core.py",
-    deep_proposals: list[DeepResearchProposal] | None = None,
-    agent_proposals: list[AgentProposal] | None = None,
-    state: str = "AGENT_PROPOSALS_CREATED",
+    deep_proposals: list[Proposal] | None = None,
+    agent_proposals: list[Proposal] | None = None,
 ) -> Candidate:
     return Candidate(
-        id=f"cand-{n:04d}",
-        file=file,
-        line_start=10,
-        line_end=20,
-        symbol=f"hot_{n}",
-        kind="function",
+        id=f"cand-mod-{n:04d}",
+        origin="code_agent",
+        locations=[
+            make_location(
+                file=file,
+                line_start=10,
+                line_end=20,
+                symbol=f"hot_{n}",
+                kind="function",
+            )
+        ],
         description=f"description {n}",
         current_approach=f"current approach {n}",
         evolve_rationale=f"evolve rationale {n}",
         estimated_impact=impact,  # type: ignore[arg-type]
         estimated_impact_explanation=f"impact explanation {n}",
-        state=state,  # type: ignore[arg-type]
-        deep_research_proposals=list(deep_proposals or []),
-        agent_proposals=list(agent_proposals or []),
+        proposals=[*(deep_proposals or []), *(agent_proposals or [])],
     )
 
 
 def make_finding(n: int) -> Finding:
     return Finding(
-        finding_id=f"find-{n:04d}",
+        finding_id=f"find-mod-{n:04d}",
         title=f"Finding {n}",
         url=f"https://example.com/f/{n}",
         source_type="paper",
@@ -111,22 +112,26 @@ def make_finding(n: int) -> Finding:
     )
 
 
-def make_deep_proposal(finding_id: str) -> DeepResearchProposal:
-    return DeepResearchProposal(
+def make_deep_proposal(finding_id: str, *, prop_id: str = "prop-mod-0001") -> Proposal:
+    return Proposal(
+        id=prop_id,
+        source="research_finding",
+        finding_ref_id=finding_id,
+        author="claude_code",
         title=f"Deep proposal for {finding_id}",
-        detailed_description="detailed description",
-        finding_id=finding_id,
-        proposal_rationale="proposal rationale",
-        created_by="claude_code",
+        description="detailed description",
+        rationale="proposal rationale",
     )
 
 
-def make_agent_proposal() -> AgentProposal:
-    return AgentProposal(
+def make_agent_proposal(*, prop_id: str = "prop-mod-0002") -> Proposal:
+    return Proposal(
+        id=prop_id,
+        source="agent_knowledge",
+        author="claude_code",
         title="Agent proposal",
-        detailed_description="detailed agent description",
-        agent_name="claude_code",
-        novelty_rationale="novelty rationale",
+        description="detailed agent description",
+        rationale="novelty rationale",
     )
 
 
@@ -236,14 +241,15 @@ def make_full_run(
 
     findings_kv = [make_finding(1), make_finding(2)]
     deep_props = [
-        make_deep_proposal("find-0001"),
-        make_deep_proposal("find-0099"),  # dangling — should not be counted
+        make_deep_proposal("find-mod-0001", prop_id="prop-mod-0001"),
+        # dangling — should not be counted
+        make_deep_proposal("find-mod-0099", prop_id="prop-mod-0002"),
     ]
     cand_kv_high = make_candidate(
         1,
         impact="high",
         deep_proposals=deep_props,
-        agent_proposals=[make_agent_proposal()],
+        agent_proposals=[make_agent_proposal(prop_id="prop-mod-0003")],
     )
     cand_kv_med = make_candidate(2, impact="medium")
     cand_kv_low = make_candidate(3, impact="low")

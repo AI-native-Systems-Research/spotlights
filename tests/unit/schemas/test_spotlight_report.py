@@ -40,7 +40,7 @@ def _location(**overrides) -> CodeLocation:
 
 def _candidate(**overrides) -> Candidate:
     payload = {
-        "id": "cand-0001",
+        "id": "cand-core-0001",
         "module_qualified_name": "core",
         "origin": "code_agent",
         "locations": [_location().model_dump()],
@@ -56,9 +56,9 @@ def _candidate(**overrides) -> Candidate:
 
 def _proposal(**overrides) -> Proposal:
     payload = {
-        "id": "prop-0001",
+        "id": "prop-core-0001",
         "source": "research_finding",
-        "finding_ref_id": "find-0001",
+        "finding_ref_id": "find-core-0001",
         "title": "t",
         "description": "d",
         "rationale": "r",
@@ -92,7 +92,7 @@ def _run() -> RunInfo:
         (
             Candidate,
             {
-                "id": "cand-0001",
+                "id": "cand-core-0001",
                 "origin": "code_agent",
                 "locations": [_location().model_dump()],
                 "description": "d",
@@ -106,7 +106,7 @@ def _run() -> RunInfo:
         (
             Proposal,
             {
-                "id": "prop-0001",
+                "id": "prop-core-0001",
                 "source": "research_finding",
                 "title": "t",
                 "description": "d",
@@ -134,26 +134,17 @@ def test_extra_forbid_rejects_unknown_fields(model_cls, payload) -> None:
         model_cls.model_validate(payload)
 
 
-# id pattern validation -------------------------------------------------------
+# id fields ------------------------------------------------------------------
 
-@pytest.mark.parametrize("bad_id", ["cand-1", "cand-00001", "Cand-0001", "cand_0001", "candidate-0001"])
-def test_candidate_id_pattern_rejects_bad_ids(bad_id) -> None:
-    with pytest.raises(ValidationError):
-        _candidate(id=bad_id)
-
-
-def test_candidate_id_pattern_accepts_four_digits() -> None:
-    assert _candidate(id="cand-0042").id == "cand-0042"
+# ids are free-form strings (the schema no longer enforces a pattern); the
+# producing modules are responsible for minting the `<type>-<segment>-NNNN`
+# form. These just confirm the value round-trips unchanged.
+def test_candidate_id_accepts_module_prefixed() -> None:
+    assert _candidate(id="cand-core-0042").id == "cand-core-0042"
 
 
-@pytest.mark.parametrize("bad_id", ["prop-1", "prop-00001", "Prop-0001", "prop_0001", "proposal-0001"])
-def test_proposal_id_pattern_rejects_bad_ids(bad_id) -> None:
-    with pytest.raises(ValidationError):
-        _proposal(id=bad_id)
-
-
-def test_proposal_id_pattern_accepts_four_digits() -> None:
-    assert _proposal(id="prop-0042").id == "prop-0042"
+def test_proposal_id_accepts_module_prefixed() -> None:
+    assert _proposal(id="prop-core-0042").id == "prop-core-0042"
 
 
 # Literal value sets ----------------------------------------------------------
@@ -368,7 +359,7 @@ def test_anomaly_optional_string_fields_default_to_empty() -> None:
 
 def _finding(**overrides) -> Finding:
     payload = {
-        "finding_id": "find-0001",
+        "finding_id": "find-core-0001",
         "title": "t",
         "url": "https://example.com",
         "source_type": "paper",
@@ -400,6 +391,6 @@ def test_report_carries_findings_and_anomalies() -> None:
         findings=[_finding()],
         anomalies=[_anomaly(severity="high", confidence=0.9)],
     )
-    assert rep.findings[0].finding_id == "find-0001"
+    assert rep.findings[0].finding_id == "find-core-0001"
     assert rep.anomalies[0].anomaly_id == "anom-0001"
     assert rep.anomalies[0].severity == "high"

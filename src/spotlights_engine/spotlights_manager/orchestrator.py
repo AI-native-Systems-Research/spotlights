@@ -13,7 +13,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +42,7 @@ from spotlights_engine.proposal_from_finding_creator import (
     ProposalFromFindingValidationError,
     create_proposals_with_telemetry,
 )
-from spotlights_engine.schemas.candidate import Candidate, Candidates
+from spotlights_engine.schemas.candidate import Candidates
 from spotlights_engine.schemas.common import (
     ModuleRunStatus,
     PipelineStep,
@@ -62,6 +62,7 @@ from spotlights_engine.schemas.pipeline import (
     SpotlightsManagerInput,
 )
 from spotlights_engine.schemas.project import Module, ProjectTree
+from spotlights_engine.spotlights_manager import persistence as P
 from spotlights_engine.spotlights_manager.api import (
     ModuleTelemetry,
     SpotlightsManagerConfig,
@@ -72,14 +73,18 @@ from spotlights_engine.spotlights_manager.errors import (
     ResumeMismatchError,
 )
 from spotlights_engine.spotlights_manager.filters import apply_filter
-from spotlights_engine.spotlights_manager import persistence as P
 from spotlights_engine.spotlights_manager.persistence import (
     LoadedModuleState,
     ManagerPaths,
     ModuleCheckpoint,
     ModulePaths,
 )
-
+from spotlights_engine.spotlights_manager.pipeline_state import (
+    CandidateStateMap,
+    state_map_for,
+)
+from spotlights_engine.utils.id_helpers import module_segment, slug_for
+from spotlights_engine.utils.schema_compat import proposals_from
 
 _log = logging.getLogger(__name__)
 
@@ -90,7 +95,7 @@ _log = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def _issue(
@@ -192,6 +197,7 @@ def _now_checkpoint(
     error: str | None = None,
     retryable: bool = False,
     issues: list[StepIssue] | None = None,
+    session_index: int = 1,
     started_at: str | None = None,
 ) -> ModuleCheckpoint:
     return ModuleCheckpoint(
@@ -202,6 +208,7 @@ def _now_checkpoint(
         error=error,
         retryable=retryable,
         issues=list(issues or []),
+        session_index=session_index,
         started_at=started_at or _now_iso(),
         updated_at=_now_iso(),
     )
@@ -262,8 +269,7 @@ def _ensure_resume_compatible(
         raise ResumeMismatchError(
             "manager run dir schema_version "
             f"{existing_schema_version!r} is incompatible with the current "
-            f"schema_version {P.SCHEMA_VERSION!r} (qualified-name format "
-            "changed); start a fresh artifacts_dir",
+            f"schema_version {P.SCHEMA_VERSION!r}; start a fresh artifacts_dir",
             existing=existing_schema_version,
             current=P.SCHEMA_VERSION,
         )
@@ -510,8 +516,14 @@ async def _do_step2(
     mgr_input: SpotlightsManagerInput,
     cfg: SpotlightsManagerConfig,
     module_paths: ModulePaths,
+    segment: str,
 ) -> tuple[Candidates, list, float, float | None]:
-    """Returns (candidates, iterations, total_duration_s, total_cost_usd)."""
+    """Returns (candidates, iterations, total_duration_s, total_cost_usd).
+
+    `segment` is the module id segment (D3): discovery promotes each agent-local
+    `cand-NNNN` to `cand-<segment>-NNNN` while building schema `Candidate`s, so
+    the candidates returned here are already globally-prefixed (no manager-side
+    rebase)."""
     discovery_input = CandidateDiscoveryInput(
         project_tree=tree,
         module_qualified_name=qn,
@@ -519,7 +531,7 @@ async def _do_step2(
     )
     discovery_cfg = _build_discovery_config(
         cfg, mgr_input.repo_path, module_paths.dir
-    )
+    ).model_copy(update={"id_segment": segment})
     result = await asyncio.to_thread(discover, discovery_input, config=discovery_cfg)
     return (
         result.candidates,
@@ -536,7 +548,11 @@ async def _do_step3(
     mgr_input: SpotlightsManagerInput,
     cfg: SpotlightsManagerConfig,
     module_paths: ModulePaths,
+    segment: str,
 ) -> tuple[ModuleDeepResearchOutput, float]:
+    """`segment` is the module id segment (D3): deep research renumbers and
+    prefixes each finding id to `find-<segment>-NNNN` before returning, so the
+    findings are already globally-prefixed (no manager-side rebase)."""
     research_input = ModuleDeepResearchInput(
         project_tree=tree,
         module_qualified_name=qn,
@@ -548,23 +564,11 @@ async def _do_step3(
         cfg, mgr_input.repo_path, module_paths.deep_research_last_message_path
     )
     start = time.monotonic()
-    output = await asyncio.to_thread(research_module, research_input, options)
+    output = await asyncio.to_thread(
+        lambda: research_module(research_input, options, segment=segment)
+    )
     duration = time.monotonic() - start
     return output, duration
-
-
-def _candidate_at_state_finding_proposals_created(
-    candidate: Candidate,
-) -> Candidate:
-    """Round-trip an input candidate forward to `FINDING_PROPOSALS_CREATED`
-    with no proposals — the synthetic zero-findings path."""
-    return candidate.model_copy(
-        update={
-            "state": "FINDING_PROPOSALS_CREATED",
-            "deep_research_proposals": [],
-            "agent_proposals": list(candidate.agent_proposals),
-        }
-    )
 
 
 def _synthetic_step4_output_for_zero_findings(
@@ -572,14 +576,13 @@ def _synthetic_step4_output_for_zero_findings(
 ) -> ProposalFromFindingCreatorOutput:
     """Build the step-4 output the architecture mandates when step 3 found
     zero findings: every candidate advances to `FINDING_PROPOSALS_CREATED`
-    with `deep_research_proposals=[]` and no issues."""
+    (tracked in the manager's internal state map, decision D2) with no
+    research-backed proposals. The schema `Candidate` carries no `state` and the
+    candidates already hold empty `proposals`, so the wrapper is unchanged."""
     return ProposalFromFindingCreatorOutput(
         candidates=Candidates(
             module_qualified_name=candidates.module_qualified_name,
-            candidates=[
-                _candidate_at_state_finding_proposals_created(c)
-                for c in candidates.candidates
-            ],
+            candidates=list(candidates.candidates),
         ),
         issues=[],
     )
@@ -592,6 +595,9 @@ async def _do_step4(
     mgr_input: SpotlightsManagerInput,
     cfg: SpotlightsManagerConfig,
     module_paths: ModulePaths,
+    candidate_states: CandidateStateMap,
+    proposal_id_start: int,
+    segment: str,
 ) -> tuple[ProposalFromFindingCreatorOutput, float, dict[str, float]]:
     """Returns (output, total_duration_s, per_pair_durations_s)."""
     pf_input = ProposalFromFindingCreatorInput(
@@ -603,9 +609,19 @@ async def _do_step4(
         cfg, mgr_input.repo_path, module_paths.dir
     )
     result = await asyncio.to_thread(
-        create_proposals_with_telemetry, pf_input, config=pf_cfg
+        lambda: create_proposals_with_telemetry(
+            pf_input,
+            config=pf_cfg,
+            candidate_states=candidate_states,
+            proposal_id_start=proposal_id_start,
+            segment=segment,
+        )
     )
-    return result.output, result.total_duration_s, dict(result.per_pair_durations_s)
+    return (
+        result.output,
+        result.total_duration_s,
+        dict(result.per_pair_durations_s),
+    )
 
 
 async def _do_step5(
@@ -615,6 +631,9 @@ async def _do_step5(
     mgr_input: SpotlightsManagerInput,
     cfg: SpotlightsManagerConfig,
     module_paths: ModulePaths,
+    candidate_states: CandidateStateMap,
+    proposal_id_start: int,
+    segment: str,
 ) -> tuple[AgentProposalsOutput, float, dict[str, dict[str, float]]]:
     """Returns (output, total_duration_s, per_candidate_durations_s)."""
     ap_input = AgentProposalsInput(
@@ -626,7 +645,13 @@ async def _do_step5(
         cfg, mgr_input.repo_path, module_paths.dir
     )
     result = await asyncio.to_thread(
-        create_agent_proposals_with_telemetry, ap_input, config=ap_cfg
+        lambda: create_agent_proposals_with_telemetry(
+            ap_input,
+            config=ap_cfg,
+            candidate_states=candidate_states,
+            proposal_id_start=proposal_id_start,
+            segment=segment,
+        )
     )
     return (
         result.output,
@@ -699,6 +724,22 @@ async def _run_module(
     state = P.read_module_state(module_paths)
     plan = _plan_module(state)
 
+    # Decision D3: this module's id segment. The producing module's slug makes
+    # every minted id globally unique by construction (`<type>-<segment>-NNNN`),
+    # so there is no numeric block, base offset, or run-wide ceiling.
+    #
+    # Session bump rule: the segment carries an optional `.s<k>` sub-segment so
+    # two discovery/run sessions of the same module never collide. The session
+    # index is persisted on the checkpoint and re-read on resume so the segment
+    # is byte-identical (the prefix stays idempotent). No run trigger currently
+    # creates a second session, so `session_index` stays 1 (bare-slug segment);
+    # the field reserves the hook for an explicit re-discovery request.
+    session_index = state.checkpoint.session_index if state.checkpoint else 1
+    segment = module_segment(slug_for(qn), session_index)
+    # The per-(module, session) proposal counter starts at 1 and advances across
+    # steps 4 -> 5.
+    proposal_id_start = 1
+
     if plan.skip_module:
         assert state.checkpoint is not None
         _log.info("[%s] skipping (already %s)", qn, state.checkpoint.status)
@@ -763,6 +804,7 @@ async def _run_module(
                     mgr_input=mgr_input,
                     cfg=cfg,
                     module_paths=module_paths,
+                    segment=segment,
                 )
             except Exception as e:  # noqa: BLE001
                 if isinstance(
@@ -804,6 +846,10 @@ async def _run_module(
                 )
                 return cp
 
+            # D3: discovery already promoted each agent-local `cand-NNNN` to the
+            # module-prefixed `cand-<segment>-NNNN` while building the schema
+            # `Candidate`s (and the telemetry id lists match), so the candidates
+            # and iterations are globally-unique by construction — no rebase.
             P.write_candidates(module_paths, candidates)
             P.write_discovery_telemetry(module_paths, iters, dur, cost)
             cost_str = f" ${cost:.2f}" if cost is not None else ""
@@ -879,6 +925,7 @@ async def _run_module(
                     mgr_input=mgr_input,
                     cfg=cfg,
                     module_paths=module_paths,
+                    segment=segment,
                 )
             except Exception as e:  # noqa: BLE001
                 cp = _now_checkpoint(
@@ -915,6 +962,10 @@ async def _run_module(
                 )
                 return cp
 
+            # D3: deep research already renumbered + prefixed each finding id to
+            # `find-<segment>-NNNN` before returning, so step-4
+            # `Proposal.finding_ref_id` values are global from birth (no
+            # manager-side rebase / ref remap).
             _log.info(
                 "[%s] deep_research: complete in %.1fs — %d findings (after dedup)",
                 qn,
@@ -985,6 +1036,9 @@ async def _run_module(
                         mgr_input=mgr_input,
                         cfg=cfg,
                         module_paths=module_paths,
+                        candidate_states=state_map_for(candidates, "DISCOVERED"),
+                        proposal_id_start=proposal_id_start,
+                        segment=segment,
                     )
                 except Exception as e:  # noqa: BLE001
                     if isinstance(
@@ -1037,7 +1091,7 @@ async def _run_module(
                     return cp
 
                 n_proposals = sum(
-                    len(c.deep_research_proposals)
+                    len(proposals_from(c, "research_finding"))
                     for c in proposal_output.candidates.candidates
                 )
                 _log.info(
@@ -1093,6 +1147,14 @@ async def _run_module(
             _log.info(
                 "[%s] agent_proposals: start — %d candidates", qn, n_candidates
             )
+            # D3: step 5 continues minting prop- ids past step 4's allocation.
+            # Count the research-backed proposals already attached (works for
+            # both fresh runs and resume, where proposal_output is loaded from
+            # disk with global ids) so step-5 ids never collide with step-4 ids.
+            n_step4_proposals = sum(
+                len(proposals_from(c, "research_finding"))
+                for c in proposal_output.candidates.candidates
+            )
             try:
                 agent_output, ap_duration, per_cand = await _do_step5(
                     candidates=proposal_output.candidates,
@@ -1100,6 +1162,11 @@ async def _run_module(
                     mgr_input=mgr_input,
                     cfg=cfg,
                     module_paths=module_paths,
+                    candidate_states=state_map_for(
+                        proposal_output.candidates, "FINDING_PROPOSALS_CREATED"
+                    ),
+                    proposal_id_start=proposal_id_start + n_step4_proposals,
+                    segment=segment,
                 )
             except Exception as e:  # noqa: BLE001
                 if isinstance(
@@ -1150,7 +1217,7 @@ async def _run_module(
                 return cp
 
             n_agent_proposals = sum(
-                len(c.agent_proposals)
+                len(proposals_from(c, "agent_knowledge"))
                 for c in agent_output.candidates.candidates
             )
             _log.info(
@@ -1335,9 +1402,6 @@ async def _run_async(
         seen_slugs[slug] = qn
 
     selected_set = set(selected)
-    selected_modules: dict[str, Module] = {
-        qn: m for qn, m in leaves if qn in selected_set
-    }
     ordered_qns = (
         list(selected)
         if (config.module_filter and config.module_filter.include)
@@ -1349,6 +1413,11 @@ async def _run_async(
     cancel_event = (
         None if input.continue_on_module_failure else asyncio.Event()
     )
+
+    # D3: ids are made globally unique by embedding each module's slug
+    # (`<type>-<slug>[.s<k>]-NNNN`), so there is no run-wide id block to size and
+    # no per-module base offset — each `_run_module` derives its own segment from
+    # its slug + persisted session index.
 
     async def _wrapped(qn: str) -> ModuleCheckpoint:
         try:
@@ -1434,10 +1503,8 @@ async def _run_async(
     for run_record in module_runs.values():
         counts[run_record.status] = counts.get(run_record.status, 0) + 1
     total_cost = sum(
-        (
-            t.discovery_total_cost_usd or 0.0
-            for t in per_module_telemetry.values()
-        )
+        t.discovery_total_cost_usd or 0.0
+        for t in per_module_telemetry.values()
     )
     cost_str = f", discovery cost ${total_cost:.2f}" if total_cost else ""
     _log.info(

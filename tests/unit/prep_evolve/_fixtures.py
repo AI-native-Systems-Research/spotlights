@@ -3,8 +3,10 @@
 `make_result_dict()` returns a minimal `result.json`-shaped payload (the
 architecture `SpotlightsResult` shape, which `load_result` also accepts). It
 contains a nested project tree (so slash-form submodule resolution is
-exercised), one candidate with both deep-research and agent proposals, and a
-findings list with one candidate-linked finding and one unlinked finding.
+exercised), one candidate (new shape: `origin="code_agent"`, nested
+`locations`, unified `proposals`) carrying one research-backed and one
+agent-knowledge proposal, and a findings list with one candidate-linked
+finding and one unlinked finding.
 
 `make_repo(tmp_path)` writes a synthetic source tree on disk that matches the
 candidate's file/line range so `validate_target` passes.
@@ -27,12 +29,21 @@ MAIN_FILE_EXTRA = "pkg/attn/launch.py"
 def make_result_dict() -> dict:
     """A result.json payload: nested tree, one candidate, mixed proposals."""
     candidate = {
-        "id": "cand-0002",
-        "file": CAND_FILE,
-        "line_start": CAND_START,
-        "line_end": CAND_END,
-        "symbol": CAND_SYMBOL,
-        "kind": "function",
+        "id": "cand-v1_attention-0002",
+        "origin": "code_agent",
+        "locations": [
+            {
+                "file": CAND_FILE,
+                "spans": [
+                    {
+                        "line_start": CAND_START,
+                        "line_end": CAND_END,
+                        "symbol": CAND_SYMBOL,
+                        "kind": "function",
+                    }
+                ],
+            }
+        ],
         "description": "Tile-size heuristic for the attention kernel.",
         "current_approach": "A compact closed-form heuristic.",
         "evolve_rationale": (
@@ -42,29 +53,30 @@ def make_result_dict() -> dict:
         ),
         "estimated_impact": "high",
         "estimated_impact_explanation": "Drives occupancy; affects throughput.",
-        "state": "AGENT_PROPOSALS_CREATED",
-        "deep_research_proposals": [
+        "proposals": [
             {
+                "id": "prop-v1_attention-0001",
+                "source": "research_finding",
+                "finding_ref_id": "find-v1_attention-0001",
+                "author": "claude",
                 "title": "Make tile size GQA-aware",
-                "detailed_description": "Use a register-budget formula.",
-                "finding_id": "find-0001",
-                "proposal_rationale": "POD-Attention suggests this.",
-                "created_by": "claude",
-            }
-        ],
-        "agent_proposals": [
+                "description": "Use a register-budget formula.",
+                "rationale": "POD-Attention suggests this.",
+            },
             {
+                "id": "prop-v1_attention-0002",
+                "source": "agent_knowledge",
+                "author": "codex",
                 "title": "Use decode tile size for 2D launches",
-                "detailed_description": "Branch on decode vs prefill.",
-                "agent_name": "codex",
-                "novelty_rationale": "Not covered by the findings.",
-            }
+                "description": "Branch on decode vs prefill.",
+                "rationale": "Not covered by the findings.",
+            },
         ],
     }
 
     findings = [
         {
-            "finding_id": "find-0002",
+            "finding_id": "find-v1_attention-0002",
             "title": "Unlinked broader-context finding",
             "url": "https://example.com/find2",
             "source_type": "blog",
@@ -72,7 +84,7 @@ def make_result_dict() -> dict:
             "supporting_evidence": "",
         },
         {
-            "finding_id": "find-0001",
+            "finding_id": "find-v1_attention-0001",
             "title": "POD-Attention",
             "url": "https://arxiv.org/abs/2410.18038",
             "source_type": "paper",

@@ -60,7 +60,7 @@ def _ctx() -> SpotlightContext:
 
 def _candidate(**overrides) -> Candidate:
     payload = {
-        "id": "cand-0001",
+        "id": "cand-core-0001",
         "module_qualified_name": "core",
         "origin": "code_agent",
         "locations": [
@@ -92,7 +92,7 @@ def _candidates() -> Candidates:
 
 def _finding(idx: int = 1) -> Finding:
     return Finding(
-        finding_id=f"find-{idx:04d}",
+        finding_id=f"find-mod-{idx:04d}",
         title="t",
         url="https://x",
         source_type="paper",

@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from spotlights_engine.candidate_discovery.api import IterationTelemetry
-from spotlights_engine.schemas.candidate import Candidates
+from spotlights_engine.schemas.candidate import Candidate, Candidates
+from spotlights_engine.utils.schema_compat import primary_file, primary_span
 
 if TYPE_CHECKING:  # pragma: no cover
     from spotlights_engine.candidate_discovery.agents import AgentInvocation
@@ -66,12 +67,13 @@ def _compute_diff(
     return added, removed, modified
 
 
-def _materially_differs(a, b) -> bool:
+def _materially_differs(a: Candidate, b: Candidate) -> bool:
+    sa, sb = primary_span(a), primary_span(b)
     return (
-        a.line_start != b.line_start
-        or a.line_end != b.line_end
-        or a.symbol.strip() != b.symbol.strip()
-        or a.kind != b.kind
+        sa.line_start != sb.line_start
+        or sa.line_end != sb.line_end
+        or sa.symbol.strip() != sb.symbol.strip()
+        or sa.kind != sb.kind
         or a.estimated_impact != b.estimated_impact
         or a.description.strip() != b.description.strip()
         or a.current_approach.strip() != b.current_approach.strip()
@@ -89,26 +91,30 @@ def render_diff_markdown(prev: Candidates | None, current: Candidates) -> str:
 
     def _added_line(cid: str) -> str:
         c = current_by_id[cid]
+        s = primary_span(c)
         return (
-            f"- {cid} — {c.file}:{c.line_start}-{c.line_end} "
-            f"[{c.kind}] {c.symbol} — {c.evolve_rationale}"
+            f"- {cid} — {primary_file(c)}:{s.line_start}-{s.line_end} "
+            f"[{s.kind}] {s.symbol} — {c.evolve_rationale}"
         )
 
     def _removed_line(cid: str) -> str:
         c = prev_by_id[cid]
+        s = primary_span(c)
         return (
-            f"- {cid} — {c.file}:{c.line_start}-{c.line_end} "
-            f"[{c.kind}] {c.symbol} — (was: {c.evolve_rationale})"
+            f"- {cid} — {primary_file(c)}:{s.line_start}-{s.line_end} "
+            f"[{s.kind}] {s.symbol} — (was: {c.evolve_rationale})"
         )
 
     def _modified_line(cid: str) -> str:
         prev_c = prev_by_id[cid]
         cur_c = current_by_id[cid]
+        prev_s = primary_span(prev_c)
+        cur_s = primary_span(cur_c)
         return (
-            f"- {cid} — {cur_c.file}:"
-            f"{prev_c.line_start}-{prev_c.line_end} → "
-            f"{cur_c.line_start}-{cur_c.line_end} "
-            f"[{cur_c.kind}] {cur_c.symbol} — {cur_c.evolve_rationale}"
+            f"- {cid} — {primary_file(cur_c)}:"
+            f"{prev_s.line_start}-{prev_s.line_end} → "
+            f"{cur_s.line_start}-{cur_s.line_end} "
+            f"[{cur_s.kind}] {cur_s.symbol} — {cur_c.evolve_rationale}"
         )
 
     def _section(title: str, lines: list[str]) -> str:

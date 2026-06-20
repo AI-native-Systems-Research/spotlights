@@ -28,7 +28,7 @@ class Finding(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    finding_id: str = Field(pattern=r"^find-\d{4}$")
+    finding_id: str
     title: str = Field(min_length=1)
     url: str = Field(min_length=1)
     source_type: FindingSourceType

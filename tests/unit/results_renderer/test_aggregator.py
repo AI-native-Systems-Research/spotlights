@@ -18,9 +18,9 @@ def test_index_rows_relevant_findings_count(tmp_path: Path) -> None:
     rows, views, skipped, warnings = aggregate(loaded, RendererConfig())
 
     by_qn = {r.module_qualified_name: r for r in rows}
-    # kv_offload has two deep_research_proposals on cand 1 (find-0001 and
-    # find-0099). Findings list contains find-0001 and find-0002. Intersection
-    # is {find-0001} -> 1 relevant.
+    # kv_offload has two deep_research_proposals on cand 1 (find-mod-0001 and
+    # find-mod-0099). Findings list contains find-mod-0001 and find-mod-0002. Intersection
+    # is {find-mod-0001} -> 1 relevant.
     assert by_qn["v1/kv_offload"].n_relevant_findings == 1
     # kernels has no proposals on its candidate -> 0.
     assert by_qn["kernels"].n_relevant_findings == 0
@@ -44,11 +44,11 @@ def test_module_page_view_candidate_sort(tmp_path: Path) -> None:
 
     _, views, _, _ = aggregate(loaded, RendererConfig())
     kv = views["v1/kv_offload"]
-    # cand-0001 high, cand-0002 medium, cand-0003 low.
+    # cand-mod-0001 high, cand-mod-0002 medium, cand-mod-0003 low.
     assert [c.id for c in kv.candidates_sorted] == [
-        "cand-0001",
-        "cand-0002",
-        "cand-0003",
+        "cand-mod-0001",
+        "cand-mod-0002",
+        "cand-mod-0003",
     ]
 
 

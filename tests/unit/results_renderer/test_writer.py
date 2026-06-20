@@ -52,10 +52,10 @@ def test_module_page_contents(tmp_path: Path) -> None:
     # Candidates table header + rows.
     assert "| Candidate | Impact | Deep research proposals |" in page
     # Symbol cell links to candidate page; impact column shows enum values.
-    assert "[`hot_1`](v1_kv_offload/hot_1__cand-0001.md)" in page
-    assert "[`hot_2`](v1_kv_offload/hot_2__cand-0002.md)" in page
-    assert "[`hot_3`](v1_kv_offload/hot_3__cand-0003.md)" in page
-    # Sort: most deep_research_proposals first. cand-0001 has 2; others 0.
+    assert "[`hot_1`](v1_kv_offload/hot_1__cand-mod-0001.md)" in page
+    assert "[`hot_2`](v1_kv_offload/hot_2__cand-mod-0002.md)" in page
+    assert "[`hot_3`](v1_kv_offload/hot_3__cand-mod-0003.md)" in page
+    # Sort: most deep_research_proposals first. cand-mod-0001 has 2; others 0.
     table_start = page.index("| Candidate | Impact | Deep research proposals |")
     table_block = page[table_start:]
     pos_h1 = table_block.index("hot_1")
@@ -65,17 +65,17 @@ def test_module_page_contents(tmp_path: Path) -> None:
 
     # Per-candidate pages exist for every candidate.
     cand_dir = output / "modules" / "v1_kv_offload"
-    assert (cand_dir / "hot_1__cand-0001.md").exists()
-    assert (cand_dir / "hot_2__cand-0002.md").exists()
-    assert (cand_dir / "hot_3__cand-0003.md").exists()
+    assert (cand_dir / "hot_1__cand-mod-0001.md").exists()
+    assert (cand_dir / "hot_2__cand-mod-0002.md").exists()
+    assert (cand_dir / "hot_3__cand-mod-0003.md").exists()
 
     # candidate_pages on RendererResult is populated.
     cps = result.candidate_pages["v1/kv_offload"]
-    assert cps["cand-0001"] == cand_dir / "hot_1__cand-0001.md"
-    assert cps["cand-0002"] == cand_dir / "hot_2__cand-0002.md"
+    assert cps["cand-mod-0001"] == cand_dir / "hot_1__cand-mod-0001.md"
+    assert cps["cand-mod-0002"] == cand_dir / "hot_2__cand-mod-0002.md"
 
     # Candidate page contents — H1 + breadcrumb + sections.
-    cpage = (cand_dir / "hot_1__cand-0001.md").read_text()
+    cpage = (cand_dir / "hot_1__cand-mod-0001.md").read_text()
     assert "# hot_1" in cpage
     assert "[← v1/kv_offload](../v1_kv_offload.md)" in cpage
     assert "## Description" in cpage
@@ -87,17 +87,17 @@ def test_module_page_contents(tmp_path: Path) -> None:
     # File link on the candidate page (not the module page).
     assert "[`src/v1/kv_offload/core.py`](src/v1/kv_offload/core.py)" in cpage
     # Cross-link to a finding in the candidate page.
-    assert "`find-0001` — *Finding 1*" in cpage
+    assert "`find-mod-0001` — *Finding 1*" in cpage
     assert "<https://example.com/f/1>" in cpage
     # Dangling finding id still rendered without a title/URL.
-    assert "`find-0099`" in cpage
+    assert "`find-mod-0099`" in cpage
 
     # Module page no longer carries the per-candidate detail.
     assert "## Description" not in page
     assert "Detailed description" not in page
 
     # Candidate without proposals -> placeholder shows on its candidate page.
-    cpage2 = (cand_dir / "hot_2__cand-0002.md").read_text()
+    cpage2 = (cand_dir / "hot_2__cand-mod-0002.md").read_text()
     assert "_No proposals._" in cpage2
 
     kernels_page = (output / "modules" / "kernels.md").read_text()
