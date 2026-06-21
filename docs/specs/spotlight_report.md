@@ -80,11 +80,41 @@
    per-field-decision protocol. The unified `SpotlightReport` only
    carries what consumers need; internal pipeline state lives on
    pipeline-internal types as needed.
-10. **IDs are globally unique within a report** — `cand-NNNN`,
-    `prop-NNNN`. Today's per-module-scoped ids would collide on a
-    flat list; pipeline-repair work normalizes ids at the boundary
-    where the report is built. Traceability back to source artifacts
-    is via content fingerprints (see §4.3) — no `original_id` field.
+10. **IDs are globally unique within a report and follow a segmented
+    `<type>-<segment>-NNNN` pattern** (ratified in #28, schema enforced
+    in PR #25 / commit `c2af407f`). Schema patterns:
+
+    ```
+    Candidate.id    : ^cand-[A-Za-z0-9._-]+-\d{4}$
+    Proposal.id     : ^prop-[A-Za-z0-9._-]+-\d{4}$
+    Finding.finding_id (and DeepResearchProposal.finding_id):
+                      ^find-[A-Za-z0-9._-]+-\d{4}$
+    ```
+
+    The `<segment>` slot is per-pipeline:
+
+    - **Deep-research pipeline** — uses the module slug (e.g.
+      `cand-auth_login.s2-0001`). Module ids are the natural
+      segmentation since DR runs per-module by construction; this also
+      gives parallel-module uniqueness without a global counter and
+      keeps resume/persistence directory layout aligned with the id.
+    - **Signal pipeline** — uses the fixed string `signal` for every
+      candidate / proposal (e.g. `cand-signal-0001`,
+      `prop-signal-0001`). Signal-pipeline candidates don't have a
+      natural per-module segmentation (`module_qualified_name` is
+      optional and resolved post-hoc), so a fixed segment keeps the
+      schema valid without inventing one.
+
+    Slug character class `[A-Za-z0-9._-]` matches `_SLUG_SAFE` in
+    [`utils/id_helpers.py`](../../src/spotlights_engine/utils/id_helpers.py).
+    Pipeline-repair work normalizes ids at the boundary where the
+    report is built. Traceability back to source artifacts is via
+    content fingerprints (see §4.3) — no `original_id` field.
+
+    *Note: this is a pragmatic compromise, not a principled choice —
+    see #28 for the full rationale and the option to revisit (flat
+    ids with a renumber-at-assembly step) once both pipelines have
+    settled.*
 
 ---
 
@@ -170,7 +200,7 @@ class SpotlightCandidate(BaseModel):
     """
     model_config = ConfigDict(extra="forbid")
 
-    id: str = Field(pattern=r"^cand-\d{4}$")  # globally unique within the report
+    id: str = Field(pattern=r"^cand-[A-Za-z0-9._-]+-\d{4}$")  # globally unique; segmented per §10
 
     # link to project_tree.modules[*].qualified_name.
     # DR always populates (it runs per-module by construction).
@@ -221,7 +251,7 @@ class SpotlightProposal(BaseModel):
     """
     model_config = ConfigDict(extra="forbid")
 
-    id: str = Field(pattern=r"^prop-\d{4}$")  # globally unique within the report
+    id: str = Field(pattern=r"^prop-[A-Za-z0-9._-]+-\d{4}$")  # globally unique; segmented per §10
 
     source: ProposalSource
 
@@ -499,6 +529,12 @@ In this DR run, `v1.kv_offload` was the first module walked, so its
 candidates take the head of the global numbering (`cand-0001`,
 `cand-0002`) and the proposals as `prop-0001..prop-0008`.
 
+> *Note (2026-06-21):* the ids below show the pre-ratification flat
+> format. Under the segmented scheme adopted in #28 (see §10), DR ids
+> would be `cand-v1.kv_offload-0001` / `prop-v1.kv_offload-NNNN`. The
+> example is left as-is for now — only the format differs; the
+> renumbering / global-uniqueness story is unchanged.
+
 ```json
 {
   "schema_version": "1",
@@ -713,6 +749,11 @@ each have their own `cand-0001`. A flat top-level list collides on
 those, so the adapter renumbers globally. `prop-NNNN` is also
 globally unique; proposal ids are decoupled from candidate ids — the
 embedding under `SpotlightCandidate.proposals` carries the linkage.
+
+The format of those renumbered ids is segmented (`<type>-<segment>-NNNN`)
+per §10 — the `<segment>` slot disambiguates DR's module slugs from
+signal's fixed `signal` segment without changing the global-uniqueness
+or determinism story below.
 
 **Determinism:** the adapter walks `module_runs` alphabetically by
 `module_qualified_name`, candidates within a module in their stored
