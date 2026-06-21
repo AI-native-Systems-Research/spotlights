@@ -28,6 +28,7 @@ from spotlights_engine.signal_pipeline.layout import (
 from spotlights_engine.signal_pipeline.runner import (
     InjectValidationError,
     PipelineLayoutError,
+    _compute_run_id,
 )
 
 
@@ -98,7 +99,10 @@ def test_spotlight_report_emitted_after_full_run(tmp_path):
 
     report = SpotlightReport.model_validate_json(report_path.read_text())
     assert report.run.pipeline == "signal"
-    assert report.run.run_id == run_dir.resolve().name
+    # `run_id` is a `run-<16-hex>` content hash of input.json (mirrors DR);
+    # see `_compute_run_id` for the formula.
+    assert report.run.run_id.startswith("run-")
+    assert len(report.run.run_id) == len("run-") + 16
     # Two stub candidates, two stub changes -> two proposals total
     assert [c.id for c in report.candidates] == ["cand-signal-0001", "cand-signal-0002"]
     assert all(c.origin == "telemetry_anomaly" for c in report.candidates)
@@ -111,6 +115,58 @@ def test_spotlight_report_emitted_after_full_run(tmp_path):
     # Upstream `stub-anomaly-1` (synthetic stage-01 placeholder) is
     # renumbered to the segmented form at the report-build boundary.
     assert report.anomalies[0].anomaly_id == "anom-signal-0001"
+
+
+def test_compute_run_id_is_resume_stable_for_same_input(tmp_path):
+    """Two invocations against the same `input.json` content yield the
+    same `run-<hex>` id, so resumed runs keep their identity (mirrors
+    DR's `_run_id_from_manifest`)."""
+    run_dir_a = tmp_path / "run-a"
+    run_pipeline(_input(tmp_path), run_dir=run_dir_a)
+    layout_a = RunDirLayout(root=run_dir_a)
+    id_first = _compute_run_id(layout_a)
+    id_again = _compute_run_id(layout_a)  # second call, same input
+    assert id_first == id_again
+    assert id_first.startswith("run-")
+    assert len(id_first) == len("run-") + 16
+
+
+def test_compute_run_id_distinguishes_two_runs_in_same_dir(tmp_path):
+    """Two consecutive runs into the SAME `--artifacts-dir` but with
+    different `input.json` content (e.g. different telemetry path) get
+    distinct `run_id`s. Pre-fix this was broken: `run_id = layout.root.name`
+    made them indistinguishable."""
+    run_dir = tmp_path / "shared"
+    run_dir.mkdir()
+    layout = RunDirLayout(root=run_dir)
+
+    layout.input_path.write_text(
+        json.dumps({"subject_root": "/repo-a", "max_candidates": 1}),
+        encoding="utf-8",
+    )
+    id_a = _compute_run_id(layout)
+
+    layout.input_path.write_text(
+        json.dumps({"subject_root": "/repo-b", "max_candidates": 1}),
+        encoding="utf-8",
+    )
+    id_b = _compute_run_id(layout)
+
+    assert id_a != id_b
+    assert id_a.startswith("run-") and id_b.startswith("run-")
+
+
+def test_compute_run_id_falls_back_when_input_missing(tmp_path):
+    """If `input.json` is missing (very-early-error path), the helper
+    still returns a non-empty `run-<hex>` so `RunInfo.run_id` validation
+    (`min_length=1`) passes."""
+    run_dir = tmp_path / "empty"
+    run_dir.mkdir()
+    layout = RunDirLayout(root=run_dir)
+    assert not layout.input_path.exists()
+    rid = _compute_run_id(layout)
+    assert rid.startswith("run-")
+    assert len(rid) > len("run-")
 
 
 def test_spotlight_report_skipped_for_partial_run(tmp_path):

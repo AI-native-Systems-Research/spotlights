@@ -13,6 +13,7 @@ Implements the run loop:
 from __future__ import annotations
 
 import concurrent.futures
+import hashlib
 import json
 import shutil
 import threading
@@ -307,6 +308,34 @@ def _aggregate_run_cost(status: "PipelineStatus") -> float | None:
             total += float(stage_status.cost_usd)
             saw_any = True
     return round(total, 4) if saw_any else None
+
+
+def _compute_run_id(layout: RunDirLayout) -> str:
+    """Deterministic, resume-stable run id derived from `input.json`.
+
+    Mirrors the DR pipeline's `_run_id_from_manifest`
+    (`spotlights_manager/orchestrator.py`): hash the run's content-addressed
+    inputs and prefix with `run-`. Same input -> same id across resumes
+    (resume-stable for log correlation); different inputs in the same
+    artifacts dir get different ids (so two consecutive runs into the
+    same `--artifacts-dir` are no longer indistinguishable as they were
+    when `run_id` was just `layout.root.name`).
+
+    Falls back to a hash of the artifacts-dir path so the field stays
+    non-empty when called before `input.json` has been persisted (e.g.
+    in a partial run that errored very early); `RunInfo.run_id` requires
+    `min_length=1`, so an empty string is unsafe.
+    """
+    input_path = layout.input_path
+    if input_path.exists():
+        try:
+            payload = json.loads(input_path.read_text(encoding="utf-8"))
+            canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+            return "run-" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+        except (OSError, ValueError):
+            pass
+    fallback_seed = str(layout.root.resolve())
+    return "run-" + hashlib.sha256(fallback_seed.encode("utf-8")).hexdigest()[:16]
 
 
 # ── Artifact load / completeness ─────────────────────────────────────────
@@ -992,7 +1021,7 @@ def run_pipeline(
         cost_total = _aggregate_run_cost(status)
         emit_spotlight_report(
             layout,
-            run_id=layout.root.name,
+            run_id=_compute_run_id(layout),
             started_at=run_started_at,
             finished_at=_now_iso(),
             cost_usd=cost_total,
