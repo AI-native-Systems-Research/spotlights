@@ -59,6 +59,15 @@ def resolve_target_module(project_tree: ProjectTree, module_qualified_name: str)
     return None
 
 
+def _module_antigravity_options(
+    options: AntigravityExecOptions | None, *, repo_path: Path
+) -> AntigravityExecOptions:
+    base = options or AntigravityExecOptions(cwd=repo_path)
+    if base.response_schema is not None:
+        return base
+    return base.model_copy(update={"response_schema": ModuleDeepResearchOutput})
+
+
 def select_runners(
     *,
     repo_path: Path,
@@ -78,7 +87,9 @@ def select_runners(
     return (
         CodexExecClient(codex_options or CodexExecOptions(cwd=repo_path)),
         ClaudeExecClient(ClaudeExecOptions(cwd=repo_path)),
-        AntigravityExecClient(antigravity_options or AntigravityExecOptions(cwd=repo_path)),
+        AntigravityExecClient(
+            _module_antigravity_options(antigravity_options, repo_path=repo_path)
+        ),
     )
 
 

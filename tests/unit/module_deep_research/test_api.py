@@ -9,7 +9,7 @@ from pathlib import Path
 from spotlights_engine.module_deep_research.api import research_module, resolve_target_module
 from spotlights_engine.module_deep_research.codex_exec import CodexExecResult
 from spotlights_engine.schemas.common import SpotlightContext
-from spotlights_engine.schemas.pipeline import ModuleDeepResearchInput
+from spotlights_engine.schemas.pipeline import ModuleDeepResearchInput, ModuleDeepResearchOutput
 from spotlights_engine.schemas.project import Module, ProjectTree, Repository
 
 
@@ -289,6 +289,7 @@ def test_select_runners_defaults_to_codex_claude_antigravity(tmp_path: Path) -> 
     )
 
     assert [runner.name for runner in runners] == ["codex", "claude", "antigravity"]
+    assert runners[-1].options.response_schema is ModuleDeepResearchOutput
 
 
 def test_antigravity_litellm_proxy_enables_sse_bytes_repr_normalizer(tmp_path: Path) -> None:
@@ -304,15 +305,183 @@ def test_antigravity_litellm_proxy_enables_sse_bytes_repr_normalizer(tmp_path: P
 
 def test_antigravity_normalizes_litellm_bytes_repr_sse_line() -> None:
     from spotlights_engine.module_deep_research.antigravity_exec import (
+        _forward_headers,
+        _is_streaming_response,
+        _normalize_sse_lines,
         normalize_litellm_sse_bytes_repr_line,
+        normalize_litellm_vertex_sse_line,
     )
 
     line = 'data: b\'data: {"ok": true}\\r\\n\\r\\n\''
 
     assert normalize_litellm_sse_bytes_repr_line(line) == b'data: {"ok": true}\r\n\r\n'
-    assert normalize_litellm_sse_bytes_repr_line("data: b'okenCount'") == b'okenCount'
+    assert normalize_litellm_sse_bytes_repr_line("data: b'okenCount'") is None
     assert normalize_litellm_sse_bytes_repr_line("data: b'data: [DONE]\\n\\n'") == b''
     assert normalize_litellm_sse_bytes_repr_line('data: {"ok": true}') is None
+    assert normalize_litellm_vertex_sse_line('data: {"ok": true}') is None
+    assert _forward_headers({"accept-encoding": "gzip", "X-Test": "yes"}) == {
+        "X-Test": "yes",
+        "Accept-Encoding": "identity",
+    }
+
+    assert _is_streaming_response(
+        content_type="application/json",
+        request_path="/v1beta/models/gemini:streamGenerateContent?alt=sse",
+    )
+    assert _is_streaming_response(content_type="text/event-stream", request_path="/")
+    assert not _is_streaming_response(content_type="application/json", request_path="/models")
+    assert list(
+        _normalize_sse_lines(
+            iter(
+                [
+                    b"event: message\n",
+                    b'data: {"ok": true}\n',
+                    b"\n",
+                    b": keepalive\n",
+                    b"data: b'okenCount'\n",
+                    b"data: b'data: {\"nested\": true}\\r\\n\\r\\n'\n",
+                    b"data: [DONE]\n",
+                ]
+            )
+        )
+    ) == [
+        b"event: message\n",
+        b'data: {"ok": true}\n',
+        b'data: {"nested": true}\r\n\r\n',
+    ]
+
+
+def test_antigravity_normalizer_strips_vertex_thought_signature() -> None:
+    from spotlights_engine.module_deep_research.antigravity_exec import (
+        _normalize_sse_lines,
+        normalize_litellm_sse_bytes_repr_line,
+        normalize_litellm_vertex_sse_line,
+    )
+
+    line = (
+        "data: b'data: {\"candidates\":[{\"content\":{\"parts\":["
+        "{\"text\":\"hi\",\"thoughtSignature\":\"opaque\"}]}}],"
+        "\"usageMetadata\":{\"trafficType\":\"ON_DEMAND\"},"
+        "\"modelVersion\":\"gemini-3.5-flash\"}\\r\\n\\r\\n'"
+    )
+
+    normalized = normalize_litellm_sse_bytes_repr_line(line)
+
+    assert normalized is not None
+    assert b"thoughtSignature" in normalized
+    assert b'"text":"hi"' in normalized
+    assert b"usageMetadata" not in normalized
+    assert b"modelVersion" not in normalized
+
+    leading_newline = normalize_litellm_sse_bytes_repr_line(
+        "data: b'\\ndata: "
+        "{\"candidates\":[{\"content\":{\"parts\":[{\"text\":\"hi\"}]}}]}"
+        "\\r\\n\\r\\n'"
+    )
+    assert leading_newline is not None
+    assert leading_newline.startswith(b"data: ")
+
+    assert (
+        normalize_litellm_sse_bytes_repr_line(
+            "data: b'data: "
+            "{\"candidates\":[{\"content\":{\"parts\":[{"
+            "\"functionCall\":{\"name\":\"list_dir\"},"
+            "\"thoughtSignature\":\"abc'"
+        )
+        is None
+    )
+
+    plain_vertex = (
+        'data: {"candidates":[{"content":{"parts":[{"text":"hi",'
+        '"thoughtSignature":"opaque"}]}}],"usageMetadata":{"x":1}}'
+    )
+    normalized_plain = normalize_litellm_vertex_sse_line(plain_vertex)
+    assert normalized_plain is not None
+    assert b"thoughtSignature" in normalized_plain
+    assert b"usageMetadata" not in normalized_plain
+    assert b'"text":"hi"' in normalized_plain
+
+    fragmented = list(
+        _normalize_sse_lines(
+            iter(
+                [
+                    b"data: b'data: {\"candidates\":[{\"content\":{\"parts\":[{"
+                    b"\"functionCall\":{\"name\":\"view_file\"},"
+                    b"\"thoughtSignature\":\"abc",
+                    b"data: b'def\"}]}}],\"usageMetadata\":{}}\\r\\n\\r\\n'\n",
+                ]
+            )
+        )
+    )
+    assert len(fragmented) == 1
+    assert fragmented[0].startswith(b"data: ")
+    assert b"thoughtSignature" in fragmented[0]
+    assert b"usageMetadata" not in fragmented[0]
+    assert b"functionCall" in fragmented[0]
+
+    concatenated_marker = normalize_litellm_sse_bytes_repr_line(
+        "data: b'data: "
+        "{\"candidates\":[{\"content\":{\"parts\":[{\"functionCall\":{\"name\":\"search_web\"},"
+        "\"thoughtSignature\":\"abcdata: b'def\"}]}}],"
+        "\"usageMetadata\":{},\"modelVersion\":\"x\"}\\r\\n\\r\\n'"
+    )
+    assert concatenated_marker is not None
+    assert b"data: b" not in concatenated_marker
+    assert b"thoughtSignature" in concatenated_marker
+    assert b"usageMetadata" not in concatenated_marker
+    assert b"functionCall" in concatenated_marker
+
+    plain_embedded_marker = normalize_litellm_vertex_sse_line(
+        'data: {"candidates":[{"content":{"parts":[{"functionCall":{"name":"search_web"},'
+        '"thoughtSignature":"abcdata: b\'def"}]}}],"usageMetadata":{},'
+        '"modelVersion":"x"}\\r\\n\\r\\n\''
+    )
+    assert plain_embedded_marker is not None
+    assert b"data: b" not in plain_embedded_marker
+    assert b"thoughtSignature" in plain_embedded_marker
+    assert b"usageMetadata" not in plain_embedded_marker
+    assert b"functionCall" in plain_embedded_marker
+
+    finish_with_helper_metadata = normalize_litellm_vertex_sse_line(
+        'data: {"candidates":[{"content":{"parts":[{"functionCall":'
+        '{"name":"finish","args":{"findings":[],"issues":[],'
+        '"toolAction":"done","toolSummary":"done"}}}]}}]}'
+    )
+    assert finish_with_helper_metadata is not None
+    assert b'"name":"finish"' in finish_with_helper_metadata
+    assert b"toolAction" not in finish_with_helper_metadata
+    assert b"toolSummary" not in finish_with_helper_metadata
+
+    split_plain_then_bytes = list(
+        _normalize_sse_lines(
+            iter(
+                [
+                    b'data: {"candidates":[{"content":{"parts":[{'
+                    b'"functionCall":{"name":"search_web"},'
+                    b'"thoughtSignature":"abc',
+                    b"data: b'def\"}]}}],\"usageMetadata\":{},\"modelVersion\":\"x\"}\r\n\r\n'\n",
+                ]
+            )
+        )
+    )
+    assert len(split_plain_then_bytes) == 1
+    assert b"data: b" not in split_plain_then_bytes[0]
+    assert b"usageMetadata" not in split_plain_then_bytes[0]
+    assert b"functionCall" in split_plain_then_bytes[0]
+
+
+def test_antigravity_normalizer_suppresses_empty_terminal_chunk() -> None:
+    from spotlights_engine.module_deep_research.antigravity_exec import (
+        normalize_litellm_sse_bytes_repr_line,
+    )
+
+    line = (
+        "data: b'data: {\"candidates\":[{\"content\":{\"role\":\"model\","
+        "\"parts\":[{\"text\":\"\"}]},\"finishReason\":\"STOP\"}],"
+        "\"usageMetadata\":{\"totalTokenCount\":123}}\\r\\n\\r\\n'"
+    )
+
+    assert normalize_litellm_sse_bytes_repr_line(line) == b""
 
 
 def test_antigravity_default_command_is_sdk_and_does_not_expose_prompt(tmp_path: Path) -> None:
@@ -345,12 +514,37 @@ def test_antigravity_litellm_proxy_maps_key_to_bearer_header(tmp_path: Path) -> 
 
     assert client.build_model_endpoint_kwargs() == {
         "base_url": "https://litellm.example.com",
+        "api_key": "test-key",
         "http_headers": {"Authorization": "Bearer test-key"},
+    }
+
+
+def test_antigravity_x_goog_key_uses_sdk_api_key_without_duplicate_header(
+    tmp_path: Path,
+) -> None:
+    from spotlights_engine.module_deep_research.antigravity_exec import (
+        AntigravityExecClient,
+        AntigravityExecOptions,
+    )
+
+    client = AntigravityExecClient(
+        AntigravityExecOptions(
+            cwd=tmp_path,
+            antigravity_base_url="https://gemini.example.com",
+            antigravity_api_key_env="GEMINI_API_KEY",
+            api_key_auth_mechanism="x-goog-api-key",
+            env={"GEMINI_API_KEY": "test-key"},
+        )
+    )
+
+    assert client.build_model_endpoint_kwargs() == {
+        "base_url": "https://gemini.example.com",
         "api_key": "test-key",
     }
 
 
 def test_antigravity_runner_enables_web_search_tool(monkeypatch, tmp_path: Path) -> None:
+    import os
     import sys
     import types
 
@@ -392,6 +586,8 @@ def test_antigravity_runner_enables_web_search_tool(monkeypatch, tmp_path: Path)
             return None
 
         async def chat(self, prompt):
+            captured["env_value"] = os.environ.get("ANTIGRAVITY_TEST_ENV")
+
             class Response:
                 async def structured_output(self):
                     return {"findings": [], "issues": []}
@@ -412,10 +608,177 @@ def test_antigravity_runner_enables_web_search_tool(monkeypatch, tmp_path: Path)
 
     monkeypatch.setitem(sys.modules, "google.antigravity", fake)
 
-    result = AntigravityExecClient(AntigravityExecOptions(cwd=tmp_path)).run("prompt")
+    result = AntigravityExecClient(
+        AntigravityExecOptions(
+            cwd=tmp_path,
+            env={"ANTIGRAVITY_TEST_ENV": "visible"},
+        )
+    ).run("prompt")
 
     assert result.ok
     assert "search_web" in captured["enabled_tools"]
+    assert captured["env_value"] == "visible"
+    assert os.environ.get("ANTIGRAVITY_TEST_ENV") is None
+
+
+def test_antigravity_compacts_spotlights_prompt_and_wraps_web_result() -> None:
+    from spotlights_engine.module_deep_research.antigravity_exec import (
+        _is_simple_web_grounded_spotlights_prompt,
+        _maybe_compact_web_grounded_spotlights_prompt,
+        _wrap_simple_web_result,
+    )
+
+    prompt = """You are running the Spotlights module_deep_research pipeline step.
+
+Target module:
+Qualified name: v1/sample
+Path: vllm/v1/sample
+
+Caller context:
+Objective: speed up speculative decoding rejection sampling
+Workload hints:
+- GPU kernels
+
+Workflow:
+1. Open files.
+
+Output rules:
+- Include at most 2 findings.
+"""
+
+    compacted = _maybe_compact_web_grounded_spotlights_prompt(prompt, compact=True)
+
+    assert _is_simple_web_grounded_spotlights_prompt(compacted)
+    assert "Use web search" in compacted
+    assert "up to 2" in compacted
+    assert "speed up speculative decoding" in compacted
+
+    wrapped = _wrap_simple_web_result(
+        '{"findings":['
+        '{"title":"Dual Pivot Rejection Sampling",'
+        '"url":"https://flashinfer.ai/2025/03/10/sampling",'
+        '"source_type":"blog"},'
+        '{"title":"EARS",'
+        '"url":"https://arxiv.org/abs/2512.13194",'
+        '"source_type":"paper"}'
+        '],"issues":[]}'
+    )
+
+    assert json.loads(wrapped) == {
+        "findings": [
+            {
+                "finding_id": "find-0001",
+                "title": "Dual Pivot Rejection Sampling",
+                "url": "https://flashinfer.ai/2025/03/10/sampling",
+                "source_type": "blog",
+                "technique_summary": (
+                    "External source with a transferable optimization idea "
+                    "for the target module."
+                ),
+                "supporting_evidence": "Source identified by web search.",
+            },
+            {
+                "finding_id": "find-0002",
+                "title": "EARS",
+                "url": "https://arxiv.org/abs/2512.13194",
+                "source_type": "paper",
+                "technique_summary": (
+                    "External source with a transferable optimization idea "
+                    "for the target module."
+                ),
+                "supporting_evidence": "Source identified by web search.",
+            },
+        ],
+        "issues": [],
+    }
+
+    single_wrapped = _wrap_simple_web_result(
+        '{"title":"Dual Pivot Rejection Sampling",'
+        '"url":"https://flashinfer.ai/2025/03/10/sampling",'
+        '"source_type":"blog"}'
+    )
+    assert len(json.loads(single_wrapped)["findings"]) == 1
+
+
+def test_antigravity_repairs_missing_structured_output(monkeypatch, tmp_path: Path) -> None:
+    import sys
+    import types
+
+    from spotlights_engine.module_deep_research.antigravity_exec import (
+        AntigravityExecClient,
+        AntigravityExecOptions,
+    )
+
+    prompts: list[str] = []
+
+    class BuiltinTools:
+        LIST_DIR = "list_directory"
+        SEARCH_DIR = "search_directory"
+        FIND_FILE = "find_file"
+        VIEW_FILE = "view_file"
+        FINISH = "finish"
+        SEARCH_WEB = "search_web"
+
+        @classmethod
+        def read_only(cls):
+            return [cls.LIST_DIR, cls.SEARCH_DIR, cls.FIND_FILE, cls.VIEW_FILE, cls.FINISH]
+
+    class CapabilitiesConfig:
+        def __init__(self, *, enabled_tools):
+            self.enabled_tools = enabled_tools
+
+    class LocalAgentConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class Agent:
+        def __init__(self, config):
+            self.config = config
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def chat(self, prompt):
+            prompts.append(prompt)
+
+            class Response:
+                async def structured_output(self):
+                    if len(prompts) < 3:
+                        return None
+                    return {"findings": [], "issues": []}
+
+                async def text(self):
+                    return "I will gather more context first."
+
+            return Response()
+
+    fake = types.ModuleType("google.antigravity")
+    fake.Agent = Agent
+    fake.BuiltinTools = BuiltinTools
+    fake.CapabilitiesConfig = CapabilitiesConfig
+    fake.GeminiAPIEndpoint = object
+    fake.LocalAgentConfig = LocalAgentConfig
+    fake.ModelTarget = object
+    fake.ModelType = types.SimpleNamespace(TEXT="text")
+
+    monkeypatch.setitem(sys.modules, "google.antigravity", fake)
+
+    result = AntigravityExecClient(
+        AntigravityExecOptions(
+            cwd=tmp_path,
+            model="gemini-test",
+            response_schema={"type": "object"},
+        )
+    ).run("prompt")
+
+    assert result.ok
+    assert json.loads(result.final_message) == {"findings": [], "issues": []}
+    assert prompts[0] == "prompt"
+    assert "previous turn did not produce" in prompts[1]
+    assert "previous repair turn still" in prompts[2]
 
 
 def test_antigravity_run_wraps_async_sdk_result(monkeypatch, tmp_path: Path) -> None:
