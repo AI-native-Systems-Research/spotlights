@@ -70,12 +70,12 @@ def test_zero_findings_synthesizes_step4_without_invoking_claude(
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
         output_folder=artifacts.parent / "output",
-        module_filter=ModuleFilter(include=["v1.kv_offload"]),
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
     )
     result = run_with_telemetry(make_input(repo), config=cfg)
     assert pf_calls == []
 
-    mr = result.module_runs["v1.kv_offload"]
+    mr = result.module_runs["v1/kv_offload"]
     assert mr.status == "SUCCEEDED"
     assert mr.findings == []
     assert mr.candidates is not None
@@ -87,5 +87,5 @@ def test_zero_findings_synthesizes_step4_without_invoking_claude(
 
     # The synthetic sidecar must be on disk so a resume sees the step-4 outputs.
     paths = P.ManagerPaths(artifacts)
-    mp = paths.for_module("v1.kv_offload")
+    mp = paths.for_module("v1/kv_offload")
     assert mp.proposal_from_finding_path.exists()

@@ -48,7 +48,11 @@ from spotlights_engine.schemas.project import ProjectTree
 from spotlights_engine.signal_pipeline.stages._types import StageContext, StageSpec
 
 
-_CACHE_SCHEMA_VERSION = "v1"
+# Bumped to v2 when qualified names became source-root-relative: a v1 cache
+# entry was written before `Repository.source_root` existed, so reloading it
+# would yield the old package-less qualified names. The suffix change misses
+# those stale entries cleanly.
+_CACHE_SCHEMA_VERSION = "v2"
 
 
 def parse_artifact(raw: Any) -> ProjectTree:

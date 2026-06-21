@@ -27,9 +27,9 @@ from tests.unit.spotlights_manager._fakes import (
 def test_module_checkpoint_round_trip(tmp_path: Path) -> None:
     paths = ManagerPaths(tmp_path)
     paths.modules_root.mkdir(parents=True)
-    mp = paths.for_module("v1.kv_offload")
+    mp = paths.for_module("v1/kv_offload")
     cp = ModuleCheckpoint(
-        module_qualified_name="v1.kv_offload",
+        module_qualified_name="v1/kv_offload",
         status="DISCOVERED",
         last_step="candidate_discovery",
         started_at="2026-05-21T00:00:00+00:00",
@@ -43,7 +43,7 @@ def test_module_checkpoint_round_trip(tmp_path: Path) -> None:
 def test_atomic_write_recovers_from_orphan_tmp(tmp_path: Path) -> None:
     """A leftover `.tmp` from a previous crashed write must not block the next write."""
     paths = ManagerPaths(tmp_path)
-    mp = paths.for_module("v1.kv_offload")
+    mp = paths.for_module("v1/kv_offload")
     mp.dir.mkdir(parents=True)
 
     # Plant a leftover .tmp file (sim'd crash mid-write).
@@ -52,7 +52,7 @@ def test_atomic_write_recovers_from_orphan_tmp(tmp_path: Path) -> None:
     )
 
     cp = ModuleCheckpoint(
-        module_qualified_name="v1.kv_offload",
+        module_qualified_name="v1/kv_offload",
         status="PENDING",
         last_step=None,
         started_at="2026-05-21T00:00:00+00:00",
@@ -65,10 +65,10 @@ def test_atomic_write_recovers_from_orphan_tmp(tmp_path: Path) -> None:
 
 def test_candidates_and_deep_research_round_trip(tmp_path: Path) -> None:
     paths = ManagerPaths(tmp_path)
-    mp = paths.for_module("v1.kv_offload")
+    mp = paths.for_module("v1/kv_offload")
     mp.dir.mkdir(parents=True)
 
-    cands = make_candidates("v1.kv_offload", n=2)
+    cands = make_candidates("v1/kv_offload", n=2)
     P.write_candidates(mp, cands)
 
     output = make_research_output(n_findings=3)
@@ -89,10 +89,10 @@ def test_proposal_from_finding_round_trip(tmp_path: Path) -> None:
     )
 
     paths = ManagerPaths(tmp_path)
-    mp = paths.for_module("v1.kv_offload")
+    mp = paths.for_module("v1/kv_offload")
     mp.dir.mkdir(parents=True)
 
-    cands = make_candidates("v1.kv_offload", n=2)
+    cands = make_candidates("v1/kv_offload", n=2)
     advanced = Candidates(
         module_qualified_name=cands.module_qualified_name,
         candidates=[
@@ -126,10 +126,10 @@ def test_clear_proposal_from_finding_artifacts_removes_sidecar_and_dir(
     )
 
     paths = ManagerPaths(tmp_path)
-    mp = paths.for_module("v1.kv_offload")
+    mp = paths.for_module("v1/kv_offload")
     mp.dir.mkdir(parents=True)
 
-    cands = make_candidates("v1.kv_offload")
+    cands = make_candidates("v1/kv_offload")
     advanced = Candidates(
         module_qualified_name=cands.module_qualified_name,
         candidates=[
@@ -155,11 +155,11 @@ def test_clear_proposal_from_finding_artifacts_removes_sidecar_and_dir(
 
 def test_clear_helpers_remove_artifacts(tmp_path: Path) -> None:
     paths = ManagerPaths(tmp_path)
-    mp = paths.for_module("v1.kv_offload")
+    mp = paths.for_module("v1/kv_offload")
     mp.dir.mkdir(parents=True)
     mp.discovery_run_dir.mkdir()
     (mp.discovery_run_dir / "marker").write_text("x")
-    P.write_candidates(mp, make_candidates("v1.kv_offload"))
+    P.write_candidates(mp, make_candidates("v1/kv_offload"))
     P.write_deep_research(mp, make_research_output(), duration_s=1.0)
     mp.deep_research_last_message_path.write_text("hello", encoding="utf-8")
 
@@ -189,8 +189,9 @@ def test_init_manifest_creates_tree(tmp_path: Path) -> None:
 
 
 def test_slug_for_replaces_unsafe_chars() -> None:
-    assert P.slug_for("v1.kv_offload") == "v1.kv_offload"
+    # Slash-form qns collapse their separators to `_` for the on-disk dir name.
     assert P.slug_for("v1/kv_offload") == "v1_kv_offload"
+    assert P.slug_for("v1/attention/paged_kv") == "v1_attention_paged_kv"
     assert P.slug_for("a.b c") == "a.b_c"
 
 

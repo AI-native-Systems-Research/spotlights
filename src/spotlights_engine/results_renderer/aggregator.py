@@ -74,7 +74,7 @@ def aggregate(
             skipped.append(qn)
             continue
 
-        module = loaded.project_tree.resolve(qn.replace(".", "/"))
+        module = loaded.project_tree.resolve(qn)
         if module is None:
             warnings.append(
                 f"module {qn!r} is in the manifest but missing from project_tree"

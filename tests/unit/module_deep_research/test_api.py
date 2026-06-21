@@ -14,6 +14,8 @@ from spotlights_engine.schemas.project import Module, ProjectTree, Repository
 
 
 class FakeRunner:
+    name = "fake"
+
     def __init__(self, final_message: str, returncode: int = 0, stderr: str = "") -> None:
         self.final_message = final_message
         self.returncode = returncode
@@ -34,7 +36,7 @@ class FakeRunner:
 
 def _tree() -> ProjectTree:
     return ProjectTree(
-        repository=Repository(name="demo", summary="Demo repository."),
+        repository=Repository(name="demo", summary="Demo repository.", source_root="src"),
         modules=[
             Module(
                 name="inference",
@@ -51,7 +53,7 @@ def _tree() -> ProjectTree:
     )
 
 
-def _request(module_qualified_name: str = "inference.attention") -> ModuleDeepResearchInput:
+def _request(module_qualified_name: str = "inference/attention") -> ModuleDeepResearchInput:
     return ModuleDeepResearchInput(
         project_tree=_tree(),
         module_qualified_name=module_qualified_name,
@@ -64,6 +66,13 @@ def _request(module_qualified_name: str = "inference.attention") -> ModuleDeepRe
 def _request_with_cap(max_findings_per_module: int) -> ModuleDeepResearchInput:
     request = _request()
     return request.model_copy(update={"max_findings_per_module": max_findings_per_module})
+
+
+def test_resolve_target_module_by_slash_qualified_name() -> None:
+    module = resolve_target_module(_tree(), "inference/attention")
+
+    assert module is not None
+    assert module.path == "src/inference/attention"
 
 
 def test_resolve_target_module_accepts_dot_qualified_name() -> None:
@@ -258,6 +267,7 @@ def test_claude_command_shape_uses_litellm_safe_research_tools(tmp_path: Path) -
     assert "WebFetch" in allowed_tools
     assert "WebSearch" not in tools
     assert "Edit" not in tools
+
 
 
 def test_gemini_default_command_is_read_only_and_does_not_expose_prompt(tmp_path: Path) -> None:

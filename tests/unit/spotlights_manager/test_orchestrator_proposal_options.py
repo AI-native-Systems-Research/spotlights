@@ -113,7 +113,7 @@ def test_proposal_from_finding_options_per_module_override(
         artifacts_dir=artifacts,
         output_folder=artifacts.parent / "output",
         proposal_from_finding=caller_pf,
-        module_filter=ModuleFilter(include=["v1.kv_offload"]),
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
     )
     run_with_telemetry(make_input(repo), config=cfg)
 
@@ -121,7 +121,7 @@ def test_proposal_from_finding_options_per_module_override(
     used = seen_cfgs[0]
     assert used.repo_path == repo
     assert used.artifacts_dir is not None
-    assert "v1.kv_offload" in str(used.artifacts_dir)
+    assert "v1_kv_offload" in str(used.artifacts_dir)
     assert used.max_parallel_pairs == 3
     assert used.claude_max_turns == 42
 
@@ -155,7 +155,7 @@ def test_proposal_from_finding_default_when_caller_none(
     cfg = SpotlightsManagerConfig(
         artifacts_dir=artifacts,
         output_folder=artifacts.parent / "output",
-        module_filter=ModuleFilter(include=["v1.kv_offload"]),
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
     )
     # Should not raise — defaults are used.
     run_with_telemetry(make_input(repo), config=cfg)

@@ -88,7 +88,7 @@ def test_agent_proposals_options_per_module_override(
         artifacts_dir=artifacts,
         output_folder=artifacts.parent / "output",
         agent_proposals=caller_ap,
-        module_filter=ModuleFilter(include=["v1.kv_offload"]),
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
     )
     result = run_with_telemetry(make_input(repo), config=cfg)
 
@@ -96,7 +96,7 @@ def test_agent_proposals_options_per_module_override(
     used = seen_cfgs[0]
     assert used.repo_path == repo
     assert used.artifacts_dir is not None
-    assert "v1.kv_offload" in str(used.artifacts_dir)
+    assert "v1_kv_offload" in str(used.artifacts_dir)
     assert used.max_parallel_candidates == 3
     assert used.claude_max_turns == 42
     assert used.claude_wallclock_s == 123
@@ -107,7 +107,7 @@ def test_agent_proposals_options_per_module_override(
     assert used.claude_agent_name == "claude-a"
     assert used.codex_agent_name == "codex-b"
 
-    telemetry = result.per_module_telemetry["v1.kv_offload"]
+    telemetry = result.per_module_telemetry["v1/kv_offload"]
     assert telemetry.agent_proposals_duration_s == 1.25
     assert telemetry.agent_proposals_per_candidate_durations_s == {
         "cand-0001": {"claude": 0.5, "codex": 0.7}

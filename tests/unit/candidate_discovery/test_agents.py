@@ -12,8 +12,8 @@ import pytest
 from spotlights_engine.candidate_discovery.agents import (
     ClaudeRunner,
     CodexRunner,
-    _SchemaParseError,
     _clean_env,
+    _SchemaParseError,
 )
 from spotlights_engine.candidate_discovery.api import DiscoveryConfig
 from spotlights_engine.candidate_discovery.errors import DiscoverySetupError
@@ -96,7 +96,7 @@ def test_runner_init_raises_when_executable_missing(tmp_path):
 def _force_present(monkeypatch):
     monkeypatch.setattr(
         "spotlights_engine.candidate_discovery.agents.shutil.which",
-        lambda _name: "/usr/local/bin/whatever",
+        lambda name: f"/usr/local/bin/{name}",
     )
 
 
@@ -109,7 +109,7 @@ def test_claude_argv_includes_required_flags(tmp_path, monkeypatch):
     iter_dir = tmp_path / "iter"
     iter_dir.mkdir()
     argv = runner._build_argv(schema_path=schema_path, iter_dir=iter_dir)
-    assert argv[0] == "claude"
+    assert Path(argv[0]).stem.lower() == "claude"
     assert "-p" in argv
     assert argv[argv.index("--output-format") + 1] == "stream-json"
     assert "--verbose" in argv
@@ -127,7 +127,7 @@ def test_codex_argv_includes_required_flags(tmp_path, monkeypatch):
     iter_dir = tmp_path / "iter"
     iter_dir.mkdir()
     argv = runner._build_argv(schema_path=schema_path, iter_dir=iter_dir)
-    assert argv[0] == "codex"
+    assert Path(argv[0]).stem.lower() == "codex"
     assert argv[1:3] == ["exec", "-"]
     assert "--json" in argv
     assert argv[argv.index("--output-last-message") + 1] == str(iter_dir / "last_message.json")

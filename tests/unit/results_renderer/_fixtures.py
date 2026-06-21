@@ -37,11 +37,12 @@ from spotlights_engine.spotlights_manager.persistence import (
 
 
 def make_tree() -> ProjectTree:
-    """Two-leaf tree: v1.kv_offload (impact varied), kernels (one cand)."""
+    """Two-leaf tree: v1/kv_offload (impact varied), kernels (one cand)."""
     return ProjectTree(
         repository=Repository(
             name="demo",
             summary="Demo repo for renderer tests.",
+            source_root="src",
             external_dependencies=["torch", "numpy"],
         ),
         modules=[
@@ -247,12 +248,12 @@ def make_full_run(
     cand_kv_med = make_candidate(2, impact="medium")
     cand_kv_low = make_candidate(3, impact="low")
     cands_kv = Candidates(
-        module_qualified_name="v1.kv_offload",
+        module_qualified_name="v1/kv_offload",
         candidates=[cand_kv_high, cand_kv_med, cand_kv_low],
     )
     write_module(
         paths,
-        "v1.kv_offload",
+        "v1/kv_offload",
         candidates=cands_kv,
         findings=findings_kv,
         proposal_output=ProposalFromFindingCreatorOutput(
@@ -293,7 +294,7 @@ def make_full_run(
         paths,
         context=ctx,
         repo_path=repo_path,
-        module_statuses={"v1.kv_offload": "SUCCEEDED", "kernels": "DEGRADED"},
+        module_statuses={"v1/kv_offload": "SUCCEEDED", "kernels": "DEGRADED"},
     )
 
     return paths, tree

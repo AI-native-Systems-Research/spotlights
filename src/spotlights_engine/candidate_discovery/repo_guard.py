@@ -25,7 +25,7 @@ _EXCLUDE_DIRS = frozenset({".git", "__pycache__", ".venv"})
 @dataclass(frozen=True)
 class _GitSnapshot:
     status: bytes
-    manifest: dict[str, tuple[int, int, str]]
+    manifest: dict[str, tuple[int, int, str, str]]
 
 
 class RepoGuard:
@@ -75,8 +75,8 @@ class RepoGuard:
         )
         return result.stdout
 
-    def _manifest_snapshot(self) -> dict[str, tuple[int, int, str]]:
-        manifest: dict[str, tuple[int, int, str]] = {}
+    def _manifest_snapshot(self) -> dict[str, tuple[int, int, str, str]]:
+        manifest: dict[str, tuple[int, int, str, str]] = {}
         for root, dirs, files in os.walk(self._repo_path):
             dirs[:] = [d for d in dirs if d not in _EXCLUDE_DIRS]
             for name in files:
@@ -85,9 +85,14 @@ class RepoGuard:
                 try:
                     st = full.lstat()
                 except OSError:
-                    manifest[rel] = (0, 0, "missing")
+                    manifest[rel] = (0, 0, "missing", "missing")
                     continue
-                manifest[rel] = (st.st_mtime_ns, st.st_size, _xattr_digest(full))
+                manifest[rel] = (
+                    st.st_mtime_ns,
+                    st.st_size,
+                    _xattr_digest(full),
+                    _content_digest(full),
+                )
         return manifest
 
     def _diff(self, before, after):
@@ -100,14 +105,16 @@ class RepoGuard:
                 "manifest": _manifest_diff(before.manifest, after.manifest),
             }
         if isinstance(before, bytes):
-            return {"before_bytes": before.decode("utf-8", "replace"),
-                    "after_bytes": after.decode("utf-8", "replace")}
+            return {
+                "before_bytes": before.decode("utf-8", "replace"),
+                "after_bytes": after.decode("utf-8", "replace"),
+            }
         return _manifest_diff(before, after)
 
 
 def _manifest_diff(
-    before: dict[str, tuple[int, int, str]],
-    after: dict[str, tuple[int, int, str]],
+    before: dict[str, tuple[int, int, str, str]],
+    after: dict[str, tuple[int, int, str, str]],
 ) -> dict[str, list[str]]:
     before_keys = set(before)
     after_keys = set(after)
@@ -115,6 +122,17 @@ def _manifest_diff(
     removed = sorted(before_keys - after_keys)
     changed = sorted(k for k in before_keys & after_keys if before[k] != after[k])
     return {"added": added, "removed": removed, "changed": changed}
+
+
+def _content_digest(path: Path) -> str:
+    hasher = hashlib.sha256()
+    try:
+        with path.open("rb") as fh:
+            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                hasher.update(chunk)
+    except OSError:
+        return "content-unavailable"
+    return hasher.hexdigest()
 
 
 def _xattr_digest(path: Path) -> str:
