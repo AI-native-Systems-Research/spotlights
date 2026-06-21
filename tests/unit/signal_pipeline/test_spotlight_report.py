@@ -160,8 +160,8 @@ def test_resolve_module_returns_none_when_no_match() -> None:
 
 
 def test_build_assigns_global_cand_and_prop_ids() -> None:
-    """Two drafts + two changes produce cand-0001/cand-0002 and
-    prop-0001/prop-0002 in deterministic walk order."""
+    """Two drafts + two changes produce cand-signal-0001/cand-signal-0002 and
+    prop-signal-0001/prop-signal-0002 in deterministic walk order."""
     drafts = [_draft(id_="cand-0001"), _draft(id_="cand-0002", file="src/inference/foo.py")]
     changes = {"cand-0001": _change("cand-0001"), "cand-0002": _change("cand-0002")}
     report = build_spotlight_report(
@@ -172,9 +172,9 @@ def test_build_assigns_global_cand_and_prop_ids() -> None:
         context=_context(),
         run_info=_run_info(),
     )
-    assert [c.id for c in report.candidates] == ["cand-0001", "cand-0002"]
+    assert [c.id for c in report.candidates] == ["cand-signal-0001", "cand-signal-0002"]
     proposal_ids = [p.id for c in report.candidates for p in c.proposals]
-    assert proposal_ids == ["prop-0001", "prop-0002"]
+    assert proposal_ids == ["prop-signal-0001", "prop-signal-0002"]
 
 
 def test_build_skips_proposal_when_change_missing() -> None:

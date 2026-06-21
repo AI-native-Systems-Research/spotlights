@@ -100,10 +100,10 @@ def test_spotlight_report_emitted_after_full_run(tmp_path):
     assert report.run.pipeline == "signal"
     assert report.run.run_id == run_dir.resolve().name
     # Two stub candidates, two stub changes -> two proposals total
-    assert [c.id for c in report.candidates] == ["cand-0001", "cand-0002"]
+    assert [c.id for c in report.candidates] == ["cand-signal-0001", "cand-signal-0002"]
     assert all(c.origin == "telemetry_anomaly" for c in report.candidates)
     proposals = [p for c in report.candidates for p in c.proposals]
-    assert [p.id for p in proposals] == ["prop-0001", "prop-0002"]
+    assert [p.id for p in proposals] == ["prop-signal-0001", "prop-signal-0002"]
     assert all(p.source == "telemetry_anomaly" for p in proposals)
     # One stub anomaly carries through into the closed-shape `Anomaly`
     # (synthetic fallback path -- telemetry_from is None in `_input(...)`).

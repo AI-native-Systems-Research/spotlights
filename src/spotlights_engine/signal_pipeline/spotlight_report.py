@@ -23,7 +23,8 @@ This module is the boundary translation: it walks the parsed
 
 IDs are renumbered globally in deterministic walk order: candidates take
 the order they appear in the stage 03 artifact; proposals follow each
-candidate. ID prefixes are `cand-NNNN` / `prop-NNNN` (4-digit zero-padded).
+candidate. ID prefixes are `cand-signal-NNNN` / `prop-signal-NNNN`
+(4-digit zero-padded; `signal` is the fixed pipeline segment per #28).
 
 The legacy `Change.change_type` field is intentionally NOT carried into
 the unified report (per spec section 4.10 -- one-pipeline + domain-locked
@@ -56,6 +57,11 @@ from spotlights_engine.signal_pipeline.schemas import (
 
 
 __all__ = ["build_spotlight_report", "emit_spotlight_report"]
+
+
+# Fixed pipeline segment for the unified id pattern (`<type>-signal-NNNN`),
+# per the resolution in #28.
+_SEGMENT = "signal"
 
 
 # ---- Module assignment ------------------------------------------------------
@@ -208,9 +214,9 @@ def build_spotlight_report(
 
     Walk order is deterministic: drafts iterate in the order they appear
     in stage 03's artifact; each draft's stage-04 `Change` (if present)
-    becomes its single proposal. Both ID streams (`cand-NNNN`, `prop-NNNN`)
-    are renumbered globally so the report can be flat-iterated without
-    cross-module collisions.
+    becomes its single proposal. Both ID streams (`cand-signal-NNNN`,
+    `prop-signal-NNNN`) are renumbered globally so the report can be
+    flat-iterated without cross-module collisions.
     """
     drafts_list = list(drafts)
     cand_idx = 0
@@ -218,12 +224,12 @@ def build_spotlight_report(
     candidates: list[Candidate] = []
     for draft in drafts_list:
         cand_idx += 1
-        new_cand_id = f"cand-{cand_idx:04d}"
+        new_cand_id = f"cand-{_SEGMENT}-{cand_idx:04d}"
         proposals: list[Proposal] = []
         change = changes.get(draft.id)
         if change is not None:
             prop_idx += 1
-            new_prop_id = f"prop-{prop_idx:04d}"
+            new_prop_id = f"prop-{_SEGMENT}-{prop_idx:04d}"
             proposals.append(
                 _proposal_from_change(
                     new_id=new_prop_id,
