@@ -311,7 +311,65 @@ def test_build_anomalies_translate_into_closed_shape() -> None:
     assert a.confidence == 0.6
     assert a.magnitude == "19x p50"
     assert a.evidence_pointer == "trace=t1 span=llm_request"
-    assert a.severity is None  # no upstream populator
+    assert a.estimated_severity is None  # _signals fixture omits the field
+
+
+@pytest.mark.parametrize(
+    "extras_field",
+    ["estimated_severity", "severity"],
+)
+def test_build_anomaly_picks_up_estimated_severity_from_upstream(
+    extras_field: str,
+) -> None:
+    """Stage 01's prompt asks for `estimated_severity`, but the
+    `AnomalyLite` (extra=allow) seam also tolerates the legacy
+    `severity` key from older prompts / hand-written fixtures.
+    Boundary translation accepts either."""
+    lite = AnomalyLite(
+        anomaly_id="anom-1",
+        type="latency",
+        description="p99 high",
+        **{extras_field: "high"},
+    )
+    signals = Signals(
+        workload=WorkloadProfileLite(workload_id="wl-test", description="x"),
+        traces=[],
+        anomalies=[lite],
+    )
+    report = build_spotlight_report(
+        signals=signals,
+        project_tree=_project_tree(),
+        drafts=[_draft()],
+        changes={},
+        context=_context(),
+        run_info=_run_info(),
+    )
+    assert report.anomalies[0].estimated_severity == "high"
+
+
+def test_build_anomaly_drops_off_script_severity_value() -> None:
+    """Off-script severities (e.g. `"critical"`) are silently dropped at
+    the boundary so a sloppy agent can't break schema validation."""
+    lite = AnomalyLite(
+        anomaly_id="anom-1",
+        type="latency",
+        description="x",
+        estimated_severity="critical",
+    )
+    signals = Signals(
+        workload=WorkloadProfileLite(workload_id="wl-test", description="x"),
+        traces=[],
+        anomalies=[lite],
+    )
+    report = build_spotlight_report(
+        signals=signals,
+        project_tree=_project_tree(),
+        drafts=[_draft()],
+        changes={},
+        context=_context(),
+        run_info=_run_info(),
+    )
+    assert report.anomalies[0].estimated_severity is None
 
 
 def test_build_findings_is_empty() -> None:

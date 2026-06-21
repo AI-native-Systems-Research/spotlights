@@ -355,17 +355,25 @@ def test_anomaly_id_rejects_non_segmented_values(value: str) -> None:
 
 
 @pytest.mark.parametrize("value", ["high", "medium", "low"])
-def test_anomaly_severity_accepts_each_member(value: AnomalySeverity) -> None:
-    assert _anomaly(severity=value).severity == value
+def test_anomaly_estimated_severity_accepts_each_member(value: AnomalySeverity) -> None:
+    assert _anomaly(estimated_severity=value).estimated_severity == value
 
 
-def test_anomaly_severity_accepts_none() -> None:
-    assert _anomaly().severity is None
+def test_anomaly_estimated_severity_accepts_none() -> None:
+    assert _anomaly().estimated_severity is None
 
 
-def test_anomaly_severity_rejects_non_member() -> None:
+def test_anomaly_estimated_severity_rejects_non_member() -> None:
     with pytest.raises(ValidationError):
-        _anomaly(severity="critical")
+        _anomaly(estimated_severity="critical")
+
+
+def test_anomaly_severity_field_was_renamed() -> None:
+    """`severity` was renamed to `estimated_severity` to mirror
+    `Candidate.estimated_impact` — the old key must be rejected under
+    `extra="forbid"` so callers don't silently lose data."""
+    with pytest.raises(ValidationError):
+        _anomaly(severity="high")
 
 
 @pytest.mark.parametrize("value", [0.0, 0.5, 1.0])
@@ -420,8 +428,8 @@ def test_report_carries_findings_and_anomalies() -> None:
         context=_ctx(),
         run=_run(),
         findings=[_finding()],
-        anomalies=[_anomaly(severity="high", confidence=0.9)],
+        anomalies=[_anomaly(estimated_severity="high", confidence=0.9)],
     )
     assert rep.findings[0].finding_id == "find-core-0001"
     assert rep.anomalies[0].anomaly_id == "anom-core-0001"
-    assert rep.anomalies[0].severity == "high"
+    assert rep.anomalies[0].estimated_severity == "high"

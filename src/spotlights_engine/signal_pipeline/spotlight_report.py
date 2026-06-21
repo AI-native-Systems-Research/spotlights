@@ -10,8 +10,9 @@ This module is the boundary translation: it walks the parsed
 `dict[id, Change]` from stage 04 and produces:
 
 - `Anomaly` records (closed shape, `anomaly_id` / `type` / `description` /
-  `confidence` / `evidence_pointer` / `magnitude`, with `severity=None` --
-  no upstream populator yet).
+  `confidence` / `evidence_pointer` / `magnitude` / `estimated_severity`,
+  with the upstream descriptive id renumbered to `anom-signal-NNNN` per
+  spec §10).
 - `Candidate` records, one per draft, wrapping the draft's flat location
   fields into a single `CodeLocation` containing one `CodeSpan`. `origin`
   is hard-coded to `"telemetry_anomaly"`. `module_qualified_name` is
@@ -99,6 +100,26 @@ def _resolve_module(file_path: str, project_tree: ProjectTree) -> str | None:
 # ---- Translation primitives -------------------------------------------------
 
 
+_VALID_SEVERITIES = ("high", "medium", "low")
+
+
+def _normalize_estimated_severity(value: object) -> str | None:
+    """Coerce an agent-emitted severity label to a valid `AnomalySeverity`.
+
+    Accepts the upstream prompt's preferred field name `estimated_severity`
+    AND the legacy `severity` key (older prompts / hand-written fixtures
+    still use it). Lower-cases the value so case differences don't
+    disqualify a valid label, and drops anything outside the closed set
+    so the boundary stays robust against agent off-script values.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        return None
+    norm = value.strip().lower()
+    return norm if norm in _VALID_SEVERITIES else None
+
+
 def _clamp_confidence(value: object) -> float | None:
     """Coerce confidence to a float in [0, 1] or None.
 
@@ -133,7 +154,9 @@ def _anomaly_from_lite(lite: AnomalyLite, *, new_id: str) -> Anomaly:
         anomaly_id=new_id,
         type=lite.type,
         description=lite.description or "",
-        severity=None,
+        estimated_severity=_normalize_estimated_severity(
+            extras.get("estimated_severity") or extras.get("severity")
+        ),
         confidence=_clamp_confidence(extras.get("confidence")),
         evidence_pointer=str(extras.get("evidence_pointer") or ""),
         magnitude=str(extras.get("magnitude") or ""),
