@@ -25,7 +25,7 @@ from typing import Any, Callable, Iterable
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from spotlights_engine.signal_pipeline.event_formatter import StageEventFormatter
-from spotlights_engine.signal_pipeline.findings import emit_findings
+from spotlights_engine.signal_pipeline.signal_summary import emit_signal_summary
 from spotlights_engine.signal_pipeline.layout import (
     ALL_STAGES,
     RunDirLayout,
@@ -978,7 +978,7 @@ def run_pipeline(
     # change specs into a single human-readable view. Skipped silently if the
     # candidates artifact isn't on disk yet (e.g. selection ended before 03).
     try:
-        emit_findings(layout, resolved_output_folder)
+        emit_signal_summary(layout, resolved_output_folder)
     except Exception as exc:  # noqa: BLE001 — never fail the pipeline on rollup
         aggregate_issues.append(f"findings rollup failed: {exc}")
 

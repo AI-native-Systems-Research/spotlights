@@ -1,4 +1,4 @@
-"""Tests for the findings rollup (`signal_pipeline.findings`)."""
+"""Tests for the signal-pipeline rollup (`signal_pipeline.signal_summary`)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from spotlights_engine.signal_pipeline.findings import emit_findings
+from spotlights_engine.signal_pipeline.signal_summary import emit_signal_summary
 from spotlights_engine.signal_pipeline.layout import RunDirLayout
 
 
@@ -60,12 +60,12 @@ def test_no_op_when_candidates_missing(
     layout: RunDirLayout, output_folder: Path
 ) -> None:
     """If stage 03 didn't run, rollup is a silent no-op (no files written)."""
-    emit_findings(layout, output_folder)
-    assert not (output_folder / "findings.json").exists()
-    assert not (output_folder / "findings.md").exists()
+    emit_signal_summary(layout, output_folder)
+    assert not (output_folder / "signal_summary.json").exists()
+    assert not (output_folder / "signal_summary.md").exists()
 
 
-def test_emits_findings_with_candidates_only(
+def test_emits_summary_with_candidates_only(
     layout: RunDirLayout, output_folder: Path
 ) -> None:
     """Stage 03 ran but stage 04 didn't — change column is None."""
@@ -74,15 +74,15 @@ def test_emits_findings_with_candidates_only(
         json.dumps({"candidates": candidates}), encoding="utf-8"
     )
 
-    emit_findings(layout, output_folder)
+    emit_signal_summary(layout, output_folder)
 
-    findings = json.loads((output_folder / "findings.json").read_text(encoding="utf-8"))
-    assert len(findings) == 2
-    assert findings[0]["candidate"]["id"] == "cand-0001"
-    assert findings[0]["change"] is None
-    assert findings[1]["change"] is None
+    entries = json.loads((output_folder / "signal_summary.json").read_text(encoding="utf-8"))
+    assert len(entries) == 2
+    assert entries[0]["candidate"]["id"] == "cand-0001"
+    assert entries[0]["change"] is None
+    assert entries[1]["change"] is None
 
-    md = (output_folder / "findings.md").read_text(encoding="utf-8")
+    md = (output_folder / "signal_summary.md").read_text(encoding="utf-8")
     assert "cand-0001" in md
     assert "cand-0002" in md
     # Both candidates should announce missing change spec
@@ -107,13 +107,13 @@ def test_joins_candidates_and_changes(
         json.dumps(_change("cand-0002")), encoding="utf-8"
     )
 
-    emit_findings(layout, output_folder)
+    emit_signal_summary(layout, output_folder)
 
-    findings = json.loads((output_folder / "findings.json").read_text(encoding="utf-8"))
-    assert findings[0]["change"]["mechanism"] == "UNIQUE-MECH-1"
-    assert findings[1]["change"]["candidate_ref"] == "cand-0002"
+    entries = json.loads((output_folder / "signal_summary.json").read_text(encoding="utf-8"))
+    assert entries[0]["change"]["mechanism"] == "UNIQUE-MECH-1"
+    assert entries[1]["change"]["candidate_ref"] == "cand-0002"
 
-    md = (output_folder / "findings.md").read_text(encoding="utf-8")
+    md = (output_folder / "signal_summary.md").read_text(encoding="utf-8")
     assert "UNIQUE-MECH-1" in md
 
 
@@ -131,13 +131,13 @@ def test_partial_changes_some_missing(
         json.dumps(_change("cand-0001")), encoding="utf-8"
     )
 
-    emit_findings(layout, output_folder)
+    emit_signal_summary(layout, output_folder)
 
-    findings = json.loads((output_folder / "findings.json").read_text(encoding="utf-8"))
-    assert findings[0]["change"] is not None
-    assert findings[1]["change"] is None
+    entries = json.loads((output_folder / "signal_summary.json").read_text(encoding="utf-8"))
+    assert entries[0]["change"] is not None
+    assert entries[1]["change"] is None
 
-    md = (output_folder / "findings.md").read_text(encoding="utf-8")
+    md = (output_folder / "signal_summary.md").read_text(encoding="utf-8")
     assert md.count("_(stage 04 not run for this candidate)_") == 1
 
 
@@ -148,16 +148,16 @@ def test_idempotent_overwrite(
     layout.stage_artifact("03", shape="single").write_text(
         json.dumps({"candidates": [_candidate("cand-0001")]}), encoding="utf-8"
     )
-    emit_findings(layout, output_folder)
-    first_md = (output_folder / "findings.md").read_text(encoding="utf-8")
+    emit_signal_summary(layout, output_folder)
+    first_md = (output_folder / "signal_summary.md").read_text(encoding="utf-8")
     assert "cand-0001" in first_md
     assert "cand-0002" not in first_md
 
     layout.stage_artifact("03", shape="single").write_text(
         json.dumps({"candidates": [_candidate("cand-0002")]}), encoding="utf-8"
     )
-    emit_findings(layout, output_folder)
-    second_md = (output_folder / "findings.md").read_text(encoding="utf-8")
+    emit_signal_summary(layout, output_folder)
+    second_md = (output_folder / "signal_summary.md").read_text(encoding="utf-8")
     assert "cand-0002" in second_md
     assert "cand-0001" not in second_md  # no leftover from first run
 
@@ -169,10 +169,10 @@ def test_handles_bare_array_candidates(
     layout.stage_artifact("03", shape="single").write_text(
         json.dumps([_candidate("cand-0001")]), encoding="utf-8"
     )
-    emit_findings(layout, output_folder)
-    findings = json.loads((output_folder / "findings.json").read_text(encoding="utf-8"))
-    assert len(findings) == 1
-    assert findings[0]["candidate"]["id"] == "cand-0001"
+    emit_signal_summary(layout, output_folder)
+    entries = json.loads((output_folder / "signal_summary.json").read_text(encoding="utf-8"))
+    assert len(entries) == 1
+    assert entries[0]["candidate"]["id"] == "cand-0001"
 
 
 def test_summary_table_renders_one_row_per_candidate(
@@ -186,8 +186,8 @@ def test_summary_table_renders_one_row_per_candidate(
     layout.stage_artifact("03", shape="single").write_text(
         json.dumps({"candidates": candidates}), encoding="utf-8"
     )
-    emit_findings(layout, output_folder)
-    md = (output_folder / "findings.md").read_text(encoding="utf-8")
+    emit_signal_summary(layout, output_folder)
+    md = (output_folder / "signal_summary.md").read_text(encoding="utf-8")
     # Summary section is a single 4-row Markdown table (header + sep + 3 entries)
     summary_lines = [
         line for line in md.splitlines()
@@ -209,12 +209,12 @@ def test_writes_to_external_folder(
     )
     external = tmp_path / "published" / "report"
     assert not external.exists()
-    emit_findings(layout, external)
-    assert (external / "findings.json").exists()
-    assert (external / "findings.md").exists()
+    emit_signal_summary(layout, external)
+    assert (external / "signal_summary.json").exists()
+    assert (external / "signal_summary.md").exists()
     # Nothing written into the run dir itself.
-    assert not (layout.root / "findings.json").exists()
-    assert not (layout.root / "findings.md").exists()
+    assert not (layout.root / "signal_summary.json").exists()
+    assert not (layout.root / "signal_summary.md").exists()
 
 
 def test_markdown_stamps_source_run_and_render_time(
@@ -224,8 +224,8 @@ def test_markdown_stamps_source_run_and_render_time(
     layout.stage_artifact("03", shape="single").write_text(
         json.dumps({"candidates": [_candidate("cand-0001")]}), encoding="utf-8"
     )
-    emit_findings(layout, output_folder)
-    md = (output_folder / "findings.md").read_text(encoding="utf-8")
+    emit_signal_summary(layout, output_folder)
+    md = (output_folder / "signal_summary.md").read_text(encoding="utf-8")
     assert "_Source run:_" in md
     assert str(layout.root) in md
     assert "_Rendered:_" in md
