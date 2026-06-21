@@ -34,8 +34,6 @@ anyone reading those directly.
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
-from pathlib import Path
 from typing import Iterable
 
 from spotlights_engine.schemas.anomaly import Anomaly
@@ -308,20 +306,20 @@ def _load_changes(layout: RunDirLayout) -> dict[str, Change]:
     return out
 
 
+_DEFAULT_SIGNAL_OBJECTIVE = "Address performance issues surfaced by telemetry signals"
+
+
 def _default_context(signals: Signals) -> SpotlightContext:
     """Synthesize a `SpotlightContext` for signal runs.
 
-    Signal pipeline today has no caller-supplied objective; the unified
+    Signal pipeline has no caller-supplied objective today; the unified
     schema requires one (`SpotlightContext.objective: str` with
-    `min_length=1`). Fabricate from the workload description so the report
-    is self-describing without lying about a missing input.
+    `min_length=1`). Use a fixed general objective for now — future runs
+    will supply real ones (e.g. "Reduce TTFT", "Improve median TPOT").
     """
-    workload_id = signals.workload.workload_id
-    description = (signals.workload.description or "").strip()
-    objective = description or f"Signal-driven discovery against workload {workload_id}"
     return SpotlightContext(
-        objective=objective,
-        workload_hints=[workload_id],
+        objective=_DEFAULT_SIGNAL_OBJECTIVE,
+        workload_hints=[signals.workload.workload_id],
         validation_plan=[],
     )
 
@@ -377,7 +375,3 @@ def emit_spotlight_report(
         encoding="utf-8",
     )
     return report
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")

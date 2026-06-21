@@ -453,8 +453,9 @@ def test_emit_works_with_partial_changes(tmp_path: Path) -> None:
 
 def test_emit_uses_default_context_when_none_supplied(tmp_path: Path) -> None:
     """Signal pipeline has no caller-supplied objective; the builder
-    fabricates one from the workload description so the closed
-    `SpotlightContext.objective` (`min_length=1`) stays valid."""
+    populates `SpotlightContext.objective` with a fixed general string
+    so the closed `min_length=1` constraint stays valid. Future runs
+    will supply real objectives like 'Reduce TTFT'."""
     layout = _layout(tmp_path)
     _write_artifacts(
         layout,
@@ -467,5 +468,7 @@ def test_emit_uses_default_context_when_none_supplied(tmp_path: Path) -> None:
         layout, run_id="r", started_at="2026-06-19T00:00:00+00:00"
     )
     assert report is not None
-    assert report.context.objective  # non-empty per the schema constraint
+    assert report.context.objective == (
+        "Address performance issues surfaced by telemetry signals"
+    )
     assert "wl-test" in report.context.workload_hints
