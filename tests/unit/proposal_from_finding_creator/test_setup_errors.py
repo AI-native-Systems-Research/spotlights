@@ -69,14 +69,12 @@ def test_candidates_must_be_in_discovered_state(
     repo: Path, artifacts: Path
 ) -> None:
     inp = make_input()
-    bad = inp.candidates.candidates[0].model_copy(
-        update={"state": "FINDING_PROPOSALS_CREATED"}
-    )
-    inp = inp.model_copy(
-        update={
-            "candidates": inp.candidates.model_copy(update={"candidates": [bad]})
-        }
-    )
+    cand_id = inp.candidates.candidates[0].id
     cfg = ProposalFromFindingConfig(repo_path=repo, artifacts_dir=artifacts)
     with pytest.raises(ProposalFromFindingValidationError):
-        create_proposals(inp, config=cfg, runner=fake_runner_factory())
+        create_proposals(
+            inp,
+            config=cfg,
+            runner=fake_runner_factory(),
+            candidate_states={cand_id: "FINDING_PROPOSALS_CREATED"},
+        )

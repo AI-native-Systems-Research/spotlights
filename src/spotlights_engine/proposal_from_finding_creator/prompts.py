@@ -5,6 +5,7 @@ from __future__ import annotations
 from spotlights_engine.schemas.candidate import Candidate
 from spotlights_engine.schemas.common import SpotlightContext
 from spotlights_engine.schemas.finding import Finding
+from spotlights_engine.utils.schema_compat import primary_file, primary_span
 
 
 def _format_list(values: list[str]) -> str:
@@ -23,10 +24,10 @@ def build_prompt(
 ) -> str:
     """Render the per-pair prompt.
 
-    The prompt asks the agent to either emit one `DeepResearchProposal` (in a
-    1-element JSON array) when the finding meaningfully supports a change to
-    the candidate, or to emit an empty array otherwise. The `--json-schema`
-    machinery enforces the array shape and pins `finding_id` / `created_by`.
+    The prompt asks the agent to either emit one `DeepResearchProposal` (in the
+    `proposals` array) when the finding meaningfully supports a change to the
+    candidate, or to emit an empty array otherwise. The `--json-schema`
+    machinery enforces the wrapper shape and pins `finding_id` / `created_by`.
     """
     return f"""You are running the Spotlights proposal_from_finding_creator pipeline step.
 Do not modify files. Do not ask questions. You may read repository files
@@ -43,10 +44,10 @@ Target module: {module_qualified_name}
 
 Candidate:
 - id: {candidate.id}
-- file: {candidate.file}
-- lines: {candidate.line_start}-{candidate.line_end}
-- symbol: {candidate.symbol}
-- kind: {candidate.kind}
+- file: {primary_file(candidate)}
+- lines: {primary_span(candidate).line_start}-{primary_span(candidate).line_end}
+- symbol: {primary_span(candidate).symbol}
+- kind: {primary_span(candidate).kind}
 - description: {candidate.description}
 - current_approach: {candidate.current_approach}
 - evolve_rationale: {candidate.evolve_rationale}
@@ -69,7 +70,8 @@ Validation plan:
 {_format_list(context.validation_plan)}
 
 Output rules:
-- Return a JSON array of length 0 or 1.
+- Return a JSON object with a single property `proposals` whose value is a
+  JSON array of length 0 or 1.
 - An empty array (`[]`) means: this finding does not meaningfully apply to
   this candidate. Prefer emptiness when the finding is only topically
   adjacent or restates the candidate's current approach.
@@ -82,7 +84,7 @@ Output rules:
   - proposal_rationale: why this finding plausibly improves this specific
     candidate, including which gap or constraint it addresses.
   - created_by: must be exactly "{created_by}".
-- Do not wrap the array in Markdown. Do not include explanatory prose.
+- Do not wrap the object in Markdown. Do not include explanatory prose.
 """.strip()
 
 

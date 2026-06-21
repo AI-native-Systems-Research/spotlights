@@ -12,7 +12,7 @@ Layout:
     candidate  — Candidate, Candidates, CandidateKind, CandidateState,
                  EstimatedImpact, CodeKind, CodeSpan, CodeLocation,
                  CandidateOrigin
-    pipeline   — Per-step DR I/O contracts + ModuleRun + SpotlightsManagerInput/Result;
+    pipeline   — Per-step DR I/O contracts + ModuleRun + SpotlightsManagerInput;
                  plus the cross-pipeline `SpotlightReport` and `RunInfo`.
 """
 
@@ -52,7 +52,6 @@ from spotlights_engine.schemas.pipeline import (
     RunInfo,
     SpotlightReport,
     SpotlightsManagerInput,
-    SpotlightsResult,
 )
 from spotlights_engine.schemas.project import File, Module, ProjectTree, Repository
 from spotlights_engine.schemas.proposal import Proposal, ProposalSource
@@ -97,6 +96,5 @@ __all__ = [
     "SpotlightContext",
     "SpotlightReport",
     "SpotlightsManagerInput",
-    "SpotlightsResult",
     "StepIssue",
 ]

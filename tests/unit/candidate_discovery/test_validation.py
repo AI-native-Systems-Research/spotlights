@@ -8,28 +8,46 @@ from unittest.mock import patch
 
 from spotlights_engine.candidate_discovery.validation import Validator
 from spotlights_engine.schemas.candidate import Candidate, Candidates
+from spotlights_engine.utils.schema_compat import make_location
 
 
 def _validator(repo_path: Path, module_path: str) -> Validator:
     return Validator(repo_path=repo_path, module_path=module_path)
 
 
-def _cand(**overrides) -> Candidate:
-    payload = {
-        "id": "cand-0001",
-        "file": "src/foo/x.py",
-        "line_start": 1,
-        "line_end": 10,
-        "symbol": "module.x.run",
-        "kind": "function",
-        "description": "does work",
-        "current_approach": "linear scan",
-        "evolve_rationale": "hot loop; oracle is test_x.py",
-        "estimated_impact": "medium",
-        "estimated_impact_explanation": "cuts request_latency_us; loop dominates the profile",
-    }
-    payload.update(overrides)
-    return Candidate.model_validate(payload)
+def _cand(
+    *,
+    id: str = "cand-mod-0001",
+    file: str = "src/foo/x.py",
+    line_start: int = 1,
+    line_end: int = 10,
+    symbol: str = "module.x.run",
+    kind: str = "function",
+    description: str = "does work",
+    current_approach: str = "linear scan",
+    evolve_rationale: str = "hot loop; oracle is test_x.py",
+    estimated_impact: str = "medium",
+    estimated_impact_explanation: str = "cuts request_latency_us; loop dominates the profile",
+) -> Candidate:
+    return Candidate(
+        id=id,
+        origin="code_agent",
+        locations=[
+            make_location(
+                file=file,
+                line_start=line_start,
+                line_end=line_end,
+                symbol=symbol,
+                kind=kind,
+            )
+        ],
+        description=description,
+        current_approach=current_approach,
+        evolve_rationale=evolve_rationale,
+        estimated_impact=estimated_impact,
+        estimated_impact_explanation=estimated_impact_explanation,
+        proposals=[],
+    )
 
 
 def _make_file(root: Path, rel: str, lines: int = 50) -> Path:
@@ -46,12 +64,12 @@ def test_drops_candidate_outside_module(tmp_path):
     parsed = Candidates(
         module_qualified_name="m",
         candidates=[
-            _cand(id="cand-0001", file="src/foo/x.py"),
-            _cand(id="cand-0002", file="src/bar/y.py"),
+            _cand(id="cand-mod-0001", file="src/foo/x.py"),
+            _cand(id="cand-mod-0002", file="src/bar/y.py"),
         ],
     )
     survivors, counters = v.run(parsed)
-    assert [c.id for c in survivors] == ["cand-0001"]
+    assert [c.id for c in survivors] == ["cand-mod-0001"]
     assert counters.dropped_outside_module == 1
 
 
@@ -61,12 +79,12 @@ def test_drops_absolute_path(tmp_path):
     parsed = Candidates(
         module_qualified_name="m",
         candidates=[
-            _cand(id="cand-0001", file="src/foo/x.py"),
-            _cand(id="cand-0002", file="/etc/passwd"),
+            _cand(id="cand-mod-0001", file="src/foo/x.py"),
+            _cand(id="cand-mod-0002", file="/etc/passwd"),
         ],
     )
     survivors, counters = v.run(parsed)
-    assert [c.id for c in survivors] == ["cand-0001"]
+    assert [c.id for c in survivors] == ["cand-mod-0001"]
     assert counters.dropped_outside_module == 1
 
 
@@ -93,12 +111,12 @@ def test_drops_missing_file(tmp_path):
     parsed = Candidates(
         module_qualified_name="m",
         candidates=[
-            _cand(id="cand-0001", file="src/foo/x.py"),
-            _cand(id="cand-0002", file="src/foo/missing.py"),
+            _cand(id="cand-mod-0001", file="src/foo/x.py"),
+            _cand(id="cand-mod-0002", file="src/foo/missing.py"),
         ],
     )
     survivors, counters = v.run(parsed)
-    assert [c.id for c in survivors] == ["cand-0001"]
+    assert [c.id for c in survivors] == ["cand-mod-0001"]
     assert counters.dropped_missing_file == 1
 
 
@@ -108,12 +126,12 @@ def test_drops_line_end_past_file_end(tmp_path):
     parsed = Candidates(
         module_qualified_name="m",
         candidates=[
-            _cand(id="cand-0001", file="src/foo/x.py", line_start=1, line_end=10),
-            _cand(id="cand-0002", file="src/foo/x.py", line_start=1, line_end=11),
+            _cand(id="cand-mod-0001", file="src/foo/x.py", line_start=1, line_end=10),
+            _cand(id="cand-mod-0002", file="src/foo/x.py", line_start=1, line_end=11),
         ],
     )
     survivors, counters = v.run(parsed)
-    assert [c.id for c in survivors] == ["cand-0001"]
+    assert [c.id for c in survivors] == ["cand-mod-0001"]
     assert counters.dropped_invalid_ranges == 1
 
 
@@ -123,8 +141,8 @@ def test_same_file_read_once(tmp_path):
     parsed = Candidates(
         module_qualified_name="m",
         candidates=[
-            _cand(id="cand-0001", file="src/foo/x.py", line_start=1, line_end=5),
-            _cand(id="cand-0002", file="src/foo/x.py", line_start=6, line_end=12),
+            _cand(id="cand-mod-0001", file="src/foo/x.py", line_start=1, line_end=5),
+            _cand(id="cand-mod-0002", file="src/foo/x.py", line_start=6, line_end=12),
         ],
     )
     real_open = Path.open
@@ -147,9 +165,9 @@ def test_counters_independent(tmp_path):
     parsed = Candidates(
         module_qualified_name="m",
         candidates=[
-            _cand(id="cand-0001", file="src/bar/y.py"),
-            _cand(id="cand-0002", file="src/foo/missing.py"),
-            _cand(id="cand-0003", file="src/foo/x.py", line_end=99, line_start=1),
+            _cand(id="cand-mod-0001", file="src/bar/y.py"),
+            _cand(id="cand-mod-0002", file="src/foo/missing.py"),
+            _cand(id="cand-mod-0003", file="src/foo/x.py", line_end=99, line_start=1),
         ],
     )
     survivors, counters = v.run(parsed)

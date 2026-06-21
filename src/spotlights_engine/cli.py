@@ -22,10 +22,18 @@ from pydantic import ValidationError
 from spotlights_engine.agent_proposals import AgentProposalsConfig
 from spotlights_engine.defaults import (
     DEFAULT_ARTIFACTS as _DEFAULT_ARTIFACTS,
+)
+from spotlights_engine.defaults import (
     DEFAULT_OUTPUT as _DEFAULT_OUTPUT,
+)
+from spotlights_engine.defaults import (
     DEFAULT_REPO as _DEFAULT_REPO,
 )
-from spotlights_engine.module_knowledge import KnowledgeBase, KnowledgeRecord, RetrieveRequest
+from spotlights_engine.module_knowledge import (
+    KnowledgeBase,
+    KnowledgeRecord,
+    RetrieveRequest,
+)
 from spotlights_engine.proposal_from_finding_creator import (
     ProposalFromFindingConfig,
 )
@@ -362,12 +370,22 @@ def _print_summary(result: SpotlightsManagerResult) -> None:
         n_cands = len(run.candidates.candidates) if run.candidates else 0
         n_findings = len(run.findings)
         n_proposals = (
-            sum(len(c.deep_research_proposals) for c in run.candidates.candidates)
+            sum(
+                1
+                for c in run.candidates.candidates
+                for p in c.proposals
+                if p.source == "research_finding"
+            )
             if run.candidates
             else 0
         )
         n_agent_proposals = (
-            sum(len(c.agent_proposals) for c in run.candidates.candidates)
+            sum(
+                1
+                for c in run.candidates.candidates
+                for p in c.proposals
+                if p.source == "agent_knowledge"
+            )
             if run.candidates
             else 0
         )

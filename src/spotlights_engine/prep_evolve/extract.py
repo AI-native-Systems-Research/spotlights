@@ -29,6 +29,11 @@ from spotlights_engine.schemas.candidate import Candidate
 from spotlights_engine.schemas.common import SpotlightContext
 from spotlights_engine.schemas.finding import Finding
 from spotlights_engine.schemas.project import Module
+from spotlights_engine.utils.schema_compat import (
+    primary_file,
+    primary_span,
+    proposals_from,
+)
 
 Scope = Literal["candidate", "module-main-files"]
 Direction = Literal["minimize", "maximize"]
@@ -129,12 +134,13 @@ def _candidate_target(
     validated: ValidatedCandidate,
     oracles: Oracles,
 ) -> Target:
+    span = primary_span(candidate)
     return Target(
         scope_kind="candidate",
         candidate_id=candidate.id,
-        file=candidate.file,
-        symbol=candidate.symbol,
-        kind=candidate.kind,
+        file=primary_file(candidate),
+        symbol=span.symbol,
+        kind=span.kind,
         line_start=validated.line_start,
         line_end=validated.line_end,
         source_excerpt_sha256=validated.source_excerpt_sha256,
@@ -175,10 +181,14 @@ def _ordered_findings(candidate: Candidate, findings: list[Finding]) -> list[Fin
     Findings are attached at the module level, so the same list is shared by
     every candidate in the module. Including all of them buries the few that
     actually motivated this candidate under unrelated module-wide research, so
-    we keep only the ones referenced by `candidate.deep_research_proposals`,
-    in proposal order.
+    we keep only the ones referenced by the candidate's research-backed
+    proposals, in proposal order.
     """
-    linked_ids = [p.finding_id for p in candidate.deep_research_proposals]
+    linked_ids = [
+        p.finding_ref_id
+        for p in proposals_from(candidate, "research_finding")
+        if p.finding_ref_id is not None
+    ]
     by_id = {f.finding_id: f for f in findings}
 
     ordered: list[Finding] = []
@@ -203,27 +213,33 @@ def _ordered_findings(candidate: Candidate, findings: list[Finding]) -> list[Fin
 
 
 def _proposals(candidate: Candidate) -> list[ProposalRef]:
+    """Map the candidate's unified `Proposal`s to spec `ProposalRef`s.
+
+    Research-backed proposals (`source == "research_finding"`) carry their
+    finding ref; agent-knowledge proposals (`source == "agent_knowledge"`) do
+    not. `ProposalRef.agent` is non-optional, so a missing `author` maps to "".
+    """
     refs: list[ProposalRef] = []
-    for drp in candidate.deep_research_proposals:
+    for p in proposals_from(candidate, "research_finding"):
         refs.append(
             ProposalRef(
                 origin="deep_research",
-                agent=drp.created_by,
-                title=drp.title,
-                detailed_description=drp.detailed_description,
-                finding_id=drp.finding_id,
-                rationale=drp.proposal_rationale,
+                agent=p.author or "",
+                title=p.title,
+                detailed_description=p.description,
+                finding_id=p.finding_ref_id,
+                rationale=p.rationale,
             )
         )
-    for ap in candidate.agent_proposals:
+    for p in proposals_from(candidate, "agent_knowledge"):
         refs.append(
             ProposalRef(
                 origin="agent",
-                agent=ap.agent_name,
-                title=ap.title,
-                detailed_description=ap.detailed_description,
+                agent=p.author or "",
+                title=p.title,
+                detailed_description=p.description,
                 finding_id=None,
-                rationale=ap.novelty_rationale,
+                rationale=p.rationale,
             )
         )
     return refs
@@ -249,7 +265,9 @@ def build_spec(
     oracles = _build_oracles(candidate, context)
     targets = [_candidate_target(candidate, validated, oracles)]
     if scope == "module-main-files":
-        targets.extend(_main_file_targets(module, exclude_file=candidate.file))
+        targets.extend(
+            _main_file_targets(module, exclude_file=primary_file(candidate))
+        )
 
     return EvolveSpec(
         run=RepoInfo(

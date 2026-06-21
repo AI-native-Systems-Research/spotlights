@@ -55,13 +55,22 @@ def test_agent_proposals_options_per_module_override(
     monkeypatch.setattr(
         orch,
         "research_module",
-        lambda inp, options=None: make_research_output(n_findings=1),
+        lambda inp, options=None, **_kw: make_research_output(n_findings=1),
     )
     patch_proposal_from_finding(monkeypatch, orch)
 
     seen_cfgs: list[AgentProposalsConfig] = []
 
-    def _capture(inp, *, config, claude_runner=None, codex_runner=None):
+    def _capture(
+        inp,
+        *,
+        config,
+        claude_runner=None,
+        codex_runner=None,
+        candidate_states=None,
+        proposal_id_start=1,
+        segment=None,
+    ):
         seen_cfgs.append(config)
         return make_agent_proposals_result(
             inp.candidates,

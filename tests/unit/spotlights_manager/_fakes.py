@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from spotlights_engine.agent_proposals.api import AgentProposalsResult
 from spotlights_engine.candidate_discovery.api import (
@@ -24,13 +23,14 @@ from spotlights_engine.schemas.pipeline import (
     ProposalFromFindingCreatorOutput,
     SpotlightsManagerInput,
 )
-from spotlights_engine.schemas.proposals import DeepResearchProposal
 from spotlights_engine.schemas.project import (
     File,
     Module,
     ProjectTree,
     Repository,
 )
+from spotlights_engine.utils.id_helpers import slug_for
+from spotlights_engine.utils.schema_compat import make_location
 
 
 def make_tree() -> ProjectTree:
@@ -73,34 +73,43 @@ def make_tree() -> ProjectTree:
     )
 
 
-def make_candidate(idx: int = 0) -> Candidate:
+def make_candidate(idx: int = 0, *, segment: str = "v1_kv_offload") -> Candidate:
     n = idx + 1
     return Candidate(
-        id=f"cand-{n:04d}",
-        file="src/v1/kv_offload/core.py",
-        line_start=1,
-        line_end=10,
-        symbol=f"hot_{n}",
-        kind="function",
+        id=f"cand-{segment}-{n:04d}",
+        origin="code_agent",
+        locations=[
+            make_location(
+                file="src/v1/kv_offload/core.py",
+                line_start=1,
+                line_end=10,
+                symbol=f"hot_{n}",
+                kind="function",
+            )
+        ],
         description="x",
         current_approach="x",
         evolve_rationale="x",
         estimated_impact="medium",
         estimated_impact_explanation="x",
+        proposals=[],
     )
 
 
 def make_candidates(qn: str, n: int = 1) -> Candidates:
+    # Discovery now mints ids prefixed with the producing module's slug (D3), so
+    # a fake `discover` that returns these must do the same to mirror reality.
+    segment = slug_for(qn)
     return Candidates(
         module_qualified_name=qn,
-        candidates=[make_candidate(i) for i in range(n)],
+        candidates=[make_candidate(i, segment=segment) for i in range(n)],
     )
 
 
-def make_finding(idx: int = 0) -> Finding:
+def make_finding(idx: int = 0, *, segment: str = "v1_kv_offload") -> Finding:
     n = idx + 1
     return Finding(
-        finding_id=f"find-{n:04d}",
+        finding_id=f"find-{segment}-{n:04d}",
         title="t",
         url="https://example.com",
         source_type="paper",
@@ -109,10 +118,13 @@ def make_finding(idx: int = 0) -> Finding:
 
 
 def make_research_output(
-    n_findings: int = 1, issues: list[StepIssue] | None = None
+    n_findings: int = 1,
+    issues: list[StepIssue] | None = None,
+    *,
+    segment: str = "v1_kv_offload",
 ) -> ModuleDeepResearchOutput:
     return ModuleDeepResearchOutput(
-        findings=[make_finding(i) for i in range(n_findings)],
+        findings=[make_finding(i, segment=segment) for i in range(n_findings)],
         issues=list(issues or []),
     )
 
@@ -156,15 +168,13 @@ def make_discovery_result(qn: str, n_candidates: int = 1) -> DiscoveryResult:
 
 
 def _advance_candidate(c: Candidate) -> Candidate:
-    """Round-trip a step-2 candidate forward to the post-step-4 state with
-    no synthesized proposals."""
-    return c.model_copy(
-        update={
-            "state": "FINDING_PROPOSALS_CREATED",
-            "deep_research_proposals": [],
-            "agent_proposals": list(c.agent_proposals),
-        }
-    )
+    """Round-trip a step-2 candidate forward to the post-step-4 shape with
+    no synthesized proposals.
+
+    The new `Candidate` carries no `state`; pipeline progress is tracked in the
+    manager's parallel state map (decision D2). A step-4 run that mints no
+    research-backed proposals therefore returns the candidate unchanged."""
+    return c.model_copy(deep=True)
 
 
 def make_proposal_from_finding_result(
@@ -195,15 +205,12 @@ def make_proposal_from_finding_result(
 
 
 def _advance_candidate_to_agent_proposals(c: Candidate) -> Candidate:
-    """Advance a step-4-output candidate to `AGENT_PROPOSALS_CREATED` with
-    no agent proposals."""
-    return c.model_copy(
-        update={
-            "state": "AGENT_PROPOSALS_CREATED",
-            "deep_research_proposals": list(c.deep_research_proposals),
-            "agent_proposals": [],
-        }
-    )
+    """Advance a step-4-output candidate to the post-step-5 shape with no
+    agent proposals.
+
+    As with `_advance_candidate`, the schema `Candidate` has no `state` and a
+    step-5 run that mints no agent-knowledge proposals returns it unchanged."""
+    return c.model_copy(deep=True)
 
 
 def make_agent_proposals_result(
@@ -235,7 +242,16 @@ def patch_agent_proposals(monkeypatch, orch_module) -> None:
     synchronous fake that advances every candidate to `AGENT_PROPOSALS_CREATED`
     with no proposals and no issues."""
 
-    def _fake(inp, *, config, claude_runner=None, codex_runner=None):
+    def _fake(
+        inp,
+        *,
+        config,
+        claude_runner=None,
+        codex_runner=None,
+        candidate_states=None,
+        proposal_id_start=1,
+        segment=None,
+    ):
         return make_agent_proposals_result(inp.candidates)
 
     monkeypatch.setattr(
@@ -248,7 +264,15 @@ def patch_proposal_from_finding(monkeypatch, orch_module) -> None:
     synchronous fake that mirrors the input shape — used by every existing
     manager test that wants to drive step 4 without invoking Claude."""
 
-    def _fake(inp, *, config, runner=None):
+    def _fake(
+        inp,
+        *,
+        config,
+        runner=None,
+        candidate_states=None,
+        proposal_id_start=1,
+        segment=None,
+    ):
         cands = inp.candidates
         advanced = Candidates(
             module_qualified_name=cands.module_qualified_name,

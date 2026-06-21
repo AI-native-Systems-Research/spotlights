@@ -9,20 +9,23 @@ from spotlights_engine.agent_proposals.prompts import (
 )
 from spotlights_engine.schemas.common import SpotlightContext
 from spotlights_engine.schemas.project import Module, ProjectTree, Repository
-from spotlights_engine.schemas.proposals import AgentProposal, DeepResearchProposal
+from spotlights_engine.schemas.proposal import Proposal
+from spotlights_engine.schemas.proposals import AgentProposal
 from tests.unit.agent_proposals._fakes import make_candidate, make_project_tree
 
 
 def test_claude_prompt_includes_candidate_research_context_and_agent_name() -> None:
     candidate = make_candidate().model_copy(
         update={
-            "deep_research_proposals": [
-                DeepResearchProposal(
+            "proposals": [
+                Proposal(
+                    id="prop-v1_kv_offload-0001",
+                    source="research_finding",
+                    finding_ref_id="find-v1_kv_offload-0001",
+                    author="proposal_from_finding_creator",
                     title="Batch eviction",
-                    detailed_description="Batch evictions during decode.",
-                    finding_id="find-0001",
-                    proposal_rationale="Research-backed rationale.",
-                    created_by="proposal_from_finding_creator",
+                    description="Batch evictions during decode.",
+                    rationale="Research-backed rationale.",
                 )
             ]
         }
@@ -43,7 +46,7 @@ def test_claude_prompt_includes_candidate_research_context_and_agent_name() -> N
     assert "agent A" in prompt
     assert "Target module: v1/kv_offload" in prompt
     assert "parents: v1" in prompt
-    assert "finding_id=find-0001" in prompt
+    assert "finding_id=find-v1_kv_offload-0001" in prompt
     assert "Batch eviction" in prompt
     assert "Objective: reduce latency" in prompt
     assert "- decode-heavy" in prompt

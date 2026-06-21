@@ -38,7 +38,7 @@ def test_deep_research_options_per_module_override(tmp_path: Path, monkeypatch) 
 
     seen_options: list[CodexExecOptions] = []
 
-    def _research(inp, options=None):
+    def _research(inp, options=None, **_kw):
         seen_options.append(options)
         return make_research_output()
 
@@ -97,7 +97,7 @@ def test_deep_research_options_default_when_caller_none(
     monkeypatch.setattr(
         orch,
         "research_module",
-        lambda inp, options=None: (seen.append(options), make_research_output())[1],
+        lambda inp, options=None, **_kw: (seen.append(options), make_research_output())[1],
     )
     patch_proposal_from_finding(monkeypatch, orch)
     patch_agent_proposals(monkeypatch, orch)

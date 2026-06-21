@@ -42,6 +42,7 @@ from spotlights_engine.prep_evolve.validate_target import (
     validate_candidate_target,
     validate_scope_file,
 )
+from spotlights_engine.utils.schema_compat import primary_file
 
 _BUNDLE_SEGMENT_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
@@ -167,7 +168,7 @@ def prep_evolve(input: PrepEvolveInput, config: PrepEvolveConfig | None = None) 
     for t_file in (
         {mf.path for mf in module.main_files} if input.scope == "module-main-files" else set()
     ):
-        if t_file != candidate.file:
+        if t_file != primary_file(candidate):
             validate_scope_file(repo_path, t_file)
 
     revision = capture_revision(repo_path, captured_at)

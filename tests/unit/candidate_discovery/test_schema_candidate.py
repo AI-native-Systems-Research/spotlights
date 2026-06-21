@@ -8,11 +8,19 @@ import pytest
 from pydantic import ValidationError
 
 from spotlights_engine.schemas.candidate import Candidate, Candidates
+from spotlights_engine.utils.schema_compat import make_location
+
+# Flat span fields are wrapped into the nested `locations[].spans[]` shape; the
+# rest map straight onto the new `Candidate`. `_MISSING` lets a test drop a
+# field entirely (e.g. to assert it is required) by passing `field=_MISSING`.
+_MISSING = object()
+
+_SPAN_FIELDS = ("file", "line_start", "line_end", "symbol", "kind")
 
 
 def _valid_candidate(**overrides):
     payload = {
-        "id": "cand-0001",
+        "id": "cand-mod-0001",
         "file": "src/foo.py",
         "line_start": 1,
         "line_end": 10,
@@ -22,30 +30,61 @@ def _valid_candidate(**overrides):
         "current_approach": "Linear scan over the request body.",
         "evolve_rationale": "Hot loop with simple structure; oracle is unit tests in test_foo.py.",
         "estimated_impact": "high",
-        "estimated_impact_explanation": "Reduces request_latency_ms; the loop dominates the profile and re-allocates per item.",
+        "estimated_impact_explanation": (
+            "Reduces request_latency_ms; the loop dominates the profile and "
+            "re-allocates per item."
+        ),
     }
     payload.update(overrides)
+    payload = {k: v for k, v in payload.items() if v is not _MISSING}
+
+    span_kwargs = {k: payload.pop(k) for k in _SPAN_FIELDS if k in payload}
+    if span_kwargs:
+        payload["locations"] = [make_location(**span_kwargs)]
+    payload.setdefault("origin", "code_agent")
     return payload
 
 
-def test_id_pattern_accepts_four_digit_zero_padded():
-    Candidate.model_validate(_valid_candidate(id="cand-0001"))
+@pytest.mark.parametrize(
+    "good_id",
+    [
+        "cand-mod-0001",
+        "cand-v1_kv_offload-0010",
+        "cand-a-b_c-0001",  # slug containing '-'
+        "cand-auth_login.s2-0001",  # session sub-segment
+    ],
+)
+def test_id_pattern_accepts_module_prefixed(good_id):
+    Candidate.model_validate(_valid_candidate(id=good_id))
 
 
-@pytest.mark.parametrize("bad_id", ["cand-1", "cand-00001", "candidate-0001", "CAND-0001", "cand-001a"])
+@pytest.mark.parametrize(
+    "bad_id",
+    [
+        "cand-0001",  # bare local form is no longer valid in the schema
+        "cand--0001",  # empty segment
+        "cand-mod-1",  # counter not four digits
+        "cand-mod-00001",
+        "candidate-mod-0001",
+        "CAND-mod-0001",
+        "cand-mod-001a",
+    ],
+)
 def test_id_pattern_rejects(bad_id):
     with pytest.raises(ValidationError):
         Candidate.model_validate(_valid_candidate(id=bad_id))
 
 
 def test_line_end_must_be_ge_line_start():
+    # The range invariant now lives on `CodeSpan` (built here via `make_location`).
     with pytest.raises(ValidationError, match="line_end must be >= line_start"):
-        Candidate.model_validate(_valid_candidate(line_start=10, line_end=9))
+        _valid_candidate(line_start=10, line_end=9)
 
 
 def test_line_end_equal_to_line_start_is_ok():
     c = Candidate.model_validate(_valid_candidate(line_start=10, line_end=10))
-    assert c.line_start == c.line_end == 10
+    span = c.locations[0].spans[0]
+    assert span.line_start == span.line_end == 10
 
 
 def test_line_start_must_be_ge_1():
@@ -128,28 +167,18 @@ def test_candidates_list_can_be_empty():
     assert obj.module_qualified_name == "v1/foo"
 
 
-def test_candidate_default_state_and_empty_attachments():
-    """Per architecture, a freshly discovered candidate is at `DISCOVERED`
-    with empty proposal lists; later steps populate these fields."""
+def test_candidate_default_empty_proposals():
+    """Per architecture, a freshly discovered candidate carries an empty
+    proposal list; later steps populate it. State now lives in a
+    manager-provided map, not on the candidate."""
     c = Candidate.model_validate(_valid_candidate())
-    assert c.state == "DISCOVERED"
-    assert c.deep_research_proposals == []
-    assert c.agent_proposals == []
+    assert c.proposals == []
 
 
-def test_candidate_state_accepts_pipeline_progression():
-    for state in (
-        "DISCOVERED",
-        "FINDING_PROPOSALS_CREATED",
-        "AGENT_PROPOSALS_CREATED",
-    ):
-        c = Candidate.model_validate(_valid_candidate(state=state))
-        assert c.state == state
-
-
-def test_candidate_rejects_unknown_state():
+def test_candidate_rejects_legacy_state_field():
+    """`state` was removed from `Candidate` (extra='forbid')."""
     with pytest.raises(ValidationError):
-        Candidate.model_validate(_valid_candidate(state="FINDINGS_MAPPED"))
+        Candidate.model_validate(_valid_candidate(state="DISCOVERED"))
 
 
 def test_candidates_model_json_schema_round_trips_through_json_dumps():

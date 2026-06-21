@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import hashlib
+from typing import TYPE_CHECKING
 
 from spotlights_engine.module_knowledge.schemas import KnowledgeRecord, Provenance, SourceRef
 from spotlights_engine.schemas.candidate import Candidate, Candidates
 from spotlights_engine.schemas.finding import Finding
-from spotlights_engine.schemas.pipeline import ModuleDeepResearchOutput, ModuleRun, SpotlightsResult
+from spotlights_engine.schemas.pipeline import ModuleDeepResearchOutput, ModuleRun
 from spotlights_engine.schemas.project import Module, ProjectTree
 from spotlights_engine.schemas.proposals import AgentProposal, DeepResearchProposal
+
+if TYPE_CHECKING:
+    from spotlights_engine.spotlights_manager.api import SpotlightsManagerResult
 
 
 def records_from_findings(
@@ -331,8 +335,10 @@ def records_from_module_run(module_run: ModuleRun) -> list[KnowledgeRecord]:
     return records
 
 
-def records_from_spotlights_result(result: SpotlightsResult) -> list[KnowledgeRecord]:
-    """Convert all module runs in a `SpotlightsResult` into knowledge records."""
+def records_from_spotlights_result(
+    result: SpotlightsManagerResult,
+) -> list[KnowledgeRecord]:
+    """Convert all module runs in a `SpotlightsManagerResult` into records."""
     records: list[KnowledgeRecord] = []
     for module_run in result.module_runs.values():
         records.extend(records_from_module_run(module_run))

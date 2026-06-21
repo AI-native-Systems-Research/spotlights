@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import json
 
-from spotlights_engine.schemas.pipeline import (
-    ModuleDeepResearchInput,
-    ModuleDeepResearchOutput,
+from spotlights_engine.module_deep_research.validation import (
+    AgentModuleDeepResearchOutput,
 )
+from spotlights_engine.schemas.pipeline import ModuleDeepResearchInput
 from spotlights_engine.schemas.project import File, Module, Repository
 
 
@@ -49,7 +49,11 @@ def render_module_deep_research_prompt(
     module: Module,
 ) -> str:
     """Render the survey prompt from repository, target module, and context fields."""
-    schema_json = json.dumps(ModuleDeepResearchOutput.model_json_schema(), indent=2)
+    # Show the agent the bare-id wire schema (`find-NNNN`); the manager prefixes
+    # finding ids with the module slug after parsing (decision D3, option A).
+    schema_json = json.dumps(
+        AgentModuleDeepResearchOutput.model_json_schema(), indent=2
+    )
     repo_path = str(request.repo_path)
     return f"""You are running the Spotlights module_deep_research pipeline step.
 Do not modify files. Do not ask questions.

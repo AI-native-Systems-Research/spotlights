@@ -15,7 +15,6 @@ from spotlights_engine.spotlights_manager import (
 )
 from spotlights_engine.spotlights_manager import orchestrator as orch
 from tests.unit.spotlights_manager._fakes import (
-    make_candidates,
     make_discovery_result,
     make_extractor_result,
     make_input,
@@ -59,7 +58,7 @@ def test_succeeded_happy_path(monkeypatch, repo: Path, artifacts: Path) -> None:
     monkeypatch.setattr(
         orch,
         "research_module",
-        lambda inp, options=None: make_research_output(n_findings=2),
+        lambda inp, options=None, **_kw: make_research_output(n_findings=2),
     )
     patch_proposal_from_finding(monkeypatch, orch)
     patch_agent_proposals(monkeypatch, orch)
@@ -90,7 +89,7 @@ def test_skipped_when_no_candidates(monkeypatch, repo: Path, artifacts: Path) ->
 
     research_called = {"n": 0}
 
-    def _no_research(inp, options=None):  # pragma: no cover - asserted not called
+    def _no_research(inp, options=None, **_kw):  # pragma: no cover - asserted not called
         research_called["n"] += 1
         return make_research_output()
 
@@ -120,7 +119,7 @@ def test_degraded_on_recoverable_issue(monkeypatch, repo: Path, artifacts: Path)
     monkeypatch.setattr(
         orch,
         "research_module",
-        lambda inp, options=None: make_research_output(
+        lambda inp, options=None, **_kw: make_research_output(
             n_findings=1,
             issues=[
                 StepIssue(
@@ -160,10 +159,18 @@ def test_degraded_on_step4_recoverable_issue(
     monkeypatch.setattr(
         orch,
         "research_module",
-        lambda inp, options=None: make_research_output(n_findings=1),
+        lambda inp, options=None, **_kw: make_research_output(n_findings=1),
     )
 
-    def _fake_step4(inp, *, config, runner=None):
+    def _fake_step4(
+        inp,
+        *,
+        config,
+        runner=None,
+        candidate_states=None,
+        proposal_id_start=1,
+        segment=None,
+    ):
         from spotlights_engine.proposal_from_finding_creator.api import (
             ProposalFromFindingCreatorResult,
         )
@@ -174,17 +181,11 @@ def test_degraded_on_step4_recoverable_issue(
         )
 
         cands = inp.candidates
+        # New-shape candidates carry no `state`; a step-4 run minting no
+        # research-backed proposals returns them unchanged.
         advanced = Candidates(
             module_qualified_name=cands.module_qualified_name,
-            candidates=[
-                c.model_copy(
-                    update={
-                        "state": "FINDING_PROPOSALS_CREATED",
-                        "deep_research_proposals": [],
-                    }
-                )
-                for c in cands.candidates
-            ],
+            candidates=[c.model_copy(deep=True) for c in cands.candidates],
         )
         return ProposalFromFindingCreatorResult(
             output=ProposalFromFindingCreatorOutput(
@@ -230,7 +231,7 @@ def test_failed_on_unrecoverable_issue(monkeypatch, repo: Path, artifacts: Path)
     monkeypatch.setattr(
         orch,
         "research_module",
-        lambda inp, options=None: make_research_output(
+        lambda inp, options=None, **_kw: make_research_output(
             n_findings=0,
             issues=[
                 StepIssue(
@@ -297,7 +298,7 @@ def test_fail_fast_writes_retryable_checkpoint_for_not_started_module(
     monkeypatch.setattr(
         orch,
         "research_module",
-        lambda inp, options=None: make_research_output(n_findings=1),
+        lambda inp, options=None, **_kw: make_research_output(n_findings=1),
     )
 
     cfg = SpotlightsManagerConfig(
@@ -345,7 +346,7 @@ def test_fail_fast_cancels_after_unhandled_task_exception(
     monkeypatch.setattr(
         orch,
         "research_module",
-        lambda inp, options=None: make_research_output(n_findings=1),
+        lambda inp, options=None, **_kw: make_research_output(n_findings=1),
     )
 
     original_write_checkpoint = orch.P.write_checkpoint

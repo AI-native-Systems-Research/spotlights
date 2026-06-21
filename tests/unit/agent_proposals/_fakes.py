@@ -13,25 +13,29 @@ from spotlights_engine.schemas.project import (
     ProjectTree,
     Repository,
 )
+from spotlights_engine.utils.schema_compat import make_location
 
 
 def make_candidate(idx: int = 0) -> Candidate:
     n = idx + 1
     return Candidate(
-        id=f"cand-{n:04d}",
-        file="src/v1/kv_offload/core.py",
-        line_start=1,
-        line_end=10,
-        symbol=f"hot_{n}",
-        kind="function",
+        id=f"cand-v1_kv_offload-{n:04d}",
+        origin="code_agent",
+        locations=[
+            make_location(
+                file="src/v1/kv_offload/core.py",
+                line_start=1,
+                line_end=10,
+                symbol=f"hot_{n}",
+                kind="function",
+            )
+        ],
         description="x",
         current_approach="x",
         evolve_rationale="x",
         estimated_impact="medium",
         estimated_impact_explanation="x",
-        state="FINDING_PROPOSALS_CREATED",
-        deep_research_proposals=[],
-        agent_proposals=[],
+        proposals=[],
     )
 
 
