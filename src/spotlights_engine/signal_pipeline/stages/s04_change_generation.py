@@ -21,8 +21,11 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from spotlights_engine.schemas.candidate import Candidate
-from spotlights_engine.signal_pipeline.schemas import Change, ChangeType
+from spotlights_engine.signal_pipeline.schemas import (
+    CandidateDraft,
+    Change,
+    ChangeType,
+)
 from spotlights_engine.signal_pipeline.stages._types import StageContext, StageSpec
 
 
@@ -65,12 +68,12 @@ def parse_item(raw: Any) -> Change:
 def ids_from_upstream(candidates: Any) -> list[str]:
     if not isinstance(candidates, list):
         raise TypeError(
-            f"upstream of stage 04 must be list[Candidate]; got {type(candidates).__name__}"
+            f"upstream of stage 04 must be list[CandidateDraft]; got {type(candidates).__name__}"
         )
-    return [c.id if isinstance(c, Candidate) else c["id"] for c in candidates]
+    return [c.id if isinstance(c, CandidateDraft) else c["id"] for c in candidates]
 
 
-def _build_prompt(candidate: Candidate, subject_root: Path) -> str:
+def _build_prompt(candidate: CandidateDraft, subject_root: Path) -> str:
     template = _PROMPT_TEMPLATE_PATH.read_text(encoding="utf-8")
     return template.format(
         candidate_json=candidate.model_dump_json(indent=2),
@@ -79,7 +82,7 @@ def _build_prompt(candidate: Candidate, subject_root: Path) -> str:
 
 
 def _generate_change(
-    candidate: Candidate,
+    candidate: CandidateDraft,
     subject_root: Path,
     log_dir: Path,
     on_event=None,
@@ -125,8 +128,8 @@ def _generate_change(
 
 
 def run_one(ctx: StageContext, id_: str) -> Change:
-    # Upstream is `list[Candidate]` (parsed by s03's parse_artifact).
-    candidates: list[Candidate] = ctx.upstream["03"]
+    # Upstream is `list[CandidateDraft]` (parsed by s03's parse_artifact).
+    candidates: list[CandidateDraft] = ctx.upstream["03"]
     by_id = {c.id: c for c in candidates}
     candidate = by_id.get(id_)
     if candidate is None:

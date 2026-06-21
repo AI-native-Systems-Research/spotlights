@@ -12,13 +12,12 @@ from pathlib import Path
 
 import pytest
 
-from spotlights_engine.schemas.candidate import Candidate
 from spotlights_engine.signal_pipeline import (
     SignalPipelineInput,
     StageSelection,
     run_pipeline,
 )
-from spotlights_engine.signal_pipeline.schemas import Change
+from spotlights_engine.signal_pipeline.schemas import CandidateDraft, Change
 from spotlights_engine.signal_pipeline.stages import s04_change_generation
 from spotlights_engine.signal_pipeline.stages.s04_change_generation import (
     ChangeGenerationError,
@@ -26,8 +25,8 @@ from spotlights_engine.signal_pipeline.stages.s04_change_generation import (
 )
 
 
-def _candidate(id_: str = "cand-0001") -> Candidate:
-    return Candidate(
+def _candidate(id_: str = "cand-0001") -> CandidateDraft:
+    return CandidateDraft(
         id=id_,
         file="m/x.py",
         line_start=10,

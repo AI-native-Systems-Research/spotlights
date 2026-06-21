@@ -23,9 +23,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from spotlights_engine.schemas.candidate import Candidate
 from spotlights_engine.schemas.project import ProjectTree
-from spotlights_engine.signal_pipeline.schemas import Signals
+from spotlights_engine.signal_pipeline.schemas import CandidateDraft, Signals
 from spotlights_engine.signal_pipeline.stages._types import StageContext, StageSpec
 
 
@@ -41,26 +40,31 @@ _TIMEOUT_S = 1800
 class CandidateList(BaseModel):
     """Output envelope for stage 03's claude session.
 
-    Wrapping `list[Candidate]` in a closed object satisfies claude's
+    Wrapping `list[CandidateDraft]` in a closed object satisfies claude's
     structured-output requirement (`additionalProperties: false` at every
     object level). The runner unwraps `.candidates` before persisting.
+
+    `CandidateDraft` is the pipeline-internal flat-shape candidate; the
+    runner translates a list of these into the unified `Candidate`
+    (with `locations`/`module_qualified_name`/`origin`) when building the
+    `SpotlightReport` at the end of the run.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    candidates: list[Candidate] = Field(default_factory=list)
+    candidates: list[CandidateDraft] = Field(default_factory=list)
 
 
 class CandidateGenerationError(RuntimeError):
     pass
 
 
-def parse_artifact(raw: Any) -> list[Candidate]:
+def parse_artifact(raw: Any) -> list[CandidateDraft]:
     if not isinstance(raw, list):
         raise TypeError(
-            f"03_candidates.json must be a JSON list of Candidates; got {type(raw).__name__}"
+            f"03_candidates.json must be a JSON list of CandidateDraft; got {type(raw).__name__}"
         )
-    return [Candidate.model_validate(item) for item in raw]
+    return [CandidateDraft.model_validate(item) for item in raw]
 
 
 def _build_prompt(
@@ -99,7 +103,7 @@ def _run_candidate_generation(
     on_event=None,
     model: str | None = None,
     max_candidates: int | None = None,
-) -> list[Candidate]:
+) -> list[CandidateDraft]:
     """Real path. Test-monkeypatch seam.
 
     Imports `claude_subprocess` lazily so the package can be imported
@@ -133,7 +137,7 @@ def _run_candidate_generation(
     return envelope.candidates
 
 
-def run(ctx: StageContext) -> list[Candidate]:
+def run(ctx: StageContext) -> list[CandidateDraft]:
     signals = ctx.upstream["01"]
     project_tree = ctx.upstream["02"]
     subject_root = ctx.signal_input.subject_root.resolve()

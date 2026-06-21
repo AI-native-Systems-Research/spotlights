@@ -1,16 +1,23 @@
-"""Roll up stage 03 candidates + stage 04 change specs into `findings.{json,md}`.
+"""Roll up stage 03 candidates + stage 04 change specs into `signal_summary.{json,md}`.
 
 Called best-effort by the runner at the end of a pipeline invocation. Writes
 two artifacts to the run's output folder (`--output-folder`, defaulting to
 `<artifacts-dir>/report/`):
 
-- `findings.json` — single JSON array, one entry per candidate, each
+- `signal_summary.json` — single JSON array, one entry per candidate, each
   shaped `{"candidate": <stage 03 candidate>, "change": <stage 04 spec>|None}`.
-  Stable, machine-friendly join of the two stages.
-- `findings.md` — same data, rendered as a summary table + per-candidate
+  Stable, machine-friendly join of the two stages. Distinct from the unified
+  `spotlight_report.json` (`SpotlightReport`) the runner also writes — this
+  one keeps the per-stage internal shapes for legacy consumers.
+- `signal_summary.md` — same data, rendered as a summary table + per-candidate
   sections suitable for sharing with humans. Stamped with the source
   run-dir name + UTC timestamp so a stale render against a different run
   is obvious at a glance.
+
+Naming note: prior name was `findings.{json,md}` / `emit_findings`. Renamed
+to avoid collision with the unified `Finding` schema type, which is a
+DR-pipeline literature-citation record — completely unrelated to this
+rollup's content.
 
 Idempotent: every call overwrites both files. No-ops if `03_candidates.json`
 is missing (e.g. the run was scoped to stages 01-02). Stage 04 is optional
@@ -34,11 +41,11 @@ from spotlights_engine.signal_pipeline.layout import (
 )
 
 
-__all__ = ["emit_findings"]
+__all__ = ["emit_signal_summary"]
 
 
-def emit_findings(layout: RunDirLayout, output_folder: Path) -> None:
-    """Write `findings.json` + `findings.md` joining 03 candidates with 04 changes.
+def emit_signal_summary(layout: RunDirLayout, output_folder: Path) -> None:
+    """Write `signal_summary.json` + `signal_summary.md` joining 03 candidates with 04 changes.
 
     Idempotent — overwrites on every invocation. No-ops if 03_candidates.json
     is missing. Creates `output_folder` if it doesn't exist.
@@ -53,7 +60,7 @@ def emit_findings(layout: RunDirLayout, output_folder: Path) -> None:
     )
 
     changes_dir = layout.root / "04_changes"
-    findings: list[dict[str, Any]] = []
+    entries: list[dict[str, Any]] = []
     for c in candidates:
         cid = c.get("id")
         change_path = changes_dir / f"{cid}.json"
@@ -62,27 +69,27 @@ def emit_findings(layout: RunDirLayout, output_folder: Path) -> None:
             if change_path.exists()
             else None
         )
-        findings.append({"candidate": c, "change": change})
+        entries.append({"candidate": c, "change": change})
 
     output_folder.mkdir(parents=True, exist_ok=True)
-    atomic_write_json(output_folder / "findings.json", findings)
+    atomic_write_json(output_folder / "signal_summary.json", entries)
     atomic_write_text(
-        output_folder / "findings.md", _render_markdown(layout, findings)
+        output_folder / "signal_summary.md", _render_markdown(layout, entries)
     )
 
 
-def _render_markdown(layout: RunDirLayout, findings: list[dict[str, Any]]) -> str:
+def _render_markdown(layout: RunDirLayout, entries: list[dict[str, Any]]) -> str:
     md: list[str] = []
-    md.append(f"# Findings — `{layout.root.name}`\n")
+    md.append(f"# Signal-pipeline summary — `{layout.root.name}`\n")
     rendered_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     md.append(
         f"_Source run:_ `{layout.root}`  \n_Rendered:_ {rendered_at}\n"
     )
-    md.append(f"_{len(findings)} candidates_ from this pipeline run.\n")
+    md.append(f"_{len(entries)} candidates_ from this pipeline run.\n")
     md.append("## Summary\n")
     md.append("| ID | Impact | File:Lines | Symbol | One-line |")
     md.append("|---|---|---|---|---|")
-    for f in findings:
+    for f in entries:
         c = f["candidate"]
         symbol = c.get("symbol", "?")
         kind = c.get("kind", "")
@@ -98,7 +105,7 @@ def _render_markdown(layout: RunDirLayout, findings: list[dict[str, Any]]) -> st
         )
     md.append("")
 
-    for f in findings:
+    for f in entries:
         c = f["candidate"]
         chg = f["change"]
         md.append(f"## {c.get('id')} — `{c.get('symbol', '?')}`")
