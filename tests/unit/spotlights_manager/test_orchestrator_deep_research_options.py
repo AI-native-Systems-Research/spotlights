@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from spotlights_engine.module_deep_research.antigravity_exec import AntigravityExecOptions
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
 from spotlights_engine.spotlights_manager import (
     ModuleFilter,
@@ -38,7 +39,7 @@ def test_deep_research_options_per_module_override(tmp_path: Path, monkeypatch) 
 
     seen_options: list[CodexExecOptions] = []
 
-    def _research(inp, options=None):
+    def _research(inp, options=None, **kwargs):
         seen_options.append(options)
         return make_research_output()
 
@@ -97,7 +98,7 @@ def test_deep_research_options_default_when_caller_none(
     monkeypatch.setattr(
         orch,
         "research_module",
-        lambda inp, options=None: (seen.append(options), make_research_output())[1],
+        lambda inp, options=None, **kwargs: (seen.append(options), make_research_output())[1],
     )
     patch_proposal_from_finding(monkeypatch, orch)
     patch_agent_proposals(monkeypatch, orch)
@@ -117,3 +118,53 @@ def test_deep_research_options_default_when_caller_none(
     used = seen[0]
     assert used.cwd == repo
     assert used.output_last_message is not None
+
+
+def test_deep_research_antigravity_options_per_module_override(
+    tmp_path: Path, monkeypatch
+) -> None:
+    tree = make_tree()
+    monkeypatch.setattr(
+        orch,
+        "extract_with_telemetry",
+        lambda inp, *, config=None: make_extractor_result(tree),
+    )
+    monkeypatch.setattr(
+        orch,
+        "discover",
+        lambda inp, *, config: make_discovery_result(inp.module_qualified_name),
+    )
+
+    seen_antigravity: list[AntigravityExecOptions | None] = []
+
+    def _research(inp, options=None, **kwargs):
+        seen_antigravity.append(kwargs.get("antigravity_options"))
+        return make_research_output()
+
+    monkeypatch.setattr(orch, "research_module", _research)
+    patch_proposal_from_finding(monkeypatch, orch)
+    patch_agent_proposals(monkeypatch, orch)
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+
+    caller_options = AntigravityExecOptions.litellm_proxy(
+        cwd=Path("/tmp/will-be-overridden"),
+        base_url="https://litellm.example.com",
+        env={"LITELLM_API_KEY": "test-key"},
+    )
+    cfg = SpotlightsManagerConfig(
+        artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
+        deep_research_antigravity=caller_options,
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
+    )
+    run_with_telemetry(make_input(repo), config=cfg)
+
+    used = seen_antigravity[0]
+    assert used is not None
+    assert used.cwd == repo
+    assert used.antigravity_base_url == "https://litellm.example.com"
+    assert caller_options.cwd == Path("/tmp/will-be-overridden")

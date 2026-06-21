@@ -13,7 +13,8 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -31,6 +32,7 @@ from spotlights_engine.candidate_discovery import (
     discover,
 )
 from spotlights_engine.module_deep_research import research_module
+from spotlights_engine.module_deep_research.antigravity_exec import AntigravityExecOptions
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
 from spotlights_engine.modules_extractor import (
     ExtractorConfig,
@@ -62,6 +64,7 @@ from spotlights_engine.schemas.pipeline import (
     SpotlightsManagerInput,
 )
 from spotlights_engine.schemas.project import Module, ProjectTree
+from spotlights_engine.spotlights_manager import persistence as P
 from spotlights_engine.spotlights_manager.api import (
     ModuleTelemetry,
     SpotlightsManagerConfig,
@@ -72,14 +75,12 @@ from spotlights_engine.spotlights_manager.errors import (
     ResumeMismatchError,
 )
 from spotlights_engine.spotlights_manager.filters import apply_filter
-from spotlights_engine.spotlights_manager import persistence as P
 from spotlights_engine.spotlights_manager.persistence import (
     LoadedModuleState,
     ManagerPaths,
     ModuleCheckpoint,
     ModulePaths,
 )
-
 
 _log = logging.getLogger(__name__)
 
@@ -90,7 +91,7 @@ _log = logging.getLogger(__name__)
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return datetime.now(UTC).isoformat(timespec="seconds")
 
 
 def _issue(
@@ -151,6 +152,17 @@ def _build_deep_research_options(
     return base.model_copy(
         update={"cwd": repo_path, "output_last_message": last_message_path}
     )
+
+
+def _build_deep_research_antigravity_options(
+    cfg: SpotlightsManagerConfig,
+    repo_path: Path,
+) -> AntigravityExecOptions | None:
+    """Per-module Antigravity options: copy caller config and override `cwd`."""
+    base = cfg.deep_research_antigravity
+    if base is None:
+        return None
+    return base.model_copy(update={"cwd": repo_path})
 
 
 def _build_proposal_from_finding_config(
@@ -328,7 +340,7 @@ def _run_extractor_if_needed(
 
     if completed and tree is not None and invocation is not None:
         prev_dur = extractor_state.get("duration_s")
-        if isinstance(prev_dur, (int, float)):
+        if isinstance(prev_dur, int | float):
             _log.info("extractor: cached (%.1fs on previous run)", prev_dur)
         else:
             _log.info("extractor: cached")
@@ -547,8 +559,15 @@ async def _do_step3(
     options = _build_deep_research_options(
         cfg, mgr_input.repo_path, module_paths.deep_research_last_message_path
     )
+    antigravity_options = _build_deep_research_antigravity_options(cfg, mgr_input.repo_path)
+    research_call = partial(
+        research_module,
+        research_input,
+        options,
+        antigravity_options=antigravity_options,
+    )
     start = time.monotonic()
-    output = await asyncio.to_thread(research_module, research_input, options)
+    output = await asyncio.to_thread(research_call)
     duration = time.monotonic() - start
     return output, duration
 
@@ -766,7 +785,7 @@ async def _run_module(
                 )
             except Exception as e:  # noqa: BLE001
                 if isinstance(
-                    e, (DiscoverySetupError, DiscoveryValidationError, ValueError)
+                    e, DiscoverySetupError | DiscoveryValidationError | ValueError
                 ):
                     retryable = False
                 elif isinstance(e, DiscoveryMutationError):
@@ -989,11 +1008,9 @@ async def _run_module(
                 except Exception as e:  # noqa: BLE001
                     if isinstance(
                         e,
-                        (
-                            ProposalFromFindingSetupError,
-                            ProposalFromFindingValidationError,
-                            ValueError,
-                        ),
+                        ProposalFromFindingSetupError
+                        | ProposalFromFindingValidationError
+                        | ValueError,
                     ):
                         retryable = False
                     else:
@@ -1104,11 +1121,7 @@ async def _run_module(
             except Exception as e:  # noqa: BLE001
                 if isinstance(
                     e,
-                    (
-                        AgentProposalsSetupError,
-                        AgentProposalsValidationError,
-                        ValueError,
-                    ),
+                    AgentProposalsSetupError | AgentProposalsValidationError | ValueError,
                 ):
                     retryable = False
                 else:
@@ -1335,9 +1348,6 @@ async def _run_async(
         seen_slugs[slug] = qn
 
     selected_set = set(selected)
-    selected_modules: dict[str, Module] = {
-        qn: m for qn, m in leaves if qn in selected_set
-    }
     ordered_qns = (
         list(selected)
         if (config.module_filter and config.module_filter.include)
@@ -1434,10 +1444,7 @@ async def _run_async(
     for run_record in module_runs.values():
         counts[run_record.status] = counts.get(run_record.status, 0) + 1
     total_cost = sum(
-        (
-            t.discovery_total_cost_usd or 0.0
-            for t in per_module_telemetry.values()
-        )
+        t.discovery_total_cost_usd or 0.0 for t in per_module_telemetry.values()
     )
     cost_str = f", discovery cost ${total_cost:.2f}" if total_cost else ""
     _log.info(

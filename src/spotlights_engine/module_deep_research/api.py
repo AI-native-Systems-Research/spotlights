@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 
 from spotlights_engine.module_deep_research.agent_exec import ModuleResearchRunner
+from spotlights_engine.module_deep_research.antigravity_exec import AntigravityExecOptions
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
 from spotlights_engine.module_deep_research.orchestration import (
     merge_outcomes,
@@ -22,6 +23,7 @@ def research_module(
     codex_options: CodexExecOptions | None = None,
     *,
     check: bool = False,
+    antigravity_options: AntigravityExecOptions | None = None,
     runner: ModuleResearchRunner | None = None,
     runners: Sequence[ModuleResearchRunner] | None = None,
 ) -> ModuleDeepResearchOutput:
@@ -42,6 +44,7 @@ def research_module(
     active_runners = select_runners(
         repo_path=request.repo_path,
         codex_options=codex_options,
+        antigravity_options=antigravity_options,
         runner=runner,
         runners=runners,
     )

@@ -11,9 +11,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from spotlights_engine.module_deep_research.agent_exec import AgentExecResult, ModuleResearchRunner
+from spotlights_engine.module_deep_research.antigravity_exec import (
+    AntigravityExecClient,
+    AntigravityExecOptions,
+)
 from spotlights_engine.module_deep_research.claude_exec import ClaudeExecClient, ClaudeExecOptions
 from spotlights_engine.module_deep_research.codex_exec import CodexExecClient, CodexExecOptions
-from spotlights_engine.module_deep_research.gemini_exec import GeminiExecClient, GeminiExecOptions
 from spotlights_engine.module_deep_research.validation import (
     normalize_module_deep_research_output,
     parse_module_deep_research_output,
@@ -60,10 +63,11 @@ def select_runners(
     *,
     repo_path: Path,
     codex_options: CodexExecOptions | None,
+    antigravity_options: AntigravityExecOptions | None = None,
     runner: ModuleResearchRunner | None,
     runners: Sequence[ModuleResearchRunner] | None,
 ) -> tuple[ModuleResearchRunner, ...]:
-    """Resolve caller-provided runners or create the default Codex/Claude/Gemini set."""
+    """Resolve caller-provided runners or create the default Codex/Claude/Antigravity set."""
     if runner is not None and runners is not None:
         raise ValueError("pass either runner or runners, not both")
     if runner is not None:
@@ -74,7 +78,7 @@ def select_runners(
     return (
         CodexExecClient(codex_options or CodexExecOptions(cwd=repo_path)),
         ClaudeExecClient(ClaudeExecOptions(cwd=repo_path)),
-        GeminiExecClient(GeminiExecOptions(cwd=repo_path)),
+        AntigravityExecClient(antigravity_options or AntigravityExecOptions(cwd=repo_path)),
     )
 
 

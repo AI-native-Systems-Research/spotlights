@@ -110,23 +110,34 @@ codex           # first run: pick "Sign in with ChatGPT"
 codex --version
 ```
 
-### Install the `gemini` CLI
+### Install Google Antigravity SDK
 
-Install Gemini CLI with npm and verify it from a fresh shell:
-
-```bash
-npm install -g @google/gemini-cli
-which gemini && gemini --version
-```
-
-For direct Google API-key auth:
+The module deep-research Gemini-backed runner uses the Google Antigravity SDK,
+not the deprecated consumer Gemini CLI path. Install the SDK in the same Python
+environment as the engine and configure Gemini API auth:
 
 ```bash
+python -m pip install google-antigravity
 export GEMINI_API_KEY="<your-gemini-api-key>"
-gemini --prompt "Reply with exactly: OK" --output-format json
 ```
 
-### Optional: route the CLIs through a LiteLLM proxy
+For a direct smoke test, run a tiny SDK-backed agent from the project root:
+
+```bash
+python - <<'PY'
+import asyncio
+from google.antigravity import Agent, LocalAgentConfig
+
+async def main():
+    async with Agent(LocalAgentConfig()) as agent:
+        response = await agent.chat("Reply with exactly: OK")
+        print(await response.text())
+
+asyncio.run(main())
+PY
+```
+
+### Optional: route providers through a LiteLLM proxy
 
 Use this when Anthropic, OpenAI, or Google models are exposed through an OpenAI-compatible LiteLLM gateway.
 
@@ -160,85 +171,59 @@ env_key = "LITELLM_API_KEY"
 wire_api = "responses"
 ```
 
-**`gemini` CLI** — use the proxy root (not `/v1`) and keep the key in `~/.gemini/.env` so headless subprocesses load it consistently.
+**Antigravity SDK** — pass the proxy root and bearer key through
+`AntigravityExecOptions.litellm_proxy(...)` when constructing custom
+module-deep-research runners, or set `deep_research_antigravity` on
+`SpotlightsManagerConfig`:
 
-```bash
-mkdir -p ~/.gemini
-cat > ~/.gemini/.env <<'EOF'
-LITELLM_API_KEY=<your-litellm-virtual-key>
-GEMINI_API_KEY=<your-litellm-virtual-key>
-GOOGLE_GEMINI_BASE_URL=https://your-litellm-host.example.com
-GEMINI_API_KEY_AUTH_MECHANISM=bearer
-GEMINI_CLI_TRUST_WORKSPACE=true
-EOF
-```
+```python
+from spotlights_engine.module_deep_research import (
+    AntigravityExecClient,
+    AntigravityExecOptions,
+)
 
-Then pin Gemini CLI to API-key auth and remap the internal web-tool aliases to a public model name from your LiteLLM gateway. Gemini CLI implements `google_web_search` and `web_fetch` through the helper aliases `web-search`, `web-fetch`, and `web-fetch-fallback`; remap those aliases directly so they do not fall back to unqualified model names such as `gemini-3-flash-preview`.
-
-```bash
-cat > ~/.gemini/settings.json <<'JSON'
-{
-  "model": { "name": "gcp/gemini-3.1-pro-preview" },
-  "modelConfigs": {
-    "customAliases": {
-      "web-search": {
-        "extends": "base",
-        "modelConfig": {
-          "model": "gcp/gemini-3.1-pro-preview",
-          "generateContentConfig": { "tools": [ { "googleSearch": {} } ] }
-        }
-      },
-      "web-fetch": {
-        "extends": "base",
-        "modelConfig": {
-          "model": "gcp/gemini-3.1-pro-preview",
-          "generateContentConfig": { "tools": [ { "urlContext": {} } ] }
-        }
-      },
-      "web-fetch-fallback": {
-        "extends": "base",
-        "modelConfig": { "model": "gcp/gemini-3.1-pro-preview" }
-      }
-    }
-  },
-  "advanced": { "ignoreLocalEnv": true },
-  "security": { "auth": { "selectedType": "gemini-api-key" } }
-}
-JSON
-
-gemini --prompt "Use google_web_search once for Gemini CLI docs, then reply OK." --output-format json --approval-mode yolo
+antigravity_runner = AntigravityExecClient(
+    AntigravityExecOptions.litellm_proxy(
+        base_url="https://your-litellm-host.example.com",
+        model="gcp/gemini-3.1-pro-preview",
+        api_key_env="LITELLM_API_KEY",
+    )
+)
 ```
 
 Notes:
 
-- `GOOGLE_GEMINI_BASE_URL` is the LiteLLM proxy root; do not append `/v1`.
-- `advanced.ignoreLocalEnv` prevents a repo-level `.env` from shadowing the Gemini credentials above.
-- If your LiteLLM deployment uses different public model names, replace `gcp/gemini-3.1-pro-preview` with a public model that supports `googleSearch` and `urlContext`.
-- `GeminiExecOptions.litellm_proxy(...)` writes an equivalent temporary settings file for managed Python runs when `settings_path` is not supplied.
+- `base_url` is the proxy root for a Gemini API-compatible endpoint; do not hardcode environment-specific hosts in shared code.
+- Bearer auth maps the configured key environment variable (default `LITELLM_API_KEY`) to the SDK endpoint `Authorization` header.
+- Antigravity SDK uses Gemini streaming APIs internally. `AntigravityExecOptions.litellm_proxy(...)` enables a provider-neutral local SSE normalizer by default for gateways that wrap Gemini stream chunks as Python bytes repr frames or append OpenAI-style `[DONE]` sentinels. Pass `normalize_sse_bytes_repr=False` if your proxy already emits standards-compliant Gemini SSE.
+- If your LiteLLM deployment uses different public model names, replace `gcp/gemini-3.1-pro-preview` with a public model that supports the research tools your gateway exposes.
+- Plain `AntigravityExecOptions()` keeps native Gemini API-key behavior via `GEMINI_API_KEY`.
 
 For LiteLLM-backed live research from Python, use
-`GeminiExecOptions.litellm_proxy(...)` with the proxy root, bearer auth, and your
-gateway model IDs. Plain `GeminiExecOptions()` keeps native Gemini CLI
-auth/model/proxy behavior. Do not cap real module deep-research runs with short
-smoke-test timeouts; the subprocess wrappers default to no timeout, and explicit
+`AntigravityExecOptions.litellm_proxy(...)` with the proxy root, bearer auth,
+and your gateway model IDs. Do not cap real module deep-research runs with
+short smoke-test timeouts; the SDK runner defaults to no timeout, and explicit
 timeouts for live research should be long enough for web/literature retrieval
 (15+ minutes is a reasonable floor).
 
 Swap the host and model IDs for your LiteLLM deployment. After editing config or
-environment, re-run `claude --version` / `codex --version` / `gemini --version`
+environment, re-run `claude --version` / `codex --version` and the Antigravity SDK smoke test
 from a fresh shell.
 
-### Verify all CLIs from a fresh shell
+### Verify CLI and SDK dependencies from a fresh shell
 
-Open a new terminal (so any PATH changes from the installers are picked up) and confirm all binaries resolve and report a version:
+Open a new terminal (so any PATH changes from the installers are picked up) and confirm the remaining CLI binaries resolve and the Antigravity SDK imports:
 
 ```bash
 which claude && claude --version
 which codex  && codex  --version
-which gemini && gemini --version
+python - <<'PY'
+import google.antigravity
+print("google-antigravity OK")
+PY
 ```
 
-If any command is not found, re-open your terminal so shell PATH updates from the installers are picked up. The native `claude` installer drops its binary at `~/.local/bin/claude`; the `codex` and `gemini` binary locations depend on the install method (for example, Homebrew vs npm vs native installer) — check the installer's final output if a binary still is not on PATH.
+If any command is not found, re-open your terminal so shell PATH updates from the installers are picked up. The native `claude` installer drops its binary at `~/.local/bin/claude`; the `codex` binary location depends on the install method (for example, Homebrew vs npm vs native installer) — check the installer's final output if a binary still is not on PATH.
 
 ### Install the engine
 

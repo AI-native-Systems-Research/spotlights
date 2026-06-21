@@ -17,7 +17,8 @@ classifiers = [
 ]
 dependencies = [
     "pydantic>=2",
-    "pyyaml>=6"
+    "pyyaml>=6",
+    "google-antigravity>=0.1.4"
 ]
 
 [project.urls]

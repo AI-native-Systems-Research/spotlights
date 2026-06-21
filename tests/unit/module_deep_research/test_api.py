@@ -176,16 +176,18 @@ class NamedFakeRunner(FakeRunner):
         self.name = name
 
 
-def test_research_module_runs_codex_claude_gemini_and_dedups_outputs() -> None:
+def test_research_module_runs_codex_claude_antigravity_and_dedups_outputs() -> None:
     codex = NamedFakeRunner("codex", _payload("PagedAttention", "https://arxiv.org/abs/2309.06180"))
     claude = NamedFakeRunner(
         "claude", _payload("PagedAttention", "https://arxiv.org/pdf/2309.06180v2.pdf")
     )
-    gemini = NamedFakeRunner("gemini", _payload("vAttention", "https://arxiv.org/abs/2405.04437"))
+    antigravity = NamedFakeRunner(
+        "antigravity", _payload("vAttention", "https://arxiv.org/abs/2405.04437")
+    )
 
-    output = research_module(_request(), runners=[codex, claude, gemini])
+    output = research_module(_request(), runners=[codex, claude, antigravity])
 
-    assert [len(r.prompts) for r in (codex, claude, gemini)] == [1, 1, 1]
+    assert [len(r.prompts) for r in (codex, claude, antigravity)] == [1, 1, 1]
     assert [finding.finding_id for finding in output.findings] == ["find-0001", "find-0002"]
     assert [finding.title for finding in output.findings] == ["PagedAttention", "vAttention"]
     assert output.issues == []
@@ -269,6 +271,170 @@ def test_claude_command_shape_uses_litellm_safe_research_tools(tmp_path: Path) -
     assert "Edit" not in tools
 
 
+
+
+def test_select_runners_defaults_to_codex_claude_antigravity(tmp_path: Path) -> None:
+    from spotlights_engine.module_deep_research.antigravity_exec import AntigravityExecOptions
+    from spotlights_engine.module_deep_research.orchestration import select_runners
+
+    runners = select_runners(
+        repo_path=tmp_path,
+        codex_options=None,
+        antigravity_options=AntigravityExecOptions.litellm_proxy(
+            cwd=tmp_path,
+            base_url="https://litellm.example.com",
+        ),
+        runner=None,
+        runners=None,
+    )
+
+    assert [runner.name for runner in runners] == ["codex", "claude", "antigravity"]
+
+
+def test_antigravity_litellm_proxy_enables_sse_bytes_repr_normalizer(tmp_path: Path) -> None:
+    from spotlights_engine.module_deep_research.antigravity_exec import AntigravityExecOptions
+
+    options = AntigravityExecOptions.litellm_proxy(
+        cwd=tmp_path,
+        base_url="https://litellm.example.com",
+    )
+
+    assert options.normalize_sse_bytes_repr is True
+
+
+def test_antigravity_normalizes_litellm_bytes_repr_sse_line() -> None:
+    from spotlights_engine.module_deep_research.antigravity_exec import (
+        normalize_litellm_sse_bytes_repr_line,
+    )
+
+    line = 'data: b\'data: {"ok": true}\\r\\n\\r\\n\''
+
+    assert normalize_litellm_sse_bytes_repr_line(line) == b'data: {"ok": true}\r\n\r\n'
+    assert normalize_litellm_sse_bytes_repr_line("data: b'okenCount'") == b'okenCount'
+    assert normalize_litellm_sse_bytes_repr_line("data: b'data: [DONE]\\n\\n'") == b''
+    assert normalize_litellm_sse_bytes_repr_line('data: {"ok": true}') is None
+
+
+def test_antigravity_default_command_is_sdk_and_does_not_expose_prompt(tmp_path: Path) -> None:
+    from spotlights_engine.module_deep_research.antigravity_exec import (
+        AntigravityExecClient,
+        AntigravityExecOptions,
+    )
+
+    cmd = AntigravityExecClient(AntigravityExecOptions(cwd=tmp_path)).build_command()
+
+    assert cmd[0] == "antigravity-sdk"
+    assert "research prompt" not in cmd
+    assert "--workspace" in cmd
+    assert str(tmp_path.resolve()) in cmd
+
+
+def test_antigravity_litellm_proxy_maps_key_to_bearer_header(tmp_path: Path) -> None:
+    from spotlights_engine.module_deep_research.antigravity_exec import (
+        AntigravityExecClient,
+        AntigravityExecOptions,
+    )
+
+    client = AntigravityExecClient(
+        AntigravityExecOptions.litellm_proxy(
+            cwd=tmp_path,
+            base_url="https://litellm.example.com",
+            env={"LITELLM_API_KEY": "test-key"},
+        )
+    )
+
+    assert client.build_model_endpoint_kwargs() == {
+        "base_url": "https://litellm.example.com",
+        "http_headers": {"Authorization": "Bearer test-key"},
+        "api_key": "test-key",
+    }
+
+
+def test_antigravity_runner_enables_web_search_tool(monkeypatch, tmp_path: Path) -> None:
+    import sys
+    import types
+
+    from spotlights_engine.module_deep_research.antigravity_exec import (
+        AntigravityExecClient,
+        AntigravityExecOptions,
+    )
+
+    captured: dict[str, object] = {}
+
+    class BuiltinTools:
+        LIST_DIR = "list_directory"
+        SEARCH_DIR = "search_directory"
+        FIND_FILE = "find_file"
+        VIEW_FILE = "view_file"
+        FINISH = "finish"
+        SEARCH_WEB = "search_web"
+
+        @classmethod
+        def read_only(cls):
+            return [cls.LIST_DIR, cls.SEARCH_DIR, cls.FIND_FILE, cls.VIEW_FILE, cls.FINISH]
+
+    class CapabilitiesConfig:
+        def __init__(self, *, enabled_tools):
+            captured["enabled_tools"] = enabled_tools
+
+    class LocalAgentConfig:
+        def __init__(self, **kwargs):
+            captured["config_kwargs"] = kwargs
+
+    class Agent:
+        def __init__(self, config):
+            self.config = config
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def chat(self, prompt):
+            class Response:
+                async def structured_output(self):
+                    return {"findings": [], "issues": []}
+
+                async def text(self):
+                    return ""
+
+            return Response()
+
+    fake = types.ModuleType("google.antigravity")
+    fake.Agent = Agent
+    fake.BuiltinTools = BuiltinTools
+    fake.CapabilitiesConfig = CapabilitiesConfig
+    fake.GeminiAPIEndpoint = object
+    fake.LocalAgentConfig = LocalAgentConfig
+    fake.ModelTarget = object
+    fake.ModelType = types.SimpleNamespace(TEXT="text")
+
+    monkeypatch.setitem(sys.modules, "google.antigravity", fake)
+
+    result = AntigravityExecClient(AntigravityExecOptions(cwd=tmp_path)).run("prompt")
+
+    assert result.ok
+    assert "search_web" in captured["enabled_tools"]
+
+
+def test_antigravity_run_wraps_async_sdk_result(monkeypatch, tmp_path: Path) -> None:
+    from spotlights_engine.module_deep_research.antigravity_exec import (
+        AntigravityExecClient,
+        AntigravityExecOptions,
+    )
+
+    async def fake_run_async(self, prompt: str) -> str:
+        assert prompt == "prompt"
+        return '{"findings": [], "issues": []}'
+
+    monkeypatch.setattr(AntigravityExecClient, "_run_async", fake_run_async)
+
+    result = AntigravityExecClient(AntigravityExecOptions(cwd=tmp_path)).run("prompt")
+
+    assert result.ok
+    assert result.final_message == '{"findings": [], "issues": []}'
+    assert result.command[0] == "antigravity-sdk"
 
 def test_gemini_default_command_is_read_only_and_does_not_expose_prompt(tmp_path: Path) -> None:
     from spotlights_engine.module_deep_research.gemini_exec import (
