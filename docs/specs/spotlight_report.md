@@ -690,6 +690,18 @@ candidates take the head of the global numbering (`cand-0001`,
       ]
     }
   ],
+  "findings": [
+    {
+      "finding_id": "find-0008",
+      "title": "S3-FIFO: Simpler, Better, and Scalable Cache",
+      "url": "https://www.usenix.org/conference/atc24/...",
+      "source_type": "paper",
+      "technique_summary": "Probationary FIFO admission filters one-hit wonders before promotion to a small main cache, beating LRU on web/CDN traces with simpler bookkeeping.",
+      "supporting_evidence": "..."
+    },
+    "..."
+  ],
+  "anomalies": [],
   "run": {
     "pipeline": "deep_research",
     "run_id": "vllm_subset_2026-06-14",
@@ -701,16 +713,21 @@ candidates take the head of the global numbering (`cand-0001`,
 }
 ```
 
-`finding_ref_id` values (`find-0008..find-0011`) are the **upstream**
-finding ids from the legacy `SpotlightsResult` artifact — opaque
-strings. The report does not carry `Finding` records; consumers
-needing the finding's URL / technique_summary / supporting_evidence
-read the legacy artifact next to the report.
+`finding_ref_id` values (`find-0008..find-0011`) join to the
+top-level `findings: list[Finding]` array on the report itself —
+the report carries the finding's `title` / `url` / `source_type`
+/ `technique_summary` / `supporting_evidence` directly (revised
+2026-06-18, see §What-this-session-decides item 5). Earlier draft
+of this spec dropped findings to keep the report "what to do" only
+and pointed consumers at the legacy `SpotlightsResult` artifact;
+that decision was reversed because the legacy artifacts go away
+under unification, so the ref-ids would dangle.
 
 A signal-pipeline `SpotlightReport` against the same vllm tree would
 have identical *shape* — only with `run.pipeline = "signal"`,
 candidate `origin = "telemetry_anomaly"`, `anomaly_ref_ids` populated
-on each proposal, `finding_ref_id` always None, and `proposals` of
+on each proposal joining to the top-level `anomalies` list,
+`finding_ref_id` always None, `findings: []`, and `proposals` of
 length one each with `source = "telemetry_anomaly"` + the structured
 fields (`mechanism`, `expected_effect`, …) filled in.
 
