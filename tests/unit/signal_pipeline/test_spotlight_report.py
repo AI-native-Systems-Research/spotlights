@@ -208,8 +208,10 @@ def test_build_origin_is_telemetry_anomaly() -> None:
 
 
 def test_build_proposal_source_is_telemetry_anomaly_with_ref_ids() -> None:
-    """Proposals carry `source="telemetry_anomaly"` and the upstream anomaly
-    ids in `anomaly_ref_ids`. `finding_ref_id` and `author` stay None."""
+    """Proposals carry `source="telemetry_anomaly"` and `anomaly_ref_ids`
+    remapped to the renumbered `anom-signal-NNNN` ids minted at the
+    report-build boundary (spec §10). `finding_ref_id` and `author`
+    stay None."""
     drafts = [_draft(anomaly_refs=["anom-1"])]
     changes = {"cand-0001": _change("cand-0001")}
     report = build_spotlight_report(
@@ -222,7 +224,7 @@ def test_build_proposal_source_is_telemetry_anomaly_with_ref_ids() -> None:
     )
     p = report.candidates[0].proposals[0]
     assert p.source == "telemetry_anomaly"
-    assert p.anomaly_ref_ids == ["anom-1"]
+    assert p.anomaly_ref_ids == ["anom-signal-0001"]
     assert p.finding_ref_id is None
     assert p.author is None
 
@@ -303,7 +305,8 @@ def test_build_anomalies_translate_into_closed_shape() -> None:
     )
     assert len(report.anomalies) == 1
     a = report.anomalies[0]
-    assert a.anomaly_id == "anom-1"
+    # Upstream `anom-1` is renumbered to the segmented form at the boundary.
+    assert a.anomaly_id == "anom-signal-0001"
     assert a.type == "latency"
     assert a.confidence == 0.6
     assert a.magnitude == "19x p50"
@@ -418,7 +421,7 @@ def test_emit_writes_spotlight_report_json(tmp_path: Path) -> None:
     assert parsed.run.pipeline == "signal"
     assert parsed.run.run_id == "run-xyz"
     assert len(parsed.candidates) == 1
-    assert parsed.candidates[0].proposals[0].anomaly_ref_ids == ["anom-1"]
+    assert parsed.candidates[0].proposals[0].anomaly_ref_ids == ["anom-signal-0001"]
 
 
 def test_emit_returns_none_when_signals_missing(tmp_path: Path) -> None:

@@ -297,7 +297,7 @@ def test_report_issues_accepts_step_issue() -> None:
 # Anomaly --------------------------------------------------------------------
 
 def _anomaly(**overrides) -> Anomaly:
-    payload = {"anomaly_id": "anom-0001", "type": "latency_spike"}
+    payload = {"anomaly_id": "anom-core-0001", "type": "latency_spike"}
     payload.update(overrides)
     return Anomaly.model_validate(payload)
 
@@ -305,7 +305,7 @@ def _anomaly(**overrides) -> Anomaly:
 def test_anomaly_extra_forbid_rejects_unknown_field() -> None:
     with pytest.raises(ValidationError):
         Anomaly.model_validate(
-            {"anomaly_id": "anom-0001", "type": "x", "garbage": "y"}
+            {"anomaly_id": "anom-core-0001", "type": "x", "garbage": "y"}
         )
 
 
@@ -313,7 +313,7 @@ def test_anomaly_requires_id_and_type() -> None:
     with pytest.raises(ValidationError):
         Anomaly.model_validate({"type": "latency_spike"})
     with pytest.raises(ValidationError):
-        Anomaly.model_validate({"anomaly_id": "anom-0001"})
+        Anomaly.model_validate({"anomaly_id": "anom-core-0001"})
 
 
 def test_anomaly_rejects_empty_id_or_type() -> None:
@@ -321,6 +321,37 @@ def test_anomaly_rejects_empty_id_or_type() -> None:
         _anomaly(anomaly_id="")
     with pytest.raises(ValidationError):
         _anomaly(type="")
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "anom-signal-0001",
+        "anom-core-0042",
+        "anom-v1.kv_offload-0007",
+        "anom-A.b_c-9999",
+    ],
+)
+def test_anomaly_id_accepts_segmented_format(value: str) -> None:
+    """Per spec §10, `anomaly_id` follows the same segmented pattern as
+    candidate / proposal / finding ids."""
+    assert _anomaly(anomaly_id=value).anomaly_id == value
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "anom-0001",          # missing segment
+        "anom-signal-1",      # too few digits
+        "anom-signal-00001",  # too many digits
+        "A1-queue-dom",       # legacy descriptive form (rejected post-segmentation)
+        "anomaly-signal-0001",
+        "anom--0001",         # empty segment
+    ],
+)
+def test_anomaly_id_rejects_non_segmented_values(value: str) -> None:
+    with pytest.raises(ValidationError):
+        _anomaly(anomaly_id=value)
 
 
 @pytest.mark.parametrize("value", ["high", "medium", "low"])
@@ -392,5 +423,5 @@ def test_report_carries_findings_and_anomalies() -> None:
         anomalies=[_anomaly(severity="high", confidence=0.9)],
     )
     assert rep.findings[0].finding_id == "find-core-0001"
-    assert rep.anomalies[0].anomaly_id == "anom-0001"
+    assert rep.anomalies[0].anomaly_id == "anom-core-0001"
     assert rep.anomalies[0].severity == "high"

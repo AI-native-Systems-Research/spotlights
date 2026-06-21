@@ -89,6 +89,8 @@
     Proposal.id     : ^prop-[A-Za-z0-9._-]+-\d{4}$
     Finding.finding_id (and DeepResearchProposal.finding_id):
                       ^find-[A-Za-z0-9._-]+-\d{4}$
+    Anomaly.anomaly_id:
+                      ^anom-[A-Za-z0-9._-]+-\d{4}$
     ```
 
     The `<segment>` slot is per-pipeline:
@@ -99,11 +101,15 @@
       gives parallel-module uniqueness without a global counter and
       keeps resume/persistence directory layout aligned with the id.
     - **Signal pipeline** — uses the fixed string `signal` for every
-      candidate / proposal (e.g. `cand-signal-0001`,
-      `prop-signal-0001`). Signal-pipeline candidates don't have a
-      natural per-module segmentation (`module_qualified_name` is
-      optional and resolved post-hoc), so a fixed segment keeps the
-      schema valid without inventing one.
+      candidate / proposal / anomaly (e.g. `cand-signal-0001`,
+      `prop-signal-0001`, `anom-signal-0001`). Signal-pipeline
+      candidates don't have a natural per-module segmentation
+      (`module_qualified_name` is optional and resolved post-hoc), so a
+      fixed segment keeps the schema valid without inventing one.
+      Anomalies as emitted by stage 01 carry descriptive upstream ids
+      (e.g. `A1-queue-dominated-latency`) which are renumbered at the
+      report-build boundary so the anomaly id pattern is enforced and
+      `Proposal.anomaly_ref_ids` join cleanly.
 
     Slug character class `[A-Za-z0-9._-]` matches `_SLUG_SAFE` in
     [`utils/id_helpers.py`](../../src/spotlights_engine/utils/id_helpers.py).

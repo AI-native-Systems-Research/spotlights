@@ -117,15 +117,20 @@ def _clamp_confidence(value: object) -> float | None:
     return f
 
 
-def _anomaly_from_lite(lite: AnomalyLite) -> Anomaly:
+def _anomaly_from_lite(lite: AnomalyLite, *, new_id: str) -> Anomaly:
     """Translate a stage-01 `AnomalyLite` (extra="allow") into the closed
     `Anomaly` shape. Pulls fields the production prompt + design doc spec
     (see `runs/max1-smoke/01_signals.json` for the real shape), defaulting
     to empty strings for the optional text fields.
+
+    `new_id` is the renumbered `anom-signal-NNNN` id minted at the
+    report-build boundary; the upstream descriptive id from `lite` is
+    discarded so the unified `Anomaly.anomaly_id` pattern (spec §10)
+    is honored without leaking pipeline-internal naming.
     """
     extras = lite.model_dump()
     return Anomaly(
-        anomaly_id=lite.anomaly_id,
+        anomaly_id=new_id,
         type=lite.type,
         description=lite.description or "",
         severity=None,
@@ -169,6 +174,7 @@ def _proposal_from_change(
     candidate_id: str,
     draft: CandidateDraft,
     change: Change,
+    anomaly_id_remap: dict[str, str],
 ) -> Proposal:
     """Build a `Proposal` from a stage-04 `Change` + its source draft.
 
@@ -182,10 +188,17 @@ def _proposal_from_change(
     if change.expected_effect:
         description = f"{description}\n\nExpected: {change.expected_effect}"
     rationale = draft.evolve_rationale
+    remapped_refs: list[str] | None
+    if draft.anomaly_refs:
+        remapped_refs = [
+            anomaly_id_remap[ref] for ref in draft.anomaly_refs if ref in anomaly_id_remap
+        ] or None
+    else:
+        remapped_refs = None
     return Proposal(
         id=new_id,
         source="telemetry_anomaly",
-        anomaly_ref_ids=list(draft.anomaly_refs) if draft.anomaly_refs else None,
+        anomaly_ref_ids=remapped_refs,
         finding_ref_id=None,
         author=None,
         title=title,
@@ -218,6 +231,19 @@ def build_spotlight_report(
     `prop-signal-NNNN`) are renumbered globally so the report can be
     flat-iterated without cross-module collisions.
     """
+    # Renumber upstream anomaly ids (e.g. `A1-queue-dominated-latency`) to
+    # the unified `anom-signal-NNNN` shape per spec §10. `anomaly_id_remap`
+    # is then used to translate each draft's `anomaly_refs` so proposals'
+    # `anomaly_ref_ids` continue to join cleanly to the renumbered anomalies.
+    anomaly_id_remap: dict[str, str] = {
+        lite.anomaly_id: f"anom-{_SEGMENT}-{idx:04d}"
+        for idx, lite in enumerate(signals.anomalies, start=1)
+    }
+    anomalies = [
+        _anomaly_from_lite(lite, new_id=anomaly_id_remap[lite.anomaly_id])
+        for lite in signals.anomalies
+    ]
+
     drafts_list = list(drafts)
     cand_idx = 0
     prop_idx = 0
@@ -236,6 +262,7 @@ def build_spotlight_report(
                     candidate_id=new_cand_id,
                     draft=draft,
                     change=change,
+                    anomaly_id_remap=anomaly_id_remap,
                 )
             )
         candidates.append(
@@ -246,8 +273,6 @@ def build_spotlight_report(
                 proposals=proposals,
             )
         )
-
-    anomalies = [_anomaly_from_lite(a) for a in signals.anomalies]
 
     return SpotlightReport(
         project_tree=project_tree,

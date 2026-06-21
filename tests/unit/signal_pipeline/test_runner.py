@@ -108,7 +108,9 @@ def test_spotlight_report_emitted_after_full_run(tmp_path):
     # One stub anomaly carries through into the closed-shape `Anomaly`
     # (synthetic fallback path -- telemetry_from is None in `_input(...)`).
     assert len(report.anomalies) == 1
-    assert report.anomalies[0].anomaly_id == "stub-anomaly-1"
+    # Upstream `stub-anomaly-1` (synthetic stage-01 placeholder) is
+    # renumbered to the segmented form at the report-build boundary.
+    assert report.anomalies[0].anomaly_id == "anom-signal-0001"
 
 
 def test_spotlight_report_skipped_for_partial_run(tmp_path):

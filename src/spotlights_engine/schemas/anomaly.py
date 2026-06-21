@@ -19,7 +19,7 @@ class Anomaly(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    anomaly_id: str = Field(min_length=1)
+    anomaly_id: str = Field(pattern=r"^anom-[A-Za-z0-9._-]+-\d{4}$")
     type: str = Field(min_length=1)
     description: str = ""
     severity: AnomalySeverity | None = None
