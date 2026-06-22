@@ -10,6 +10,7 @@ truth; in-memory state is only there to drive the scheduling.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import time
 from dataclasses import dataclass
@@ -154,15 +155,56 @@ def _build_deep_research_options(
     )
 
 
+def _callable_accepts_keyword(func: Any, keyword: str) -> bool:
+    """Return whether a callable accepts a keyword argument.
+
+    Production ``research_module`` supports ``antigravity_options``. Some unit
+    tests monkeypatch it with narrower doubles; keep orchestration compatible
+    with those callables instead of failing before the tested downstream step.
+    """
+    try:
+        signature = inspect.signature(func)
+    except (TypeError, ValueError):
+        return True
+    return any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        or (parameter.name == keyword and parameter.kind != inspect.Parameter.POSITIONAL_ONLY)
+        for parameter in signature.parameters.values()
+    )
+
+
 def _build_deep_research_antigravity_options(
     cfg: SpotlightsManagerConfig,
     repo_path: Path,
+    tree: ProjectTree,
+    qn: str,
 ) -> AntigravityExecOptions | None:
-    """Per-module Antigravity options: copy caller config and override `cwd`."""
+    """Per-module Antigravity options: copy caller config and override `cwd`.
+
+    The Antigravity local harness indexes every configured workspace before it
+    starts answering. Large repositories can exceed the harness WebSocket ping
+    window during that startup scan, so default to the target module directory
+    instead of the repository root. Explicit caller workspaces are preserved.
+    """
     base = cfg.deep_research_antigravity
+    module = tree.resolve(qn)
+    module_workspace = (
+        repo_path / module.path
+        if module is not None and module.path
+        else repo_path
+    )
     if base is None:
-        return None
-    return base.model_copy(update={"cwd": repo_path})
+        return AntigravityExecOptions(
+            cwd=repo_path,
+            workspaces=[module_workspace],
+            response_schema=ModuleDeepResearchOutput,
+        )
+    updates: dict[str, Any] = {"cwd": repo_path}
+    if base.workspaces is None:
+        updates["workspaces"] = [module_workspace]
+    if base.response_schema is None:
+        updates["response_schema"] = ModuleDeepResearchOutput
+    return base.model_copy(update=updates)
 
 
 def _build_proposal_from_finding_config(
@@ -559,12 +601,17 @@ async def _do_step3(
     options = _build_deep_research_options(
         cfg, mgr_input.repo_path, module_paths.deep_research_last_message_path
     )
-    antigravity_options = _build_deep_research_antigravity_options(cfg, mgr_input.repo_path)
+    antigravity_options = _build_deep_research_antigravity_options(
+        cfg, mgr_input.repo_path, tree, qn
+    )
+    research_kwargs: dict[str, Any] = {}
+    if _callable_accepts_keyword(research_module, "antigravity_options"):
+        research_kwargs["antigravity_options"] = antigravity_options
     research_call = partial(
         research_module,
         research_input,
         options,
-        antigravity_options=antigravity_options,
+        **research_kwargs,
     )
     start = time.monotonic()
     output = await asyncio.to_thread(research_call)

@@ -53,12 +53,12 @@ Contributions to any of these are welcome — see [Contributing](#contributing).
 - [uv](https://docs.astral.sh/uv/)
 - The `claude` CLI on PATH, with auth configured via its own login state or supported environment variables. Used by the modules extractor, candidate discovery, and the Claude executors for steps 4 and 5.
 - The `codex` CLI on PATH, with auth configured via its own login state or supported environment variables. Used by `module_deep_research` and the Codex executors for steps 2 and 5.
-- The `gemini` CLI on PATH, with API-key or gateway auth configured. Used by `module_deep_research` alongside Codex and Claude when available.
+- The Google Antigravity SDK installed in the active Python environment, with Gemini API-key or gateway auth configured. Used by `module_deep_research` alongside Codex and Claude when available.
 - A target repo on disk (the quickstart below uses vLLM).
 
-The module deep-research step fans out to Codex, Claude, and Gemini by default,
+The module deep-research step fans out to Codex, Claude, and the Antigravity-backed Gemini runner by default,
 then treats individual runner failures as recoverable so one flaky provider does
-not fail the whole step. Install, authenticate, and verify all three CLIs for
+not fail the whole step. Install, authenticate, and verify the CLIs plus SDK for
 best coverage.
 
 ### Install the `claude` CLI
@@ -206,7 +206,31 @@ short smoke-test timeouts; the SDK runner defaults to no timeout, and explicit
 timeouts for live research should be long enough for web/literature retrieval
 (15+ minutes is a reasonable floor).
 
-Swap the host and model IDs for your LiteLLM deployment. After editing config or
+The public CLI also exposes provider-neutral runtime overrides, so callers do
+not need to hardcode organization-specific hosts in shared code:
+
+```bash
+spotlights-engine \
+  --repo /path/to/target-repo \
+  --codex-profile <codex-profile> \
+  --claude-model <claude-model-id> \
+  --claude-base-url https://your-claude-compatible-host.example.com \
+  --claude-auth-token-env LITELLM_API_KEY \
+  --claude-unset-env ANTHROPIC_API_KEY \
+  --claude-disable-experimental-betas \
+  --antigravity-base-url https://your-gemini-compatible-host.example.com \
+  --antigravity-model <gemini-model-id> \
+  --antigravity-api-key-env LITELLM_API_KEY
+```
+
+`--claude-auth-token-env` copies the named environment variable into
+`ANTHROPIC_AUTH_TOKEN` only for child Claude processes. If your Claude Code
+uses the official Anthropic API key directly, omit the Claude proxy flags. If
+you use a Python environment manager such as conda or micromamba and the engine
+already imports successfully there, prefer running from that active environment
+(or `python -m pip install -e .`) over re-syncing all optional extras into it.
+
+Swap the host and model IDs for your deployment. After editing config or
 environment, re-run `claude --version` / `codex --version` and the Antigravity SDK smoke test
 from a fresh shell.
 

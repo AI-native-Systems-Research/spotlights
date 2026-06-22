@@ -7,6 +7,7 @@ from pathlib import Path
 
 from spotlights_engine.module_deep_research.antigravity_exec import AntigravityExecOptions
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
+from spotlights_engine.schemas.pipeline import ModuleDeepResearchOutput
 from spotlights_engine.spotlights_manager import (
     ModuleFilter,
     SpotlightsManagerConfig,
@@ -166,5 +167,105 @@ def test_deep_research_antigravity_options_per_module_override(
     used = seen_antigravity[0]
     assert used is not None
     assert used.cwd == repo
+    assert used.workspaces == [repo / "src/v1/kv_offload"]
+    assert used.response_schema is ModuleDeepResearchOutput
+    assert used.response_schema is ModuleDeepResearchOutput
     assert used.antigravity_base_url == "https://litellm.example.com"
     assert caller_options.cwd == Path("/tmp/will-be-overridden")
+    assert caller_options.workspaces is None
+
+
+def test_deep_research_antigravity_preserves_explicit_workspaces(
+    tmp_path: Path, monkeypatch
+) -> None:
+    tree = make_tree()
+    monkeypatch.setattr(
+        orch,
+        "extract_with_telemetry",
+        lambda inp, *, config=None: make_extractor_result(tree),
+    )
+    monkeypatch.setattr(
+        orch,
+        "discover",
+        lambda inp, *, config: make_discovery_result(inp.module_qualified_name),
+    )
+
+    seen_antigravity: list[AntigravityExecOptions | None] = []
+
+    def _research(inp, options=None, **kwargs):
+        seen_antigravity.append(kwargs.get("antigravity_options"))
+        return make_research_output()
+
+    monkeypatch.setattr(orch, "research_module", _research)
+    patch_proposal_from_finding(monkeypatch, orch)
+    patch_agent_proposals(monkeypatch, orch)
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    explicit_workspace = tmp_path / "explicit"
+    explicit_workspace.mkdir()
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+
+    caller_options = AntigravityExecOptions(
+        cwd=Path("/tmp/will-be-overridden"),
+        workspaces=[explicit_workspace],
+    )
+    cfg = SpotlightsManagerConfig(
+        artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
+        deep_research_antigravity=caller_options,
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
+    )
+    run_with_telemetry(make_input(repo), config=cfg)
+
+    used = seen_antigravity[0]
+    assert used is not None
+    assert used.cwd == repo
+    assert used.workspaces == [explicit_workspace]
+    assert used.response_schema is ModuleDeepResearchOutput
+    assert used.enable_file_tools is True
+    assert caller_options.workspaces == [explicit_workspace]
+
+
+def test_deep_research_antigravity_default_uses_module_workspace(
+    tmp_path: Path, monkeypatch
+) -> None:
+    tree = make_tree()
+    monkeypatch.setattr(
+        orch,
+        "extract_with_telemetry",
+        lambda inp, *, config=None: make_extractor_result(tree),
+    )
+    monkeypatch.setattr(
+        orch,
+        "discover",
+        lambda inp, *, config: make_discovery_result(inp.module_qualified_name),
+    )
+
+    seen_antigravity: list[AntigravityExecOptions | None] = []
+
+    def _research(inp, options=None, **kwargs):
+        seen_antigravity.append(kwargs.get("antigravity_options"))
+        return make_research_output()
+
+    monkeypatch.setattr(orch, "research_module", _research)
+    patch_proposal_from_finding(monkeypatch, orch)
+    patch_agent_proposals(monkeypatch, orch)
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+
+    cfg = SpotlightsManagerConfig(
+        artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
+    )
+    run_with_telemetry(make_input(repo), config=cfg)
+
+    used = seen_antigravity[0]
+    assert used is not None
+    assert used.cwd == repo
+    assert used.workspaces == [repo / "src/v1/kv_offload"]
