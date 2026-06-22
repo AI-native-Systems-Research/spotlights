@@ -206,6 +206,15 @@ def _build_argparser() -> argparse.ArgumentParser:
         help="Environment variable containing the Antigravity/Gemini-compatible API key.",
     )
     provider.add_argument(
+        "--antigravity-timeout-seconds",
+        type=int,
+        default=None,
+        help=(
+            "Timeout for the Antigravity SDK runner. "
+            "Default: runner/provider default."
+        ),
+    )
+    provider.add_argument(
         "--antigravity-auth-mechanism",
         choices=("bearer", "x-goog-api-key"),
         default="bearer",
@@ -452,6 +461,7 @@ def _build_config(args: argparse.Namespace) -> SpotlightsManagerConfig:
         args.antigravity_base_url is not None
         or args.antigravity_model is not None
         or args.antigravity_api_key_env is not None
+        or args.antigravity_timeout_seconds is not None
     ):
         antigravity_cfg = AntigravityExecOptions(
             model=args.antigravity_model,
@@ -462,6 +472,7 @@ def _build_config(args: argparse.Namespace) -> SpotlightsManagerConfig:
             ),
             antigravity_api_key_env=args.antigravity_api_key_env,
             api_key_auth_mechanism=args.antigravity_auth_mechanism,
+            timeout_seconds=args.antigravity_timeout_seconds,
             normalize_sse_bytes_repr=args.antigravity_sse_normalizer,
         )
 

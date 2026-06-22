@@ -45,6 +45,7 @@ from spotlights_engine.signal_pipeline._subprocess_util import (
 # Linux MAX_ARG_STRLEN is 131_072 bytes per argument. `claude --json-schema`
 # inlines the schema as one argv string; leave headroom for environment growth.
 _MAX_SCHEMA_BYTES = 120_000
+_MAX_SEMANTIC_REPAIR_ATTEMPTS = 2
 
 
 def _clean_env() -> dict[str, str]:
@@ -128,56 +129,97 @@ def run_extraction(
         *claude_model_args(),
     ]
 
-    try:
-        result = run_streaming_claude(
-            argv=argv,
-            prompt=prompt,
-            env=_clean_env(),
-            cwd=repo_path,
-            timeout_s=timeout_s,
-            on_event=on_event,
-        )
-    except StreamingTimeout as exc:
+    repair_errors: list[str] = []
+    current_prompt = prompt
+    for attempt in range(_MAX_SEMANTIC_REPAIR_ATTEMPTS + 1):
+        artifact_label = None if attempt == 0 else f"repair_{attempt}"
+        if artifacts_dir is not None and attempt > 0:
+            (artifacts_dir / f"{artifact_label}_prompt.md").write_text(
+                current_prompt, encoding="utf-8"
+            )
+
+        try:
+            result = run_streaming_claude(
+                argv=argv,
+                prompt=current_prompt,
+                env=_clean_env(),
+                cwd=repo_path,
+                timeout_s=timeout_s,
+                on_event=on_event,
+            )
+        except StreamingTimeout as exc:
+            if artifacts_dir is not None:
+                _write_streams(
+                    artifacts_dir, exc.stdout, exc.stderr, label=artifact_label
+                )
+            raise ExtractorAgentError(
+                f"claude timed out after {exc.duration_s:.1f}s",
+                timeout_s=timeout_s,
+            ) from exc
+
         if artifacts_dir is not None:
-            _write_streams(artifacts_dir, exc.stdout, exc.stderr)
-        raise ExtractorAgentError(
-            f"claude timed out after {exc.duration_s:.1f}s",
-            timeout_s=timeout_s,
-        ) from exc
+            _write_streams(artifacts_dir, result.stdout, result.stderr, label=artifact_label)
 
-    if artifacts_dir is not None:
-        _write_streams(artifacts_dir, result.stdout, result.stderr)
+        if result.returncode != 0:
+            stderr_tail = result.stderr[-500:].decode("utf-8", "replace")
+            stdout_tail = result.stdout[-500:].decode("utf-8", "replace")
+            raise ExtractorAgentError(
+                f"claude exit={result.returncode}",
+                returncode=result.returncode,
+                stderr_tail=stderr_tail,
+                stdout_tail=stdout_tail,
+            )
 
-    if result.returncode != 0:
-        stderr_tail = result.stderr[-500:].decode("utf-8", "replace")
-        stdout_tail = result.stdout[-500:].decode("utf-8", "replace")
-        raise ExtractorAgentError(
-            f"claude exit={result.returncode}",
-            returncode=result.returncode,
-            stderr_tail=stderr_tail,
-            stdout_tail=stdout_tail,
-        )
+        result_event = _extract_result_event(result.stdout)
+        if result_event is None:
+            raise ExtractorAgentError(
+                "claude stream-json had no terminal result event",
+            )
 
-    result_event = _extract_result_event(result.stdout)
-    if result_event is None:
-        raise ExtractorAgentError(
-            "claude stream-json had no terminal result event",
-        )
+        payload = _final_message_text(result_event)
+        if not payload.strip():
+            raise ExtractorAgentError("claude returned an empty final message")
 
-    payload = _final_message_text(result_event)
-    if not payload.strip():
-        raise ExtractorAgentError("claude returned an empty final message")
+        if artifacts_dir is not None:
+            message_name = (
+                "last_message.json"
+                if artifact_label is None
+                else f"{artifact_label}_last_message.json"
+            )
+            (artifacts_dir / message_name).write_text(payload, encoding="utf-8")
 
-    if artifacts_dir is not None:
-        (artifacts_dir / "last_message.json").write_text(payload, encoding="utf-8")
-
-    try:
-        tree = ProjectTree.model_validate_json(payload)
-    except ValidationError as exc:
-        raise ExtractorValidationError(
-            f"ProjectTree validation failed: {exc}",
-            payload_preview=payload[:1000],
-        ) from exc
+        try:
+            tree = ProjectTree.model_validate_json(payload)
+            break
+        except ValidationError as exc:
+            repair_errors.append(str(exc))
+            if artifacts_dir is not None:
+                error_name = (
+                    "validation_error.txt"
+                    if artifact_label is None
+                    else f"{artifact_label}_validation_error.txt"
+                )
+                (artifacts_dir / error_name).write_text(str(exc), encoding="utf-8")
+            if attempt >= _MAX_SEMANTIC_REPAIR_ATTEMPTS:
+                raise ExtractorValidationError(
+                    f"ProjectTree validation failed after "
+                    f"{_MAX_SEMANTIC_REPAIR_ATTEMPTS} repair attempts: {exc}",
+                    payload_preview=payload[:1000],
+                    repair_errors=repair_errors,
+                ) from exc
+            if on_event is not None:
+                on_event(
+                    "ProjectTree semantic validation failed; retrying with "
+                    f"repair prompt ({attempt + 1}/"
+                    f"{_MAX_SEMANTIC_REPAIR_ATTEMPTS})"
+                )
+            current_prompt = _semantic_repair_prompt(
+                original_prompt=prompt,
+                validation_error=str(exc),
+                payload=payload,
+            )
+    else:  # pragma: no cover - loop always exits via break or raise
+        raise ExtractorAgentError("unreachable ProjectTree validation state")
 
     if artifacts_dir is not None:
         tree.to_json(artifacts_dir / "project_tree.json")
@@ -195,9 +237,40 @@ def run_extraction(
     return ExtractionRunResult(project_tree=tree, invocation=invocation, raw_payload=payload)
 
 
-def _write_streams(artifacts_dir: Path, stdout: bytes, stderr: bytes) -> None:
-    (artifacts_dir / "raw_stdout.log").write_bytes(stdout or b"")
-    (artifacts_dir / "raw_stderr.log").write_bytes(stderr or b"")
+def _write_streams(
+    artifacts_dir: Path, stdout: bytes, stderr: bytes, *, label: str | None = None
+) -> None:
+    prefix = "" if label is None else f"{label}_"
+    (artifacts_dir / f"{prefix}raw_stdout.log").write_bytes(stdout or b"")
+    (artifacts_dir / f"{prefix}raw_stderr.log").write_bytes(stderr or b"")
+
+
+def _semantic_repair_prompt(
+    *, original_prompt: str, validation_error: str, payload: str
+) -> str:
+    return f"""The previous ProjectTree JSON matched the CLI JSON shape but failed \
+Spotlights' stricter semantic validation.
+
+Return exactly one corrected JSON object and no commentary.
+
+Fix every validation error while preserving the useful repository structure.
+Important invariants:
+- Each module/submodule `name` must equal the normalized basename of its `path`.
+- Each child module path must be strictly nested under its parent path.
+- Do not create logical submodules that reuse the parent directory path; merge
+  those files into the parent or use real child directories only.
+- All module paths must be repo-relative and unique after qualified-name normalization.
+- `depends_on` entries must be peer top-level qualified names or external dependencies.
+
+Validation error:
+{validation_error}
+
+Original extraction instructions:
+{original_prompt}
+
+Invalid JSON to repair:
+{payload}
+"""
 
 
 def _extract_result_event(stdout: bytes) -> dict | None:
