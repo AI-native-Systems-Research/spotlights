@@ -508,6 +508,17 @@ def main(argv: list[str] | None = None) -> int:
         from spotlights_engine.prep_evolve.cli import main as prep_main
 
         return prep_main(raw_argv[1:])
+    if raw_argv and raw_argv[0] == "both":
+        from spotlights_engine.unified_runner.cli_unified import main as both_main
+
+        return both_main(raw_argv[1:])
+    if raw_argv and raw_argv[0] == "signal":
+        from spotlights_engine.unified_runner.cli_signal import main as signal_main
+
+        return signal_main(raw_argv[1:])
+    if raw_argv and raw_argv[0] == "dr":
+        # Explicit alias for the no-prefix path (today's flat DR CLI).
+        argv = raw_argv[1:]
 
     args = _build_argparser().parse_args(argv)
 
