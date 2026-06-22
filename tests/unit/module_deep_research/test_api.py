@@ -351,7 +351,7 @@ def test_antigravity_normalizes_litellm_bytes_repr_sse_line() -> None:
     ]
 
 
-def test_antigravity_normalizer_strips_vertex_thought_signature() -> None:
+def test_antigravity_normalizer_preserves_vertex_thought_signature() -> None:
     from spotlights_engine.module_deep_research.antigravity_exec import (
         _normalize_sse_lines,
         normalize_litellm_sse_bytes_repr_line,
@@ -400,6 +400,12 @@ def test_antigravity_normalizer_strips_vertex_thought_signature() -> None:
     assert b"thoughtSignature" in normalized_plain
     assert b"usageMetadata" not in normalized_plain
     assert b'"text":"hi"' in normalized_plain
+
+    thought_only = normalize_litellm_vertex_sse_line(
+        'data: {"candidates":[{"content":{"parts":[{"text":"thinking",'
+        '"thought":true}]}}],"usageMetadata":{"x":1}}'
+    )
+    assert thought_only == b""
 
     fragmented = list(
         _normalize_sse_lines(
@@ -468,6 +474,17 @@ def test_antigravity_normalizer_strips_vertex_thought_signature() -> None:
     assert b"data: b" not in split_plain_then_bytes[0]
     assert b"usageMetadata" not in split_plain_then_bytes[0]
     assert b"functionCall" in split_plain_then_bytes[0]
+    assert b"thoughtSignature" in split_plain_then_bytes[0]
+
+    tool_call_with_helper_metadata = normalize_litellm_vertex_sse_line(
+        'data: {"candidates":[{"content":{"parts":[{"functionCall":'
+        '{"name":"list_dir","args":{"DirectoryPath":"/tmp",'
+        '"toolAction":"list","toolSummary":"list"}}}]}}]}'
+    )
+    assert tool_call_with_helper_metadata is not None
+    assert b'"name":"list_dir"' in tool_call_with_helper_metadata
+    assert b"toolAction" not in tool_call_with_helper_metadata
+    assert b"toolSummary" not in tool_call_with_helper_metadata
 
 
 def test_antigravity_normalizer_suppresses_empty_terminal_chunk() -> None:
@@ -498,7 +515,9 @@ def test_antigravity_default_command_is_sdk_and_does_not_expose_prompt(tmp_path:
     assert str(tmp_path.resolve()) in cmd
 
 
-def test_antigravity_litellm_proxy_maps_key_to_bearer_header(tmp_path: Path) -> None:
+def test_antigravity_litellm_proxy_defers_bearer_header_to_normalizer(
+    tmp_path: Path,
+) -> None:
     from spotlights_engine.module_deep_research.antigravity_exec import (
         AntigravityExecClient,
         AntigravityExecOptions,
@@ -509,6 +528,29 @@ def test_antigravity_litellm_proxy_maps_key_to_bearer_header(tmp_path: Path) -> 
             cwd=tmp_path,
             base_url="https://litellm.example.com",
             env={"LITELLM_API_KEY": "test-key"},
+        )
+    )
+
+    assert client.build_model_endpoint_kwargs() == {
+        "base_url": "https://litellm.example.com",
+        "api_key": "proxy-placeholder-key",
+    }
+
+
+def test_antigravity_litellm_proxy_without_normalizer_passes_bearer_header(
+    tmp_path: Path,
+) -> None:
+    from spotlights_engine.module_deep_research.antigravity_exec import (
+        AntigravityExecClient,
+        AntigravityExecOptions,
+    )
+
+    client = AntigravityExecClient(
+        AntigravityExecOptions.litellm_proxy(
+            cwd=tmp_path,
+            base_url="https://litellm.example.com",
+            env={"LITELLM_API_KEY": "test-key"},
+            normalize_sse_bytes_repr=False,
         )
     )
 
@@ -699,6 +741,281 @@ Output rules:
     )
     assert len(json.loads(single_wrapped)["findings"]) == 1
 
+
+def test_antigravity_proxy_path_keeps_file_tools_and_stages_workspace(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import contextlib
+    import sys
+    import types
+
+    import spotlights_engine.module_deep_research.antigravity_exec as ag_exec
+    from spotlights_engine.module_deep_research.antigravity_exec import (
+        AntigravityExecClient,
+        AntigravityExecOptions,
+    )
+
+    captured: dict[str, object] = {}
+    repo = tmp_path / "repo"
+    module_dir = repo / "vllm" / "v1" / "sample"
+    module_dir.mkdir(parents=True)
+    (module_dir / "sample.py").write_text("def sample(): return 'ok'\n")
+    stage_root = tmp_path / "stage"
+
+    class BuiltinTools:
+        LIST_DIR = "list_directory"
+        SEARCH_DIR = "search_directory"
+        FIND_FILE = "find_file"
+        VIEW_FILE = "view_file"
+        FINISH = "finish"
+        SEARCH_WEB = "search_web"
+
+        @classmethod
+        def read_only(cls):
+            return [cls.LIST_DIR, cls.SEARCH_DIR, cls.FIND_FILE, cls.VIEW_FILE, cls.FINISH]
+
+    class CapabilitiesConfig:
+        def __init__(self, *, enabled_tools):
+            captured["enabled_tools"] = enabled_tools
+
+    class GeminiAPIEndpoint:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class ModelTarget:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.name = kwargs["name"]
+
+    class LocalAgentConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            captured["local_config_kwargs"] = kwargs
+
+    class Agent:
+        def __init__(self, config):
+            self.config = config
+            self._config = types.SimpleNamespace(**config.kwargs)
+            # Simulate Antigravity's copied config containing SDK-added
+            # defaults; the wrapper should strip these before entering.
+            self._config.__dict__["models"] = [
+                *config.kwargs["models"],
+                "sdk-added-image-default",
+            ]
+            self._config.__dict__["api_key"] = "sdk-placeholder"
+
+        async def __aenter__(self):
+            captured["agent_config_models"] = self._config.models
+            captured["agent_config_api_key"] = self._config.api_key
+            staged_workspace = Path(self.config.kwargs["workspaces"][0])
+            captured["staged_sample_text"] = (
+                staged_workspace / "vllm" / "v1" / "sample" / "sample.py"
+            ).read_text()
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def chat(self, prompt):
+            captured["prompt"] = prompt
+
+            class Response:
+                async def structured_output(self):
+                    return None
+
+                async def text(self):
+                    return '{"findings":[],"issues":[]}'
+
+            return Response()
+
+    @contextlib.contextmanager
+    def fake_normalizer(options):
+        yield "https://normalizer.example.com"
+
+    fake = types.ModuleType("google.antigravity")
+    fake.Agent = Agent
+    fake.BuiltinTools = BuiltinTools
+    fake.CapabilitiesConfig = CapabilitiesConfig
+    fake.GeminiAPIEndpoint = GeminiAPIEndpoint
+    fake.LocalAgentConfig = LocalAgentConfig
+    fake.ModelTarget = ModelTarget
+    fake.ModelType = types.SimpleNamespace(TEXT="text")
+
+    monkeypatch.setitem(sys.modules, "google.antigravity", fake)
+    monkeypatch.setattr(ag_exec, "_maybe_sse_normalizer", fake_normalizer)
+
+    prompt = f"""You are running the Spotlights module_deep_research pipeline step.
+
+Repository working directory (the codex sandbox is rooted here; read files
+directly with relative paths from this root, e.g. the target module path
+below): {repo}
+
+Target module:
+Qualified name: v1/sample
+Path: vllm/v1/sample
+
+Caller context:
+Objective: speed up speculative decoding rejection sampling
+
+Workflow:
+1. Open files.
+
+Output rules:
+- Include at most 1 findings.
+"""
+
+    options = AntigravityExecOptions.litellm_proxy(
+        cwd=repo,
+        base_url="https://litellm.example.com",
+        model="proxy/gemini",
+        env={"LITELLM_API_KEY": "test-key"},
+    ).model_copy(
+        update={
+            "workspaces": [module_dir],
+            "stage_workspaces": True,
+            "staged_workspaces_root": stage_root,
+            "response_schema": {"type": "object"},
+        }
+    )
+    result = AntigravityExecClient(options).run(prompt, check=False)
+
+    staged_workspace = Path(captured["local_config_kwargs"]["workspaces"][0])
+
+    assert result.ok
+    assert captured["enabled_tools"] == [
+        "list_directory",
+        "search_directory",
+        "find_file",
+        "view_file",
+        "finish",
+        "search_web",
+    ]
+    assert staged_workspace != repo
+    assert captured["staged_sample_text"] == "def sample(): return 'ok'\n"
+    assert str(repo) not in captured["prompt"]
+    assert str(staged_workspace) in captured["prompt"]
+    assert len(captured["agent_config_models"]) == 1
+    assert captured["agent_config_models"][0].name == "proxy/gemini"
+    assert captured["agent_config_api_key"] is None
+    assert json.loads(result.final_message) == {"findings": [], "issues": []}
+
+
+def test_antigravity_web_only_proxy_path_uses_compact_wrapper(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import contextlib
+    import sys
+    import types
+
+    import spotlights_engine.module_deep_research.antigravity_exec as ag_exec
+    from spotlights_engine.module_deep_research.antigravity_exec import (
+        AntigravityExecClient,
+        AntigravityExecOptions,
+    )
+
+    captured: dict[str, object] = {}
+
+    class BuiltinTools:
+        LIST_DIR = "list_directory"
+        SEARCH_DIR = "search_directory"
+        FIND_FILE = "find_file"
+        VIEW_FILE = "view_file"
+        FINISH = "finish"
+        SEARCH_WEB = "search_web"
+
+        @classmethod
+        def read_only(cls):
+            return [cls.LIST_DIR, cls.SEARCH_DIR, cls.FIND_FILE, cls.VIEW_FILE, cls.FINISH]
+
+    class CapabilitiesConfig:
+        def __init__(self, *, enabled_tools):
+            captured["enabled_tools"] = enabled_tools
+
+    class GeminiAPIEndpoint:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class ModelTarget:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.name = kwargs["name"]
+
+    class LocalAgentConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            captured["local_config_kwargs"] = kwargs
+
+    class Agent:
+        def __init__(self, config):
+            self.config = config
+            self._config = types.SimpleNamespace(**config.kwargs)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def chat(self, prompt):
+            captured["prompt"] = prompt
+
+            class Response:
+                async def structured_output(self):
+                    return None
+
+                async def text(self):
+                    return (
+                        '{"findings":[{"title":"Paper","url":"https://example.com",'
+                        '"source_type":"paper"}],"issues":[]}'
+                    )
+
+            return Response()
+
+    @contextlib.contextmanager
+    def fake_normalizer(options):
+        yield "https://normalizer.example.com"
+
+    fake = types.ModuleType("google.antigravity")
+    fake.Agent = Agent
+    fake.BuiltinTools = BuiltinTools
+    fake.CapabilitiesConfig = CapabilitiesConfig
+    fake.GeminiAPIEndpoint = GeminiAPIEndpoint
+    fake.LocalAgentConfig = LocalAgentConfig
+    fake.ModelTarget = ModelTarget
+    fake.ModelType = types.SimpleNamespace(TEXT="text")
+
+    monkeypatch.setitem(sys.modules, "google.antigravity", fake)
+    monkeypatch.setattr(ag_exec, "_maybe_sse_normalizer", fake_normalizer)
+
+    prompt = """You are running the Spotlights module_deep_research pipeline step.
+
+Target module:
+Qualified name: v1/sample
+Path: vllm/v1/sample
+
+Caller context:
+Objective: speed up speculative decoding rejection sampling
+
+Workflow:
+1. Open files.
+
+Output rules:
+- Include at most 1 findings.
+"""
+
+    options = AntigravityExecOptions.litellm_proxy(
+        cwd=tmp_path,
+        base_url="https://litellm.example.com",
+        model="proxy/gemini",
+        env={"LITELLM_API_KEY": "test-key"},
+    ).model_copy(update={"enable_file_tools": False})
+    result = AntigravityExecClient(options).run(prompt, check=False)
+
+    assert result.ok
+    assert captured["enabled_tools"] == ["search_web"]
+    assert captured["local_config_kwargs"]["workspaces"] == []
+    assert captured["prompt"].startswith("SPOTLIGHTS_SIMPLE_WEB_RESULT\n")
+    assert json.loads(result.final_message)["findings"][0]["finding_id"] == "find-0001"
 
 def test_antigravity_repairs_missing_structured_output(monkeypatch, tmp_path: Path) -> None:
     import sys

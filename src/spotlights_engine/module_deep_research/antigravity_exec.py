@@ -8,6 +8,8 @@ import contextlib
 import json
 import os
 import re
+import shutil
+import tempfile
 import threading
 from collections.abc import Iterator, Mapping, Sequence
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -23,6 +25,7 @@ from spotlights_engine.module_deep_research.agent_exec import AgentExecResult
 
 DEFAULT_LITELLM_ANTIGRAVITY_MODEL = "gcp/gemini-3.1-pro-preview"
 _DEFAULT_PROXY_TIMEOUT_SECONDS = 300
+_PROXY_PLACEHOLDER_API_KEY = "proxy-placeholder-key"
 
 
 class AntigravityExecOptions(BaseModel):
@@ -44,6 +47,8 @@ class AntigravityExecOptions(BaseModel):
     normalize_sse_bytes_repr: bool = False
     structured_output_repair_attempts: int = Field(default=3, ge=0, le=8)
     enable_file_tools: bool = True
+    stage_workspaces: bool | None = None
+    staged_workspaces_root: Path | str | None = None
 
     @classmethod
     def litellm_proxy(
@@ -116,10 +121,18 @@ class AntigravityExecClient:
         if key and opt.api_key_auth_mechanism == "bearer":
             # The Antigravity SDK requires a non-empty Gemini API key when
             # constructing the endpoint even when a gateway authenticates with
-            # a bearer header. Provide the same secret through the SDK field
-            # while still making the bearer mechanism explicit for proxies.
-            kwargs["api_key"] = key
-            headers.setdefault("Authorization", f"Bearer {key}")
+            # a bearer header. When the local SSE normalizer is enabled, keep
+            # the real secret out of GeminiAPIEndpoint entirely: current
+            # Antigravity harness builds crash before sending any request with
+            # some non-Gemini key formats and with custom endpoint headers.
+            # Do not pass bearer headers into GeminiAPIEndpoint when the local
+            # normalizer is enabled. The normalizer injects those headers
+            # upstream instead.
+            if opt.antigravity_base_url and opt.normalize_sse_bytes_repr:
+                kwargs["api_key"] = _PROXY_PLACEHOLDER_API_KEY
+            else:
+                kwargs["api_key"] = key
+                headers.setdefault("Authorization", f"Bearer {key}")
         elif key:
             kwargs["api_key"] = key
         if headers:
@@ -181,72 +194,189 @@ class AntigravityExecClient:
 
         opt = self.options
         prompt = _maybe_compact_web_grounded_spotlights_prompt(
-            prompt, compact=bool(opt.antigravity_base_url and opt.normalize_sse_bytes_repr)
+            prompt,
+            compact=bool(
+                opt.antigravity_base_url
+                and opt.normalize_sse_bytes_repr
+                and not opt.enable_file_tools
+            ),
         )
         wrap_simple_web_result = _is_simple_web_grounded_spotlights_prompt(prompt)
         cwd = Path(opt.cwd).expanduser().resolve()
-        workspaces = [str(Path(path).expanduser().resolve()) for path in (opt.workspaces or [cwd])]
+        effective_enable_file_tools = opt.enable_file_tools
+        workspaces = (
+            []
+            if not effective_enable_file_tools
+            else [
+                str(Path(path).expanduser().resolve())
+                for path in (opt.workspaces or [cwd])
+            ]
+        )
         endpoint_kwargs = self.build_model_endpoint_kwargs()
         model = opt.model
         endpoint_model = model or (
             DEFAULT_LITELLM_ANTIGRAVITY_MODEL if opt.antigravity_base_url else None
         )
         research_tools = _antigravity_research_tools(
-            BuiltinTools, enable_file_tools=opt.enable_file_tools
+            BuiltinTools, enable_file_tools=effective_enable_file_tools
         )
         response_schema = None if wrap_simple_web_result else opt.response_schema
-        config_kwargs: dict[str, Any] = {
-            "system_instructions": opt.system_instructions,
-            "capabilities": CapabilitiesConfig(enabled_tools=research_tools),
-            "workspaces": workspaces,
-            "response_schema": response_schema,
-        }
-        if endpoint_model and endpoint_kwargs:
-            if endpoint_kwargs.get("api_key"):
-                # LocalAgentConfig appends SDK defaults for model types not
-                # covered by explicit ModelTarget entries. Keep validation
-                # satisfied without hardcoding any provider-specific key name.
-                config_kwargs["api_key"] = endpoint_kwargs["api_key"]
-            with _maybe_sse_normalizer(opt) as normalized_base_url:
-                if normalized_base_url:
-                    endpoint_kwargs = dict(endpoint_kwargs)
-                    endpoint_kwargs["base_url"] = normalized_base_url
-                model_target = ModelTarget(
-                    name=endpoint_model,
-                    types=[ModelType.TEXT, ModelType.IMAGE],
-                    endpoint=GeminiAPIEndpoint(**endpoint_kwargs),
-                )
-                config_kwargs["model"] = model_target
-                config_kwargs["models"] = [model_target]
-                async with Agent(LocalAgentConfig(**config_kwargs)) as agent:
-                    output = await _chat_text_or_structured_json(
-                        agent,
-                        prompt,
-                        structured_output_repair_attempts=(
-                            opt.structured_output_repair_attempts
-                            if (response_schema is not None or wrap_simple_web_result)
-                            else 0
-                        ),
+        with _maybe_staged_workspaces(opt, prompt, cwd, workspaces) as (
+            agent_prompt,
+            agent_workspaces,
+        ):
+            config_kwargs: dict[str, Any] = {
+                "system_instructions": opt.system_instructions,
+                "capabilities": CapabilitiesConfig(enabled_tools=research_tools),
+                "workspaces": agent_workspaces,
+                "response_schema": response_schema,
+            }
+            if endpoint_model and endpoint_kwargs:
+                if endpoint_kwargs.get("api_key"):
+                    # LocalAgentConfig appends SDK defaults for model types not
+                    # covered by explicit ModelTarget entries. Keep validation
+                    # satisfied without hardcoding any provider-specific key name.
+                    config_kwargs["api_key"] = endpoint_kwargs["api_key"]
+                with _maybe_sse_normalizer(opt) as normalized_base_url:
+                    if normalized_base_url:
+                        endpoint_kwargs = dict(endpoint_kwargs)
+                        endpoint_kwargs["base_url"] = normalized_base_url
+                    model_target = ModelTarget(
+                        name=endpoint_model,
+                        types=[ModelType.TEXT],
+                        endpoint=GeminiAPIEndpoint(**endpoint_kwargs),
                     )
-                    if wrap_simple_web_result:
-                        return _wrap_simple_web_result(output)
-                    return output
-        if model:
-            config_kwargs["model"] = model
+                    config_kwargs["model"] = model_target
+                    config_kwargs["models"] = [model_target]
+                    agent_session = Agent(LocalAgentConfig(**config_kwargs))
+                    _force_agent_model_targets(agent_session, [model_target])
+                    async with agent_session as agent:
+                        output = await _chat_text_or_structured_json(
+                            agent,
+                            agent_prompt,
+                            structured_output_repair_attempts=(
+                                opt.structured_output_repair_attempts
+                                if (response_schema is not None or wrap_simple_web_result)
+                                else 0
+                            ),
+                        )
+                        if wrap_simple_web_result:
+                            return _wrap_simple_web_result(output)
+                        return output
+            if model:
+                config_kwargs["model"] = model
 
-        async with Agent(LocalAgentConfig(**config_kwargs)) as agent:
-            output = await _chat_text_or_structured_json(
-                agent,
-                prompt,
-                structured_output_repair_attempts=(
-                    opt.structured_output_repair_attempts
-                    if (response_schema is not None or wrap_simple_web_result)
-                    else 0
-                ),
-            )
-            if wrap_simple_web_result:
-                return _wrap_simple_web_result(output)
-            return output
+            async with Agent(LocalAgentConfig(**config_kwargs)) as agent:
+                output = await _chat_text_or_structured_json(
+                    agent,
+                    agent_prompt,
+                    structured_output_repair_attempts=(
+                        opt.structured_output_repair_attempts
+                        if (response_schema is not None or wrap_simple_web_result)
+                        else 0
+                    ),
+                )
+                if wrap_simple_web_result:
+                    return _wrap_simple_web_result(output)
+                return output
+
+
+def _force_agent_model_targets(agent: Any, model_targets: list[Any]) -> None:
+    """Keep Antigravity's copied config on the exact requested model targets.
+
+    LocalAgentConfig currently appends SDK default models for uncovered model
+    types, and Agent deep-copies that config during construction. For a
+    Gemini-compatible proxy that only supports a text model, those defaults can
+    make the harness crash or call the wrong upstream before user code sees a
+    useful error. This targeted adjustment keeps the proxy path provider-neutral
+    while avoiding SDK-added image/default targets.
+    """
+    config = getattr(agent, "_config", None)
+    if config is None:
+        return
+    try:
+        config.__dict__["model"] = None
+        config.__dict__["models"] = list(model_targets)
+        config.__dict__["api_key"] = None
+    except Exception:  # noqa: BLE001 - best-effort compatibility with SDK internals
+        return
+
+
+@contextlib.contextmanager
+def _maybe_staged_workspaces(
+    options: AntigravityExecOptions,
+    prompt: str,
+    cwd: Path,
+    workspaces: Sequence[str],
+) -> Iterator[tuple[str, list[str]]]:
+    """Stage fragile mounted workspaces onto a native filesystem for Antigravity.
+
+    The Antigravity local harness can crash before the first model request when
+    asked to index certain mounted workspaces. In that case, copy the requested
+    read-only workspace subset into a short-lived cache directory and rewrite
+    the prompt's repository root to that staged root. This keeps file tools
+    enabled without provider- or organization-specific assumptions.
+    """
+    workspace_paths = [Path(path).expanduser().resolve() for path in workspaces]
+    should_stage = options.stage_workspaces
+    if should_stage is None:
+        should_stage = any(_should_stage_workspace(path) for path in workspace_paths)
+    if not should_stage or not workspace_paths:
+        yield prompt, [str(path) for path in workspace_paths]
+        return
+
+    staging_parent = Path(
+        options.staged_workspaces_root
+        or Path.home() / "spotlights-engine-antigravity-workspaces"
+    ).expanduser()
+    staging_parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix="run-", dir=str(staging_parent)
+    ) as staging_dir:
+        staged_cwd = Path(staging_dir) / "repo"
+        staged_cwd.mkdir(parents=True, exist_ok=True)
+        for workspace in workspace_paths:
+            _copy_workspace_into_staged_repo(workspace, cwd, staged_cwd)
+        staged_prompt = prompt.replace(str(cwd), str(staged_cwd))
+        staged_prompt = staged_prompt.replace(cwd.as_posix(), staged_cwd.as_posix())
+        yield staged_prompt, [str(staged_cwd)]
+
+
+def _should_stage_workspace(path: Path) -> bool:
+    as_posix = path.as_posix()
+    if os.environ.get("SPOTLIGHTS_ANTIGRAVITY_STAGE_WORKSPACES"):
+        return True
+    if os.environ.get("WSL_DISTRO_NAME") and as_posix.startswith("/mnt/"):
+        return True
+    return False
+
+
+def _copy_workspace_into_staged_repo(workspace: Path, cwd: Path, staged_cwd: Path) -> None:
+    if not workspace.exists():
+        return
+    try:
+        relative = workspace.relative_to(cwd)
+    except ValueError:
+        relative = Path(workspace.name)
+    destination = staged_cwd / relative
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if workspace.is_dir():
+        shutil.copytree(
+            workspace,
+            destination,
+            dirs_exist_ok=True,
+            ignore=shutil.ignore_patterns(
+                ".git",
+                "__pycache__",
+                ".pytest_cache",
+                ".mypy_cache",
+                ".ruff_cache",
+                ".venv",
+                "node_modules",
+            ),
+        )
+    else:
+        shutil.copy2(workspace, destination)
 
 
 def _maybe_compact_web_grounded_spotlights_prompt(
@@ -422,15 +552,26 @@ def _maybe_sse_normalizer(options: AntigravityExecOptions) -> Iterator[str | Non
         yield None
         return
     timeout_seconds = options.timeout_seconds or _DEFAULT_PROXY_TIMEOUT_SECONDS
+    upstream_headers = dict(options.extra_http_headers or {})
+    if options.api_key_auth_mechanism == "bearer" and options.antigravity_api_key_env:
+        key = os.environ.get(options.antigravity_api_key_env)
+        if key:
+            upstream_headers.setdefault("Authorization", f"Bearer {key}")
     with _sse_bytes_repr_normalizer(
         options.antigravity_base_url,
         timeout_seconds=timeout_seconds,
+        upstream_headers=upstream_headers,
     ) as base_url:
         yield base_url
 
 
 @contextlib.contextmanager
-def _sse_bytes_repr_normalizer(upstream_base_url: str, *, timeout_seconds: float) -> Iterator[str]:
+def _sse_bytes_repr_normalizer(
+    upstream_base_url: str,
+    *,
+    timeout_seconds: float,
+    upstream_headers: Mapping[str, str] | None = None,
+) -> Iterator[str]:
     """Proxy Gemini API traffic and normalize LiteLLM bytes-repr SSE frames.
 
     The normalizer is intentionally generic: it forwards all paths/headers to
@@ -464,6 +605,7 @@ def _sse_bytes_repr_normalizer(upstream_base_url: str, *, timeout_seconds: float
             body = self.rfile.read(length) if length else None
             upstream_url = urljoin(upstream_base_url.rstrip("/") + "/", self.path.lstrip("/"))
             headers = _forward_headers(dict(self.headers))
+            headers.update(dict(upstream_headers or {}))
             try:
                 request = Request(
                     upstream_url,
@@ -825,9 +967,12 @@ def _normalize_litellm_vertex_stream_payload(decoded_sse: str) -> str | None:
             return decoded_sse
     if "candidates" not in obj and "promptFeedback" not in obj:
         return decoded_sse
+    _drop_thought_only_parts(obj)
+    if _has_no_candidate_parts(obj):
+        return None
     if _is_empty_terminal_candidate_chunk(obj):
         return None
-    _normalize_finish_tool_call_args(obj)
+    _normalize_tool_call_args(obj)
     obj = {
         key: value
         for key, value in obj.items()
@@ -853,8 +998,8 @@ def _repair_litellm_embedded_bytes_markers(payload: str) -> str | None:
     return repaired
 
 
-def _normalize_finish_tool_call_args(obj: Any) -> None:
-    """Drop gateway helper metadata from Antigravity structured-output finish calls."""
+def _normalize_tool_call_args(obj: Any) -> None:
+    """Drop gateway helper metadata from Antigravity tool-call chunks."""
     candidates = obj.get("candidates") if isinstance(obj, dict) else None
     if not isinstance(candidates, list):
         return
@@ -868,12 +1013,53 @@ def _normalize_finish_tool_call_args(obj: Any) -> None:
             if not isinstance(part, dict):
                 continue
             function_call = part.get("functionCall")
-            if not isinstance(function_call, dict) or function_call.get("name") != "finish":
+            if not isinstance(function_call, dict):
                 continue
             args = function_call.get("args")
             if isinstance(args, dict):
                 args.pop("toolAction", None)
                 args.pop("toolSummary", None)
+
+
+def _drop_thought_only_parts(obj: Any) -> None:
+    candidates = obj.get("candidates") if isinstance(obj, dict) else None
+    if not isinstance(candidates, list):
+        return
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            continue
+        content = candidate.get("content")
+        if not isinstance(content, dict):
+            continue
+        parts = content.get("parts")
+        if not isinstance(parts, list):
+            continue
+        content["parts"] = [
+            part
+            for part in parts
+            if not (
+                isinstance(part, dict)
+                and part.get("thought") is True
+                and "functionCall" not in part
+            )
+        ]
+
+
+def _has_no_candidate_parts(obj: Any) -> bool:
+    if not isinstance(obj, dict):
+        return False
+    candidates = obj.get("candidates")
+    if not isinstance(candidates, list) or not candidates:
+        return False
+    for candidate in candidates:
+        if not isinstance(candidate, dict):
+            return False
+        parts = ((candidate.get("content") or {}).get("parts") or [])
+        if parts:
+            return False
+        if candidate.get("finishReason"):
+            return False
+    return "promptFeedback" not in obj
 
 
 def _is_empty_terminal_candidate_chunk(obj: Any) -> bool:
@@ -894,6 +1080,8 @@ def _is_empty_terminal_candidate_chunk(obj: Any) -> bool:
             if not isinstance(part, dict):
                 return False
             if part.get("text"):
+                return False
+            if part.get("functionCall"):
                 return False
     return has_finish
 
