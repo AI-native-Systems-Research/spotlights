@@ -24,6 +24,7 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 from spotlights_engine.schemas.candidate import CandidateKind, EstimatedImpact
+from spotlights_engine.schemas.common import SpotlightContext
 
 
 # ── Bundle A placeholder schemas ─────────────────────────────────────────
@@ -180,6 +181,12 @@ class SignalPipelineInput(BaseModel):
     # default. A stage's pinned `SPEC.model` still wins over this — pin
     # there if you want the choice durable across runs. CLI: `--model <id>`.
     model: str | None = None
+    # Optional `SpotlightContext` for the emitted `SpotlightReport`. When
+    # None (today's signal-pipeline default), the runner synthesizes one
+    # from `signals.workload` via `_default_context`. The unified runner
+    # passes a caller-supplied context so signal- and DR-side reports
+    # agree on `objective` / `workload_hints`.
+    context: SpotlightContext | None = None
 
 
 class SignalPipelineResult(BaseModel):

@@ -1025,6 +1025,7 @@ def run_pipeline(
             started_at=run_started_at,
             finished_at=_now_iso(),
             cost_usd=cost_total,
+            context=input.context,
         )
     except Exception as exc:  # noqa: BLE001
         aggregate_issues.append(f"spotlight_report emission failed: {exc}")
