@@ -8,7 +8,6 @@ contained so step 5 does not couple to step 4's runtime contract.
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 import time
@@ -16,28 +15,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from spotlights_engine.agent_proposals.errors import AgentProposalsSetupError
-
-
-_DROP_EXACT = frozenset(
-    {
-        "OPENAI_BASE_URL",
-        "OPENAI_API_BASE",
-        "ANTHROPIC_BASE_URL",
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "ALL_PROXY",
-        "VIRTUAL_ENV",
-    }
-)
-_DROP_PREFIX = ("VSCODE_", "OPTQUEST_", "SPOTLIGHTS_")
+from spotlights_engine.claude_env import build_claude_env, claude_model_args
 
 
 def _clean_env() -> dict[str, str]:
-    env = os.environ.copy()
-    for key in list(env):
-        if key in _DROP_EXACT or key.startswith(_DROP_PREFIX):
-            env.pop(key)
-    return env
+    return build_claude_env()
 
 
 @dataclass
@@ -94,6 +76,7 @@ def run_candidate_claude(
         "plan",
         "--max-turns",
         str(max_turns),
+        *claude_model_args(),
     ]
     env = _clean_env()
     start = time.monotonic()
@@ -149,7 +132,7 @@ def run_candidate_claude(
         )
 
     structured = result_event.get("structured_output")
-    if isinstance(structured, (dict, list)):
+    if isinstance(structured, dict | list):
         return CandidateAgentRunResult(
             candidate_id=candidate_id,
             duration_s=duration,
@@ -169,7 +152,7 @@ def run_candidate_claude(
                 stdout=completed.stdout or b"",
                 stderr=completed.stderr or b"",
             )
-        if isinstance(parsed, (dict, list)):
+        if isinstance(parsed, dict | list):
             return CandidateAgentRunResult(
                 candidate_id=candidate_id,
                 duration_s=duration,

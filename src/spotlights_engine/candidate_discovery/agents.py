@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from spotlights_engine.candidate_discovery.errors import DiscoverySetupError
+from spotlights_engine.claude_env import build_claude_env, claude_model_args
 
 if TYPE_CHECKING:  # pragma: no cover
     from spotlights_engine.candidate_discovery.api import DiscoveryConfig
@@ -31,6 +32,7 @@ _DROP_EXACT = frozenset(
         "OPENAI_BASE_URL",
         "OPENAI_API_BASE",
         "ANTHROPIC_BASE_URL",
+        "ANTHROPIC_AUTH_TOKEN",
         "HTTP_PROXY",
         "HTTPS_PROXY",
         "ALL_PROXY",
@@ -86,6 +88,9 @@ class AgentRunner(ABC):
     @abstractmethod
     def parse_last_message(self, iter_dir: Path) -> str: ...
 
+    def _build_env(self) -> dict[str, str]:
+        return _clean_env()
+
     def invoke(
         self,
         prompt: str,
@@ -93,7 +98,7 @@ class AgentRunner(ABC):
         schema_path: Path,
     ) -> AgentInvocation:
         argv = self._build_argv(schema_path=schema_path, iter_dir=iter_dir)
-        env = _clean_env()
+        env = self._build_env()
         cwd = self._config.repo_path
 
         stdout_path = iter_dir / "raw_stdout.log"
@@ -160,6 +165,9 @@ class ClaudeRunner(AgentRunner):
     name = "claude_code"
     _executable = "claude"
 
+    def _build_env(self) -> dict[str, str]:
+        return build_claude_env()
+
     def _build_argv(self, schema_path: Path, iter_dir: Path) -> list[str]:
         schema_text = schema_path.read_text(encoding="utf-8")
         # Resolve to claude.exe (not claude.CMD). The .CMD shim buffers
@@ -182,6 +190,7 @@ class ClaudeRunner(AgentRunner):
             "plan",
             "--max-turns",
             str(self._config.claude_max_turns),
+            *claude_model_args(),
         ]
 
     def _parse_invocation_metadata(
@@ -232,7 +241,7 @@ class ClaudeRunner(AgentRunner):
         # validated object on `structured_output`; the `result` string is empty
         # in that mode. Prefer structured_output when present.
         structured = result_event.get("structured_output")
-        if isinstance(structured, (dict, list)):
+        if isinstance(structured, dict | list):
             return json.dumps(structured)
         result = result_event.get("result")
         if isinstance(result, str) and result:
@@ -272,8 +281,10 @@ class CodexRunner(AgentRunner):
         # bare "codex" → FileNotFoundError because subprocess on Windows
         # doesn't follow PATHEXT for unqualified argv[0].
         resolved = shutil.which(self._executable) or self._executable
-        return [
-            resolved,
+        argv = [resolved]
+        if self._config.codex_profile is not None:
+            argv += ["--profile", self._config.codex_profile]
+        argv += [
             "exec",
             "-",
             "--json",
@@ -285,11 +296,14 @@ class CodexRunner(AgentRunner):
             "read-only",
             "-C",
             str(self._config.repo_path),
-            "-c",
-            f'model="{self._config.codex_model}"',
+        ]
+        if self._config.codex_model is not None:
+            argv += ["-c", f'model="{self._config.codex_model}"']
+        argv += [
             "-c",
             f'model_reasoning_effort="{self._config.codex_reasoning_effort}"',
         ]
+        return argv
 
     def _parse_invocation_metadata(
         self, stdout: bytes, iter_dir: Path, start: float
