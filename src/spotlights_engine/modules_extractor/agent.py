@@ -21,13 +21,13 @@ ProjectTree extraction: schema, prompt delivery, and result parsing.
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import ValidationError
 
+from spotlights_engine.claude_env import build_claude_env, claude_model_args
 from spotlights_engine.modules_extractor.errors import (
     ExtractorAgentError,
     ExtractorSetupError,
@@ -42,19 +42,6 @@ from spotlights_engine.signal_pipeline._subprocess_util import (
     run_streaming_claude,
 )
 
-_DROP_EXACT = frozenset(
-    {
-        "OPENAI_BASE_URL",
-        "OPENAI_API_BASE",
-        "ANTHROPIC_BASE_URL",
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "ALL_PROXY",
-        "VIRTUAL_ENV",
-    }
-)
-_DROP_PREFIX = ("VSCODE_", "OPTQUEST_", "SPOTLIGHTS_")
-
 # Linux MAX_ARG_STRLEN is 131_072 bytes per argument. `claude --json-schema`
 # inlines the schema as one argv string; leave headroom for environment growth.
 _MAX_SCHEMA_BYTES = 120_000
@@ -63,11 +50,7 @@ _RETRY_PAYLOAD_MAX_CHARS = 80_000
 
 
 def _clean_env() -> dict[str, str]:
-    env = os.environ.copy()
-    for key in list(env):
-        if key in _DROP_EXACT or key.startswith(_DROP_PREFIX):
-            env.pop(key)
-    return env
+    return build_claude_env()
 
 
 @dataclass
@@ -144,6 +127,7 @@ def run_extraction(
         "plan",
         "--max-turns",
         str(max_turns),
+        *claude_model_args(),
     ]
 
     attempt_prompt = prompt
@@ -334,7 +318,7 @@ def _extract_result_event(stdout: bytes) -> dict | None:
 
 def _final_message_text(result_event: dict) -> str:
     structured = result_event.get("structured_output")
-    if isinstance(structured, (dict, list)):
+    if isinstance(structured, dict | list):
         return json.dumps(structured)
     result = result_event.get("result")
     if isinstance(result, str) and result:

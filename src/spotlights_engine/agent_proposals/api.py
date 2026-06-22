@@ -12,6 +12,7 @@ step-5 sidecar and reruns the whole candidate fan-out. See plan §9.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import logging
 import time
@@ -63,8 +64,17 @@ if TYPE_CHECKING:  # pragma: no cover
     # (manager -> orchestrator -> this step package).
     from spotlights_engine.spotlights_manager.pipeline_state import CandidateStateMap
 
-
 _log = logging.getLogger(__name__)
+
+
+def _accepts_keyword(fn: object, name: str) -> bool:
+    try:
+        sig = inspect.signature(fn)
+    except (TypeError, ValueError):
+        return True
+    return name in sig.parameters or any(
+        p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
+    )
 
 
 _CLAUDE_PASS = "claude"
@@ -85,6 +95,7 @@ class AgentProposalsConfig(BaseModel):
     claude_wallclock_s: int = Field(default=600, ge=1)
     codex_wallclock_s: int = Field(default=600, ge=1)
     codex_model: str | None = None
+    codex_profile: str | None = None
     codex_reasoning_effort: str | None = None
 
     debug_first_n_candidates: int | None = Field(default=None, ge=1)
@@ -130,6 +141,7 @@ class _CodexRunner(Protocol):
         last_message_path: Path,
         schema_path: Path,
         codex_model: str | None,
+        codex_profile: str | None,
         codex_reasoning_effort: str | None,
     ) -> CandidateAgentRunResult: ...
 
@@ -341,8 +353,7 @@ async def _run_codex_pass(
 
     run_start = time.monotonic()
     try:
-        run_result = await asyncio.to_thread(
-            runner,
+        runner_kwargs = dict(
             candidate_id=candidate.id,
             prompt=prompt,
             schema_text=schema_text,
@@ -353,6 +364,9 @@ async def _run_codex_pass(
             codex_model=config.codex_model,
             codex_reasoning_effort=config.codex_reasoning_effort,
         )
+        if _accepts_keyword(runner, "codex_profile"):
+            runner_kwargs["codex_profile"] = config.codex_profile
+        run_result = await asyncio.to_thread(runner, **runner_kwargs)
     except Exception as exc:  # noqa: BLE001
         duration = time.monotonic() - run_start
         return (
