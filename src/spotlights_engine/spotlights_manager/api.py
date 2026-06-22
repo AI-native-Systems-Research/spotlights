@@ -1,9 +1,10 @@
 """Public types and entrypoints for the spotlights manager.
 
-`run` is the architecture-shaped entrypoint
-(`SpotlightsManagerInput` -> `SpotlightsResult`); `run_with_telemetry` is
-the runtime-rich variant returning per-module discovery telemetry,
-deep-research wallclock, and the manager's view of step issues.
+`run` is the cross-pipeline entrypoint
+(`SpotlightsManagerInput` -> `SpotlightReport`); `run_with_telemetry` is
+the runtime-rich variant returning the report alongside per-module
+discovery telemetry, deep-research wallclock, and the manager's view of
+step issues.
 """
 
 from __future__ import annotations
@@ -25,8 +26,9 @@ from spotlights_engine.proposal_from_finding_creator import (
 )
 from spotlights_engine.schemas.common import StepIssue
 from spotlights_engine.schemas.pipeline import (
+    ModuleRun,
+    SpotlightReport,
     SpotlightsManagerInput,
-    SpotlightsResult,
 )
 from spotlights_engine.spotlights_manager.filters import ModuleFilter
 
@@ -76,19 +78,27 @@ class ModuleTelemetry(BaseModel):
     issues: list[StepIssue] = Field(default_factory=list)
 
 
-class SpotlightsManagerResult(SpotlightsResult):
-    """Adds telemetry on top of `SpotlightsResult`.
+class SpotlightsManagerResult(BaseModel):
+    """Runtime-rich manager result wrapping the cross-pipeline report.
+
+    The `report` (`SpotlightReport`) owns the architectural payload
+    (project_tree, context, candidates, findings, anomalies, run, issues).
+    This wrapper adds the manager's runtime view: per-target `module_runs`,
+    extractor invocation, per-module telemetry, manager-level issues, and
+    the renderer result.
 
     `module_runs` keys are module qualified names in slash form (e.g.
     `v1/kv_offload`).
 
     `ExtractionInvocation` is a dataclass (not a pydantic model), so this
-    subclass redeclares `model_config` with `arbitrary_types_allowed=True`
-    while preserving the parent's `extra="forbid"`. The persisted JSON
-    sidecar is written via `dataclasses.asdict`.
+    model sets `arbitrary_types_allowed=True` while keeping `extra="forbid"`.
+    The persisted JSON sidecar is written via `dataclasses.asdict`.
     """
 
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
+
+    report: SpotlightReport
+    module_runs: dict[str, ModuleRun] = Field(default_factory=dict)
 
     extractor_invocation: ExtractionInvocation
     per_module_telemetry: dict[str, ModuleTelemetry] = Field(default_factory=dict)
@@ -98,14 +108,13 @@ class SpotlightsManagerResult(SpotlightsResult):
 
 def run(
     input: SpotlightsManagerInput, *, config: SpotlightsManagerConfig
-) -> SpotlightsResult:
-    """Architecture-shaped entrypoint."""
-    rich = run_with_telemetry(input, config=config)
-    return SpotlightsResult(
-        project_tree=rich.project_tree,
-        context=rich.context,
-        module_runs=rich.module_runs,
-    )
+) -> SpotlightReport:
+    """Cross-pipeline entrypoint: returns the assembled `SpotlightReport`.
+
+    For the runtime-rich result (per-module telemetry, extractor
+    invocation, renderer result, module_runs), call `run_with_telemetry`.
+    """
+    return run_with_telemetry(input, config=config).report
 
 
 def run_with_telemetry(

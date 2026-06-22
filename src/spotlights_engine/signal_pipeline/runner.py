@@ -13,6 +13,7 @@ Implements the run loop:
 from __future__ import annotations
 
 import concurrent.futures
+import hashlib
 import json
 import shutil
 import threading
@@ -25,7 +26,7 @@ from typing import Any, Callable, Iterable
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from spotlights_engine.signal_pipeline.event_formatter import StageEventFormatter
-from spotlights_engine.signal_pipeline.findings import emit_findings
+from spotlights_engine.signal_pipeline.signal_summary import emit_signal_summary
 from spotlights_engine.signal_pipeline.layout import (
     ALL_STAGES,
     RunDirLayout,
@@ -40,6 +41,7 @@ from spotlights_engine.signal_pipeline.schemas import (
     SignalPipelineInput,
     SignalPipelineResult,
 )
+from spotlights_engine.signal_pipeline.spotlight_report import emit_spotlight_report
 
 
 __all__ = [
@@ -291,6 +293,49 @@ def _aggregate_meta(log_dir: Path) -> dict[str, Any]:
     if saw_cost:
         out["cost_usd"] = round(cost_total, 4)
     return out
+
+
+def _aggregate_run_cost(status: "PipelineStatus") -> float | None:
+    """Sum `cost_usd` across every stage that recorded one.
+
+    Returns None if no stage carried cost (e.g. the run only exercised the
+    pre-cooked-JSON branches that don't go through claude_subprocess).
+    """
+    total = 0.0
+    saw_any = False
+    for stage_status in status.stages.values():
+        if stage_status.cost_usd is not None:
+            total += float(stage_status.cost_usd)
+            saw_any = True
+    return round(total, 4) if saw_any else None
+
+
+def _compute_run_id(layout: RunDirLayout) -> str:
+    """Deterministic, resume-stable run id derived from `input.json`.
+
+    Mirrors the DR pipeline's `_run_id_from_manifest`
+    (`spotlights_manager/orchestrator.py`): hash the run's content-addressed
+    inputs and prefix with `run-`. Same input -> same id across resumes
+    (resume-stable for log correlation); different inputs in the same
+    artifacts dir get different ids (so two consecutive runs into the
+    same `--artifacts-dir` are no longer indistinguishable as they were
+    when `run_id` was just `layout.root.name`).
+
+    Falls back to a hash of the artifacts-dir path so the field stays
+    non-empty when called before `input.json` has been persisted (e.g.
+    in a partial run that errored very early); `RunInfo.run_id` requires
+    `min_length=1`, so an empty string is unsafe.
+    """
+    input_path = layout.input_path
+    if input_path.exists():
+        try:
+            payload = json.loads(input_path.read_text(encoding="utf-8"))
+            canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+            return "run-" + hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+        except (OSError, ValueError):
+            pass
+    fallback_seed = str(layout.root.resolve())
+    return "run-" + hashlib.sha256(fallback_seed.encode("utf-8")).hexdigest()[:16]
 
 
 # ── Artifact load / completeness ─────────────────────────────────────────
@@ -743,6 +788,7 @@ def run_pipeline(
     resolved_output_folder = (
         output_folder.resolve() if output_folder is not None else layout.root / "report"
     )
+    run_started_at = _now_iso()
 
     # Persist the input contract (idempotent).
     if not layout.input_path.exists():
@@ -961,9 +1007,27 @@ def run_pipeline(
     # change specs into a single human-readable view. Skipped silently if the
     # candidates artifact isn't on disk yet (e.g. selection ended before 03).
     try:
-        emit_findings(layout, resolved_output_folder)
+        emit_signal_summary(layout, resolved_output_folder)
     except Exception as exc:  # noqa: BLE001 — never fail the pipeline on rollup
         aggregate_issues.append(f"findings rollup failed: {exc}")
+
+    # Best-effort SpotlightReport emission — produces the unified report at
+    # `<run_dir>/spotlight_report.json` per docs/specs/spotlight_report.md.
+    # Skipped silently when the run didn't get far enough to have the upstream
+    # artifacts (signals + project_tree + candidates); a partial run that
+    # ended before stage 04 still produces a valid report with empty
+    # `proposals` lists. Errors here are recorded but never abort the run.
+    try:
+        cost_total = _aggregate_run_cost(status)
+        emit_spotlight_report(
+            layout,
+            run_id=_compute_run_id(layout),
+            started_at=run_started_at,
+            finished_at=_now_iso(),
+            cost_usd=cost_total,
+        )
+    except Exception as exc:  # noqa: BLE001
+        aggregate_issues.append(f"spotlight_report emission failed: {exc}")
 
     # Sort to keep the result deterministic across runs — under the
     # parallel scheduler these lists' append order depends on which

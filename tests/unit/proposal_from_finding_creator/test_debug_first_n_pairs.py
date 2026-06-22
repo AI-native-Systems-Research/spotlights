@@ -11,8 +11,8 @@ from spotlights_engine.proposal_from_finding_creator import (
     ProposalFromFindingConfig,
     create_proposals,
 )
+from spotlights_engine.utils.schema_compat import proposals_from
 from tests.unit.proposal_from_finding_creator._fakes import (
-    fake_runner_factory,
     make_input,
     make_proposal_payload,
 )
@@ -63,11 +63,14 @@ def test_debug_first_n_pairs_caps_runner_invocations(
     assert len(invoked) == 1
     # All input candidates remain in the output, in input order.
     ids = [c.id for c in out.candidates.candidates]
-    assert ids == ["cand-0001", "cand-0002"]
+    assert ids == ["cand-v1_kv_offload-0001", "cand-v1_kv_offload-0002"]
     # Only the first scheduled pair's candidate gets a proposal; the rest get [].
-    proposals_by_id = {c.id: c.deep_research_proposals for c in out.candidates.candidates}
-    assert len(proposals_by_id["cand-0001"]) == 1
-    assert proposals_by_id["cand-0002"] == []
+    proposals_by_id = {
+        c.id: proposals_from(c, "research_finding")
+        for c in out.candidates.candidates
+    }
+    assert len(proposals_by_id["cand-v1_kv_offload-0001"]) == 1
+    assert proposals_by_id["cand-v1_kv_offload-0002"] == []
     # Truncation logs a warning so the user knows debug mode is active.
     assert any("debug_first_n_pairs" in r.message for r in caplog.records)
 

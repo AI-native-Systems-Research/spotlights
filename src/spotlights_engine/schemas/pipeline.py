@@ -14,7 +14,10 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from spotlights_engine.schemas.candidate import Candidates
+from typing import Literal
+
+from spotlights_engine.schemas.anomaly import Anomaly
+from spotlights_engine.schemas.candidate import Candidate, Candidates
 from spotlights_engine.schemas.common import (
     ModuleRunStatus,
     SpotlightContext,
@@ -141,18 +144,35 @@ class SpotlightsManagerInput(BaseModel):
     continue_on_module_failure: bool = True
 
 
-class SpotlightsResult(BaseModel):
-    """Top-level result echoed back to the caller.
-
-    `context` is echoed verbatim from the input so a result is self-describing
-    for audit and repro. `module_runs` is keyed by module qualified name.
-    """
+class RunInfo(BaseModel):
+    """Info about the run that produced a `SpotlightReport`."""
 
     model_config = ConfigDict(extra="forbid")
 
+    pipeline: Literal["deep_research", "signal"]
+
+    run_id: str = Field(min_length=1)
+    started_at: str
+    finished_at: str | None = None
+    cost_usd: float | None = None
+
+
+class SpotlightReport(BaseModel):
+    """Cross-pipeline output emitted by both pipelines."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    schema_version: Literal["1"] = "1"
+
     project_tree: ProjectTree
     context: SpotlightContext
-    module_runs: dict[str, ModuleRun] = Field(default_factory=dict)
+
+    candidates: list[Candidate] = Field(default_factory=list)
+    findings: list[Finding] = Field(default_factory=list)
+    anomalies: list[Anomaly] = Field(default_factory=list)
+
+    run: RunInfo
+    issues: list[StepIssue] = Field(default_factory=list)
 
 
 __all__ = [
@@ -165,6 +185,7 @@ __all__ = [
     "ModulesExtractorInput",
     "ProposalFromFindingCreatorInput",
     "ProposalFromFindingCreatorOutput",
+    "RunInfo",
+    "SpotlightReport",
     "SpotlightsManagerInput",
-    "SpotlightsResult",
 ]

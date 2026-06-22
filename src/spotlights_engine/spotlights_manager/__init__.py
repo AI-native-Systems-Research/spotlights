@@ -2,8 +2,8 @@
 
 Public surface:
 
-- `run(input, *, config)` — architecture-shaped entrypoint
-  (`SpotlightsManagerInput` -> `SpotlightsResult`).
+- `run(input, *, config)` — cross-pipeline entrypoint
+  (`SpotlightsManagerInput` -> `SpotlightReport`).
 - `run_with_telemetry(input, *, config)` — runtime-rich variant returning a
   `SpotlightsManagerResult` with per-module telemetry and the extractor
   invocation.

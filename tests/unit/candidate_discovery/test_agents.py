@@ -12,8 +12,8 @@ import pytest
 from spotlights_engine.candidate_discovery.agents import (
     ClaudeRunner,
     CodexRunner,
-    _SchemaParseError,
     _clean_env,
+    _SchemaParseError,
 )
 from spotlights_engine.candidate_discovery.api import DiscoveryConfig
 from spotlights_engine.candidate_discovery.errors import DiscoverySetupError
@@ -109,7 +109,9 @@ def test_claude_argv_includes_required_flags(tmp_path, monkeypatch):
     iter_dir = tmp_path / "iter"
     iter_dir.mkdir()
     argv = runner._build_argv(schema_path=schema_path, iter_dir=iter_dir)
-    assert argv[0] == "claude"
+    # argv[0] is the executable resolved via shutil.which (mocked above), not the
+    # bare "claude" name — the cmd shim is deliberately bypassed.
+    assert argv[0] == "/usr/local/bin/whatever"
     assert "-p" in argv
     assert argv[argv.index("--output-format") + 1] == "stream-json"
     assert "--verbose" in argv
@@ -127,7 +129,9 @@ def test_codex_argv_includes_required_flags(tmp_path, monkeypatch):
     iter_dir = tmp_path / "iter"
     iter_dir.mkdir()
     argv = runner._build_argv(schema_path=schema_path, iter_dir=iter_dir)
-    assert argv[0] == "codex"
+    # argv[0] is the executable resolved via shutil.which (mocked above), not the
+    # bare "codex" name.
+    assert argv[0] == "/usr/local/bin/whatever"
     assert argv[1:3] == ["exec", "-"]
     assert "--json" in argv
     assert argv[argv.index("--output-last-message") + 1] == str(iter_dir / "last_message.json")

@@ -21,6 +21,7 @@ from spotlights_engine.schemas.pipeline import (
     ModuleDeepResearchOutput,
 )
 from spotlights_engine.schemas.project import Module, ProjectTree
+from spotlights_engine.utils.id_helpers import slug_for
 
 
 def _issue(message: str, *, recoverable: bool) -> StepIssue:
@@ -44,8 +45,15 @@ def research_module(
     check: bool = False,
     runner: ModuleResearchRunner | None = None,
     runners: Sequence[ModuleResearchRunner] | None = None,
+    segment: str | None = None,
 ) -> ModuleDeepResearchOutput:
-    """Run module deep research and return the architecture output contract."""
+    """Run module deep research and return the architecture output contract.
+
+    `segment` is the module id segment (decision D3) used to prefix finding ids
+    to `find-<segment>-NNNN`; the manager supplies the resolved value. Standalone
+    callers may omit it, in which case the module slug is used.
+    """
+    seg = segment if segment is not None else slug_for(request.module_qualified_name)
     module = resolve_target_module(request.project_tree, request.module_qualified_name)
     if module is None:
         return ModuleDeepResearchOutput(
@@ -74,6 +82,7 @@ def research_module(
     return merge_outcomes(
         outcomes,
         max_findings_per_module=request.max_findings_per_module,
+        segment=seg,
     )
 
 

@@ -9,19 +9,26 @@ from spotlights_engine.module_knowledge import (
     records_from_project_tree,
     records_from_spotlights_result,
 )
+from spotlights_engine.modules_extractor.agent import ExtractionInvocation
 from spotlights_engine.schemas.candidate import Candidate, Candidates
 from spotlights_engine.schemas.common import SpotlightContext
 from spotlights_engine.schemas.finding import Finding
-from spotlights_engine.schemas.pipeline import ModuleDeepResearchOutput, ModuleRun, SpotlightsResult
+from spotlights_engine.schemas.pipeline import (
+    ModuleDeepResearchOutput,
+    ModuleRun,
+    RunInfo,
+    SpotlightReport,
+)
 from spotlights_engine.schemas.project import File, Module, ProjectTree, Repository
 from spotlights_engine.schemas.proposals import AgentProposal, DeepResearchProposal
+from spotlights_engine.spotlights_manager.api import SpotlightsManagerResult
 
 
 def test_records_from_module_deep_research_preserve_source_and_module_context() -> None:
     output = ModuleDeepResearchOutput(
         findings=[
             Finding(
-                finding_id="find-0001",
+                finding_id="find-mod-0001",
                 title="Paged attention",
                 url="https://example.com/paper",
                 source_type="paper",
@@ -38,7 +45,7 @@ def test_records_from_module_deep_research_preserve_source_and_module_context() 
     assert record.source_type == "finding"
     assert record.title == "Paged attention"
     assert record.source.url == "https://example.com/paper"
-    assert record.provenance.locator == "module_deep_research:engine/cache:find-0001"
+    assert record.provenance.locator == "module_deep_research:engine/cache:find-mod-0001"
     assert record.metadata["module_qualified_name"] == "engine/cache"
     assert "engine/cache" in record.tags
 
@@ -72,7 +79,7 @@ def test_records_from_project_tree_create_queryable_module_map_records() -> None
 
 def _candidate_with_proposals() -> Candidate:
     return Candidate(
-        id="cand-0001",
+        id="cand-mod-0001",
         file="vllm/engine/cache.py",
         line_start=10,
         line_end=20,
@@ -88,7 +95,7 @@ def _candidate_with_proposals() -> Candidate:
             DeepResearchProposal(
                 title="Pressure-aware KV eviction",
                 detailed_description="Use pressure and reuse distance to pick eviction victims.",
-                finding_id="find-0001",
+                finding_id="find-mod-0001",
                 proposal_rationale="The finding reports lower fragmentation.",
                 created_by="proposal_from_finding_creator",
             )
@@ -113,11 +120,11 @@ def test_records_from_candidates_include_candidate_and_attached_proposals() -> N
     records = records_from_candidates(candidates)
 
     assert [record.source_type for record in records] == ["candidate", "proposal", "proposal"]
-    assert records[0].record_id == "candidate:engine:cache:cand-0001"
-    assert records[0].provenance.locator == "candidate_discovery:engine/cache:cand-0001"
+    assert records[0].record_id == "candidate:engine:cache:cand-mod-0001"
+    assert records[0].provenance.locator == "candidate_discovery:engine/cache:cand-mod-0001"
     assert records[0].metadata["file"] == "vllm/engine/cache.py"
     assert records[1].provenance.extractor == "proposal_from_finding_creator"
-    assert records[1].metadata["finding_id"] == "find-0001"
+    assert records[1].metadata["finding_id"] == "find-mod-0001"
     assert records[2].provenance.extractor == "agent_proposals"
     assert records[2].metadata["agent_name"] == "codex"
 
@@ -125,7 +132,7 @@ def test_records_from_candidates_include_candidate_and_attached_proposals() -> N
 def test_records_from_module_run_and_spotlights_result_collect_memory_records() -> None:
     candidate = _candidate_with_proposals()
     finding = Finding(
-        finding_id="find-0001",
+        finding_id="find-mod-0001",
         title="KV reuse distance",
         url="https://example.com/kv-reuse",
         source_type="paper",
@@ -137,10 +144,24 @@ def test_records_from_module_run_and_spotlights_result_collect_memory_records() 
         candidates=Candidates(module_qualified_name="engine/cache", candidates=[candidate]),
         findings=[finding],
     )
-    result = SpotlightsResult(
-        project_tree=ProjectTree(repository=Repository(name="vllm", summary="serving")),
-        context=SpotlightContext(objective="Improve decode latency"),
+    tree = ProjectTree(repository=Repository(name="vllm", summary="serving"))
+    context = SpotlightContext(objective="Improve decode latency")
+    result = SpotlightsManagerResult(
+        report=SpotlightReport(
+            project_tree=tree,
+            context=context,
+            candidates=[candidate],
+            findings=[finding],
+            run=RunInfo(pipeline="deep_research", run_id="run-test", started_at="2026-06-20T00:00:00+00:00"),
+        ),
         module_runs={"engine/cache": module_run},
+        extractor_invocation=ExtractionInvocation(
+            session_id=None,
+            duration_s=0.0,
+            cost_usd=None,
+            input_tokens=None,
+            output_tokens=None,
+        ),
     )
 
     module_records = records_from_module_run(module_run)

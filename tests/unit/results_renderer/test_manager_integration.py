@@ -13,7 +13,7 @@ from spotlights_engine.spotlights_manager import (
     run_with_telemetry,
 )
 from spotlights_engine.spotlights_manager import orchestrator as orch
-from spotlights_engine.schemas.pipeline import SpotlightsResult
+from spotlights_engine.schemas.pipeline import SpotlightReport
 
 from tests.unit.spotlights_manager._fakes import (
     make_discovery_result,
@@ -85,7 +85,7 @@ def test_manager_renders_index_md(
     assert result.manager_issues == []
 
 
-def test_run_returns_architecture_shape(
+def test_run_returns_spotlight_report(
     monkeypatch, repo: Path, artifacts: Path, output: Path
 ) -> None:
     _patch_pipeline(monkeypatch)
@@ -95,9 +95,14 @@ def test_run_returns_architecture_shape(
         output_folder=output,
         module_filter=ModuleFilter(include=["v1/kv_offload"]),
     )
-    arch_result = run(make_input(repo), config=cfg)
-    assert isinstance(arch_result, SpotlightsResult)
-    assert "v1/kv_offload" in arch_result.module_runs
+    report = run(make_input(repo), config=cfg)
+    assert isinstance(report, SpotlightReport)
+    assert report.run.pipeline == "deep_research"
+    assert report.run.run_id
+    # The kv_offload module's candidates are flattened into the report; their
+    # slug-segmented ids stay globally unique.
+    assert report.candidates
+    assert all(c.id.startswith("cand-v1_kv_offload") for c in report.candidates)
 
 
 def test_renderer_failure_recorded_as_manager_issue(

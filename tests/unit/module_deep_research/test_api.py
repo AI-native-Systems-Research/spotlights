@@ -61,6 +61,12 @@ def _request(module_qualified_name: str = "inference/attention") -> ModuleDeepRe
     )
 
 
+def _request_with_cap(max_findings_per_module: int) -> ModuleDeepResearchInput:
+    return _request().model_copy(
+        update={"max_findings_per_module": max_findings_per_module}
+    )
+
+
 def test_resolve_target_module_by_slash_qualified_name() -> None:
     module = resolve_target_module(_tree(), "inference/attention")
 
@@ -90,7 +96,9 @@ def test_research_module_runs_agent_and_returns_parsed_output() -> None:
 
     assert len(runner.prompts) == 1
     assert "Attention implementation." in runner.prompts[0]
-    assert output.findings[0].finding_id == "find-0001"
+    # Finding ids are renumbered + prefixed with the module segment (D3); the
+    # default segment is the slug of `inference/attention`.
+    assert output.findings[0].finding_id == "find-inference_attention-0001"
     assert output.findings[0].title == "Flash attention tiling"
     assert output.issues == []
 
@@ -172,7 +180,10 @@ def test_research_module_runs_codex_claude_gemini_and_dedups_outputs() -> None:
     output = research_module(_request(), runners=[codex, claude, gemini])
 
     assert [len(r.prompts) for r in (codex, claude, gemini)] == [1, 1, 1]
-    assert [finding.finding_id for finding in output.findings] == ["find-0001", "find-0002"]
+    assert [finding.finding_id for finding in output.findings] == [
+        "find-inference_attention-0001",
+        "find-inference_attention-0002",
+    ]
     assert [finding.title for finding in output.findings] == ["PagedAttention", "vAttention"]
     assert output.issues == []
 
@@ -218,9 +229,9 @@ def test_research_module_treats_finding_cap_as_per_runner() -> None:
     output = research_module(_request_with_cap(1), runners=runners)
 
     assert [finding.finding_id for finding in output.findings] == [
-        "find-0001",
-        "find-0002",
-        "find-0003",
+        "find-inference_attention-0001",
+        "find-inference_attention-0002",
+        "find-inference_attention-0003",
     ]
     assert [finding.title for finding in output.findings] == ["A", "B", "C"]
 

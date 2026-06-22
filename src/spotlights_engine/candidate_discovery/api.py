@@ -41,6 +41,12 @@ class DiscoveryConfig(BaseModel):
     # `discover()` raises `DiscoverySetupError` if either is still `None`.
     repo_path: Path | None = None
     artifacts_dir: Path | None = None
+    # Module id segment (decision D3): the agent emits bare `cand-NNNN`, and the
+    # orchestrator prefixes each promoted `Candidate` to `cand-<segment>-NNNN`
+    # before constructing/writing schema objects. The manager supplies this
+    # (`module_segment(slug_for(qn), session)`); when omitted the standalone
+    # path falls back to `slug_for(module_qualified_name)`.
+    id_segment: str | None = None
     repo_context_markdown: str | None = Field(
         default=None, min_length=1, max_length=20_000
     )

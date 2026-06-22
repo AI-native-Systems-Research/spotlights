@@ -76,7 +76,7 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=DEFAULT_OUTPUT,
         help=(
-            "Where the human-readable rollup (findings.json + findings.md) "
+            "Where the human-readable rollup (signal_summary.json + signal_summary.md) "
             f"is written (default: {DEFAULT_OUTPUT})."
         ),
     )

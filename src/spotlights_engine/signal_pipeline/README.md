@@ -105,9 +105,10 @@ runs/<run-id>/
 │   ├── _manifest.json         # upstream_changes_hash, covered_ids
 │   └── <candidate_id>.json    # one ExecutionResult per candidate
 ├── report/                    # default --output-folder target
-│   ├── findings.json          # 03 candidates joined with 04 changes
-│   └── findings.md            # human-readable rollup, stamped with
-│                              #  source run + render time
+│   ├── signal_summary.json    # 03 candidates joined with 04 changes
+│   ├── signal_summary.md      # human-readable rollup, stamped with
+│   │                          #  source run + render time
+│   └── spotlight_report.json  # unified SpotlightReport (cross-pipeline)
 └── _logs/
     └── <NN>_<name>/           # raw stdout/stderr from claude -p,
                                #  prompts, parsed events, meta.json
@@ -120,13 +121,14 @@ runs/<run-id>/
 is already complete; `--no-resume` re-runs everything from the
 requested start.
 
-**Output folder.** The rollup (`findings.{json,md}`) lives in
-`--output-folder`, default `<artifacts-dir>/report/`. Same two-flag
-contract as `spotlights_manager` (`--artifacts-dir` for state,
-`--output-folder` for the rendered report). Default keeps the whole
-run as one tar-able directory; point `--output-folder` elsewhere when
-publishing the report independently. The rendered `findings.md` stamps
-the source run path + UTC render time so a stale render is obvious.
+**Output folder.** The rollup (`signal_summary.{json,md}`) and the
+unified `spotlight_report.json` live in `--output-folder`, default
+`<artifacts-dir>/report/`. Same two-flag contract as
+`spotlights_manager` (`--artifacts-dir` for state, `--output-folder`
+for the rendered report). Default keeps the whole run as one tar-able
+directory; point `--output-folder` elsewhere when publishing the
+report independently. The rendered `signal_summary.md` stamps the
+source run path + UTC render time so a stale render is obvious.
 
 ---
 

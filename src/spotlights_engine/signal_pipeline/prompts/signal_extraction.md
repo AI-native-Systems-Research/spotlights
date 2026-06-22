@@ -96,7 +96,22 @@ name, plus a roll-up over all `llm_request` spans if present.
 
 Findings worth a human's attention. Required-ish fields:
 `anomaly_id`, `type`, `description`. Suggested additional:
-`magnitude`, `evidence_pointer`, `confidence`.
+`magnitude`, `evidence_pointer`, `confidence`,
+`estimated_severity`.
+
+`estimated_severity` is your call on how impactful this anomaly is
+for the workload — one of `"high"`, `"medium"`, `"low"`. Use it for
+consumer-side ordering. A reasonable mapping:
+
+- **high** — dominates a hot-path metric (queue, prefill, decode) on
+  most requests, or a correctness/reliability red flag.
+- **medium** — visible on a meaningful subset of requests or measurably
+  shifts a tail metric.
+- **low** — present but small in magnitude or restricted to a thin tail.
+
+Set it to `null` (or omit) only when you genuinely can't tell — e.g.
+an instrumentation-gap anomaly where there's no signal to estimate
+against.
 
 You decide what counts as anomalous. Heuristics that have been useful
 in the past, **as guidance only**:

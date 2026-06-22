@@ -16,7 +16,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -26,10 +26,14 @@ from spotlights_engine.agent_proposals.agent_schema import (
 from spotlights_engine.agent_proposals.claude_exec import (
     CandidateAgentRunResult,
     ensure_claude_available,
+)
+from spotlights_engine.agent_proposals.claude_exec import (
     run_candidate_claude as default_run_claude,
 )
 from spotlights_engine.agent_proposals.codex_exec import (
     ensure_codex_available,
+)
+from spotlights_engine.agent_proposals.codex_exec import (
     run_candidate_codex as default_run_codex,
 )
 from spotlights_engine.agent_proposals.errors import (
@@ -49,7 +53,15 @@ from spotlights_engine.schemas.pipeline import (
     AgentProposalsInput,
     AgentProposalsOutput,
 )
+from spotlights_engine.schemas.proposal import Proposal
 from spotlights_engine.schemas.proposals import AgentProposal
+from spotlights_engine.utils.id_helpers import slug_for
+from spotlights_engine.utils.schema_compat import mint_proposal_ids
+
+if TYPE_CHECKING:  # pragma: no cover
+    # Typing-only: importing the manager package at runtime would create a cycle
+    # (manager -> orchestrator -> this step package).
+    from spotlights_engine.spotlights_manager.pipeline_state import CandidateStateMap
 
 
 _log = logging.getLogger(__name__)
@@ -139,6 +151,7 @@ def _validate_setup(
     *,
     will_invoke_claude: bool,
     will_invoke_codex: bool,
+    candidate_states: CandidateStateMap | None,
 ) -> None:
     if config.repo_path is None:
         raise AgentProposalsSetupError(
@@ -156,14 +169,19 @@ def _validate_setup(
             repo_path=str(repo),
         )
 
-    for c in input.candidates.candidates:
-        if c.state != "FINDING_PROPOSALS_CREATED":
-            raise AgentProposalsValidationError(
-                f"candidate {c.id} is in state {c.state!r}; "
-                "step 5 expects 'FINDING_PROPOSALS_CREATED' candidates",
-                candidate_id=c.id,
-                state=c.state,
-            )
+    # The schema `Candidate` no longer carries `state` (decision D2); the manager
+    # passes a pipeline-internal state map. When invoked standalone (no map), the
+    # caller owns the state contract and the guard is skipped.
+    if candidate_states is not None:
+        for c in input.candidates.candidates:
+            state = candidate_states.get(c.id)
+            if state != "FINDING_PROPOSALS_CREATED":
+                raise AgentProposalsValidationError(
+                    f"candidate {c.id} is in state {state!r}; "
+                    "step 5 expects 'FINDING_PROPOSALS_CREATED' candidates",
+                    candidate_id=c.id,
+                    state=state,
+                )
 
     if will_invoke_claude:
         ensure_claude_available()
@@ -426,15 +444,35 @@ async def _run_one_candidate(
     return candidate.id, proposals, issues, durations
 
 
+def _convert_proposal(ap: AgentProposal, prop_id: str) -> Proposal:
+    """Map an agent-facing `AgentProposal` to the unified `Proposal`."""
+    return Proposal(
+        id=prop_id,
+        source="agent_knowledge",
+        author=ap.agent_name,
+        title=ap.title,
+        description=ap.detailed_description,
+        rationale=ap.novelty_rationale,
+    )
+
+
 def _rebuild_candidate(
-    candidate: Candidate, proposals: list[AgentProposal]
+    candidate: Candidate,
+    new_proposals: list[AgentProposal],
+    proposal_ids: list[str],
 ) -> Candidate:
+    """Append agent-knowledge `Proposal`s to the candidate's unified list.
+
+    `proposal_ids` are minted from the module's proposal block (decision D3),
+    continuing past step 4's allocation. Existing research-backed proposals are
+    preserved.
+    """
+    converted = [
+        _convert_proposal(ap, pid)
+        for ap, pid in zip(new_proposals, proposal_ids, strict=True)
+    ]
     return candidate.model_copy(
-        update={
-            "state": "AGENT_PROPOSALS_CREATED",
-            "agent_proposals": proposals,
-            "deep_research_proposals": list(candidate.deep_research_proposals),
-        }
+        update={"proposals": list(candidate.proposals) + converted}
     )
 
 
@@ -444,6 +482,8 @@ async def _run_async(
     config: AgentProposalsConfig,
     claude_runner: _ClaudeRunner,
     codex_runner: _CodexRunner,
+    proposal_id_start: int,
+    segment: str,
 ) -> AgentProposalsResult:
     start = time.monotonic()
 
@@ -488,18 +528,29 @@ async def _run_async(
 
     aggregated_issues: list[StepIssue] = []
     per_candidate_durations_s: dict[str, dict[str, float]] = {}
-    rebuilt: list[Candidate] = []
 
+    # Deterministic post-gather rebuild: mint `prop-<segment>-NNNN` ids from the
+    # module session's proposal counter (decision D3), continuing past step 4's
+    # allocation, in candidate order. The slug segment makes ids globally
+    # unique; the counter is a plain per-module-session sequence (no run-wide
+    # block to overflow). Allocating here (not inside the parallel
+    # `_run_one_candidate`) keeps id assignment order-stable.
+    new_by_id: dict[str, list[AgentProposal]] = {}
+    for c in all_candidates:
+        proposals = candidate_results[c.id][0] if c.id in candidate_results else []
+        new_by_id[c.id] = proposals
+
+    next_id = proposal_id_start
+    rebuilt: list[Candidate] = []
     for c in all_candidates:
         if c.id in candidate_results:
-            proposals, issues, durations = candidate_results[c.id]
+            _, issues, durations = candidate_results[c.id]
             aggregated_issues.extend(issues)
             per_candidate_durations_s[c.id] = durations
-            rebuilt.append(_rebuild_candidate(c, proposals))
-        else:
-            # Candidate not scheduled (debug truncation): advance state with
-            # empty agent_proposals.
-            rebuilt.append(_rebuild_candidate(c, []))
+        new_proposals = new_by_id[c.id]
+        ids = mint_proposal_ids(next_id, len(new_proposals), segment=segment)
+        next_id += len(new_proposals)
+        rebuilt.append(_rebuild_candidate(c, new_proposals, ids))
 
     output = AgentProposalsOutput(
         candidates=Candidates(
@@ -522,8 +573,19 @@ def create_agent_proposals_with_telemetry(
     config: AgentProposalsConfig,
     claude_runner: _ClaudeRunner | None = None,
     codex_runner: _CodexRunner | None = None,
+    candidate_states: CandidateStateMap | None = None,
+    proposal_id_start: int = 1,
+    segment: str | None = None,
 ) -> AgentProposalsResult:
-    """Runtime-rich entrypoint: per-candidate / per-agent durations alongside output."""
+    """Runtime-rich entrypoint: per-candidate / per-agent durations alongside output.
+
+    `candidate_states` is the manager-provided pipeline-internal state map (D2);
+    when omitted the `FINDING_PROPOSALS_CREATED` guard is skipped.
+    `proposal_id_start` is the per-module-session proposal counter advanced past
+    step 4's allocation, and `segment` is the module id segment (D3); minted ids
+    are `prop-<segment>-NNNN`. `segment` defaults to the candidates' module slug
+    for standalone callers.
+    """
     will_invoke = bool(input.candidates.candidates)
 
     if claude_runner is None:
@@ -545,6 +607,11 @@ def create_agent_proposals_with_telemetry(
         config,
         will_invoke_claude=will_invoke_claude,
         will_invoke_codex=will_invoke_codex,
+        candidate_states=candidate_states,
+    )
+
+    seg = segment if segment is not None else slug_for(
+        input.candidates.module_qualified_name
     )
 
     return asyncio.run(
@@ -553,6 +620,8 @@ def create_agent_proposals_with_telemetry(
             config=config,
             claude_runner=active_claude,
             codex_runner=active_codex,
+            proposal_id_start=proposal_id_start,
+            segment=seg,
         )
     )
 
@@ -563,6 +632,9 @@ def create_agent_proposals(
     config: AgentProposalsConfig,
     claude_runner: _ClaudeRunner | None = None,
     codex_runner: _CodexRunner | None = None,
+    candidate_states: CandidateStateMap | None = None,
+    proposal_id_start: int = 1,
+    segment: str | None = None,
 ) -> AgentProposalsOutput:
     """Architecture-shaped entrypoint: returns the contract output directly."""
     return create_agent_proposals_with_telemetry(
@@ -570,6 +642,9 @@ def create_agent_proposals(
         config=config,
         claude_runner=claude_runner,
         codex_runner=codex_runner,
+        candidate_states=candidate_states,
+        proposal_id_start=proposal_id_start,
+        segment=segment,
     ).output
 
 
