@@ -112,21 +112,23 @@ def test_run_extraction_retries_once_after_project_tree_validation_error(
     )
 
     assert result.project_tree.modules[0].name == "sim"
-    assert result.invocation.duration_s == 2.0
-    assert result.invocation.input_tokens == 20
-    assert result.invocation.output_tokens == 40
+    assert result.invocation.duration_s == 1.0
+    assert result.invocation.input_tokens == 10
+    assert result.invocation.output_tokens == 20
     assert len(prompts) == 2
-    assert "Retry after local ProjectTree validation failure" in prompts[1]
-    assert "Do not split one directory into conceptual children" in prompts[1]
-    assert any("retrying once" in event for event in events)
-    assert (artifacts / "validation_error_attempt_0.txt").exists()
-    assert (artifacts / "last_message_attempt_0.json").exists()
-    assert (artifacts / "last_message_attempt_1.json").exists()
+    assert "failed Spotlights' stricter semantic validation" in prompts[1]
+    assert "Do not create logical submodules" in prompts[1]
+    assert any("ProjectTree semantic validation failed" in event for event in events)
+    assert (artifacts / "validation_error.txt").exists()
+    assert (artifacts / "last_message.json").exists()
+    assert (artifacts / "repair_1_prompt.md").exists()
+    assert (artifacts / "repair_1_last_message.json").exists()
 
 
 def test_run_extraction_raises_after_validation_retry_fails(tmp_path, monkeypatch) -> None:
     prompts: list[str] = []
     results = [
+        _stream_result(_invalid_conceptual_split_payload()),
         _stream_result(_invalid_conceptual_split_payload()),
         _stream_result(_invalid_conceptual_split_payload()),
     ]
@@ -144,8 +146,8 @@ def test_run_extraction_raises_after_validation_retry_fails(tmp_path, monkeypatc
         fake_run_streaming_claude,
     )
 
-    with pytest.raises(ExtractorValidationError, match="after 2 attempts") as exc:
+    with pytest.raises(ExtractorValidationError, match="after 2 repair attempts") as exc:
         run_extraction(repo_path=tmp_path, prompt="base prompt", on_event=None)
 
-    assert exc.value.context["attempts"] == 2
-    assert len(prompts) == 2
+    assert len(exc.value.context["repair_errors"]) == 3
+    assert len(prompts) == 3
