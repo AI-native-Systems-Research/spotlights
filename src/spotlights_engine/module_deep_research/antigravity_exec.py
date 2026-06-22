@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from spotlights_engine.module_deep_research.agent_exec import AgentExecResult
 
 DEFAULT_LITELLM_ANTIGRAVITY_MODEL = "gcp/gemini-3.1-pro-preview"
-_DEFAULT_PROXY_TIMEOUT_SECONDS = 900
+_DEFAULT_PROXY_TIMEOUT_SECONDS = 120
 _PROXY_PLACEHOLDER_API_KEY = "proxy-placeholder-key"
 
 

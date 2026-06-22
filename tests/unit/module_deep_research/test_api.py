@@ -1288,3 +1288,50 @@ def test_cli_resolution_uses_windows_cmd_shims(monkeypatch) -> None:
     assert GeminiExecClient().build_command()[0].endswith("/gemini.CMD")
     codex_cmd, _ = CodexExecClient(CodexExecOptions(output_last_message="last.md")).build_command()
     assert codex_cmd[0].endswith("/codex.CMD")
+
+
+def test_antigravity_falls_back_to_inline_context_web_when_file_tools_fail(
+    monkeypatch, tmp_path: Path
+) -> None:
+    from spotlights_engine.module_deep_research.antigravity_exec import (
+        AntigravityExecClient,
+        AntigravityExecOptions,
+    )
+
+    repo = tmp_path / "repo"
+    module_dir = repo / "vllm" / "v1" / "sample"
+    module_dir.mkdir(parents=True)
+    (module_dir / "sampler.py").write_text("def sample(): return 'ok'\n")
+    captured: dict[str, str] = {}
+
+    async def fake_run_async(self, prompt: str) -> str:
+        if self.options.enable_file_tools:
+            raise TimeoutError("file tools hung")
+        captured["prompt"] = prompt
+        return (
+            '{"findings":[{"finding_id":"find-0001","title":"EARS",'
+            '"url":"https://arxiv.org/abs/2512.13194",'
+            '"source_type":"paper","technique_summary":"Adaptive rejection '
+            'thresholds improve speculative decoding acceptance.",'
+            '"supporting_evidence":"paper abstract"}],"issues":[]}'
+        )
+
+    monkeypatch.setattr(AntigravityExecClient, "_run_async", fake_run_async)
+
+    result = AntigravityExecClient(
+        AntigravityExecOptions(
+            cwd=repo,
+            workspaces=[module_dir],
+            antigravity_base_url="https://gateway.example.com",
+            antigravity_api_key_env="LITELLM_API_KEY",
+            api_key_auth_mechanism="bearer",
+            normalize_sse_bytes_repr=True,
+            timeout_seconds=20,
+        )
+    ).run("You are running the Spotlights module_deep_research pipeline step.")
+
+    assert result.ok
+    assert "--fallback" in result.command
+    assert "primary Antigravity file-tool run failed" in result.stderr
+    assert "Inline target module context" in captured["prompt"]
+    assert "def sample" in captured["prompt"]
