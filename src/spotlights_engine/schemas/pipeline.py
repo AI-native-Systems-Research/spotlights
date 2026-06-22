@@ -149,7 +149,7 @@ class RunInfo(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    pipeline: Literal["deep_research", "signal"]
+    pipeline: Literal["deep_research", "signal", "unified"]
 
     run_id: str = Field(min_length=1)
     started_at: str
@@ -162,7 +162,7 @@ class SpotlightReport(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["2"] = "2"
 
     project_tree: ProjectTree
     context: SpotlightContext

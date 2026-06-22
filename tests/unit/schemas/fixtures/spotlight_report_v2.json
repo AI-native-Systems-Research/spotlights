@@ -1,0 +1,110 @@
+{
+  "schema_version": "2",
+  "project_tree": {
+    "repository": {
+      "name": "demo",
+      "summary": "Demo repository for the SpotlightReport round-trip backstop.",
+      "source_root": "",
+      "external_dependencies": []
+    },
+    "modules": [
+      {
+        "name": "core",
+        "path": "src/core",
+        "description": "",
+        "depends_on": [],
+        "main_files": [],
+        "submodules": []
+      }
+    ]
+  },
+  "context": {
+    "objective": "reduce p99 latency",
+    "workload_hints": ["batch=1-8"],
+    "validation_plan": ["bench tokens/sec"]
+  },
+  "candidates": [
+    {
+      "id": "cand-core-0001",
+      "module_qualified_name": "core",
+      "origin": "code_agent",
+      "locations": [
+        {
+          "file": "src/core/x.py",
+          "spans": [
+            {
+              "line_start": 10,
+              "line_end": 42,
+              "symbol": "core.x.run",
+              "kind": "function"
+            }
+          ]
+        }
+      ],
+      "description": "Entry point doing work.",
+      "current_approach": "Sequential.",
+      "evolve_rationale": "Could parallelize.",
+      "estimated_impact": "high",
+      "estimated_impact_explanation": "Hot path.",
+      "proposals": [
+        {
+          "id": "prop-core-0001",
+          "source": "research_finding",
+          "anomaly_ref_ids": null,
+          "finding_ref_id": "find-core-0001",
+          "author": null,
+          "title": "Parallelize core.x.run",
+          "description": "Use a thread pool.",
+          "rationale": "Hot path.",
+          "mechanism": null,
+          "required_changes": null,
+          "expected_effect": null,
+          "evaluation_metric": null
+        },
+        {
+          "id": "prop-core-0002",
+          "source": "agent_knowledge",
+          "anomaly_ref_ids": null,
+          "finding_ref_id": null,
+          "author": "claude",
+          "title": "Cache results of core.x.run",
+          "description": "Add an LRU cache.",
+          "rationale": "Repeated inputs.",
+          "mechanism": null,
+          "required_changes": null,
+          "expected_effect": null,
+          "evaluation_metric": null
+        }
+      ]
+    }
+  ],
+  "findings": [
+    {
+      "finding_id": "find-core-0001",
+      "title": "Parallel-friendly hot path",
+      "url": "https://example.com/papers/parallel-hot-path",
+      "source_type": "paper",
+      "technique_summary": "Workloads dominated by an embarrassingly parallel hot path benefit from pool-based concurrency.",
+      "supporting_evidence": ""
+    }
+  ],
+  "anomalies": [
+    {
+      "anomaly_id": "anom-core-0001",
+      "type": "latency_spike",
+      "description": "p99 latency on core.x.run is 8x p50.",
+      "estimated_severity": "high",
+      "confidence": 0.92,
+      "evidence_pointer": "traces.jsonl span=core.x.run percentile=99",
+      "magnitude": "p99 latency 1.2s vs p50 0.15s"
+    }
+  ],
+  "run": {
+    "pipeline": "deep_research",
+    "run_id": "demo-2026-06-22",
+    "started_at": "2026-06-22T12:00:00Z",
+    "finished_at": "2026-06-22T12:05:00Z",
+    "cost_usd": 1.23
+  },
+  "issues": []
+}

@@ -309,10 +309,11 @@ class RunInfo(BaseModel):
     """Info about the run that produced this report."""
     model_config = ConfigDict(extra="forbid")
 
-    pipeline: Literal["deep_research", "signal"]
-    # ↑ which pipeline produced the report. Future "unified" value
-    #   is deferred until pipelines actually unify; widening this
-    #   Literal is a schema-version bump per §4.8.
+    pipeline: Literal["deep_research", "signal", "unified"]
+    # ↑ which pipeline produced the report.  "unified" was added
+    #   2026-06-22 when the unified runner shipped (`spotlights-engine
+    #   both`).  This widening drove the v1 → v2 schema_version bump
+    #   per §4.8.
 
     run_id: str = Field(min_length=1)
     started_at: str                       # ISO-8601
@@ -329,7 +330,7 @@ class SpotlightReport(BaseModel):
     """
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["2"] = "2"
 
     # inputs echoed back, for self-describing audit/repro
     project_tree: ProjectTree
@@ -543,7 +544,7 @@ candidates take the head of the global numbering (`cand-0001`,
 
 ```json
 {
-  "schema_version": "1",
+  "schema_version": "2",
   "project_tree": { "...": "echoed unchanged" },
   "context": {
     "objective": "reduce the media TTFT and median TPOT (Time Per Output Token)",
@@ -876,7 +877,7 @@ today (separate JSON files next to the legacy `result.json`).
 
 ### 4.8 Schema versioning
 
-`schema_version: Literal["1"] = "1"` is a single envelope version
+`schema_version: Literal["2"] = "2"` is a single envelope version
 covering the whole report. Bump on breaking changes; per-field
 versioning is overkill.
 
@@ -887,12 +888,24 @@ decides if their change is breaking.
 - *Breaking* (rename/remove a field, change a type, change a field's
   meaning, **widen a `Literal` like `CandidateOrigin`,
   `ProposalSource`, `RunInfo.pipeline`, or `CodeKind`**) — bump
-  `Literal["1"]` to `Literal["1", "2"]` for reads; default new
-  writes to `"2"`; update both adapters.
+  `schema_version` to the next integer-as-string. The historical
+  fixture file is kept on disk as evidence the previous shape existed
+  but is no longer parseable by the current `SpotlightReport`
+  (hard cutover; aligns with `SpotlightsManager.SCHEMA_VERSION`
+  resume policy).
+
+**Version history:**
+
+- `"1"` — initial schema, landed in PR #22 (2026-06-18).
+- `"2"` — bumped 2026-06-22 when `RunInfo.pipeline` Literal widened
+  to include `"unified"` (closed-Literal widening = breaking per the
+  rule above). Shipped alongside the unified runner
+  (`spotlights-engine both`) in `unification/unified-runner`.
 
 Enforced by code review and a frozen-fixture test in
-`tests/unit/schemas/`. There's no automation that detects breaking
-changes from a diff; it's a discipline call.
+`tests/unit/schemas/` (one fixture per version round-trips; older
+fixtures are kept as historical evidence and asserted to FAIL
+validation under the current schema).
 
 ### 4.9 Naming — `SpotlightReport` and the `Code*` family
 
