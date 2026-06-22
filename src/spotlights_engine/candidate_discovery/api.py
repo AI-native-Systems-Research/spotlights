@@ -47,7 +47,8 @@ class DiscoveryConfig(BaseModel):
     num_review_iterations: int = Field(default=3, ge=0)
     per_iteration_wallclock_s: int = Field(default=900, ge=1)
     claude_max_turns: int = Field(default=30, ge=1)
-    codex_model: str = Field(default="gpt-5.5", pattern=r"^[\w.\-/]+$")
+    codex_model: str | None = Field(default="gpt-5.5", pattern=r"^[\w.\-/]+$")
+    codex_profile: str | None = Field(default=None, pattern=r"^[\w.\-/]+$")
     codex_reasoning_effort: Literal["minimal", "low", "medium", "high", "xhigh"] = "high"
 
 
