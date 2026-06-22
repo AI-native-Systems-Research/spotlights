@@ -495,7 +495,9 @@ def test_antigravity_normalizer_preserves_vertex_thought_signature() -> None:
 
 def test_antigravity_normalizer_suppresses_empty_terminal_chunk() -> None:
     from spotlights_engine.module_deep_research.antigravity_exec import (
+        _normalize_generate_content_body,
         normalize_litellm_sse_bytes_repr_line,
+        normalize_litellm_vertex_sse_line,
     )
 
     line = (
@@ -505,6 +507,23 @@ def test_antigravity_normalizer_suppresses_empty_terminal_chunk() -> None:
     )
 
     assert normalize_litellm_sse_bytes_repr_line(line) == b""
+
+    empty_nonterminal = (
+        'data: {"candidates":[{"content":{"role":"model",'
+        '"parts":[{"text":""}]}}],"usageMetadata":{"totalTokenCount":123}}'
+    )
+    assert normalize_litellm_vertex_sse_line(empty_nonterminal) == b""
+
+    signature_only = (
+        'data: {"candidates":[{"content":{"role":"model",'
+        '"parts":[{"thoughtSignature":"opaque"}]}}]}'
+    )
+    assert normalize_litellm_vertex_sse_line(signature_only) == b""
+
+    nonstream = _normalize_generate_content_body(
+        b'{"candidates":[{"content":{"role":"model","parts":[{"text":""}]}}]}'
+    )
+    assert b"No content returned." in nonstream
 
 
 def test_antigravity_default_command_is_sdk_and_does_not_expose_prompt(tmp_path: Path) -> None:
@@ -672,7 +691,7 @@ def test_antigravity_runner_enables_web_search_tool(monkeypatch, tmp_path: Path)
 def test_antigravity_compacts_spotlights_prompt_and_wraps_web_result() -> None:
     from spotlights_engine.module_deep_research.antigravity_exec import (
         _is_simple_web_grounded_spotlights_prompt,
-        _maybe_compact_web_grounded_spotlights_prompt,
+        _maybe_compact_spotlights_prompt,
         _wrap_simple_web_result,
     )
 
@@ -694,7 +713,9 @@ Output rules:
 - Include at most 2 findings.
 """
 
-    compacted = _maybe_compact_web_grounded_spotlights_prompt(prompt, compact=True)
+    compacted = _maybe_compact_spotlights_prompt(
+        prompt, compact=True, enable_file_tools=False
+    )
 
     assert _is_simple_web_grounded_spotlights_prompt(compacted)
     assert "Use web search" in compacted
@@ -746,6 +767,15 @@ Output rules:
         '"source_type":"blog"}'
     )
     assert len(json.loads(single_wrapped)["findings"]) == 1
+
+    file_compacted = _maybe_compact_spotlights_prompt(
+        prompt, compact=True, enable_file_tools=True
+    )
+    assert not _is_simple_web_grounded_spotlights_prompt(file_compacted)
+    assert "SPOTLIGHTS_COMPACT_MODULE_RESEARCH" in file_compacted
+    assert "Read the target module main files" in file_compacted
+    assert "Use file tools" in file_compacted
+    assert "Include at most 2 findings" in file_compacted
 
 
 def test_antigravity_proxy_path_keeps_file_tools_and_stages_workspace(

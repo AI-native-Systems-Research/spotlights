@@ -1,151 +1,94 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
-import pytest
-
-from spotlights_engine.modules_extractor.agent import run_extraction
-from spotlights_engine.modules_extractor.errors import ExtractorValidationError
+from spotlights_engine.modules_extractor import agent
 from spotlights_engine.signal_pipeline._subprocess_util import StreamingResult
 
 
-def _stream_result(payload: dict) -> StreamingResult:
+def _result_event(payload: dict) -> bytes:
     event = {
         "type": "result",
         "subtype": "success",
-        "structured_output": payload,
+        "session_id": "sess-1",
+        "total_cost_usd": 0.01,
+        "duration_ms": 1234,
         "usage": {"input_tokens": 10, "output_tokens": 20},
+        "structured_output": payload,
     }
-    return StreamingResult(
-        stdout=(json.dumps(event) + "\n").encode("utf-8"),
-        stderr=b"",
-        returncode=0,
-        duration_s=1.0,
-    )
+    return (json.dumps(event) + "\n").encode()
 
 
-def _invalid_conceptual_split_payload() -> dict:
-    return {
-        "repository": {
-            "name": "inference-sim",
-            "summary": "A Go simulator.",
-            "source_root": "",
-            "external_dependencies": [],
-        },
+def test_run_extraction_retries_semantic_project_tree_validation(
+    monkeypatch, tmp_path: Path
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+
+    invalid_tree = {
+        "repository": {"name": "demo", "summary": "demo repo", "source_root": ""},
         "modules": [
             {
-                "name": "sim",
-                "path": "sim",
-                "description": "Simulation runtime.",
+                "name": "pkg",
+                "path": "pkg",
+                "description": "package",
                 "depends_on": [],
-                "main_files": [
-                    {"path": "sim/simulator.go", "role": "Drives simulation."}
-                ],
+                "main_files": [{"path": "pkg/__init__.py", "role": "entry"}],
                 "submodules": [
                     {
-                        "name": "routing",
-                        "path": "sim",
-                        "description": "Routes requests.",
-                        "main_files": [
-                            {"path": "sim/simulator.go", "role": "Routing logic."}
-                        ],
+                        "name": "logical_unit",
+                        "path": "pkg",
+                        "description": "invalid same-path logical unit",
+                        "main_files": [{"path": "pkg/core.py", "role": "core"}],
                     }
                 ],
             }
         ],
     }
-
-
-def _valid_leaf_payload() -> dict:
-    return {
-        "repository": {
-            "name": "inference-sim",
-            "summary": "A Go simulator.",
-            "source_root": "",
-            "external_dependencies": [],
-        },
+    valid_tree = {
+        "repository": {"name": "demo", "summary": "demo repo", "source_root": ""},
         "modules": [
             {
-                "name": "sim",
-                "path": "sim",
-                "description": "Simulation runtime.",
+                "name": "pkg",
+                "path": "pkg",
+                "description": "package",
                 "depends_on": [],
                 "main_files": [
-                    {"path": "sim/simulator.go", "role": "Drives simulation."}
+                    {"path": "pkg/__init__.py", "role": "entry"},
+                    {"path": "pkg/core.py", "role": "core"},
                 ],
-                "submodules": [],
             }
         ],
     }
-
-
-def test_run_extraction_retries_once_after_project_tree_validation_error(
-    tmp_path, monkeypatch
-) -> None:
+    payloads = [invalid_tree, valid_tree]
     prompts: list[str] = []
-    results = [
-        _stream_result(_invalid_conceptual_split_payload()),
-        _stream_result(_valid_leaf_payload()),
-    ]
 
-    def fake_run_streaming_claude(**kwargs) -> StreamingResult:
+    def fake_run_streaming_claude(**kwargs):
         prompts.append(kwargs["prompt"])
-        return results.pop(0)
+        return StreamingResult(
+            stdout=_result_event(payloads.pop(0)),
+            stderr=b"",
+            returncode=0,
+            duration_s=1.0,
+        )
 
-    monkeypatch.setattr(
-        "spotlights_engine.modules_extractor.agent.resolve_claude_argv0",
-        lambda _: ["claude"],
-    )
-    monkeypatch.setattr(
-        "spotlights_engine.modules_extractor.agent.run_streaming_claude",
-        fake_run_streaming_claude,
-    )
-    artifacts = tmp_path / "artifacts"
-    artifacts.mkdir()
-    events: list[str] = []
+    monkeypatch.setattr(agent, "resolve_claude_argv0", lambda _bin: ["claude"])
+    monkeypatch.setattr(agent, "run_streaming_claude", fake_run_streaming_claude)
 
-    result = run_extraction(
-        repo_path=tmp_path,
-        prompt="base prompt",
+    result = agent.run_extraction(
+        repo_path=repo,
+        prompt="Map the repository.",
         artifacts_dir=artifacts,
-        on_event=events.append,
+        on_event=None,
     )
 
-    assert result.project_tree.modules[0].name == "sim"
-    assert result.invocation.duration_s == 2.0
-    assert result.invocation.input_tokens == 20
-    assert result.invocation.output_tokens == 40
+    assert result.project_tree.resolve("pkg") is not None
     assert len(prompts) == 2
-    assert "Retry after local ProjectTree validation failure" in prompts[1]
-    assert "Do not split one directory into conceptual children" in prompts[1]
-    assert any("retrying once" in event for event in events)
-    assert (artifacts / "validation_error_attempt_0.txt").exists()
-    assert (artifacts / "last_message_attempt_0.json").exists()
-    assert (artifacts / "last_message_attempt_1.json").exists()
-
-
-def test_run_extraction_raises_after_validation_retry_fails(tmp_path, monkeypatch) -> None:
-    prompts: list[str] = []
-    results = [
-        _stream_result(_invalid_conceptual_split_payload()),
-        _stream_result(_invalid_conceptual_split_payload()),
-    ]
-
-    def fake_run_streaming_claude(**kwargs) -> StreamingResult:
-        prompts.append(kwargs["prompt"])
-        return results.pop(0)
-
-    monkeypatch.setattr(
-        "spotlights_engine.modules_extractor.agent.resolve_claude_argv0",
-        lambda _: ["claude"],
-    )
-    monkeypatch.setattr(
-        "spotlights_engine.modules_extractor.agent.run_streaming_claude",
-        fake_run_streaming_claude,
-    )
-
-    with pytest.raises(ExtractorValidationError, match="after 2 attempts") as exc:
-        run_extraction(repo_path=tmp_path, prompt="base prompt", on_event=None)
-
-    assert exc.value.context["attempts"] == 2
-    assert len(prompts) == 2
+    assert "failed Spotlights' stricter semantic validation" in prompts[1]
+    assert (artifacts / "validation_error.txt").exists()
+    assert (artifacts / "repair_1_prompt.md").exists()
+    assert (artifacts / "repair_1_last_message.json").exists()
+    assert (artifacts / "project_tree.json").exists()

@@ -24,7 +24,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from spotlights_engine.module_deep_research.agent_exec import AgentExecResult
 
 DEFAULT_LITELLM_ANTIGRAVITY_MODEL = "gcp/gemini-3.1-pro-preview"
-_DEFAULT_PROXY_TIMEOUT_SECONDS = 300
+_DEFAULT_PROXY_TIMEOUT_SECONDS = 900
 _PROXY_PLACEHOLDER_API_KEY = "proxy-placeholder-key"
 
 
@@ -150,16 +150,72 @@ class AntigravityExecClient:
                 final_message=final_message,
             )
         except Exception as exc:  # noqa: BLE001 - convert SDK failures to runner output
-            result = AgentExecResult(
-                command=self.build_command(),
-                returncode=1,
-                stdout="",
-                stderr=f"{type(exc).__name__}: {exc}",
-                final_message=None,
-            )
+            result = self._try_inline_context_web_fallback(prompt, exc)
+            if result is None:
+                result = AgentExecResult(
+                    command=self.build_command(),
+                    returncode=1,
+                    stdout="",
+                    stderr=f"{type(exc).__name__}: {exc}",
+                    final_message=None,
+                )
         if check:
             result.raise_for_status()
         return result
+
+    def _try_inline_context_web_fallback(
+        self, prompt: str, primary_error: Exception
+    ) -> AgentExecResult | None:
+        """Fallback for SDK/proxy file-tool instability.
+
+        The preferred path keeps Antigravity file tools enabled. Some SDK +
+        Gemini-compatible gateway combinations can still stall or crash while
+        interleaving file tools and web search. In that case, preserve module
+        grounding by embedding bounded read-only snippets from the configured
+        workspaces, then retry with web search only.
+        """
+        opt = self.options
+        if not (
+            opt.enable_file_tools
+            and opt.antigravity_base_url
+            and opt.normalize_sse_bytes_repr
+        ):
+            return None
+        fallback_prompt = _append_inline_workspace_context(prompt, opt)
+        fallback_options = opt.model_copy(
+            update={
+                "enable_file_tools": False,
+                "workspaces": [],
+                "stage_workspaces": False,
+                "timeout_seconds": max(opt.timeout_seconds or 0, 300),
+            }
+        )
+        try:
+            final_message = asyncio.run(
+                AntigravityExecClient(fallback_options)._run_async(fallback_prompt)
+            )
+        except Exception as fallback_error:  # noqa: BLE001
+            return AgentExecResult(
+                command=self.build_command(),
+                returncode=1,
+                stdout="",
+                stderr=(
+                    f"{type(primary_error).__name__}: {primary_error}\n"
+                    "Inline-context web fallback also failed: "
+                    f"{type(fallback_error).__name__}: {fallback_error}"
+                ),
+                final_message=None,
+            )
+        return AgentExecResult(
+            command=self.build_command() + ["--fallback", "inline-context-web"],
+            returncode=0,
+            stdout=final_message,
+            stderr=(
+                "primary Antigravity file-tool run failed; used inline-context "
+                f"web fallback: {type(primary_error).__name__}: {primary_error}"
+            ),
+            final_message=final_message,
+        )
 
     async def _run_async(self, prompt: str) -> str:
         with _patched_environ(self.options.env):
@@ -193,13 +249,13 @@ class AntigravityExecClient:
             ) from exc
 
         opt = self.options
-        prompt = _maybe_compact_web_grounded_spotlights_prompt(
+        prompt = _maybe_compact_spotlights_prompt(
             prompt,
             compact=bool(
                 opt.antigravity_base_url
                 and opt.normalize_sse_bytes_repr
-                and not opt.enable_file_tools
             ),
+            enable_file_tools=opt.enable_file_tools,
         )
         wrap_simple_web_result = _is_simple_web_grounded_spotlights_prompt(prompt)
         cwd = Path(opt.cwd).expanduser().resolve()
@@ -379,16 +435,57 @@ def _copy_workspace_into_staged_repo(workspace: Path, cwd: Path, staged_cwd: Pat
         shutil.copy2(workspace, destination)
 
 
-def _maybe_compact_web_grounded_spotlights_prompt(
-    prompt: str, *, compact: bool
+def _maybe_compact_spotlights_prompt(
+    prompt: str, *, compact: bool, enable_file_tools: bool
 ) -> str:
     if not compact or "Spotlights module_deep_research pipeline step" not in prompt:
         return prompt
     context = _extract_prompt_section(prompt, "Caller context", "Workflow")
     objective = _extract_first_group(r"Objective: (.*)", context) or context
+    target_module = _extract_prompt_section(prompt, "Target module", "Caller context")
+    repo_path = (
+        _extract_first_group(
+            r"Repository working directory.*?\): ([^\n]+)",
+            prompt,
+            flags=re.DOTALL,
+        )
+        or "(repository root)"
+    )
     max_findings = _extract_first_group(r"Include at most (\d+) findings\.", prompt) or "3"
+    if enable_file_tools:
+        return (
+            "SPOTLIGHTS_COMPACT_MODULE_RESEARCH\n"
+            "Do not modify files. Use file tools only for the target module, "
+            "then use web search for transferable techniques. Keep the run short.\n\n"
+            f"Repository root: {repo_path}\n\n"
+            f"Target module:\n{target_module}\n\n"
+            f"Caller context:\n{context}\n\n"
+            "Workflow:\n"
+            "1. Read the target module main files listed above. Read at most three "
+            "nearby files only if required to understand the sampler path.\n"
+            "2. Run focused web searches for concrete algorithms, papers, PRs, or "
+            "implementation notes relevant to this module and objective.\n"
+            "3. Return a bare JSON object only. No markdown.\n\n"
+            "JSON shape: {\"findings\":[{\"finding_id\":\"find-0001\","
+            "\"title\":string,\"url\":string,\"source_type\":\"paper|blog|docs|"
+            "issue|pr|talk|codebase|other\",\"technique_summary\":string,"
+            "\"supporting_evidence\":string}],\"issues\":[]}.\n"
+            f"Include at most {max_findings} findings. Keep only sources with a "
+            "specific transferable optimization idea for speculative decoding "
+            "sampling/rejection hot paths. If evidence is insufficient, return "
+            "empty findings with a recoverable issue."
+        )
+    inline_context = _extract_prompt_section(
+        prompt,
+        "Inline target module context",
+        "End inline target module context.",
+    )
     return (
         "SPOTLIGHTS_SIMPLE_WEB_RESULT\n"
+        "Return only {\"findings\": [...], \"issues\": [...]} JSON. Do not return "
+        "a module summary, file inventory, or keys named module/name/path/files.\n\n"
+        f"Target module:\n{target_module}\n\n"
+        f"Inline module code context:\n{inline_context}\n\n"
         f"Use web search to find up to {max_findings} recent papers, blogs, "
         "docs pages, issues, or PRs with concrete techniques related to this "
         "caller objective. "
@@ -399,6 +496,92 @@ def _maybe_compact_web_grounded_spotlights_prompt(
         "\"technique_summary\": string, "
         "\"supporting_evidence\": string}], \"issues\": []}."
     )
+
+
+def _append_inline_workspace_context(
+    prompt: str,
+    options: AntigravityExecOptions,
+    *,
+    max_total_chars: int = 12_000,
+    max_file_chars: int = 3_000,
+    max_files: int = 4,
+) -> str:
+    if "Inline target module context:" in prompt:
+        return prompt
+    cwd = Path(options.cwd).expanduser().resolve()
+    workspace_paths = [
+        Path(path).expanduser().resolve() for path in (options.workspaces or [cwd])
+    ]
+    chunks: list[str] = []
+    remaining = max_total_chars
+    for file_path in _iter_inline_context_files(workspace_paths, max_files=max_files):
+        if remaining <= 0:
+            break
+        try:
+            text = file_path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if not text.strip():
+            continue
+        try:
+            label = file_path.relative_to(cwd).as_posix()
+        except ValueError:
+            label = file_path.as_posix()
+        body = text[: min(max_file_chars, remaining)]
+        chunks.append(f"--- {label} ---\n{body}")
+        remaining -= len(body)
+    context = "\n\n".join(chunks) if chunks else "(no readable workspace files found)"
+    return (
+        prompt
+        + "\n\nInline target module context:\n"
+        + context
+        + "\nEnd inline target module context.\n"
+    )
+
+
+def _iter_inline_context_files(
+    workspace_paths: Sequence[Path], *, max_files: int
+) -> Iterator[Path]:
+    suffix_priority = {
+        ".py": 0,
+        ".pyi": 1,
+        ".cu": 2,
+        ".cuh": 3,
+        ".cpp": 4,
+        ".cc": 5,
+        ".h": 6,
+        ".hpp": 7,
+        ".md": 8,
+        ".rst": 9,
+    }
+    seen: set[Path] = set()
+    candidates: list[Path] = []
+    for workspace in workspace_paths:
+        if workspace.is_file():
+            candidates.append(workspace)
+            continue
+        if not workspace.is_dir():
+            continue
+        for path in workspace.rglob("*"):
+            if len(candidates) >= max_files * 4:
+                break
+            if not path.is_file() or path.suffix.lower() not in suffix_priority:
+                continue
+            if any(part.startswith(".") or part == "__pycache__" for part in path.parts):
+                continue
+            resolved = path.resolve()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            candidates.append(resolved)
+    candidates.sort(
+        key=lambda p: (
+            suffix_priority.get(p.suffix.lower(), 99),
+            len(p.parts),
+            p.as_posix(),
+        )
+    )
+    yield from candidates[:max_files]
 
 
 def _is_simple_web_grounded_spotlights_prompt(prompt: str) -> bool:
@@ -467,8 +650,8 @@ def _extract_prompt_section(prompt: str, start: str, end: str) -> str:
     return match.group("body").strip()
 
 
-def _extract_first_group(pattern: str, value: str) -> str | None:
-    match = re.search(pattern, value)
+def _extract_first_group(pattern: str, value: str, *, flags: int = 0) -> str | None:
+    match = re.search(pattern, value, flags=flags)
     return match.group(1) if match else None
 
 
@@ -488,9 +671,14 @@ def _structured_output_repair_prompt(attempt: int) -> str:
         prefix
         + "Finalize now using only the context already gathered in this conversation. "
         + "Do not call search, file, shell, or planning tools. Return a raw JSON "
-        + "object only, with no markdown or explanation. If a finish tool is the "
-        + "only available finalization channel, call finish with only schema fields; "
-        + "do not include helper metadata such as toolAction or toolSummary."
+        + "object only, with no markdown or explanation. Required shape: "
+        + '{"findings":[{"finding_id":"find-0001","title":"...","url":"...",'
+        + '"source_type":"paper|blog|docs|issue|pr|talk|codebase|other",'
+        + '"technique_summary":"...","supporting_evidence":"..."}],"issues":[]}. '
+        + "Do not return module summaries or keys such as module, name, path, "
+        + "description, depends_on, files, or key_classes. If a finish tool is the "
+        + "only available finalization channel, call finish with only findings and "
+        + "issues; do not include helper metadata such as toolAction or toolSummary."
     )
 
 
@@ -509,7 +697,9 @@ async def _chat_text_or_structured_json(
             if structured is not None:
                 return json.dumps(structured, default=_json_default)
         text = await response.text()
-        if _looks_like_json_object(text) or attempt + 1 >= attempts:
+        if _looks_like_json_object(text) and _is_module_deep_research_json(text):
+            return text
+        if attempt + 1 >= attempts:
             return text
         response = await agent.chat(_structured_output_repair_prompt(attempt + 1))
     return text
@@ -518,6 +708,18 @@ async def _chat_text_or_structured_json(
 def _looks_like_json_object(value: str) -> bool:
     stripped = value.strip()
     return stripped.startswith("{") and stripped.endswith("}")
+
+
+def _is_module_deep_research_json(value: str) -> bool:
+    try:
+        parsed = json.loads(_extract_json_object_text(value))
+    except (TypeError, json.JSONDecodeError):
+        return False
+    if not isinstance(parsed, dict):
+        return False
+    if isinstance(parsed.get("findings"), list):
+        return True
+    return bool(parsed.get("title") and parsed.get("url"))
 
 
 def _json_default(value: Any) -> Any:
@@ -619,12 +821,19 @@ def _sse_bytes_repr_normalizer(
                     response = error
                 with contextlib.closing(response):
                     self.send_response(response.status)
+                    content_type = response.headers.get("content-type", "")
                     is_event_stream = _is_streaming_response(
-                        content_type=response.headers.get("content-type", ""),
+                        content_type=content_type,
+                        request_path=self.path,
+                    )
+                    rewrite_json = _is_json_generate_response(
+                        content_type=content_type,
                         request_path=self.path,
                     )
                     for key, value in response.headers.items():
-                        if _should_forward_response_header(key, rewrite_body=is_event_stream):
+                        if _should_forward_response_header(
+                            key, rewrite_body=(is_event_stream or rewrite_json)
+                        ):
                             self.send_header(key, value)
                     if is_event_stream:
                         self.send_header("Transfer-Encoding", "chunked")
@@ -643,9 +852,13 @@ def _sse_bytes_repr_normalizer(
                         self.wfile.write(b"0\r\n\r\n")
                         self.wfile.flush()
                     else:
-                        while chunk := response.read(1024 * 1024):
-                            self.wfile.write(chunk)
-                            self.wfile.flush()
+                        body = response.read()
+                        if rewrite_json:
+                            body = _normalize_generate_content_body(body)
+                        self.wfile.write(body)
+                        self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                return
             except Exception as exc:  # noqa: BLE001
                 payload = f"SSE normalizer proxy failed: {type(exc).__name__}: {exc}".encode()
                 self.send_response(502)
@@ -675,6 +888,33 @@ def _is_streaming_response(*, content_type: str, request_path: str) -> bool:
         or "streamgeneratecontent" in lowered_path
         or "alt=sse" in lowered_path
     )
+
+
+def _is_json_generate_response(*, content_type: str, request_path: str) -> bool:
+    return (
+        "application/json" in content_type.lower()
+        and "generatecontent" in request_path.lower()
+    )
+
+
+def _normalize_generate_content_body(body: bytes) -> bytes:
+    try:
+        obj = json.loads(body.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return body
+    if not isinstance(obj, dict) or "candidates" not in obj:
+        return body
+    _drop_inert_candidate_parts(obj)
+    if _has_no_candidate_parts(obj) or _is_empty_terminal_candidate_chunk(obj):
+        candidates = obj.get("candidates")
+        if isinstance(candidates, list) and candidates and isinstance(candidates[0], dict):
+            candidates[0]["content"] = {
+                "role": "model",
+                "parts": [{"text": "No content returned."}],
+            }
+            candidates[0].setdefault("finishReason", "STOP")
+    _normalize_tool_call_args(obj)
+    return json.dumps(obj, separators=(",", ":")).encode("utf-8")
 
 
 
@@ -967,7 +1207,7 @@ def _normalize_litellm_vertex_stream_payload(decoded_sse: str) -> str | None:
             return decoded_sse
     if "candidates" not in obj and "promptFeedback" not in obj:
         return decoded_sse
-    _drop_thought_only_parts(obj)
+    _drop_inert_candidate_parts(obj)
     if _has_no_candidate_parts(obj):
         return None
     if _is_empty_terminal_candidate_chunk(obj):
@@ -1021,7 +1261,7 @@ def _normalize_tool_call_args(obj: Any) -> None:
                 args.pop("toolSummary", None)
 
 
-def _drop_thought_only_parts(obj: Any) -> None:
+def _drop_inert_candidate_parts(obj: Any) -> None:
     candidates = obj.get("candidates") if isinstance(obj, dict) else None
     if not isinstance(candidates, list):
         return
@@ -1034,15 +1274,36 @@ def _drop_thought_only_parts(obj: Any) -> None:
         parts = content.get("parts")
         if not isinstance(parts, list):
             continue
-        content["parts"] = [
-            part
-            for part in parts
-            if not (
-                isinstance(part, dict)
-                and part.get("thought") is True
-                and "functionCall" not in part
-            )
-        ]
+        content["parts"] = [part for part in parts if not _is_inert_candidate_part(part)]
+
+
+def _is_inert_candidate_part(part: Any) -> bool:
+    """Drop chunks that make older Antigravity harnesses reject the stream.
+
+    Some Gemini-compatible gateways stream bookkeeping-only parts such as
+    thought-only chunks, empty text chunks, or standalone thought signatures.
+    They carry no user-visible text and no tool call, and the local harness can
+    surface them as "model output must contain either output text or tool
+    calls". Preserve function/tool-call parts and non-empty text, including
+    thought signatures attached to those meaningful parts.
+    """
+    if not isinstance(part, dict):
+        return False
+    if part.get("functionCall"):
+        return False
+    meaningful_payload_keys = {
+        "functionResponse",
+        "executableCode",
+        "codeExecutionResult",
+        "inlineData",
+        "fileData",
+    }
+    if any(part.get(key) for key in meaningful_payload_keys):
+        return False
+    text = part.get("text")
+    if isinstance(text, str) and text.strip() and part.get("thought") is not True:
+        return False
+    return True
 
 
 def _has_no_candidate_parts(obj: Any) -> bool:
