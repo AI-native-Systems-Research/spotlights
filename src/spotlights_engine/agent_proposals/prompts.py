@@ -16,9 +16,12 @@ from __future__ import annotations
 from spotlights_engine.schemas.candidate import Candidate
 from spotlights_engine.schemas.common import SpotlightContext
 from spotlights_engine.schemas.project import Module, ProjectTree
-from spotlights_engine.schemas.proposals import (
-    AgentProposal,
-    DeepResearchProposal,
+from spotlights_engine.schemas.proposal import Proposal
+from spotlights_engine.schemas.proposals import AgentProposal
+from spotlights_engine.utils.schema_compat import (
+    primary_file,
+    primary_span,
+    proposals_from,
 )
 
 
@@ -28,18 +31,19 @@ def _format_list(values: list[str]) -> str:
     return "\n".join(f"- {value}" for value in values)
 
 
-def _format_deep_research_proposals(
-    proposals: list[DeepResearchProposal],
-) -> str:
+def _format_research_proposals(proposals: list[Proposal]) -> str:
+    """Render the candidate's research-backed proposals (the unified
+    `Proposal`s whose `source == "research_finding"`) into the human-readable
+    block the prompt previously built from `deep_research_proposals`."""
     if not proposals:
         return "(none)"
     lines: list[str] = []
     for i, p in enumerate(proposals, 1):
         lines.append(
-            f"{i}. finding_id={p.finding_id}\n"
+            f"{i}. finding_id={p.finding_ref_id}\n"
             f"   title: {p.title}\n"
-            f"   detailed_description: {p.detailed_description}\n"
-            f"   proposal_rationale: {p.proposal_rationale}"
+            f"   detailed_description: {p.description}\n"
+            f"   proposal_rationale: {p.rationale}"
         )
     return "\n".join(lines)
 
@@ -97,12 +101,13 @@ def _project_tree_breadcrumb(
 
 
 def _format_candidate_block(candidate: Candidate) -> str:
+    span = primary_span(candidate)
     return (
         f"- id: {candidate.id}\n"
-        f"- file: {candidate.file}\n"
-        f"- lines: {candidate.line_start}-{candidate.line_end}\n"
-        f"- symbol: {candidate.symbol}\n"
-        f"- kind: {candidate.kind}\n"
+        f"- file: {primary_file(candidate)}\n"
+        f"- lines: {span.line_start}-{span.line_end}\n"
+        f"- symbol: {span.symbol}\n"
+        f"- kind: {span.kind}\n"
         f"- description: {candidate.description}\n"
         f"- current_approach: {candidate.current_approach}\n"
         f"- evolve_rationale: {candidate.evolve_rationale}\n"
@@ -147,7 +152,7 @@ Candidate:
 {_format_candidate_block(candidate)}
 
 Existing deep_research_proposals on this candidate:
-{_format_deep_research_proposals(candidate.deep_research_proposals)}
+{_format_research_proposals(proposals_from(candidate, "research_finding"))}
 
 Caller context:
 {_format_context_block(context)}
@@ -204,7 +209,7 @@ Candidate:
 {_format_candidate_block(candidate)}
 
 Existing deep_research_proposals on this candidate:
-{_format_deep_research_proposals(candidate.deep_research_proposals)}
+{_format_research_proposals(proposals_from(candidate, "research_finding"))}
 
 Agent A (Claude) proposal for this candidate (avoid duplicating):
 {_format_claude_proposal(claude_proposal)}

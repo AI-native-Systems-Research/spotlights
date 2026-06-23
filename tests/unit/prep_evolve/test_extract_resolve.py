@@ -53,14 +53,14 @@ def test_missing_candidate_lists_available(tmp_path: Path) -> None:
     candidates = resolve_candidates(run, "v1/attention")
     with pytest.raises(SelectionError) as exc:
         resolve_candidate(candidates, "cand-9999")
-    assert "cand-0002" in str(exc.value)
+    assert "cand-v1_attention-0002" in str(exc.value)
 
 
 def test_findings_only_candidate_linked(tmp_path: Path) -> None:
     loaded = _load(tmp_path)
     run = resolve_module_run(loaded, "v1/attention")
     candidates = resolve_candidates(run, "v1/attention")
-    candidate = resolve_candidate(candidates, "cand-0002")
+    candidate = resolve_candidate(candidates, "cand-v1_attention-0002")
     findings = resolve_findings(run, "v1/attention")
     module = resolve_module(loaded.project_tree, "v1/attention")
 
@@ -81,16 +81,16 @@ def test_findings_only_candidate_linked(tmp_path: Path) -> None:
         direction="minimize",
     )
 
-    # Only find-0001 is candidate-linked; the unlinked module finding
-    # find-0002 is dropped rather than appended.
-    assert [f.finding_id for f in spec.findings] == ["find-0001"]
+    # Only find-v1_attention-0001 is candidate-linked; the unlinked module finding
+    # find-v1_attention-0002 is dropped rather than appended.
+    assert [f.finding_id for f in spec.findings] == ["find-v1_attention-0001"]
 
 
 def test_proposal_provenance(tmp_path: Path) -> None:
     loaded = _load(tmp_path)
     run = resolve_module_run(loaded, "v1/attention")
     candidates = resolve_candidates(run, "v1/attention")
-    candidate = resolve_candidate(candidates, "cand-0002")
+    candidate = resolve_candidate(candidates, "cand-v1_attention-0002")
     module = resolve_module(loaded.project_tree, "v1/attention")
     spec = build_spec(
         loaded=loaded,
@@ -106,7 +106,7 @@ def test_proposal_provenance(tmp_path: Path) -> None:
     )
     deep = [p for p in spec.proposals if p.origin == "deep_research"]
     agent = [p for p in spec.proposals if p.origin == "agent"]
-    assert deep[0].finding_id == "find-0001"
+    assert deep[0].finding_id == "find-v1_attention-0001"
     assert deep[0].agent == "claude"
     assert agent[0].finding_id is None
     assert agent[0].agent == "codex"
@@ -116,7 +116,7 @@ def test_scope_main_files_adds_whole_file_targets(tmp_path: Path) -> None:
     loaded = _load(tmp_path)
     run = resolve_module_run(loaded, "v1/attention")
     candidates = resolve_candidates(run, "v1/attention")
-    candidate = resolve_candidate(candidates, "cand-0002")
+    candidate = resolve_candidate(candidates, "cand-v1_attention-0002")
     module = resolve_module(loaded.project_tree, "v1/attention")
     spec = build_spec(
         loaded=loaded,

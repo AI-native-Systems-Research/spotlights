@@ -1,8 +1,9 @@
 """Loading and resolution helpers for prep-evolve.
 
 This module is the only place that knows how to:
-- read a `result.json` (CLI sidecar `SpotlightsManagerResult` shape or the
-  architecture-shaped `SpotlightsResult`) into the core fields we need,
+- read a `result.json` (CLI sidecar `SpotlightsManagerResult` shape, which
+  nests `project_tree`/`context` under `report`, or the legacy flat shape)
+  into the core fields we need,
 - resolve the target repo path from `--repo` or the rendered `index.md`,
 - locate a module run + candidate by slash-form qualified name, raising clear
   errors on a miss.
@@ -45,10 +46,10 @@ class LoadedResult:
 def load_result(path: Path) -> LoadedResult:
     """Parse `result.json` into a `LoadedResult`.
 
-    Accepts both the CLI sidecar (`SpotlightsManagerResult`, which carries
-    `extractor_invocation`/`per_module_telemetry`/...) and the architecture
-    `SpotlightsResult` shape. Only `project_tree`, `context`, and `module_runs`
-    are read; extra keys are ignored.
+    Accepts the current CLI sidecar (`SpotlightsManagerResult`), which nests
+    `project_tree`/`context` under `report` and keeps `module_runs` top-level,
+    as well as the legacy flat shape (`project_tree`/`context`/`module_runs`
+    all top-level). Only those three fields are read; extra keys are ignored.
     """
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
@@ -60,13 +61,22 @@ def load_result(path: Path) -> LoadedResult:
     if not isinstance(raw, dict):
         raise SelectionError(f"result.json must be a JSON object: {path}")
 
-    for key in ("project_tree", "context", "module_runs"):
-        if key not in raw:
+    # `project_tree`/`context` moved under `report` (SpotlightReport); fall back
+    # to the top level for legacy sidecars. `module_runs` stays top-level.
+    report = raw.get("report")
+    tree_context_src = report if isinstance(report, dict) else raw
+
+    for key, src in (
+        ("project_tree", tree_context_src),
+        ("context", tree_context_src),
+        ("module_runs", raw),
+    ):
+        if key not in src:
             raise SelectionError(f"result.json missing required field {key!r}: {path}")
 
     try:
-        project_tree = ProjectTree.model_validate(raw["project_tree"])
-        context = SpotlightContext.model_validate(raw["context"])
+        project_tree = ProjectTree.model_validate(tree_context_src["project_tree"])
+        context = SpotlightContext.model_validate(tree_context_src["context"])
     except Exception as exc:  # noqa: BLE001 - surface as a clean selection error
         raise SelectionError(
             f"result.json project_tree/context did not validate: {type(exc).__name__}: {exc}"

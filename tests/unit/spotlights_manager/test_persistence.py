@@ -95,10 +95,7 @@ def test_proposal_from_finding_round_trip(tmp_path: Path) -> None:
     cands = make_candidates("v1/kv_offload", n=2)
     advanced = Candidates(
         module_qualified_name=cands.module_qualified_name,
-        candidates=[
-            c.model_copy(update={"state": "FINDING_PROPOSALS_CREATED"})
-            for c in cands.candidates
-        ],
+        candidates=[c.model_copy(deep=True) for c in cands.candidates],
     )
     output = ProposalFromFindingCreatorOutput(candidates=advanced, issues=[])
     P.write_proposal_from_finding(
@@ -132,10 +129,7 @@ def test_clear_proposal_from_finding_artifacts_removes_sidecar_and_dir(
     cands = make_candidates("v1/kv_offload")
     advanced = Candidates(
         module_qualified_name=cands.module_qualified_name,
-        candidates=[
-            c.model_copy(update={"state": "FINDING_PROPOSALS_CREATED"})
-            for c in cands.candidates
-        ],
+        candidates=[c.model_copy(deep=True) for c in cands.candidates],
     )
     P.write_proposal_from_finding(
         mp,

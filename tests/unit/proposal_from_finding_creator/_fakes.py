@@ -11,17 +11,23 @@ from spotlights_engine.schemas.candidate import Candidate, Candidates
 from spotlights_engine.schemas.common import SpotlightContext
 from spotlights_engine.schemas.finding import Finding
 from spotlights_engine.schemas.pipeline import ProposalFromFindingCreatorInput
+from spotlights_engine.utils.schema_compat import make_location
 
 
 def make_candidate(idx: int = 0) -> Candidate:
     n = idx + 1
     return Candidate(
-        id=f"cand-{n:04d}",
-        file="src/v1/kv_offload/core.py",
-        line_start=1,
-        line_end=10,
-        symbol=f"hot_{n}",
-        kind="function",
+        id=f"cand-v1_kv_offload-{n:04d}",
+        origin="code_agent",
+        locations=[
+            make_location(
+                file="src/v1/kv_offload/core.py",
+                line_start=1,
+                line_end=10,
+                symbol=f"hot_{n}",
+                kind="function",
+            )
+        ],
         description="x",
         current_approach="x",
         evolve_rationale="x",
@@ -40,7 +46,7 @@ def make_candidates(n: int = 1, qn: str = "v1/kv_offload") -> Candidates:
 def make_finding(idx: int = 0) -> Finding:
     n = idx + 1
     return Finding(
-        finding_id=f"find-{n:04d}",
+        finding_id=f"find-v1_kv_offload-{n:04d}",
         title="t",
         url="https://example.com",
         source_type="paper",

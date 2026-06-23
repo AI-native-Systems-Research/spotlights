@@ -18,8 +18,9 @@ from spotlights_engine.module_deep_research.antigravity_exec import (
 from spotlights_engine.module_deep_research.claude_exec import ClaudeExecClient, ClaudeExecOptions
 from spotlights_engine.module_deep_research.codex_exec import CodexExecClient, CodexExecOptions
 from spotlights_engine.module_deep_research.validation import (
+    AgentModuleDeepResearchOutput,
     normalize_module_deep_research_output,
-    parse_module_deep_research_output,
+    parse_agent_output,
 )
 from spotlights_engine.schemas.common import StepIssue
 from spotlights_engine.schemas.pipeline import ModuleDeepResearchOutput
@@ -133,9 +134,17 @@ def run_runners(
 
 
 def merge_outcomes(
-    outcomes: Sequence[RunnerOutcome], *, max_findings_per_module: int
+    outcomes: Sequence[RunnerOutcome],
+    *,
+    max_findings_per_module: int,
+    segment: str,
 ) -> ModuleDeepResearchOutput:
-    """Merge agent outputs into the stable module deep-research contract."""
+    """Merge agent outputs into the stable module deep-research contract.
+
+    Per-runner outputs are parsed into the lenient wire shape (bare ids), then
+    deduped and merged; the single promotion to persisted `Finding`s — capping,
+    renumbering, and prefixing each id to `find-<segment>-NNNN` (D3) — happens
+    once here via `normalize_module_deep_research_output`."""
     findings = []
     issues: list[StepIssue] = []
     seen: set[str] = set()
@@ -149,10 +158,7 @@ def merge_outcomes(
 
         result = outcome.result
         response_text = result.final_message or result.stdout
-        output = parse_module_deep_research_output(
-            response_text,
-            max_findings_per_module=max_findings_per_module,
-        )
+        output = parse_agent_output(response_text)
         issues.extend(_agent_issues(outcome.agent_name, output.issues))
         if not result.ok:
             issues.append(
@@ -170,11 +176,12 @@ def merge_outcomes(
             seen.update(keys)
             findings.append(finding)
 
-    merged = ModuleDeepResearchOutput(findings=findings, issues=issues)
+    merged = AgentModuleDeepResearchOutput(findings=findings, issues=issues)
     merged_findings_cap = max_findings_per_module * len(outcomes)
     return normalize_module_deep_research_output(
         merged,
         max_findings_per_module=merged_findings_cap,
+        segment=segment,
     )
 
 
@@ -206,7 +213,7 @@ def _run_one_runner(
 
     elapsed = time.monotonic() - started
     response_text = result.final_message or result.stdout
-    parsed = parse_module_deep_research_output(response_text)
+    parsed = parse_agent_output(response_text)
     finding_count = len(parsed.findings)
     parse_issue_count = len(parsed.issues)
     if not result.ok:

@@ -30,7 +30,7 @@ def _input(tmp_path: Path, repo: Path, **kw) -> PrepEvolveInput:
     base = dict(
         result=fx.write_result(tmp_path),
         module="v1/attention",
-        candidate="cand-0002",
+        candidate="cand-v1_attention-0002",
         repo=str(repo),
         evolver="skydiscover",
         out=tmp_path / "bundles",
@@ -63,7 +63,7 @@ def test_force_overwrites_bundle_without_prior_manifest(tmp_path: Path) -> None:
     repo = fx.make_repo(tmp_path)
     out = tmp_path / "bundles"
     # Pre-create a bundle dir with no manifest; --force overwrites it.
-    bundle = out / "demo__v1_attention__cand-0002__coral"
+    bundle = out / "demo__v1_attention__cand-v1_attention-0002__coral"
     bundle.mkdir(parents=True)
     result = prep_evolve(_input(tmp_path, repo, evolver="coral", out=out, force=True), _CFG)
     assert result.bundles
@@ -85,7 +85,7 @@ def test_generated_path_escape_rejected_before_writing(tmp_path: Path) -> None:
 def test_bundle_dir_name_sanitizes_repo_name(tmp_path: Path) -> None:
     repo = fx.make_repo(tmp_path)
     payload = fx.make_result_dict()
-    payload["project_tree"]["repository"]["name"] = "../demo repo"
+    payload["report"]["project_tree"]["repository"]["name"] = "../demo repo"
     result_json = tmp_path / "custom_result.json"
     result_json.write_text(json.dumps(payload), encoding="utf-8")
 
@@ -182,7 +182,7 @@ def test_cli_main_success(tmp_path: Path) -> None:
             "--module",
             "v1/attention",
             "--candidate",
-            "cand-0002",
+            "cand-v1_attention-0002",
             "--repo",
             str(repo),
             "--evolver",
@@ -207,7 +207,7 @@ def test_top_level_cli_dispatch(tmp_path: Path) -> None:
             "--module",
             "v1/attention",
             "--candidate",
-            "cand-0002",
+            "cand-v1_attention-0002",
             "--repo",
             str(repo),
             "--evolver",
@@ -229,7 +229,7 @@ def test_cli_main_clean_error(tmp_path: Path, capsys) -> None:
             "--module",
             "v1/nope",
             "--candidate",
-            "cand-0002",
+            "cand-v1_attention-0002",
             "--repo",
             str(repo),
             "--evolver",

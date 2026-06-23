@@ -241,7 +241,9 @@ def test_happy_path_four_iterations(repo_artifacts, monkeypatch):
     assert final.exists()
     final_data = json.loads(final.read_text())
     final_ids = sorted(c["id"] for c in final_data["candidates"])
-    assert final_ids == ["cand-0001", "cand-0003", "cand-0004"]
+    # The agent emits bare `cand-NNNN`; persisted schema ids carry the module
+    # segment (default slug of `v1/foo` -> `v1_foo`).
+    assert final_ids == ["cand-v1_foo-0001", "cand-v1_foo-0003", "cand-v1_foo-0004"]
 
     last_iter_dir = artifacts / "candidate_discovery" / "iter_3_codex"
     assert (last_iter_dir / "candidates.json").read_bytes() == final.read_bytes()
@@ -356,7 +358,7 @@ def test_containment_drop(repo_artifacts, monkeypatch):
 
     result = _run(repo, artifacts, num_reviews=0)
     assert result.iterations[0].dropped_outside_module == 1
-    assert [c.id for c in result.candidates.candidates] == ["cand-0001"]
+    assert [c.id for c in result.candidates.candidates] == ["cand-v1_foo-0001"]
 
 
 def test_all_candidates_dropped(repo_artifacts, monkeypatch):
@@ -451,7 +453,8 @@ def test_carry_over_id_must_retain_file(repo_artifacts, monkeypatch):
     cfg = _make_config(repo, artifacts, num_reviews=1)
     with pytest.raises(DiscoveryValidationError, match="carry-over") as exc:
         discover(_make_input(), config=cfg)
-    assert exc.value.context["id"] == "cand-0001"
+    # Ids carry the module segment by the time the integrity check runs.
+    assert exc.value.context["id"] == "cand-v1_foo-0001"
     assert exc.value.context["prev_file"] == "src/v1/foo/x.py"
     assert exc.value.context["new_file"] == "src/v1/foo/y.py"
 

@@ -1,6 +1,7 @@
 """Zero-findings short-circuit: step 4 must not invoke `claude` when
 research returned no findings, but every candidate must still advance to
-`FINDING_PROPOSALS_CREATED` with `deep_research_proposals=[]`."""
+`FINDING_PROPOSALS_CREATED` (in the manager's parallel state map, decision D2)
+with no research-backed proposals."""
 
 from __future__ import annotations
 
@@ -15,6 +16,7 @@ from spotlights_engine.spotlights_manager import (
 )
 from spotlights_engine.spotlights_manager import orchestrator as orch
 from spotlights_engine.spotlights_manager import persistence as P
+from spotlights_engine.utils.schema_compat import proposals_from
 from tests.unit.spotlights_manager._fakes import (
     make_discovery_result,
     make_extractor_result,
@@ -56,7 +58,7 @@ def test_zero_findings_synthesizes_step4_without_invoking_claude(
     monkeypatch.setattr(
         orch,
         "research_module",
-        lambda inp, options=None: make_research_output(n_findings=0),
+        lambda inp, options=None, **_kw: make_research_output(n_findings=0),
     )
     pf_calls: list = []
 
@@ -80,10 +82,12 @@ def test_zero_findings_synthesizes_step4_without_invoking_claude(
     assert mr.findings == []
     assert mr.candidates is not None
     for c in mr.candidates.candidates:
-        # Step 5 advances every candidate from FINDING_PROPOSALS_CREATED to
-        # AGENT_PROPOSALS_CREATED; deep_research_proposals stays empty.
-        assert c.state == "AGENT_PROPOSALS_CREATED"
-        assert c.deep_research_proposals == []
+        # Candidate pipeline state is tracked in the manager's parallel state
+        # map (decision D2), not on the schema record. The synthetic
+        # zero-findings step-4 path mints no research-backed proposals, and the
+        # fake step-5 mints none either, so `proposals` stays empty.
+        assert proposals_from(c, "research_finding") == []
+        assert c.proposals == []
 
     # The synthetic sidecar must be on disk so a resume sees the step-4 outputs.
     paths = P.ManagerPaths(artifacts)

@@ -59,11 +59,19 @@ def _wire(
         discover_calls.append(inp.module_qualified_name)
         return make_discovery_result(inp.module_qualified_name)
 
-    def _research(inp, options=None):
+    def _research(inp, options=None, **_kw):
         research_calls.append(inp.module_qualified_name)
         return make_research_output(n_findings=1)
 
-    def _step4(inp, *, config, runner=None):
+    def _step4(
+        inp,
+        *,
+        config,
+        runner=None,
+        candidate_states=None,
+        proposal_id_start=1,
+        segment=None,
+    ):
         qn = inp.candidates.module_qualified_name
         step4_calls.append(qn)
         return make_proposal_from_finding_result(
@@ -71,7 +79,16 @@ def _wire(
             n_candidates=len(inp.candidates.candidates),
         )
 
-    def _step5(inp, *, config, claude_runner=None, codex_runner=None):
+    def _step5(
+        inp,
+        *,
+        config,
+        claude_runner=None,
+        codex_runner=None,
+        candidate_states=None,
+        proposal_id_start=1,
+        segment=None,
+    ):
         qn = inp.candidates.module_qualified_name
         step5_calls.append(qn)
         return make_agent_proposals_result(inp.candidates)

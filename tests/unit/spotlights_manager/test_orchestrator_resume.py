@@ -51,7 +51,7 @@ def _wire_step_doubles(monkeypatch, *, tree, discover_calls, research_calls) -> 
         discover_calls.append(inp.module_qualified_name)
         return make_discovery_result(inp.module_qualified_name)
 
-    def _research(inp, options=None):
+    def _research(inp, options=None, **_kw):
         research_calls.append(inp.module_qualified_name)
         return make_research_output(n_findings=1)
 
@@ -182,7 +182,7 @@ def test_redoing_step2_clears_stale_research_output(
             n_candidates=discovery_candidate_counts.pop(0),
         )
 
-    def _research(inp, options=None):
+    def _research(inp, options=None, **_kw):
         research_calls.append(inp.module_qualified_name)
         return make_research_output(n_findings=1)
 
@@ -309,7 +309,15 @@ def test_resume_reruns_only_step4_when_proposal_artifact_missing(
         make_proposal_from_finding_result,
     )
 
-    def _capture(inp, *, config, runner=None):
+    def _capture(
+        inp,
+        *,
+        config,
+        runner=None,
+        candidate_states=None,
+        proposal_id_start=1,
+        segment=None,
+    ):
         pf_calls.append(inp.candidates.module_qualified_name)
         return make_proposal_from_finding_result(
             inp.candidates.module_qualified_name,
@@ -363,7 +371,15 @@ def test_resume_skips_step4_when_finding_proposals_created_intact(
         make_proposal_from_finding_result,
     )
 
-    def _capture(inp, *, config, runner=None):
+    def _capture(
+        inp,
+        *,
+        config,
+        runner=None,
+        candidate_states=None,
+        proposal_id_start=1,
+        segment=None,
+    ):
         pf_calls.append(inp.candidates.module_qualified_name)
         return make_proposal_from_finding_result(
             inp.candidates.module_qualified_name,
@@ -408,7 +424,15 @@ def test_resume_redoes_step4_only_when_failed_step_is_step4(
         make_proposal_from_finding_result,
     )
 
-    def _capture(inp, *, config, runner=None):
+    def _capture(
+        inp,
+        *,
+        config,
+        runner=None,
+        candidate_states=None,
+        proposal_id_start=1,
+        segment=None,
+    ):
         pf_calls.append(inp.candidates.module_qualified_name)
         return make_proposal_from_finding_result(
             inp.candidates.module_qualified_name,

@@ -13,7 +13,7 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -23,6 +23,8 @@ from spotlights_engine.proposal_from_finding_creator.agent_schema import (
 from spotlights_engine.proposal_from_finding_creator.claude_exec import (
     PairRunResult,
     ensure_claude_available,
+)
+from spotlights_engine.proposal_from_finding_creator.claude_exec import (
     run_pair as default_run_pair,
 )
 from spotlights_engine.proposal_from_finding_creator.errors import (
@@ -40,7 +42,15 @@ from spotlights_engine.schemas.pipeline import (
     ProposalFromFindingCreatorInput,
     ProposalFromFindingCreatorOutput,
 )
+from spotlights_engine.schemas.proposal import Proposal
 from spotlights_engine.schemas.proposals import DeepResearchProposal
+from spotlights_engine.utils.id_helpers import slug_for
+from spotlights_engine.utils.schema_compat import mint_proposal_ids
+
+if TYPE_CHECKING:  # pragma: no cover
+    # Imported for typing only: importing the manager package at runtime would
+    # create a cycle (manager -> orchestrator -> this step package).
+    from spotlights_engine.spotlights_manager.pipeline_state import CandidateStateMap
 
 
 _log = logging.getLogger(__name__)
@@ -78,6 +88,10 @@ class ProposalFromFindingCreatorResult(BaseModel):
     output: ProposalFromFindingCreatorOutput
     per_pair_durations_s: dict[str, float] = Field(default_factory=dict)
     total_duration_s: float
+    # Next free `prop-` number after this step's allocation (decision D3). The
+    # manager hands this to step 5 so its proposal ids never collide with step
+    # 4's. Defaults to 1 for standalone callers that don't track id blocks.
+    next_proposal_id: int = 1
 
 
 class _PairRunner(Protocol):
@@ -107,6 +121,7 @@ def _validate_setup(
     config: ProposalFromFindingConfig,
     *,
     will_invoke_claude: bool,
+    candidate_states: CandidateStateMap | None,
 ) -> None:
     if config.repo_path is None:
         raise ProposalFromFindingSetupError(
@@ -125,14 +140,19 @@ def _validate_setup(
         )
 
     # Contract sanity: candidates must already be in the input-friendly state.
-    for c in input.candidates.candidates:
-        if c.state != "DISCOVERED":
-            raise ProposalFromFindingValidationError(
-                f"candidate {c.id} is in state {c.state!r}; "
-                "step 4 expects 'DISCOVERED' candidates",
-                candidate_id=c.id,
-                state=c.state,
-            )
+    # The schema `Candidate` no longer carries `state` (decision D2); the manager
+    # passes a pipeline-internal state map. When invoked standalone (no map), the
+    # caller owns the state contract and the guard is skipped.
+    if candidate_states is not None:
+        for c in input.candidates.candidates:
+            state = candidate_states.get(c.id)
+            if state != "DISCOVERED":
+                raise ProposalFromFindingValidationError(
+                    f"candidate {c.id} is in state {state!r}; "
+                    "step 4 expects 'DISCOVERED' candidates",
+                    candidate_id=c.id,
+                    state=state,
+                )
 
     if will_invoke_claude:
         ensure_claude_available()
@@ -280,17 +300,40 @@ async def _run_one_pair(
     return pair_key, proposals, issues, run_result.duration_s
 
 
+def _convert_proposal(drp: DeepResearchProposal, prop_id: str) -> Proposal:
+    """Map an agent-facing `DeepResearchProposal` to the unified `Proposal`.
+
+    `finding_ref_id` is the (already-global, see manager) finding id; `source`
+    pins this as a research-backed proposal.
+    """
+    return Proposal(
+        id=prop_id,
+        source="research_finding",
+        finding_ref_id=drp.finding_id,
+        author=drp.created_by,
+        title=drp.title,
+        description=drp.detailed_description,
+        rationale=drp.proposal_rationale,
+    )
+
+
 def _rebuild_candidate(
-    candidate: Candidate, proposals: list[DeepResearchProposal]
+    candidate: Candidate,
+    new_proposals: list[DeepResearchProposal],
+    proposal_ids: list[str],
 ) -> Candidate:
+    """Append research-backed `Proposal`s to the candidate's unified list.
+
+    `proposal_ids` are minted from the module's proposal block (decision D3) and
+    must be the same length as `new_proposals`. Existing proposals (none yet at
+    step 4 on the normal path) are preserved.
+    """
+    converted = [
+        _convert_proposal(drp, pid)
+        for drp, pid in zip(new_proposals, proposal_ids, strict=True)
+    ]
     return candidate.model_copy(
-        update={
-            "state": "FINDING_PROPOSALS_CREATED",
-            "deep_research_proposals": proposals,
-            # `agent_proposals` round-trips through this step unchanged; step 5
-            # owns it. Preserving the input value keeps the rebuild verbatim.
-            "agent_proposals": list(candidate.agent_proposals),
-        }
+        update={"proposals": list(candidate.proposals) + converted}
     )
 
 
@@ -299,6 +342,8 @@ async def _run_async(
     *,
     config: ProposalFromFindingConfig,
     runner: _PairRunner,
+    proposal_id_start: int,
+    segment: str,
 ) -> ProposalFromFindingCreatorResult:
     start = time.monotonic()
 
@@ -351,7 +396,7 @@ async def _run_async(
     aggregated_issues: list[StepIssue] = []
     per_pair_durations_s: dict[str, float] = {}
 
-    for c, f, key in pairs:
+    for c, _f, key in pairs:
         if key not in pair_results:
             continue
         proposals, issues, duration = pair_results[key]
@@ -359,10 +404,19 @@ async def _run_async(
         aggregated_issues.extend(issues)
         per_pair_durations_s[key] = duration
 
-    rebuilt = [
-        _rebuild_candidate(c, per_candidate_proposals.get(c.id, []))
-        for c in input.candidates.candidates
-    ]
+    # Deterministic post-gather rebuild: mint `prop-<segment>-NNNN` ids from the
+    # module session's proposal counter (decision D3) in candidate order, so
+    # step 5 can continue past them. The slug segment makes ids globally unique;
+    # the counter is a plain per-module-session sequence (no run-wide block to
+    # overflow). Allocating here (not inside the parallel `_run_one_pair`) keeps
+    # assignment order-stable.
+    next_id = proposal_id_start
+    rebuilt: list[Candidate] = []
+    for c in input.candidates.candidates:
+        new_proposals = per_candidate_proposals.get(c.id, [])
+        ids = mint_proposal_ids(next_id, len(new_proposals), segment=segment)
+        next_id += len(new_proposals)
+        rebuilt.append(_rebuild_candidate(c, new_proposals, ids))
 
     output = ProposalFromFindingCreatorOutput(
         candidates=Candidates(
@@ -376,6 +430,7 @@ async def _run_async(
         output=output,
         per_pair_durations_s=per_pair_durations_s,
         total_duration_s=total_duration_s,
+        next_proposal_id=next_id,
     )
 
 
@@ -384,19 +439,51 @@ def create_proposals_with_telemetry(
     *,
     config: ProposalFromFindingConfig,
     runner: _PairRunner | None = None,
+    candidate_states: CandidateStateMap | None = None,
+    proposal_id_start: int = 1,
+    segment: str | None = None,
 ) -> ProposalFromFindingCreatorResult:
-    """Runtime-rich entrypoint: returns per-pair durations alongside the output."""
+    """Runtime-rich entrypoint: returns per-pair durations alongside the output.
+
+    `candidate_states` is the manager-provided pipeline-internal state map (D2);
+    when omitted the `DISCOVERED` guard is skipped. `proposal_id_start` is the
+    per-module-session proposal counter and `segment` is the module id segment
+    (D3); minted ids are `prop-<segment>-NNNN`. `segment` defaults to the
+    candidates' module slug for standalone callers.
+    """
     will_invoke_claude = bool(input.candidates.candidates) and bool(input.findings)
 
     if runner is None:
         # Don't probe for `claude` on PATH unless we'll actually shell out.
-        _validate_setup(input, config, will_invoke_claude=will_invoke_claude)
+        _validate_setup(
+            input,
+            config,
+            will_invoke_claude=will_invoke_claude,
+            candidate_states=candidate_states,
+        )
         active_runner: _PairRunner = default_run_pair
     else:
-        _validate_setup(input, config, will_invoke_claude=False)
+        _validate_setup(
+            input,
+            config,
+            will_invoke_claude=False,
+            candidate_states=candidate_states,
+        )
         active_runner = runner
 
-    return asyncio.run(_run_async(input, config=config, runner=active_runner))
+    seg = segment if segment is not None else slug_for(
+        input.candidates.module_qualified_name
+    )
+
+    return asyncio.run(
+        _run_async(
+            input,
+            config=config,
+            runner=active_runner,
+            proposal_id_start=proposal_id_start,
+            segment=seg,
+        )
+    )
 
 
 def create_proposals(
@@ -404,10 +491,18 @@ def create_proposals(
     *,
     config: ProposalFromFindingConfig,
     runner: _PairRunner | None = None,
+    candidate_states: CandidateStateMap | None = None,
+    proposal_id_start: int = 1,
+    segment: str | None = None,
 ) -> ProposalFromFindingCreatorOutput:
     """Architecture-shaped entrypoint: returns the contract output directly."""
     return create_proposals_with_telemetry(
-        input, config=config, runner=runner
+        input,
+        config=config,
+        runner=runner,
+        candidate_states=candidate_states,
+        proposal_id_start=proposal_id_start,
+        segment=segment,
     ).output
 
 

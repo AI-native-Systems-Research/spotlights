@@ -26,7 +26,7 @@ def _candidate(tmp_path: Path):
     loaded = load_result(fx.write_result(tmp_path))
     run = resolve_module_run(loaded, "v1/attention")
     candidates = resolve_candidates(run, "v1/attention")
-    return resolve_candidate(candidates, "cand-0002")
+    return resolve_candidate(candidates, "cand-v1_attention-0002")
 
 
 def test_valid_candidate(tmp_path: Path) -> None:
@@ -49,7 +49,7 @@ def test_excerpt_hash_stable(tmp_path: Path) -> None:
 def test_path_escape_rejected(tmp_path: Path) -> None:
     repo = fx.make_repo(tmp_path)
     cand = _candidate(tmp_path)
-    cand.file = "../outside.py"
+    cand.locations[0].file = "../outside.py"
     with pytest.raises(StalenessError):
         validate_candidate_target(repo, cand)
 
@@ -57,7 +57,7 @@ def test_path_escape_rejected(tmp_path: Path) -> None:
 def test_absolute_candidate_file_rejected(tmp_path: Path) -> None:
     repo = fx.make_repo(tmp_path)
     cand = _candidate(tmp_path)
-    cand.file = str((repo / fx.CAND_FILE).resolve())
+    cand.locations[0].file = str((repo / fx.CAND_FILE).resolve())
     with pytest.raises(StalenessError):
         validate_candidate_target(repo, cand)
 
@@ -73,7 +73,7 @@ def test_relative_repo_path_validates(tmp_path: Path, monkeypatch: pytest.Monkey
 def test_line_range_out_of_bounds(tmp_path: Path) -> None:
     repo = fx.make_repo(tmp_path)
     cand = _candidate(tmp_path)
-    cand.line_end = 100000
+    cand.locations[0].spans[0].line_end = 100000
     with pytest.raises(StalenessError):
         validate_candidate_target(repo, cand)
 

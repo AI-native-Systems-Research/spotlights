@@ -80,12 +80,12 @@ def test_repo_path_missing_on_disk_raises_setup_error(
 def test_candidate_in_wrong_state_raises_validation_error(
     repo: Path, artifacts: Path
 ) -> None:
-    bad = make_candidate(0).model_copy(update={"state": "DISCOVERED"})
+    cand = make_candidate(0)
     inp = AgentProposalsInput(
         project_tree=make_project_tree(),
         candidates=Candidates(
             module_qualified_name="v1/kv_offload",
-            candidates=[bad],
+            candidates=[cand],
         ),
         context=SpotlightContext(objective="reduce latency"),
     )
@@ -96,4 +96,5 @@ def test_candidate_in_wrong_state_raises_validation_error(
             config=cfg,
             claude_runner=fake_claude_runner_factory(),
             codex_runner=fake_codex_runner_factory(),
+            candidate_states={cand.id: "DISCOVERED"},
         )

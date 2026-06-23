@@ -1,12 +1,8 @@
-"""The `Candidate` and `Candidates` schemas.
+"""The unified `Candidate` schema and its location helpers.
 
-Stage 1 (candidate_discovery) emits a `Candidates` object whose entries are at
-state `DISCOVERED` with empty proposal lists. Steps 4 and 5 progressively
-populate `deep_research_proposals` (see
-`schemas.proposals.DeepResearchProposal`) and `agent_proposals` (see
-`schemas.proposals.AgentProposal`) and advance `state`. The shape constraints
-captured here are the contract: they are exported via `model_json_schema()`
-and consumed by downstream agents.
+`Candidate` is the consumer-facing record carried in `SpotlightReport.candidates`.
+The legacy `Candidates` wrapper is retained for the per-step DR pipeline
+contracts in `schemas.pipeline` until those are repaired.
 """
 
 from __future__ import annotations
@@ -14,8 +10,6 @@ from __future__ import annotations
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-
-from spotlights_engine.schemas.proposals import AgentProposal, DeepResearchProposal
 
 CandidateKind = Literal[
     "function",
@@ -33,35 +27,66 @@ CandidateState = Literal[
     "AGENT_PROPOSALS_CREATED",
 ]
 
+CodeKind = Literal[
+    "function",
+    "method",
+    "loop",
+    "region",
+    "kernel",
+    "config_block",
+    "plugin_seam",
+]
 
-class Candidate(BaseModel):
+
+class CodeSpan(BaseModel):
+    """One labelled chunk of code at a (line_start, line_end) range within a file."""
+
     model_config = ConfigDict(extra="forbid")
 
-    id: str = Field(pattern=r"^cand-\d{4}$")
-    file: str
     line_start: int = Field(ge=1)
     line_end: int = Field(ge=1)
     symbol: str = Field(min_length=1, max_length=200)
-    kind: CandidateKind
+    kind: CodeKind
+
+    @model_validator(mode="after")
+    def _check_range(self) -> "CodeSpan":
+        if self.line_end < self.line_start:
+            raise ValueError("line_end must be >= line_start")
+        return self
+
+
+class CodeLocation(BaseModel):
+    """A file the candidate touches plus the spans within it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    file: str = Field(min_length=1)
+    spans: list[CodeSpan] = Field(min_length=1)
+
+
+CandidateOrigin = Literal["telemetry_anomaly", "code_agent"]
+
+
+class Candidate(BaseModel):
+    """A candidate-shaped record in `SpotlightReport.candidates`."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=r"^cand-[A-Za-z0-9._-]+-\d{4}$")
+
+    module_qualified_name: str | None = None
+
+    origin: CandidateOrigin
+
+    locations: list[CodeLocation] = Field(min_length=1)
+
     description: str = Field(min_length=1)
     current_approach: str = Field(min_length=1)
     evolve_rationale: str = Field(min_length=1)
     estimated_impact: EstimatedImpact
     estimated_impact_explanation: str = Field(min_length=1)
-    # IDs of `Anomaly` records (from `Signals.anomalies`) that motivated
-    # this candidate. Free-form strings to keep `Candidate` decoupled from
-    # the Bundle A schema. Empty list when the candidate is technique-driven
-    # or otherwise not anomaly-rooted.
-    anomaly_refs: list[str] = Field(default_factory=list)
-    state: CandidateState = "DISCOVERED"
-    deep_research_proposals: list[DeepResearchProposal] = Field(default_factory=list)
-    agent_proposals: list[AgentProposal] = Field(default_factory=list)
 
-    @model_validator(mode="after")
-    def _check_range(self) -> Candidate:
-        if self.line_end < self.line_start:
-            raise ValueError("line_end must be >= line_start")
-        return self
+    proposals: list["Proposal"] = Field(default_factory=list)
 
 
 class Candidates(BaseModel):
@@ -74,10 +99,19 @@ class Candidates(BaseModel):
     candidates: list[Candidate] = Field(default_factory=list)
 
 
+from spotlights_engine.schemas.proposal import Proposal  # noqa: E402
+
+Candidate.model_rebuild()
+
+
 __all__ = [
     "Candidate",
     "CandidateKind",
+    "CandidateOrigin",
     "CandidateState",
     "Candidates",
+    "CodeKind",
+    "CodeLocation",
+    "CodeSpan",
     "EstimatedImpact",
 ]

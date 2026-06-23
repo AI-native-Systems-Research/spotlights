@@ -1,8 +1,11 @@
 """Schemas owned by the signal pipeline.
 
-`Change` and `ExecutionResult` are introduced here because main does not yet
-have them. Once they stabilize they should move under
-`spotlights_engine.schemas/` proper.
+`Change`, `ExecutionResult`, and `CandidateDraft` are pipeline-internal
+types -- they carry the fields the signal pipeline produces today but the
+unified `SpotlightReport` schema doesn't surface (e.g. `Change.change_type`,
+`CandidateDraft.anomaly_refs`). The runner translates them into the unified
+`Candidate` / `Proposal` / `Anomaly` types at the boundary where
+`SpotlightReport` is built.
 
 `Signals` / `WorkloadProfileLite` / `TraceSummaryLite` / `AnomalyLite` are
 **placeholders** for the locked Bundle A schemas in
@@ -19,6 +22,8 @@ from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from spotlights_engine.schemas.candidate import CandidateKind, EstimatedImpact
 
 
 # ── Bundle A placeholder schemas ─────────────────────────────────────────
@@ -55,6 +60,43 @@ class Signals(BaseModel):
     workload: WorkloadProfileLite
     traces: list[TraceSummaryLite] = Field(default_factory=list)
     anomalies: list[AnomalyLite] = Field(default_factory=list)
+
+
+# CandidateDraft -- pipeline-internal flat-shape candidate produced by stage 03
+# and consumed by stage 04. Carries the fields the LLM emits naturally
+# (file/line_start/line_end/symbol/kind/anomaly_refs) plus the discovery-
+# context fields that survive into the unified `Candidate`.
+#
+# The runner translates a list[CandidateDraft] + list[Change] + Signals.anomalies
+# into the unified `SpotlightReport` shape (Candidate with locations[],
+# Proposal with anomaly_ref_ids, Anomaly with the locked closed shape) at
+# the boundary where the report is built. Keeping the LLM seam shape flat
+# avoids forcing the model to nest spans/locations in its structured output.
+
+
+class CandidateDraft(BaseModel):
+    """Stage 03 output -- one entry per anomaly-rooted finding.
+
+    `anomaly_refs` lists upstream `AnomalyLite.anomaly_id` values that motivated
+    this candidate; the runner promotes these to `Proposal.anomaly_ref_ids`
+    when building the `SpotlightReport`. Empty when the candidate is not
+    anomaly-rooted (rare in this pipeline today).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: str = Field(pattern=r"^cand-\d{4}$")
+    file: str = Field(min_length=1)
+    line_start: int = Field(ge=1)
+    line_end: int = Field(ge=1)
+    symbol: str = Field(min_length=1, max_length=200)
+    kind: CandidateKind
+    description: str = Field(min_length=1)
+    current_approach: str = Field(min_length=1)
+    evolve_rationale: str = Field(min_length=1)
+    estimated_impact: EstimatedImpact
+    estimated_impact_explanation: str = Field(min_length=1)
+    anomaly_refs: list[str] = Field(default_factory=list)
 
 
 # ── Stage 04 / 05 schemas ────────────────────────────────────────────────
@@ -154,6 +196,7 @@ class SignalPipelineResult(BaseModel):
 
 __all__ = [
     "AnomalyLite",
+    "CandidateDraft",
     "Change",
     "ChangeType",
     "ExecutionResult",

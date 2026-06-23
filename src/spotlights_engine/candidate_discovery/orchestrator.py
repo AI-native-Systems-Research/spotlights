@@ -46,12 +46,21 @@ from spotlights_engine.candidate_discovery.validation import Validator
 from spotlights_engine.schemas.candidate import Candidate, Candidates
 from spotlights_engine.schemas.pipeline import CandidateDiscoveryInput
 from spotlights_engine.schemas.project import Module
-
+from spotlights_engine.utils.id_helpers import parse_id, slug_for
+from spotlights_engine.utils.schema_compat import primary_file
 
 _log = logging.getLogger(__name__)
 
 
-_MIN_SEEN_ID = "cand-0000"
+# Initial high-water-mark counter (zero) before any candidate is seen. The
+# agent works in the bare `cand-NNNN` id space; the orchestrator tracks the
+# counter and renders the bare form back to the review prompt.
+_MIN_SEEN_COUNTER = 0
+
+
+def _bare_id(counter: int) -> str:
+    """The agent-local bare form `cand-NNNN` for a counter."""
+    return f"cand-{counter:04d}"
 
 # Per plan §17: Linux MAX_ARG_STRLEN is 131_072 bytes per argument. Claude
 # inlines the schema via `--json-schema <text>`; if a future schema addition
@@ -80,6 +89,11 @@ class Orchestrator:
         self._input = input
         self._config = config
         self._module = module
+        # Module id segment (D3): the agent emits bare `cand-NNNN`; the
+        # orchestrator prefixes each promoted candidate to `cand-<segment>-NNNN`
+        # before any schema object is built. Standalone callers may omit it, in
+        # which case the module slug is the segment.
+        self._segment = config.id_segment or slug_for(input.module_qualified_name)
         self._validator = Validator(
             repo_path=config.repo_path, module_path=module.path
         )
@@ -89,7 +103,10 @@ class Orchestrator:
         self._prev_raw: Candidates | None = None
         self._prev_post_drop: Candidates | None = None
         self._prev_post_drop_ids: set[str] = set()
-        self._max_seen_id: str = _MIN_SEEN_ID
+        # High-water mark in the agent-local *bare* counter space. The review
+        # loop and prompt speak bare `cand-NNNN`; schema objects carry the
+        # prefixed form. `parse_id` recovers the counter from a prefixed id.
+        self._max_seen_counter: int = _MIN_SEEN_COUNTER
 
         self._iterations: list[IterationTelemetry] = []
         self._iterations_fh = None
@@ -117,12 +134,16 @@ class Orchestrator:
 
                 for n in range(1, self._config.num_review_iterations + 1):
                     agent = review_agents[(n - 1) % 2]
-                    prev_json = self._prev_post_drop.model_dump_json(indent=2)  # type: ignore[union-attr]
+                    # The review prompt speaks the agent-local bare id space:
+                    # render the prior candidates with their bare ids and pass
+                    # the bare high-water mark, so the agent contract stays
+                    # `cand-NNNN` (D3 option A).
+                    prev_json = self._to_bare_json(self._prev_post_drop)  # type: ignore[arg-type]
                     review_prompt = prompts.render_review(
                         self._input.module_qualified_name,
                         self._module,
                         prev_json,
-                        self._max_seen_id,
+                        _bare_id(self._max_seen_counter),
                         repo_context_markdown=self._config.repo_context_markdown,
                         spotlight_context=self._input.context,
                     )
@@ -192,7 +213,11 @@ class Orchestrator:
                     agent_parsed = AgentCandidates.model_validate_json(payload_json)
                 except ValidationError as e:
                     raise _SchemaParseError(f"schema validation failed: {e}") from e
-                parsed = agent_parsed.to_candidates()
+                # Promote bare agent ids to the prefixed schema form here, at the
+                # construction boundary (D3): the rest of the loop — validator,
+                # integrity check, telemetry, persistence — operates on final
+                # `cand-<segment>-NNNN` ids.
+                parsed = agent_parsed.to_candidates(segment=self._segment)
 
                 self._check_qualified_name(parsed, n=n, agent=agent.name)
                 survivors, drops = self._validator.run(parsed)
@@ -277,26 +302,33 @@ class Orchestrator:
         if self._prev_raw is not None:
             prev_by_id = {c.id: c for c in self._prev_raw.candidates}
             for c in parsed.candidates:
-                if c.id in prev_by_id and c.file != prev_by_id[c.id].file:
+                if (
+                    c.id in prev_by_id
+                    and primary_file(c) != primary_file(prev_by_id[c.id])
+                ):
                     raise DiscoveryValidationError(
                         "carry-over id changed file",
                         iteration=n,
                         agent=agent,
                         id=c.id,
-                        prev_file=prev_by_id[c.id].file,
-                        new_file=c.file,
+                        prev_file=primary_file(prev_by_id[c.id]),
+                        new_file=primary_file(c),
                     )
 
         survivor_ids = {c.id for c in survivors}
         new_ids = survivor_ids - self._prev_post_drop_ids
         for nid in new_ids:
-            if nid <= self._max_seen_id:
+            # Monotonicity is on the per-(module, session) counter, which is the
+            # same whether ids are bare or prefixed (uniqueness across modules
+            # comes from the slug, not the number). Compare counters, not the
+            # full id strings, so a slug containing digits can't perturb order.
+            if parse_id(nid)[2] <= self._max_seen_counter:
                 raise DiscoveryValidationError(
                     "newly minted id not strictly greater than max_seen_id",
                     iteration=n,
                     agent=agent,
                     id=nid,
-                    max_seen_id=self._max_seen_id,
+                    max_seen_id=_bare_id(self._max_seen_counter),
                 )
 
     def _normalize_and_persist(
@@ -318,6 +350,21 @@ class Orchestrator:
         )
         return normalized
 
+    def _to_bare_json(self, candidates: Candidates) -> str:
+        """Render `candidates` with their bare `cand-NNNN` ids for the agent.
+
+        The loop carries prefixed schema ids, but the review prompt must speak
+        the agent-local bare form (D3 option A). Rewrite each id back to its
+        counter; everything else is unchanged.
+        """
+        bare = [
+            c.model_copy(update={"id": _bare_id(parse_id(c.id)[2])})
+            for c in candidates.candidates
+        ]
+        return candidates.model_copy(update={"candidates": bare}).model_dump_json(
+            indent=2
+        )
+
     def _record(self, outcome: _IterOutcome) -> None:
         self._iterations.append(outcome.telemetry)
         assert self._iterations_fh is not None
@@ -328,8 +375,9 @@ class Orchestrator:
         self._prev_post_drop = outcome.candidates
         self._prev_post_drop_ids = {c.id for c in outcome.candidates.candidates}
         for c in outcome.candidates.candidates:
-            if c.id > self._max_seen_id:
-                self._max_seen_id = c.id
+            counter = parse_id(c.id)[2]
+            if counter > self._max_seen_counter:
+                self._max_seen_counter = counter
 
         _log.info(
             "[%s] discovery: iteration %d (%s) — %d candidates so far",

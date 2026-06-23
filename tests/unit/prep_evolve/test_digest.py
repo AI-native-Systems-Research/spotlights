@@ -24,7 +24,7 @@ def _spec(tmp_path: Path, scope="candidate"):
     loaded = load_result(fx.write_result(tmp_path))
     run = resolve_module_run(loaded, "v1/attention")
     candidates = resolve_candidates(run, "v1/attention")
-    candidate = resolve_candidate(candidates, "cand-0002")
+    candidate = resolve_candidate(candidates, "cand-v1_attention-0002")
     module = resolve_module(loaded.project_tree, "v1/attention")
     return build_spec(
         loaded=loaded,
@@ -50,7 +50,7 @@ def test_digest_sections_present(tmp_path: Path) -> None:
 
 def test_digest_proposal_finding_cross_reference(tmp_path: Path) -> None:
     md = render_digest(_spec(tmp_path))
-    # find-0001 (POD-Attention) is candidate-linked -> listed as finding #1.
+    # find-v1_attention-0001 (POD-Attention) is candidate-linked -> listed as finding #1.
     assert "from finding #1: POD-Attention" in md
 
 

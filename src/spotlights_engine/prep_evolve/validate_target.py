@@ -21,6 +21,7 @@ from spotlights_engine.prep_evolve.errors import (
 )
 from spotlights_engine.prep_evolve.spec import SourceRevision
 from spotlights_engine.schemas.candidate import Candidate
+from spotlights_engine.utils.schema_compat import primary_file, primary_span
 
 # How far above/below the recorded range to look for the recorded symbol when
 # checking staleness. result.json does not carry the original excerpt, so the
@@ -84,17 +85,19 @@ def validate_candidate_target(
     staleness gate (the recorded symbol must appear in/around the recorded
     range). Returns the validated range and the excerpt hash.
     """
-    resolved = _resolve_inside(repo_path, candidate.file)
+    cand_file = primary_file(candidate)
+    span = primary_span(candidate)
+    resolved = _resolve_inside(repo_path, cand_file)
     if not resolved.is_file():
-        raise StalenessError(f"candidate file does not exist in repo: {candidate.file}")
+        raise StalenessError(f"candidate file does not exist in repo: {cand_file}")
 
     lines = resolved.read_text(encoding="utf-8", errors="replace").splitlines()
     n = len(lines)
-    start, end = candidate.line_start, candidate.line_end
+    start, end = span.line_start, span.line_end
     if start < 1 or end < start or end > n:
         raise StalenessError(
             f"candidate line range [{start}, {end}] is out of bounds for "
-            f"{candidate.file} ({n} lines). result.json is stale relative to "
+            f"{cand_file} ({n} lines). result.json is stale relative to "
             f"the repo; re-run spotlights or correct the selected result."
         )
 
@@ -112,12 +115,12 @@ def validate_candidate_target(
     # present in the window. A whole-string match would false-positive on
     # `region` candidates whose symbol is a qualified name spanning several
     # symbols (e.g. "Type.methodA/methodB"), which never appears verbatim.
-    components = _symbol_components(candidate.symbol) if candidate.symbol else []
+    components = _symbol_components(span.symbol) if span.symbol else []
     missing = [c for c in components if c not in window_text]
     if missing:
         raise StalenessError(
-            f"recorded symbol {candidate.symbol!r} not found near lines "
-            f"[{start}, {end}] of {candidate.file} (missing component(s): "
+            f"recorded symbol {span.symbol!r} not found near lines "
+            f"[{start}, {end}] of {cand_file} (missing component(s): "
             f"{', '.join(missing)}). result.json is stale relative to the repo; "
             f"re-run spotlights or correct the selected result."
         )

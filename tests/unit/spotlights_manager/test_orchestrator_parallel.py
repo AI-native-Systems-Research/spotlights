@@ -48,7 +48,7 @@ def test_max_parallel_sessions_respected(tmp_path: Path, monkeypatch) -> None:
         _busy(inp.module_qualified_name)
         return make_discovery_result(inp.module_qualified_name)
 
-    def _research(inp, options=None):
+    def _research(inp, options=None, **_kw):
         _busy(inp.module_qualified_name)
         return make_research_output()
 

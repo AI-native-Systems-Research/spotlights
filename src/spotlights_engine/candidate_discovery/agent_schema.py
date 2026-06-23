@@ -1,17 +1,25 @@
 """Discovery-only output schema handed to the Claude / codex subprocess agents.
 
 The full `Candidate` schema in `spotlights_engine.schemas.candidate` carries
-fields (`state`, `deep_research_proposals`, `agent_proposals`) that are only
-filled in by later pipeline steps. They default to sensible empty values,
-which makes pydantic emit a JSON schema where those properties are *not* in
-`required`. Codex's `--output-schema` forwards the schema to OpenAI
-structured-output, whose strict mode rejects schemas with
-`additionalProperties: false` plus optional properties.
+fields the agent should not emit: `locations` (nested file/span data) and
+`proposals` (populated by later pipeline steps), plus a required `origin` and an
+optional `module_qualified_name`. Handing the agents that schema would also trip
+codex's `--output-schema` strict mode, which rejects `additionalProperties:
+false` objects with optional properties.
 
-To avoid that breakage we hand the agents a strict subset (`AgentCandidates`)
-whose properties exactly match `required`. The orchestrator promotes each
-parsed `AgentCandidate` into a full `Candidate` with `state="DISCOVERED"`
-and empty proposal lists.
+To avoid that we hand the agents a strict, flat subset (`AgentCandidates`) whose
+properties exactly match `required`. The orchestrator promotes each parsed
+`AgentCandidate` into a full `Candidate` by wrapping the flat
+`file/line_start/line_end/symbol/kind` fields into the nested
+`locations=[CodeLocation(...)]` shape (decision D1) and setting
+`origin="code_agent"`; `proposals` start empty and are filled by steps 4/5.
+
+The agent keeps emitting **bare** `cand-NNNN` ids (decision D3, option A — the
+agent is unaware of module slugs). Promotion to a schema `Candidate` therefore
+also prefixes the bare id with the producing module's segment
+(`cand-<segment>-NNNN`) via `prefix_local_id`, because the widened
+`Candidate.id` pattern rejects bare ids. The prefix is idempotent, so re-running
+promotion on an already-prefixed id is a no-op.
 """
 
 from __future__ import annotations
@@ -24,6 +32,8 @@ from spotlights_engine.schemas.candidate import (
     Candidates,
     EstimatedImpact,
 )
+from spotlights_engine.utils.id_helpers import prefix_local_id
+from spotlights_engine.utils.schema_compat import make_location
 
 
 class AgentCandidate(BaseModel):
@@ -49,19 +59,31 @@ class AgentCandidate(BaseModel):
             raise ValueError("line_end must be >= line_start")
         return self
 
-    def to_candidate(self) -> Candidate:
+    def to_candidate(
+        self,
+        *,
+        module_qualified_name: str | None = None,
+        segment: str,
+    ) -> Candidate:
         return Candidate(
-            id=self.id,
-            file=self.file,
-            line_start=self.line_start,
-            line_end=self.line_end,
-            symbol=self.symbol,
-            kind=self.kind,
+            id=prefix_local_id(self.id, expected_type="cand", segment=segment),
+            module_qualified_name=module_qualified_name,
+            origin="code_agent",
+            locations=[
+                make_location(
+                    file=self.file,
+                    line_start=self.line_start,
+                    line_end=self.line_end,
+                    symbol=self.symbol,
+                    kind=self.kind,
+                )
+            ],
             description=self.description,
             current_approach=self.current_approach,
             evolve_rationale=self.evolve_rationale,
             estimated_impact=self.estimated_impact,
             estimated_impact_explanation=self.estimated_impact_explanation,
+            proposals=[],
         )
 
 
@@ -79,10 +101,16 @@ class AgentCandidates(BaseModel):
     module_qualified_name: str = Field(min_length=1)
     candidates: list[AgentCandidate]
 
-    def to_candidates(self) -> Candidates:
+    def to_candidates(self, *, segment: str) -> Candidates:
         return Candidates(
             module_qualified_name=self.module_qualified_name,
-            candidates=[c.to_candidate() for c in self.candidates],
+            candidates=[
+                c.to_candidate(
+                    module_qualified_name=self.module_qualified_name,
+                    segment=segment,
+                )
+                for c in self.candidates
+            ],
         )
 
 

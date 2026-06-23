@@ -31,7 +31,7 @@ def _spec(tmp_path: Path, scope="candidate", repo: Path | None = None):
     loaded = load_result(fx.write_result(tmp_path))
     run = resolve_module_run(loaded, "v1/attention")
     candidates = resolve_candidates(run, "v1/attention")
-    candidate = resolve_candidate(candidates, "cand-0002")
+    candidate = resolve_candidate(candidates, "cand-v1_attention-0002")
     module = resolve_module(loaded.project_tree, "v1/attention")
     if repo is not None:
         validated = validate_candidate_target(repo, candidate)

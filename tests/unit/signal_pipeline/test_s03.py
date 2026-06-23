@@ -15,7 +15,6 @@ from pathlib import Path
 
 import pytest
 
-from spotlights_engine.schemas.candidate import Candidate
 from spotlights_engine.schemas.project import Module, ProjectTree, Repository
 from spotlights_engine.signal_pipeline import (
     SignalPipelineInput,
@@ -24,6 +23,7 @@ from spotlights_engine.signal_pipeline import (
 )
 from spotlights_engine.signal_pipeline.schemas import (
     AnomalyLite,
+    CandidateDraft,
     Signals,
     TraceSummaryLite,
     WorkloadProfileLite,
@@ -50,8 +50,8 @@ def _tree() -> ProjectTree:
     )
 
 
-def _candidate(id_: str = "cand-0001") -> Candidate:
-    return Candidate(
+def _candidate(id_: str = "cand-0001") -> CandidateDraft:
+    return CandidateDraft(
         id=id_,
         file="m/x.py",
         line_start=1,
@@ -108,8 +108,8 @@ def test_candidate_list_schema_is_closed():
     it. Regression guard for future schema edits."""
     schema = CandidateList.model_json_schema()
     assert schema["additionalProperties"] is False
-    # Spot-check the inner Candidate definition (referenced via $defs).
-    cand_def = schema.get("$defs", {}).get("Candidate")
+    # Spot-check the inner CandidateDraft definition (referenced via $defs).
+    cand_def = schema.get("$defs", {}).get("CandidateDraft")
     assert cand_def is not None
     assert cand_def.get("additionalProperties") is False
 
@@ -156,7 +156,7 @@ def test_run_calls_claude_with_expected_args(monkeypatch, tmp_path):
     )
 
     assert isinstance(out, list) and len(out) == 1
-    assert isinstance(out[0], Candidate) and out[0].id == "cand-0001"
+    assert isinstance(out[0], CandidateDraft) and out[0].id == "cand-0001"
     assert captured["cwd"] == subject
     assert captured["permission_mode"] == "plan"
     assert captured["allowed_tools"] == ("Read",)

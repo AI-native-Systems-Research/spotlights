@@ -76,7 +76,7 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         default=DEFAULT_OUTPUT,
         help=(
-            "Where the human-readable rollup (findings.json + findings.md) "
+            "Where the human-readable rollup (signal_summary.json + signal_summary.md) "
             f"is written (default: {DEFAULT_OUTPUT})."
         ),
     )
@@ -125,7 +125,11 @@ def _build_parser() -> argparse.ArgumentParser:
         "--to-stage",
         type=_stage_arg,
         default=None,
-        help="Stop after this stage (paired with --from-stage). Default: 05.",
+        help=(
+            "Stop after this stage (paired with --from-stage). Default: 04 — "
+            "stage 05 (execution) mutates the subject repo and is opt-in until "
+            "it's worktree-isolated."
+        ),
     )
 
     p.add_argument(
@@ -196,7 +200,8 @@ def _resolve_selection(args: argparse.Namespace) -> tuple[StageSelection, bool]:
     if args.only_stage is not None:
         return StageSelection.only(args.only_stage), False  # only-stage flips to no-resume
     from_s: StageId = args.from_stage or "01"
-    to_s: StageId = args.to_stage or "05"
+    # Stage 05 mutates the subject repo; opt-in only until worktree-isolated.
+    to_s: StageId = args.to_stage or "04"
     return StageSelection(from_stage=from_s, to_stage=to_s), resume
 
 

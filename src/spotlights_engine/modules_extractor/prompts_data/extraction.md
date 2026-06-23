@@ -46,6 +46,8 @@ You are analyzing this repository to produce a structured architectural map. Wor
    - *One concept, multiple files* — a data class + builder + validator for one entity is one unit, even if 6 files. `main_files` picks the 3–5 that matter; the rest are implementation detail.
    - *Strategy/plugin implementations of one interface* — `backends/postgres.py`, `backends/sqlite.py`, etc. are one submodule ("backends"), not one-per-file. `main_files` names the interface + 1–2 representative implementations.
 
+   Physical-path guard — a SPLIT is valid only when every child corresponds to a real nested directory/package path under the parent, and each child `name` can equal that path basename after normalization. Do not split a directory into conceptual children that reuse the parent `path` (for example `{"name": "handling", "path": "emul"}` under parent `emul`). If distinct responsibilities live inside one flat directory with no nested paths for them, keep the directory as one LEAF and summarize the responsibilities in the description / `main_files` roles.
+
    If you SPLIT, choose the seam from directory boundaries, import clusters, and external API usage, then recurse into each child starting from Step A. If you LEAF, stop.
 
 3. **For each module, determine**
@@ -100,6 +102,7 @@ PARENT — the directory contains 2+ logical units that each deserve their own e
 ## Rules
 - All paths are relative to the repo root, no leading "./" or "/".
 - Module/submodule `name` must match `^[a-z][a-z0-9_]*$` — lowercase, starts with a letter, only letters/digits/underscore — and must equal the normalized basename of `path`. If the directory name violates the pattern (e.g. has dashes, dots, or a leading digit), normalize by lowercasing and replacing offending characters with underscores (a leading digit gets an `m_` prefix); the human-readable basename still goes in `path`. The same per-segment normalization is applied to every segment of the derived qualified name.
+- Submodule `path` must be a real nested path below its parent, not the parent's own path. Never use conceptual labels as `name` values unless the same label is also the normalized basename of the emitted `path`.
 - A LEAF submodule has no `submodules` key at all (or an empty list). A PARENT submodule has `submodules` with ≥2 entries. Never emit a parent with only one child — collapse it. `main_files` on a parent lists files that belong to the parent itself, not files that belong to any child.
 - `main_files` is required and 1–5 entries, on every module and every submodule. If you cannot name a central file, it isn't a (sub)module.
 - Top-level modules use the full schema with `depends_on`. Submodules omit `depends_on` (it is implied by the parent module's dependencies).

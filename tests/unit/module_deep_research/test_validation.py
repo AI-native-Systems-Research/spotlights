@@ -31,10 +31,14 @@ def test_parse_accepts_fenced_json_and_normalizes_ids_and_cap() -> None:
 ```
 """
 
-    output = parse_module_deep_research_output(text, max_findings_per_module=1)
+    output = parse_module_deep_research_output(
+        text, max_findings_per_module=1, segment="kv_offload"
+    )
 
     assert len(output.findings) == 1
-    assert output.findings[0].finding_id == "find-0001"
+    # The agent emits bare `find-NNNN`; the finding id is renumbered and
+    # prefixed with the module segment (D3).
+    assert output.findings[0].finding_id == "find-kv_offload-0001"
     assert output.findings[0].title == "Paged KV allocation"
     assert output.issues == []
 

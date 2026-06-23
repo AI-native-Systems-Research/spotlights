@@ -63,21 +63,22 @@ def test_agent_candidates_allows_empty_list():
     parsed = AgentCandidates.model_validate_json(
         '{"module_qualified_name": "v1/foo", "candidates": []}'
     )
-    promoted = parsed.to_candidates()
+    promoted = parsed.to_candidates(segment="v1_foo")
     assert promoted.candidates == []
 
 
-def test_agent_candidates_to_candidates_sets_default_state_and_empty_attachments():
+def test_agent_candidates_to_candidates_sets_origin_and_empty_proposals():
     parsed = AgentCandidates(
         module_qualified_name="v1/foo",
         candidates=[AgentCandidate.model_validate(_valid_agent_candidate())],
     )
-    promoted = parsed.to_candidates()
+    promoted = parsed.to_candidates(segment="v1_foo")
     assert len(promoted.candidates) == 1
     c = promoted.candidates[0]
-    assert c.state == "DISCOVERED"
-    assert c.deep_research_proposals == []
-    assert c.agent_proposals == []
+    assert c.origin == "code_agent"
+    # The bare agent id is promoted to the module-prefixed schema form (D3).
+    assert c.id == "cand-v1_foo-0001"
+    assert c.proposals == []
 
 
 def test_agent_candidate_rejects_extra_field():
