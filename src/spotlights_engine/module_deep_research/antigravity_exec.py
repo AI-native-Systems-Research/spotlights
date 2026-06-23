@@ -16,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Literal
 from urllib.error import HTTPError
-from urllib.parse import urljoin
+from urllib.parse import parse_qsl, urlencode, urljoin, urlsplit, urlunsplit
 from urllib.request import Request, urlopen
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -539,8 +539,23 @@ def _append_inline_workspace_context(
     )
 
 
+_INLINE_CONTEXT_IGNORED_DIRS = {
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    ".venv",
+    "__pycache__",
+    "build",
+    "dist",
+    "node_modules",
+}
+
+
 def _iter_inline_context_files(
-    workspace_paths: Sequence[Path], *, max_files: int
+    workspace_paths: Sequence[Path], *, max_files: int, max_scanned_entries: int = 2_000
 ) -> Iterator[Path]:
     suffix_priority = {
         ".py": 0,
@@ -556,24 +571,42 @@ def _iter_inline_context_files(
     }
     seen: set[Path] = set()
     candidates: list[Path] = []
+    scanned_entries = 0
     for workspace in workspace_paths:
         if workspace.is_file():
             candidates.append(workspace)
             continue
         if not workspace.is_dir():
             continue
-        for path in workspace.rglob("*"):
-            if len(candidates) >= max_files * 4:
+        for root, dirs, files in os.walk(workspace):
+            dirs[:] = [
+                name
+                for name in dirs
+                if name not in _INLINE_CONTEXT_IGNORED_DIRS and not name.startswith(".")
+            ]
+            for file_name in files:
+                scanned_entries += 1
+                if scanned_entries > max_scanned_entries:
+                    break
+                path = Path(root) / file_name
+                if path.name.startswith("."):
+                    continue
+                if not path.is_file() or path.suffix.lower() not in suffix_priority:
+                    continue
+                resolved = path.resolve()
+                if resolved in seen:
+                    continue
+                seen.add(resolved)
+                candidates.append(resolved)
+                if len(candidates) >= max_files * 4:
+                    break
+            if (
+                scanned_entries > max_scanned_entries
+                or len(candidates) >= max_files * 4
+            ):
                 break
-            if not path.is_file() or path.suffix.lower() not in suffix_priority:
-                continue
-            if any(part.startswith(".") or part == "__pycache__" for part in path.parts):
-                continue
-            resolved = path.resolve()
-            if resolved in seen:
-                continue
-            seen.add(resolved)
-            candidates.append(resolved)
+        if scanned_entries > max_scanned_entries or len(candidates) >= max_files * 4:
+            break
     candidates.sort(
         key=lambda p: (
             suffix_priority.get(p.suffix.lower(), 99),
@@ -805,8 +838,11 @@ def _sse_bytes_repr_normalizer(
         def _proxy(self) -> None:
             length = int(self.headers.get("Content-Length") or 0)
             body = self.rfile.read(length) if length else None
-            upstream_url = urljoin(upstream_base_url.rstrip("/") + "/", self.path.lstrip("/"))
+            upstream_url = _strip_proxy_placeholder_key_from_url(
+                urljoin(upstream_base_url.rstrip("/") + "/", self.path.lstrip("/"))
+            )
             headers = _forward_headers(dict(self.headers))
+            _strip_proxy_placeholder_key_from_headers(headers)
             headers.update(dict(upstream_headers or {}))
             try:
                 request = Request(
@@ -964,6 +1000,38 @@ def _forward_headers(headers: Mapping[str, str]) -> dict[str, str]:
     }
     forwarded.setdefault("Accept-Encoding", "identity")
     return forwarded
+
+
+def _strip_proxy_placeholder_key_from_headers(headers: dict[str, str]) -> None:
+    """Avoid forwarding the SDK-only placeholder key to real gateways."""
+    for key in list(headers):
+        if (
+            key.lower() == "x-goog-api-key"
+            and headers[key] == _PROXY_PLACEHOLDER_API_KEY
+        ):
+            headers.pop(key, None)
+
+
+def _strip_proxy_placeholder_key_from_url(url: str) -> str:
+    """Drop only the synthetic Gemini key used to satisfy SDK validation."""
+    parts = urlsplit(url)
+    query_items = parse_qsl(parts.query, keep_blank_values=True)
+    filtered_query_items = [
+        (key, value)
+        for key, value in query_items
+        if not (key.lower() == "key" and value == _PROXY_PLACEHOLDER_API_KEY)
+    ]
+    if len(filtered_query_items) == len(query_items):
+        return url
+    return urlunsplit(
+        (
+            parts.scheme,
+            parts.netloc,
+            parts.path,
+            urlencode(filtered_query_items, doseq=True),
+            parts.fragment,
+        )
+    )
 
 
 def _should_forward_response_header(key: str, *, rewrite_body: bool) -> bool:

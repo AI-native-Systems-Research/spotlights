@@ -137,9 +137,10 @@ asyncio.run(main())
 PY
 ```
 
-### Optional: route providers through a LiteLLM proxy
+### Optional: route research providers through a LiteLLM proxy
 
-Use this when Anthropic, OpenAI, or Google models are exposed through an OpenAI-compatible LiteLLM gateway.
+Use this when Anthropic, OpenAI, or Google models are exposed through an
+OpenAI-compatible LiteLLM gateway.
 
 **`claude` CLI** — edit `~/.claude/settings.json` and set `ANTHROPIC_BASE_URL` plus the per-tier model overrides to models served by your proxy:
 
@@ -206,33 +207,9 @@ short smoke-test timeouts; the SDK runner defaults to no timeout, and explicit
 timeouts for live research should be long enough for web/literature retrieval
 (15+ minutes is a reasonable floor).
 
-The public CLI also exposes provider-neutral runtime overrides, so callers do
-not need to hardcode organization-specific hosts in shared code:
-
-```bash
-export GATEWAY_API_KEY="<your-gateway-key>"
-
-spotlights-engine \
-  --repo /path/to/target-repo \
-  --codex-profile <codex-profile> \
-  --claude-model <claude-model-id> \
-  --claude-base-url https://your-claude-compatible-host.example.com \
-  --claude-auth-token-env GATEWAY_API_KEY \
-  --claude-unset-env ANTHROPIC_API_KEY \
-  --claude-disable-experimental-betas \
-  --antigravity-base-url https://your-gemini-compatible-host.example.com \
-  --antigravity-model <gemini-model-id> \
-  --antigravity-api-key-env GATEWAY_API_KEY
-```
-
-`--claude-auth-token-env` copies the named environment variable into
-`ANTHROPIC_AUTH_TOKEN` only for child Claude processes. If your Claude Code
-uses the official Anthropic API key directly, omit the Claude proxy flags.
-
-Swap the host, model IDs, and key environment variable for your deployment.
-After editing config or environment, re-run `claude --version` /
-`codex --version` and the Antigravity SDK smoke test
-from a fresh shell.
+Swap the host and model IDs for your LiteLLM deployment. After editing config
+or environment, re-run `claude --version` / `codex --version` and the
+Antigravity SDK smoke test from a fresh shell.
 
 ### Verify CLI and SDK dependencies from a fresh shell
 
@@ -268,105 +245,39 @@ spots, run web/literature research for those candidates, and write proposals. It
 is the main `spotlights-engine` CLI flow; it does **not** require the telemetry
 preview or a profiling capture.
 
-1. **Activate the Python environment where the engine is installed.**
+```bash
+spotlights-engine \
+  --repo /path/to/target-repo \
+  --include path/to/module_or_subtree \
+  --objective "Find high-leverage latency/throughput improvements." \
+  --hint "Name the workload, hot path, benchmark, or subsystem to prioritize." \
+  --output-folder tmp/spotlights_results \
+  --artifacts-dir tmp/spotlights_artifacts \
+  --verbose
+```
 
-   ```bash
-   cd /path/to/spotlights
-   source .venv/bin/activate
+For a Gemini-compatible gateway used only by the Antigravity SDK runner, add the
+Antigravity overrides:
 
-   # Optional: install the checkout into any already-active Python environment.
-   # python -m pip install -e .
-   ```
+```bash
+export GATEWAY_API_KEY="<your-gateway-key>"
 
-2. **Verify the three research backends.**
+spotlights-engine \
+  --repo /path/to/target-repo \
+  --include path/to/module_or_subtree \
+  --objective "Find high-leverage latency/throughput improvements." \
+  --hint "Focus on the exact workload or subsystem." \
+  --antigravity-base-url https://your-gemini-compatible-host.example.com \
+  --antigravity-model <gemini-model-id> \
+  --antigravity-api-key-env GATEWAY_API_KEY \
+  --output-folder tmp/spotlights_results \
+  --artifacts-dir tmp/spotlights_artifacts \
+  --verbose
+```
 
-   ```bash
-   claude --version
-   codex --version
-   python - <<'PY'
-import google.antigravity
-print("google-antigravity OK")
-PY
-   ```
-
-3. **Run one focused module or subtree first.**  Start small so the module map,
-   candidate selection, and provider auth are easy to debug. `--include` takes
-   slash-form module names from the extracted project tree; a parent include
-   expands to its leaf modules.
-
-   ```bash
-   spotlights-engine \
-     --repo /path/to/target-repo \
-     --include path/to/module_or_subtree \
-     --objective "Find high-leverage latency/throughput improvements." \
-     --hint "Name the workload, hot path, benchmark, or subsystem to prioritize." \
-     --output-folder tmp/spotlights_results \
-     --artifacts-dir tmp/spotlights_artifacts \
-     --verbose
-   ```
-
-   If your CLIs/SDK use a gateway or proxy, add the generic runtime flags instead
-   of hardcoding provider details in code:
-
-   ```bash
-   export GATEWAY_API_KEY="<your-gateway-key>"
-
-   spotlights-engine \
-     --repo /path/to/target-repo \
-     --include path/to/module_or_subtree \
-     --objective "Find high-leverage latency/throughput improvements." \
-     --hint "Focus on the exact workload or subsystem." \
-     --codex-profile <codex-profile-name> \
-     --claude-model <claude-model-id> \
-     --claude-base-url https://your-claude-compatible-host.example.com \
-     --claude-auth-token-env GATEWAY_API_KEY \
-     --claude-unset-env ANTHROPIC_API_KEY \
-     --claude-disable-experimental-betas \
-     --antigravity-base-url https://your-gemini-compatible-host.example.com \
-     --antigravity-model <gemini-model-id> \
-     --antigravity-api-key-env GATEWAY_API_KEY \
-     --output-folder tmp/spotlights_results \
-     --artifacts-dir tmp/spotlights_artifacts \
-     --verbose
-   ```
-
-4. **Inspect results.**
-
-   ```text
-   tmp/spotlights_results/
-     index.md          # human-readable run summary
-     result.json       # full structured output
-     modules/          # per-module and per-candidate Markdown pages
-
-   tmp/spotlights_artifacts/
-     spotlights_manager/
-       modules/<module-id>/
-         candidate_discovery/
-         module_deep_research.json
-         status.json
-   ```
-
-   The artifact directory is also the resume key. Re-run with the same
-   `--artifacts-dir` to reuse completed checkpoints, or use a new directory for
-   a clean run.
-
-#### What the deep-research CLI runs
-
-`spotlights-engine` executes the deep-research pipeline in five logged steps:
-
-1. `modules_extractor` — Claude builds the repo/module tree.
-2. `candidate_discovery` — agent runners pick candidate symbols or regions for
-   the requested objective.
-3. `module_deep_research` — Codex, Claude, and Antigravity-backed Gemini run in
-   parallel to gather web/literature evidence. Individual runner failures are
-   recoverable; the step merges the successful outputs.
-4. `proposal_from_finding_creator` — converts research findings into candidate
-   proposals.
-5. `agent_proposals` — adds code-grounded agent proposals for each candidate.
-
-Runtime telemetry is a separate preview flow (`signal-pipeline`). The normal
-`spotlights-engine` deep-research run above only needs the target repo, the
-objective/hints, and working provider auth.
+Results land in `tmp/spotlights_results/` (`index.md`, `result.json`, and
+per-candidate Markdown pages). Raw resumable checkpoints and transcripts land
+in `tmp/spotlights_artifacts/spotlights_manager/`.
 
 ### Install the Spotlights skill
 
@@ -533,28 +444,15 @@ All flags are optional once `--repo` and the agent CLIs are available.
 | `--max-parallel-pairs` | `5` | Within-step parallelism for step 4. |
 | `--max-parallel-candidates` | `5` | Within-step parallelism for step 5. |
 | `--max-findings-per-module` | `30` | Cap on findings produced by step 3 per module. |
-
-Provider/runtime override flags are only needed when you do not want to rely on
-the local CLI defaults:
-
-| Flag | Default | Purpose |
-|---|---|---|
-| `--codex-profile` | (Codex default) | Codex config profile for Codex-backed steps. |
-| `--codex-model` | (profile/default) | Explicit Codex model override. |
-| `--claude-model` | (Claude default) | Claude model passed to Claude Code subprocesses. |
-| `--claude-base-url` | (Claude default) | Claude-compatible API base URL for child Claude processes. |
-| `--claude-auth-token-env` | (none) | Copies the named env var into `ANTHROPIC_AUTH_TOKEN` for child Claude processes. |
-| `--claude-unset-env` | `[]` | Removes named env vars before launching Claude; repeatable and accepts comma-separated names. |
-| `--claude-disable-experimental-betas` | off | Sets `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` for child Claude processes. |
-| `--antigravity-base-url` | native Gemini default | Gemini-compatible endpoint for the Antigravity SDK runner. |
-| `--antigravity-model` | SDK/default | Model for the Antigravity SDK runner. |
+| `--antigravity-base-url` | native Gemini default | Optional Gemini-compatible endpoint for the Antigravity SDK runner. |
+| `--antigravity-model` | SDK/default | Optional model ID for the Antigravity SDK runner. |
 | `--antigravity-api-key-env` | `GEMINI_API_KEY`/SDK default | Env var containing the Gemini-compatible key. |
 | `--antigravity-timeout-seconds` | runner/provider default | Optional timeout for the Antigravity SDK call. |
 | `--antigravity-auth-mechanism` | `bearer` | Use `bearer` for gateway-style auth or `x-goog-api-key` for API-key header auth. |
 | `--no-antigravity-sse-normalizer` | normalizer enabled | Disable the provider-neutral SSE normalizer for gateways that already emit native Gemini SSE. |
 
 Agent authentication is handled by the underlying `claude` and `codex` CLIs and
-the Antigravity SDK. No engine config file is required for the happy path.
+the Antigravity SDK; no engine config file is required for the happy path.
 
 ## Where Spotlights fits
 

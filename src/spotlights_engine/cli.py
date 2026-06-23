@@ -20,7 +20,6 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from spotlights_engine.agent_proposals import AgentProposalsConfig
-from spotlights_engine.candidate_discovery import DiscoveryConfig
 from spotlights_engine.defaults import (
     DEFAULT_ARTIFACTS as _DEFAULT_ARTIFACTS,
 )
@@ -30,7 +29,7 @@ from spotlights_engine.defaults import (
 from spotlights_engine.defaults import (
     DEFAULT_REPO as _DEFAULT_REPO,
 )
-from spotlights_engine.module_deep_research import AntigravityExecOptions, CodexExecOptions
+from spotlights_engine.module_deep_research import AntigravityExecOptions
 from spotlights_engine.module_knowledge import (
     KnowledgeBase,
     KnowledgeRecord,
@@ -147,69 +146,26 @@ def _build_argparser() -> argparse.ArgumentParser:
         ),
     )
 
-    provider = p.add_argument_group(
-        "provider/runtime overrides",
-        "Optional generic agent-provider settings; defaults use each CLI's local config.",
+    antigravity = p.add_argument_group(
+        "Antigravity deep-research overrides",
+        "Optional generic Gemini-compatible settings for the Antigravity SDK runner.",
     )
-    provider.add_argument(
-        "--codex-profile",
-        default=None,
-        help="Codex config profile for Codex-backed steps (e.g. a local gateway profile).",
-    )
-    provider.add_argument(
-        "--codex-model",
-        default=None,
-        help=(
-            "Codex model override for Codex-backed steps. "
-            "If omitted, profile/default config wins."
-        ),
-    )
-    provider.add_argument(
-        "--claude-model",
-        default=None,
-        help="Claude model passed to Claude Code subprocesses.",
-    )
-    provider.add_argument(
-        "--claude-base-url",
-        default=None,
-        help="Claude-compatible API base URL exposed to Claude Code as ANTHROPIC_BASE_URL.",
-    )
-    provider.add_argument(
-        "--claude-auth-token-env",
-        default=None,
-        help=(
-            "Name of an existing environment variable whose value should be copied "
-            "to ANTHROPIC_AUTH_TOKEN for Claude subprocesses."
-        ),
-    )
-    provider.add_argument(
-        "--claude-unset-env",
-        action="append",
-        default=[],
-        metavar="NAME[,NAME...]",
-        help="Environment variable(s) to remove before launching Claude; repeatable.",
-    )
-    provider.add_argument(
-        "--claude-disable-experimental-betas",
-        action="store_true",
-        help="Set CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1 for Claude subprocesses.",
-    )
-    provider.add_argument(
+    antigravity.add_argument(
         "--antigravity-base-url",
         default=None,
         help="Gemini-compatible base URL for the Antigravity SDK runner.",
     )
-    provider.add_argument(
+    antigravity.add_argument(
         "--antigravity-model",
         default=None,
         help="Model name for the Antigravity SDK runner.",
     )
-    provider.add_argument(
+    antigravity.add_argument(
         "--antigravity-api-key-env",
         default=None,
         help="Environment variable containing the Antigravity/Gemini-compatible API key.",
     )
-    provider.add_argument(
+    antigravity.add_argument(
         "--antigravity-timeout-seconds",
         type=int,
         default=None,
@@ -218,19 +174,19 @@ def _build_argparser() -> argparse.ArgumentParser:
             "Default: runner/provider default."
         ),
     )
-    provider.add_argument(
+    antigravity.add_argument(
         "--antigravity-auth-mechanism",
         choices=("bearer", "x-goog-api-key"),
         default="bearer",
         help="How to pass the Antigravity API key to the configured endpoint (default: bearer).",
     )
-    provider.add_argument(
+    antigravity.add_argument(
         "--no-antigravity-sse-normalizer",
         dest="antigravity_sse_normalizer",
         action="store_false",
         help="Disable the local SSE normalizer used for some Gemini-compatible gateways.",
     )
-    provider.set_defaults(antigravity_sse_normalizer=True)
+    antigravity.set_defaults(antigravity_sse_normalizer=True)
     p.add_argument(
         "--no-resume",
         dest="resume",
@@ -379,30 +335,6 @@ def _flatten_include(raw: list[list[str]] | None) -> list[str]:
     return flat
 
 
-def _flatten_csv(raw: list[str]) -> list[str]:
-    names: list[str] = []
-    for item in raw:
-        names.extend(part.strip() for part in item.split(",") if part.strip())
-    return names
-
-
-def _apply_claude_env_directives(args: argparse.Namespace) -> None:
-    """Set parent-process directives consumed by Claude subprocess helpers."""
-    import os
-
-    if args.claude_model:
-        os.environ["SPOTLIGHTS_CLAUDE_MODEL"] = args.claude_model
-    if args.claude_base_url:
-        os.environ["SPOTLIGHTS_CLAUDE_BASE_URL"] = args.claude_base_url
-    if args.claude_auth_token_env:
-        os.environ["SPOTLIGHTS_CLAUDE_AUTH_TOKEN_ENV"] = args.claude_auth_token_env
-    unset_names = _flatten_csv(args.claude_unset_env)
-    if unset_names:
-        os.environ["SPOTLIGHTS_CLAUDE_UNSET_ENV"] = ",".join(unset_names)
-    if args.claude_disable_experimental_betas:
-        os.environ["SPOTLIGHTS_CLAUDE_DISABLE_EXPERIMENTAL_BETAS"] = "1"
-
-
 def _build_input(args: argparse.Namespace) -> SpotlightsManagerInput:
     context_kwargs = {
         "objective": args.objective,
@@ -441,25 +373,6 @@ def _build_config(args: argparse.Namespace) -> SpotlightsManagerConfig:
 
     include = _flatten_include(args.include)
 
-    discovery_cfg: DiscoveryConfig | None = None
-    if args.codex_profile is not None or args.codex_model is not None:
-        discovery_kwargs: dict = {}
-        if args.codex_profile is not None:
-            discovery_kwargs["codex_profile"] = args.codex_profile
-            # Let a profile own model/provider selection unless the caller
-            # explicitly supplies a model override as well.
-            discovery_kwargs["codex_model"] = None
-        if args.codex_model is not None:
-            discovery_kwargs["codex_model"] = args.codex_model
-        discovery_cfg = DiscoveryConfig(**discovery_kwargs)
-
-    deep_research_cfg: CodexExecOptions | None = None
-    if args.codex_profile is not None or args.codex_model is not None:
-        deep_research_cfg = CodexExecOptions(
-            profile=args.codex_profile,
-            model=args.codex_model,
-        )
-
     antigravity_cfg: AntigravityExecOptions | None = None
     if (
         args.antigravity_base_url is not None
@@ -480,22 +393,11 @@ def _build_config(args: argparse.Namespace) -> SpotlightsManagerConfig:
             normalize_sse_bytes_repr=args.antigravity_sse_normalizer,
         )
 
-    if args.codex_profile is not None and agent_cfg is None:
-        agent_cfg = AgentProposalsConfig(codex_profile=args.codex_profile)
-    elif args.codex_profile is not None:
-        agent_cfg = agent_cfg.model_copy(update={"codex_profile": args.codex_profile})
-    if args.codex_model is not None and agent_cfg is None:
-        agent_cfg = AgentProposalsConfig(codex_model=args.codex_model)
-    elif args.codex_model is not None:
-        agent_cfg = agent_cfg.model_copy(update={"codex_model": args.codex_model})
-
     return SpotlightsManagerConfig(
         artifacts_dir=args.artifacts_dir,
         output_folder=args.output_folder,
         max_parallel_sessions=args.max_parallel,
         module_filter=ModuleFilter(include=include) if include else None,
-        discovery=discovery_cfg,
-        deep_research=deep_research_cfg,
         deep_research_antigravity=antigravity_cfg,
         proposal_from_finding=proposal_cfg,
         agent_proposals=agent_cfg,
@@ -685,7 +587,6 @@ def main(argv: list[str] | None = None) -> int:
     args.artifacts_dir.mkdir(parents=True, exist_ok=True)
     args.output_folder.mkdir(parents=True, exist_ok=True)
 
-    _apply_claude_env_directives(args)
     _configure_logging(args)
 
     inp = _build_input(args)

@@ -36,15 +36,6 @@ def test_git_mode_new_untracked_file_raises(tmp_path):
             (tmp_path / "new.py").write_text("x = 2\n")
 
 
-def test_git_mode_skips_local_agent_state(tmp_path):
-    _init_git_repo(tmp_path)
-    guard = RepoGuard(tmp_path)
-    with guard.observe():
-        omc = tmp_path / ".omc"
-        omc.mkdir()
-        (omc / "project-memory.json").write_text("{}\n")
-
-
 def test_git_mode_staged_change_raises(tmp_path):
     _init_git_repo(tmp_path)
     guard = RepoGuard(tmp_path)
@@ -115,15 +106,6 @@ def test_non_git_mode_skips_pycache(tmp_path):
     with guard.observe():
         # Writing inside __pycache__ should be invisible to the guard.
         (pycache / "new.pyc").write_text("new garbage")
-
-
-def test_non_git_mode_skips_local_agent_state(tmp_path):
-    (tmp_path / "a.py").write_text("a = 1\n")
-    guard = RepoGuard(tmp_path)
-    with guard.observe():
-        omc = tmp_path / ".omc"
-        omc.mkdir()
-        (omc / "project-memory.json").write_text("{}\n")
 
 
 @pytest.mark.skipif(

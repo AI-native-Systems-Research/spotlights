@@ -314,6 +314,8 @@ def test_antigravity_normalizes_litellm_bytes_repr_sse_line() -> None:
         _forward_headers,
         _is_streaming_response,
         _normalize_sse_lines,
+        _strip_proxy_placeholder_key_from_headers,
+        _strip_proxy_placeholder_key_from_url,
         normalize_litellm_sse_bytes_repr_line,
         normalize_litellm_vertex_sse_line,
     )
@@ -329,6 +331,25 @@ def test_antigravity_normalizes_litellm_bytes_repr_sse_line() -> None:
         "X-Test": "yes",
         "Accept-Encoding": "identity",
     }
+    headers = {
+        "X-Goog-Api-Key": "proxy-placeholder-key",
+        "Authorization": "Bearer real-key",
+    }
+    _strip_proxy_placeholder_key_from_headers(headers)
+    assert headers == {"Authorization": "Bearer real-key"}
+    assert (
+        _strip_proxy_placeholder_key_from_url(
+            "https://gemini.example.com/v1beta/models/m:streamGenerateContent"
+            "?alt=sse&key=proxy-placeholder-key"
+        )
+        == "https://gemini.example.com/v1beta/models/m:streamGenerateContent?alt=sse"
+    )
+    assert (
+        _strip_proxy_placeholder_key_from_url(
+            "https://gemini.example.com/v1beta/models/m:generateContent?key=real"
+        )
+        == "https://gemini.example.com/v1beta/models/m:generateContent?key=real"
+    )
 
     assert _is_streaming_response(
         content_type="application/json",
@@ -776,6 +797,24 @@ Output rules:
     assert "Read the target module main files" in file_compacted
     assert "Use file tools" in file_compacted
     assert "Include at most 2 findings" in file_compacted
+
+
+def test_antigravity_inline_context_skips_large_ignored_dirs(tmp_path: Path) -> None:
+    from spotlights_engine.module_deep_research.antigravity_exec import (
+        _iter_inline_context_files,
+    )
+
+    repo = tmp_path / "repo"
+    module_dir = repo / "vllm" / "v1" / "sample"
+    ignored_dir = repo / ".git" / "objects"
+    module_dir.mkdir(parents=True)
+    ignored_dir.mkdir(parents=True)
+    (module_dir / "sampler.py").write_text("def sample(): return 1\n")
+    (ignored_dir / "ignored.py").write_text("def ignored(): return 2\n")
+
+    files = list(_iter_inline_context_files([repo], max_files=4, max_scanned_entries=10))
+
+    assert files == [(module_dir / "sampler.py").resolve()]
 
 
 def test_antigravity_proxy_path_keeps_file_tools_and_stages_workspace(

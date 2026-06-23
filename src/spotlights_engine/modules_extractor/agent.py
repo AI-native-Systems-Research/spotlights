@@ -21,13 +21,13 @@ ProjectTree extraction: schema, prompt delivery, and result parsing.
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import ValidationError
 
-from spotlights_engine.claude_env import build_claude_env, claude_model_args
 from spotlights_engine.modules_extractor.errors import (
     ExtractorAgentError,
     ExtractorSetupError,
@@ -42,14 +42,32 @@ from spotlights_engine.signal_pipeline._subprocess_util import (
     run_streaming_claude,
 )
 
+_DROP_EXACT = frozenset(
+    {
+        "OPENAI_BASE_URL",
+        "OPENAI_API_BASE",
+        "ANTHROPIC_BASE_URL",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "ALL_PROXY",
+        "VIRTUAL_ENV",
+    }
+)
+_DROP_PREFIX = ("VSCODE_", "OPTQUEST_", "SPOTLIGHTS_")
+
 # Linux MAX_ARG_STRLEN is 131_072 bytes per argument. `claude --json-schema`
 # inlines the schema as one argv string; leave headroom for environment growth.
 _MAX_SCHEMA_BYTES = 120_000
-_MAX_SEMANTIC_REPAIR_ATTEMPTS = 2
+_VALIDATION_RETRIES = 1
+_RETRY_PAYLOAD_MAX_CHARS = 80_000
 
 
 def _clean_env() -> dict[str, str]:
-    return build_claude_env()
+    env = os.environ.copy()
+    for key in list(env):
+        if key in _DROP_EXACT or key.startswith(_DROP_PREFIX):
+            env.pop(key)
+    return env
 
 
 @dataclass
@@ -126,22 +144,24 @@ def run_extraction(
         "plan",
         "--max-turns",
         str(max_turns),
-        *claude_model_args(),
     ]
 
-    repair_errors: list[str] = []
-    current_prompt = prompt
-    for attempt in range(_MAX_SEMANTIC_REPAIR_ATTEMPTS + 1):
-        artifact_label = None if attempt == 0 else f"repair_{attempt}"
-        if artifacts_dir is not None and attempt > 0:
-            (artifacts_dir / f"{artifact_label}_prompt.md").write_text(
-                current_prompt, encoding="utf-8"
+    attempt_prompt = prompt
+    attempts = _VALIDATION_RETRIES + 1
+    total_duration_s = 0.0
+    total_cost_usd: float | None = None
+    total_input_tokens: int | None = None
+    total_output_tokens: int | None = None
+    for attempt in range(attempts):
+        if artifacts_dir is not None and attempt:
+            (artifacts_dir / f"prompt_attempt_{attempt}.md").write_text(
+                attempt_prompt, encoding="utf-8"
             )
 
         try:
             result = run_streaming_claude(
                 argv=argv,
-                prompt=current_prompt,
+                prompt=attempt_prompt,
                 env=_clean_env(),
                 cwd=repo_path,
                 timeout_s=timeout_s,
@@ -149,16 +169,14 @@ def run_extraction(
             )
         except StreamingTimeout as exc:
             if artifacts_dir is not None:
-                _write_streams(
-                    artifacts_dir, exc.stdout, exc.stderr, label=artifact_label
-                )
+                _write_streams(artifacts_dir, exc.stdout, exc.stderr, attempt=attempt)
             raise ExtractorAgentError(
                 f"claude timed out after {exc.duration_s:.1f}s",
                 timeout_s=timeout_s,
             ) from exc
 
         if artifacts_dir is not None:
-            _write_streams(artifacts_dir, result.stdout, result.stderr, label=artifact_label)
+            _write_streams(artifacts_dir, result.stdout, result.stderr, attempt=attempt)
 
         if result.returncode != 0:
             stderr_tail = result.stderr[-500:].decode("utf-8", "replace")
@@ -175,102 +193,123 @@ def run_extraction(
             raise ExtractorAgentError(
                 "claude stream-json had no terminal result event",
             )
+        usage = result_event.get("usage") or {}
+        reported_duration = _duration_seconds(result_event)
+        total_duration_s += (
+            reported_duration if reported_duration is not None else result.duration_s
+        )
+        total_cost_usd = _add_optional_float(
+            total_cost_usd,
+            _as_float(result_event.get("total_cost_usd")),
+        )
+        total_input_tokens = _add_optional_int(
+            total_input_tokens,
+            _as_int(usage.get("input_tokens")),
+        )
+        total_output_tokens = _add_optional_int(
+            total_output_tokens,
+            _as_int(usage.get("output_tokens")),
+        )
 
         payload = _final_message_text(result_event)
         if not payload.strip():
             raise ExtractorAgentError("claude returned an empty final message")
 
         if artifacts_dir is not None:
-            message_name = (
-                "last_message.json"
-                if artifact_label is None
-                else f"{artifact_label}_last_message.json"
+            (artifacts_dir / "last_message.json").write_text(payload, encoding="utf-8")
+            (artifacts_dir / f"last_message_attempt_{attempt}.json").write_text(
+                payload, encoding="utf-8"
             )
-            (artifacts_dir / message_name).write_text(payload, encoding="utf-8")
 
         try:
             tree = ProjectTree.model_validate_json(payload)
-            break
         except ValidationError as exc:
-            repair_errors.append(str(exc))
             if artifacts_dir is not None:
-                error_name = (
-                    "validation_error.txt"
-                    if artifact_label is None
-                    else f"{artifact_label}_validation_error.txt"
+                (artifacts_dir / f"validation_error_attempt_{attempt}.txt").write_text(
+                    str(exc), encoding="utf-8"
                 )
-                (artifacts_dir / error_name).write_text(str(exc), encoding="utf-8")
-            if attempt >= _MAX_SEMANTIC_REPAIR_ATTEMPTS:
-                raise ExtractorValidationError(
-                    f"ProjectTree validation failed after "
-                    f"{_MAX_SEMANTIC_REPAIR_ATTEMPTS} repair attempts: {exc}",
-                    payload_preview=payload[:1000],
-                    repair_errors=repair_errors,
-                ) from exc
-            if on_event is not None:
-                on_event(
-                    "ProjectTree semantic validation failed; retrying with "
-                    f"repair prompt ({attempt + 1}/"
-                    f"{_MAX_SEMANTIC_REPAIR_ATTEMPTS})"
+            if attempt < _VALIDATION_RETRIES:
+                _notify(
+                    on_event,
+                    "extractor: ProjectTree validation failed; retrying once with "
+                    "validation feedback",
                 )
-            current_prompt = _semantic_repair_prompt(
-                original_prompt=prompt,
-                validation_error=str(exc),
-                payload=payload,
-            )
-    else:  # pragma: no cover - loop always exits via break or raise
-        raise ExtractorAgentError("unreachable ProjectTree validation state")
+                attempt_prompt = _validation_retry_prompt(prompt, exc, payload)
+                continue
+            raise ExtractorValidationError(
+                f"ProjectTree validation failed after {attempts} attempts: {exc}",
+                attempts=attempts,
+                payload_preview=payload[:1000],
+            ) from exc
 
-    if artifacts_dir is not None:
-        tree.to_json(artifacts_dir / "project_tree.json")
+        if artifacts_dir is not None:
+            tree.to_json(artifacts_dir / "project_tree.json")
 
-    usage = result_event.get("usage") or {}
-    reported_duration = _duration_seconds(result_event)
-    invocation = ExtractionInvocation(
-        session_id=result_event.get("session_id"),
-        duration_s=reported_duration if reported_duration is not None else result.duration_s,
-        cost_usd=_as_float(result_event.get("total_cost_usd")),
-        input_tokens=_as_int(usage.get("input_tokens")),
-        output_tokens=_as_int(usage.get("output_tokens")),
-    )
+        invocation = ExtractionInvocation(
+            session_id=result_event.get("session_id"),
+            duration_s=total_duration_s,
+            cost_usd=total_cost_usd,
+            input_tokens=total_input_tokens,
+            output_tokens=total_output_tokens,
+        )
 
-    return ExtractionRunResult(project_tree=tree, invocation=invocation, raw_payload=payload)
+        return ExtractionRunResult(
+            project_tree=tree,
+            invocation=invocation,
+            raw_payload=payload,
+        )
+
+    raise AssertionError("unreachable: extraction attempts loop exhausted")
 
 
 def _write_streams(
-    artifacts_dir: Path, stdout: bytes, stderr: bytes, *, label: str | None = None
+    artifacts_dir: Path,
+    stdout: bytes,
+    stderr: bytes,
+    *,
+    attempt: int | None = None,
 ) -> None:
-    prefix = "" if label is None else f"{label}_"
-    (artifacts_dir / f"{prefix}raw_stdout.log").write_bytes(stdout or b"")
-    (artifacts_dir / f"{prefix}raw_stderr.log").write_bytes(stderr or b"")
+    (artifacts_dir / "raw_stdout.log").write_bytes(stdout or b"")
+    (artifacts_dir / "raw_stderr.log").write_bytes(stderr or b"")
+    if attempt is not None:
+        (artifacts_dir / f"raw_stdout_attempt_{attempt}.log").write_bytes(stdout or b"")
+        (artifacts_dir / f"raw_stderr_attempt_{attempt}.log").write_bytes(stderr or b"")
 
 
-def _semantic_repair_prompt(
-    *, original_prompt: str, validation_error: str, payload: str
-) -> str:
-    return f"""The previous ProjectTree JSON matched the CLI JSON shape but failed \
-Spotlights' stricter semantic validation.
+def _validation_retry_prompt(prompt: str, exc: ValidationError, payload: str) -> str:
+    payload_preview = payload
+    if len(payload_preview) > _RETRY_PAYLOAD_MAX_CHARS:
+        payload_preview = payload_preview[:_RETRY_PAYLOAD_MAX_CHARS] + "\n...<truncated>"
+    return (
+        f"{prompt}\n\n"
+        "## Retry after local ProjectTree validation failure\n\n"
+        "Your previous final JSON failed Spotlights' ProjectTree validators. "
+        "Repair it and return ONLY one complete valid JSON object in the same schema.\n\n"
+        "Validation error:\n"
+        f"{exc}\n\n"
+        "Common fixes:\n"
+        "- Every module/submodule `name` must equal the normalized basename of its "
+        "`path`.\n"
+        "- A child submodule `path` must be nested under its parent and must point "
+        "to the real filesystem unit represented by that child.\n"
+        "- Do not split one directory into conceptual children that reuse the "
+        "parent path. If the code has conceptual responsibilities inside one "
+        "flat directory and no real nested paths for those children, keep the "
+        "directory as one LEAF and capture the responsibilities in its "
+        "description/main_files roles.\n"
+        "- Do not invent path suffixes that do not exist.\n\n"
+        "Previous invalid JSON:\n"
+        f"{payload_preview}\n"
+    )
 
-Return exactly one corrected JSON object and no commentary.
 
-Fix every validation error while preserving the useful repository structure.
-Important invariants:
-- Each module/submodule `name` must equal the normalized basename of its `path`.
-- Each child module path must be strictly nested under its parent path.
-- Do not create logical submodules that reuse the parent directory path; merge
-  those files into the parent or use real child directories only.
-- All module paths must be repo-relative and unique after qualified-name normalization.
-- `depends_on` entries must be peer top-level qualified names or external dependencies.
-
-Validation error:
-{validation_error}
-
-Original extraction instructions:
-{original_prompt}
-
-Invalid JSON to repair:
-{payload}
-"""
+def _notify(on_event: Callable[[str], None] | None, message: str) -> None:
+    if on_event is None:
+        return
+    try:
+        on_event(message)
+    except Exception:  # noqa: BLE001 - UI callbacks must not abort extraction
+        pass
 
 
 def _extract_result_event(stdout: bytes) -> dict | None:
@@ -295,7 +334,7 @@ def _extract_result_event(stdout: bytes) -> dict | None:
 
 def _final_message_text(result_event: dict) -> str:
     structured = result_event.get("structured_output")
-    if isinstance(structured, dict | list):
+    if isinstance(structured, (dict, list)):
         return json.dumps(structured)
     result = result_event.get("result")
     if isinstance(result, str) and result:
@@ -338,6 +377,18 @@ def _as_float(v: object) -> float | None:
         return float(v)  # type: ignore[arg-type]
     except (TypeError, ValueError):
         return None
+
+
+def _add_optional_float(current: float | None, value: float | None) -> float | None:
+    if current is None and value is None:
+        return None
+    return (current or 0.0) + (value or 0.0)
+
+
+def _add_optional_int(current: int | None, value: int | None) -> int | None:
+    if current is None and value is None:
+        return None
+    return (current or 0) + (value or 0)
 
 
 __all__ = [

@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from spotlights_engine.claude_env import build_claude_env, claude_model_args
 from spotlights_engine.module_deep_research.agent_exec import (
     AgentExecResult,
     resolve_cli_executable,
@@ -63,8 +63,6 @@ class ClaudeExecClient:
         ]
         if opt.model:
             cmd += ["--model", opt.model]
-        else:
-            cmd += claude_model_args()
         if opt.allowed_tools:
             cmd += ["--tools", ",".join(opt.allowed_tools)]
             cmd += ["--allowedTools", ",".join(opt.allowed_tools)]
@@ -73,7 +71,9 @@ class ClaudeExecClient:
 
     def run(self, prompt: str, *, check: bool = True) -> AgentExecResult:
         cmd = self.build_command()
-        env = build_claude_env(extra_env=self.options.env)
+        env = os.environ.copy()
+        if self.options.env:
+            env.update(dict(self.options.env))
 
         completed = subprocess.run(
             cmd,
@@ -110,7 +110,7 @@ def _final_message(stdout: str) -> str | None:
         return text
 
     structured = payload.get("structured_output")
-    if isinstance(structured, dict | list):
+    if isinstance(structured, (dict, list)):
         return json.dumps(structured)
 
     result = payload.get("result")
