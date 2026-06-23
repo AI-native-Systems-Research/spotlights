@@ -29,6 +29,7 @@ from spotlights_engine.defaults import (
 from spotlights_engine.defaults import (
     DEFAULT_REPO as _DEFAULT_REPO,
 )
+from spotlights_engine.module_deep_research import AntigravityExecOptions
 from spotlights_engine.module_knowledge import (
     KnowledgeBase,
     KnowledgeRecord,
@@ -144,6 +145,48 @@ def _build_argparser() -> argparse.ArgumentParser:
             "Default: SpotlightsManagerInput default (30)."
         ),
     )
+
+    antigravity = p.add_argument_group(
+        "Antigravity deep-research overrides",
+        "Optional generic Gemini-compatible settings for the Antigravity SDK runner.",
+    )
+    antigravity.add_argument(
+        "--antigravity-base-url",
+        default=None,
+        help="Gemini-compatible base URL for the Antigravity SDK runner.",
+    )
+    antigravity.add_argument(
+        "--antigravity-model",
+        default=None,
+        help="Model name for the Antigravity SDK runner.",
+    )
+    antigravity.add_argument(
+        "--antigravity-api-key-env",
+        default=None,
+        help="Environment variable containing the Antigravity/Gemini-compatible API key.",
+    )
+    antigravity.add_argument(
+        "--antigravity-timeout-seconds",
+        type=int,
+        default=None,
+        help=(
+            "Timeout for the Antigravity SDK runner. "
+            "Default: runner/provider default."
+        ),
+    )
+    antigravity.add_argument(
+        "--antigravity-auth-mechanism",
+        choices=("bearer", "x-goog-api-key"),
+        default="bearer",
+        help="How to pass the Antigravity API key to the configured endpoint (default: bearer).",
+    )
+    antigravity.add_argument(
+        "--no-antigravity-sse-normalizer",
+        dest="antigravity_sse_normalizer",
+        action="store_false",
+        help="Disable the local SSE normalizer used for some Gemini-compatible gateways.",
+    )
+    antigravity.set_defaults(antigravity_sse_normalizer=True)
     p.add_argument(
         "--no-resume",
         dest="resume",
@@ -329,11 +372,33 @@ def _build_config(args: argparse.Namespace) -> SpotlightsManagerConfig:
         agent_cfg = AgentProposalsConfig(**kwargs)
 
     include = _flatten_include(args.include)
+
+    antigravity_cfg: AntigravityExecOptions | None = None
+    if (
+        args.antigravity_base_url is not None
+        or args.antigravity_model is not None
+        or args.antigravity_api_key_env is not None
+        or args.antigravity_timeout_seconds is not None
+    ):
+        antigravity_cfg = AntigravityExecOptions(
+            model=args.antigravity_model,
+            antigravity_base_url=(
+                args.antigravity_base_url.rstrip("/")
+                if args.antigravity_base_url is not None
+                else None
+            ),
+            antigravity_api_key_env=args.antigravity_api_key_env,
+            api_key_auth_mechanism=args.antigravity_auth_mechanism,
+            timeout_seconds=args.antigravity_timeout_seconds,
+            normalize_sse_bytes_repr=args.antigravity_sse_normalizer,
+        )
+
     return SpotlightsManagerConfig(
         artifacts_dir=args.artifacts_dir,
         output_folder=args.output_folder,
         max_parallel_sessions=args.max_parallel,
         module_filter=ModuleFilter(include=include) if include else None,
+        deep_research_antigravity=antigravity_cfg,
         proposal_from_finding=proposal_cfg,
         agent_proposals=agent_cfg,
         resume=args.resume,

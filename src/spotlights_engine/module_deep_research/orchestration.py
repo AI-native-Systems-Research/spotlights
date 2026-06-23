@@ -11,9 +11,12 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from spotlights_engine.module_deep_research.agent_exec import AgentExecResult, ModuleResearchRunner
+from spotlights_engine.module_deep_research.antigravity_exec import (
+    AntigravityExecClient,
+    AntigravityExecOptions,
+)
 from spotlights_engine.module_deep_research.claude_exec import ClaudeExecClient, ClaudeExecOptions
 from spotlights_engine.module_deep_research.codex_exec import CodexExecClient, CodexExecOptions
-from spotlights_engine.module_deep_research.gemini_exec import GeminiExecClient, GeminiExecOptions
 from spotlights_engine.module_deep_research.validation import (
     AgentModuleDeepResearchOutput,
     normalize_module_deep_research_output,
@@ -57,14 +60,31 @@ def resolve_target_module(project_tree: ProjectTree, module_qualified_name: str)
     return None
 
 
+def _module_antigravity_options(
+    options: AntigravityExecOptions | None,
+    *,
+    repo_path: Path,
+    module: Module | None = None,
+) -> AntigravityExecOptions:
+    base = options or AntigravityExecOptions(cwd=repo_path)
+    updates: dict[str, object] = {}
+    if base.response_schema is None:
+        updates["response_schema"] = ModuleDeepResearchOutput
+    if base.workspaces is None and module is not None:
+        updates["workspaces"] = [repo_path / module.path]
+    return base.model_copy(update=updates) if updates else base
+
+
 def select_runners(
     *,
     repo_path: Path,
     codex_options: CodexExecOptions | None,
+    antigravity_options: AntigravityExecOptions | None = None,
+    target_module: Module | None = None,
     runner: ModuleResearchRunner | None,
     runners: Sequence[ModuleResearchRunner] | None,
 ) -> tuple[ModuleResearchRunner, ...]:
-    """Resolve caller-provided runners or create the default Codex/Claude/Gemini set."""
+    """Resolve caller-provided runners or create the default Codex/Claude/Antigravity set."""
     if runner is not None and runners is not None:
         raise ValueError("pass either runner or runners, not both")
     if runner is not None:
@@ -75,7 +95,13 @@ def select_runners(
     return (
         CodexExecClient(codex_options or CodexExecOptions(cwd=repo_path)),
         ClaudeExecClient(ClaudeExecOptions(cwd=repo_path)),
-        GeminiExecClient(GeminiExecOptions(cwd=repo_path)),
+        AntigravityExecClient(
+            _module_antigravity_options(
+                antigravity_options,
+                repo_path=repo_path,
+                module=target_module,
+            )
+        ),
     )
 
 
@@ -162,10 +188,9 @@ def merge_outcomes(
             findings.append(finding)
 
     merged = AgentModuleDeepResearchOutput(findings=findings, issues=issues)
-    merged_findings_cap = max_findings_per_module * len(outcomes)
     return normalize_module_deep_research_output(
         merged,
-        max_findings_per_module=merged_findings_cap,
+        max_findings_per_module=max_findings_per_module,
         segment=segment,
     )
 

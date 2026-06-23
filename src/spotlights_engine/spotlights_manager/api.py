@@ -18,6 +18,7 @@ from spotlights_engine.candidate_discovery.api import (
     DiscoveryConfig,
     IterationTelemetry,
 )
+from spotlights_engine.module_deep_research.antigravity_exec import AntigravityExecOptions
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
 from spotlights_engine.modules_extractor import ExtractorConfig
 from spotlights_engine.modules_extractor.agent import ExtractionInvocation
@@ -52,6 +53,7 @@ class SpotlightsManagerConfig(BaseModel):
     extractor: ExtractorConfig = Field(default_factory=ExtractorConfig)
     discovery: DiscoveryConfig | None = None
     deep_research: CodexExecOptions | None = None
+    deep_research_antigravity: AntigravityExecOptions | None = None
     proposal_from_finding: ProposalFromFindingConfig | None = None
     agent_proposals: AgentProposalsConfig | None = None
 
@@ -103,7 +105,7 @@ class SpotlightsManagerResult(BaseModel):
     extractor_invocation: ExtractionInvocation
     per_module_telemetry: dict[str, ModuleTelemetry] = Field(default_factory=dict)
     manager_issues: list[StepIssue] = Field(default_factory=list)
-    renderer_result: "RendererResult | None" = None
+    renderer_result: RendererResult | None = None
 
 
 def run(

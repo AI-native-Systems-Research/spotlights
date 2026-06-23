@@ -36,7 +36,7 @@ class AgentExecResult(BaseModel):
 
 
 class ModuleResearchRunner(Protocol):
-    """Minimal interface shared by Codex, Claude, Gemini, and test fakes."""
+    """Minimal interface shared by Codex, Claude, Antigravity, and test fakes."""
 
     name: str
 
