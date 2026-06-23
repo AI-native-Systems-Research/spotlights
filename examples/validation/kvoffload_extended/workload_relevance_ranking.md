@@ -64,7 +64,7 @@ vllm serve deepseek-ai/DeepSeek-V3-0324 \
   --kv-transfer-config '{"kv_connector":"OffloadingConnector"}'
 
 # Benchmark
-python benchmarks/benchmark_serving.py \
+vllm bench serve \
   --model deepseek-ai/DeepSeek-V3-0324 \
   --num-prompts 20 \
   --sharegpt-pattern "A-B-A" \
@@ -84,7 +84,7 @@ vllm serve meta-llama/Llama-3.1-8B-Instruct \
   --kv-transfer-config '{"kv_connector":"OffloadingConnector"}'
 
 # Benchmark (multi-turn agentic pattern)
-python benchmarks/benchmark_serving.py \
+vllm bench serve \
   --model meta-llama/Llama-3.1-8B-Instruct \
   --dataset-name sharegpt \
   --multi-turn \
@@ -121,7 +121,7 @@ vllm serve Qwen/Qwen3.5-27B \
   --override-pooler-config '{"hybrid_kv_cache_manager": true}'
 
 # Benchmark
-python benchmarks/benchmark_serving.py \
+vllm bench serve \
   --model Qwen/Qwen3.5-27B \
   --num-prompts 10 \
   --input-len 512 \
@@ -141,7 +141,7 @@ vllm serve meta-llama/Llama-3.1-8B-Instruct \
   --max-num-seqs 128
 
 # Benchmark
-python benchmarks/benchmark_serving.py \
+vllm bench serve \
   --model meta-llama/Llama-3.1-8B-Instruct \
   --num-prompts 128 \
   --input-len 16384 \
@@ -160,7 +160,7 @@ vllm serve meta-llama/Llama-3.1-8B-Instruct \
   --kv-transfer-config '{"kv_connector":"SimpleCPUOffloadConnector"}'
 
 # Benchmark
-python benchmarks/benchmark_serving.py \
+vllm bench serve \
   --model meta-llama/Llama-3.1-8B-Instruct \
   --num-prompts 100 \
   --input-len 256 \
@@ -182,7 +182,7 @@ vllm serve meta-llama/Llama-3.1-8B-Instruct \
   --kv-transfer-config '{"kv_connector":"OffloadingConnector"}'
 
 # Benchmark (mixed prefill+decode via concurrent arrivals)
-python benchmarks/benchmark_serving.py \
+vllm bench serve \
   --model meta-llama/Llama-3.1-8B-Instruct \
   --num-prompts 200 \
   --input-len 2048 \
@@ -203,7 +203,7 @@ vllm serve Qwen/Qwen3-235B-A22B \
   --kv-transfer-config '{"kv_connector":"SimpleCPUOffloadConnector","cpu_bytes_to_use":34359738368}'
 
 # Benchmark
-python benchmarks/benchmark_serving.py \
+vllm bench serve \
   --model Qwen/Qwen3-235B-A22B \
   --num-prompts 200 \
   --max-concurrency 50 \
@@ -238,7 +238,7 @@ VLLM_BATCH_INVARIANT=1 vllm serve meta-llama/Llama-3.1-8B-Instruct \
   --kv-transfer-config '{"kv_connector":"OffloadingConnector","kv_connector_extra_config":{"num_cpu_blocks":50000}}'
 
 # Benchmark (determinism check: compare output for identical prompts)
-python benchmarks/benchmark_serving.py \
+vllm bench serve \
   --model meta-llama/Llama-3.1-8B-Instruct \
   --num-prompts 500 \
   --input-len 4000 \
@@ -257,7 +257,7 @@ vllm serve meta-llama/Llama-3.1-8B-Instruct \
   --kv-transfer-config '{"kv_connector":"OffloadingConnector"}'
 
 # Benchmark (small blocks, high request rate)
-python benchmarks/benchmark_serving.py \
+vllm bench serve \
   --model meta-llama/Llama-3.1-8B-Instruct \
   --num-prompts 512 \
   --input-len 128 \
@@ -277,7 +277,7 @@ vllm serve meta-llama/Llama-3.1-8B-Instruct \
   --override-pooler-config '{"hybrid_kv_cache_manager": true}'
 
 # Benchmark (sequential long-context requests)
-python benchmarks/benchmark_serving.py \
+vllm bench serve \
   --model meta-llama/Llama-3.1-8B-Instruct \
   --num-prompts 5 \
   --input-len 32768 \
@@ -296,7 +296,7 @@ vllm serve mistralai/Mistral-7B-Instruct-v0.3 \
   --kv-transfer-config '{"kv_connector":"SimpleCPUOffloadConnector"}'
 
 # Benchmark
-python benchmarks/benchmark_serving.py \
+vllm bench serve \
   --model mistralai/Mistral-7B-Instruct-v0.3 \
   --num-prompts 32 \
   --input-len 4096 \
@@ -318,7 +318,7 @@ vllm serve Qwen/Qwen2.5-1.5B-Instruct \
   --kv-transfer-config '{"kv_connector":"OffloadingConnector","decode_context_parallel_size":2,"kv_offloading_size":8}'
 
 # Benchmark
-python benchmarks/benchmark_serving.py \
+vllm bench serve \
   --model Qwen/Qwen2.5-1.5B-Instruct \
   --num-prompts 10 \
   --input-len 600 \
