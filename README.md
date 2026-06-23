@@ -197,15 +197,17 @@ Notes:
 - `base_url` is the proxy root for a Gemini API-compatible endpoint; do not hardcode environment-specific hosts in shared code.
 - Bearer auth maps the configured key environment variable (default `LITELLM_API_KEY`) to the SDK endpoint `Authorization` header.
 - Antigravity SDK uses Gemini streaming APIs internally. `AntigravityExecOptions.litellm_proxy(...)` enables a provider-neutral local SSE normalizer by default for gateways that wrap Gemini stream chunks as Python bytes repr frames or append OpenAI-style `[DONE]` sentinels. Pass `normalize_sse_bytes_repr=False` if your proxy already emits standards-compliant Gemini SSE.
+- For Gemini-compatible proxy runs, Spotlights injects bounded read-only module snippets into the Antigravity prompt and leaves only web search enabled in the SDK harness. Native Gemini API-key runs keep the SDK file tools; proxy users still get file grounding without depending on fragile workspace attachment behavior.
 - If your LiteLLM deployment uses different public model names, replace `gcp/gemini-3.1-pro-preview` with a public model that supports the research tools your gateway exposes.
 - Plain `AntigravityExecOptions()` keeps native Gemini API-key behavior via `GEMINI_API_KEY`.
 
 For LiteLLM-backed live research from Python, use
 `AntigravityExecOptions.litellm_proxy(...)` with the proxy root, bearer auth,
 and your gateway model IDs. Do not cap real module deep-research runs with
-short smoke-test timeouts; the SDK runner defaults to no timeout, and explicit
-timeouts for live research should be long enough for web/literature retrieval
-(15+ minutes is a reasonable floor).
+short smoke-test timeouts; the SDK runner uses a bounded proxy-path default
+that is intentionally long enough for file inspection, web/literature
+retrieval, and structured-output repair. If you set an explicit timeout for
+live research, keep it long enough for the same full turn loop.
 
 Swap the host and model IDs for your LiteLLM deployment. After editing config
 or environment, re-run `claude --version` / `codex --version` and the
@@ -447,7 +449,7 @@ All flags are optional once `--repo` and the agent CLIs are available.
 | `--antigravity-base-url` | native Gemini default | Optional Gemini-compatible endpoint for the Antigravity SDK runner. |
 | `--antigravity-model` | SDK/default | Optional model ID for the Antigravity SDK runner. |
 | `--antigravity-api-key-env` | `GEMINI_API_KEY`/SDK default | Env var containing the Gemini-compatible key. |
-| `--antigravity-timeout-seconds` | runner/provider default | Optional timeout for the Antigravity SDK call. |
+| `--antigravity-timeout-seconds` | runner/provider default | Optional timeout for the Antigravity SDK call; Gemini-compatible proxy runs use a bounded default sized for file + web research. |
 | `--antigravity-auth-mechanism` | `bearer` | Use `bearer` for gateway-style auth or `x-goog-api-key` for API-key header auth. |
 | `--no-antigravity-sse-normalizer` | normalizer enabled | Disable the provider-neutral SSE normalizer for gateways that already emit native Gemini SSE. |
 

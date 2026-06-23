@@ -309,6 +309,41 @@ def test_antigravity_litellm_proxy_enables_sse_bytes_repr_normalizer(tmp_path: P
     assert options.normalize_sse_bytes_repr is True
 
 
+def test_antigravity_proxy_default_timeout_covers_file_and_web_research(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import spotlights_engine.module_deep_research.antigravity_exec as ag_exec
+    from spotlights_engine.module_deep_research.antigravity_exec import (
+        AntigravityExecClient,
+        AntigravityExecOptions,
+    )
+
+    captured: dict[str, float] = {}
+
+    async def fake_run_antigravity(self, prompt):
+        return '{"findings":[],"issues":[]}'
+
+    async def fake_wait_for(coro, *, timeout):
+        captured["timeout"] = timeout
+        return await coro
+
+    monkeypatch.setattr(
+        ag_exec.AntigravityExecClient,
+        "_run_antigravity",
+        fake_run_antigravity,
+    )
+    monkeypatch.setattr(ag_exec.asyncio, "wait_for", fake_wait_for)
+
+    options = AntigravityExecOptions.litellm_proxy(
+        cwd=tmp_path,
+        base_url="https://litellm.example.com",
+    )
+    result = AntigravityExecClient(options).run("prompt", check=False)
+
+    assert result.ok
+    assert captured["timeout"] >= 600
+
+
 def test_antigravity_normalizes_litellm_bytes_repr_sse_line() -> None:
     from spotlights_engine.module_deep_research.antigravity_exec import (
         _forward_headers,
@@ -743,6 +778,12 @@ Output rules:
     assert "up to 2" in compacted
     assert "speed up speculative decoding" in compacted
 
+    broad_prompt = prompt.replace("Include at most 2 findings.", "Include at most 30 findings.")
+    broad_compacted = _maybe_compact_spotlights_prompt(
+        broad_prompt, compact=True, enable_file_tools=False
+    )
+    assert "up to 3" in broad_compacted
+
     wrapped = _wrap_simple_web_result(
         '{"findings":['
         '{"title":"Dual Pivot Rejection Sampling",'
@@ -944,6 +985,7 @@ Output rules:
         base_url="https://litellm.example.com",
         model="proxy/gemini",
         env={"LITELLM_API_KEY": "test-key"},
+        normalize_sse_bytes_repr=False,
     ).model_copy(
         update={
             "workspaces": [module_dir],
@@ -973,6 +1015,134 @@ Output rules:
     assert captured["agent_config_models"][0].name == "proxy/gemini"
     assert captured["agent_config_api_key"] is None
     assert json.loads(result.final_message) == {"findings": [], "issues": []}
+
+
+def test_antigravity_proxy_default_injects_inline_context_instead_of_file_tools(
+    monkeypatch, tmp_path: Path
+) -> None:
+    import contextlib
+    import sys
+    import types
+
+    import spotlights_engine.module_deep_research.antigravity_exec as ag_exec
+    from spotlights_engine.module_deep_research.antigravity_exec import (
+        AntigravityExecClient,
+        AntigravityExecOptions,
+    )
+
+    captured: dict[str, object] = {}
+    repo = tmp_path / "repo"
+    module_dir = repo / "vllm" / "v1" / "sample"
+    module_dir.mkdir(parents=True)
+    (module_dir / "sampler.py").write_text("def sample(): return 'ok'\n")
+
+    class BuiltinTools:
+        LIST_DIR = "list_directory"
+        SEARCH_DIR = "search_directory"
+        FIND_FILE = "find_file"
+        VIEW_FILE = "view_file"
+        FINISH = "finish"
+        SEARCH_WEB = "search_web"
+
+        @classmethod
+        def read_only(cls):
+            return [cls.LIST_DIR, cls.SEARCH_DIR, cls.FIND_FILE, cls.VIEW_FILE, cls.FINISH]
+
+    class CapabilitiesConfig:
+        def __init__(self, *, enabled_tools):
+            captured["enabled_tools"] = enabled_tools
+
+    class GeminiAPIEndpoint:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+
+    class ModelTarget:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.name = kwargs["name"]
+
+    class LocalAgentConfig:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            captured["local_config_kwargs"] = kwargs
+
+    class Agent:
+        def __init__(self, config):
+            self.config = config
+            self._config = types.SimpleNamespace(**config.kwargs)
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def chat(self, prompt):
+            captured["prompt"] = prompt
+
+            class Response:
+                async def structured_output(self):
+                    return None
+
+                async def text(self):
+                    return (
+                        '{"findings":[{"title":"Paper","url":"https://example.com",'
+                        '"source_type":"paper"}],"issues":[]}'
+                    )
+
+            return Response()
+
+    @contextlib.contextmanager
+    def fake_normalizer(options):
+        yield "https://normalizer.example.com"
+
+    fake = types.ModuleType("google.antigravity")
+    fake.Agent = Agent
+    fake.BuiltinTools = BuiltinTools
+    fake.CapabilitiesConfig = CapabilitiesConfig
+    fake.GeminiAPIEndpoint = GeminiAPIEndpoint
+    fake.LocalAgentConfig = LocalAgentConfig
+    fake.ModelTarget = ModelTarget
+    fake.ModelType = types.SimpleNamespace(TEXT="text")
+
+    monkeypatch.setitem(sys.modules, "google.antigravity", fake)
+    monkeypatch.setattr(ag_exec, "_maybe_sse_normalizer", fake_normalizer)
+
+    prompt = f"""You are running the Spotlights module_deep_research pipeline step.
+
+Repository working directory (the codex sandbox is rooted here; read files
+directly with relative paths from this root, e.g. the target module path
+below): {repo}
+
+Target module:
+Qualified name: v1/sample
+Path: vllm/v1/sample
+
+Caller context:
+Objective: speed up speculative decoding rejection sampling
+
+Workflow:
+1. Open files.
+
+Output rules:
+- Include at most 30 findings.
+"""
+
+    options = AntigravityExecOptions.litellm_proxy(
+        cwd=repo,
+        base_url="https://litellm.example.com",
+        model="proxy/gemini",
+        env={"LITELLM_API_KEY": "test-key"},
+    ).model_copy(update={"workspaces": [module_dir]})
+    result = AntigravityExecClient(options).run(prompt, check=False)
+
+    assert result.ok
+    assert captured["enabled_tools"] == ["search_web"]
+    assert captured["local_config_kwargs"]["workspaces"] == []
+    assert captured["prompt"].startswith("SPOTLIGHTS_SIMPLE_WEB_RESULT\n")
+    assert "def sample(): return 'ok'" in captured["prompt"]
+    assert "up to 3" in captured["prompt"]
+    assert json.loads(result.final_message)["findings"][0]["finding_id"] == "find-0001"
 
 
 def test_antigravity_web_only_proxy_path_uses_compact_wrapper(

@@ -24,7 +24,13 @@ from pydantic import BaseModel, ConfigDict, Field
 from spotlights_engine.module_deep_research.agent_exec import AgentExecResult
 
 DEFAULT_LITELLM_ANTIGRAVITY_MODEL = "gcp/gemini-3.1-pro-preview"
-_DEFAULT_PROXY_TIMEOUT_SECONDS = 120
+# Antigravity module research is intentionally a file-tool + web-search run.
+# Gemini-compatible gateways can spend several minutes on file inspection,
+# search calls, and structured-output repair before returning a final JSON
+# object. Keep the provider-neutral proxy default long enough for a normal
+# end-to-end module survey while still bounding stuck SDK/harness calls.
+_DEFAULT_PROXY_TIMEOUT_SECONDS = 600
+_DEFAULT_COMPACT_PROXY_MAX_FINDINGS = 3
 _PROXY_PLACEHOLDER_API_KEY = "proxy-placeholder-key"
 
 
@@ -187,7 +193,10 @@ class AntigravityExecClient:
                 "enable_file_tools": False,
                 "workspaces": [],
                 "stage_workspaces": False,
-                "timeout_seconds": max(opt.timeout_seconds or 0, 300),
+                "timeout_seconds": max(
+                    opt.timeout_seconds or 0,
+                    _DEFAULT_PROXY_TIMEOUT_SECONDS,
+                ),
             }
         )
         try:
@@ -249,17 +258,20 @@ class AntigravityExecClient:
             ) from exc
 
         opt = self.options
+        effective_enable_file_tools = opt.enable_file_tools
+        if _should_use_proxy_inline_context(opt):
+            prompt = _append_inline_workspace_context(prompt, opt)
+            effective_enable_file_tools = False
         prompt = _maybe_compact_spotlights_prompt(
             prompt,
             compact=bool(
                 opt.antigravity_base_url
                 and opt.normalize_sse_bytes_repr
             ),
-            enable_file_tools=opt.enable_file_tools,
+            enable_file_tools=effective_enable_file_tools,
         )
         wrap_simple_web_result = _is_simple_web_grounded_spotlights_prompt(prompt)
         cwd = Path(opt.cwd).expanduser().resolve()
-        effective_enable_file_tools = opt.enable_file_tools
         workspaces = (
             []
             if not effective_enable_file_tools
@@ -334,7 +346,24 @@ class AntigravityExecClient:
                 )
                 if wrap_simple_web_result:
                     return _wrap_simple_web_result(output)
-                return output
+        return output
+
+
+def _should_use_proxy_inline_context(options: AntigravityExecOptions) -> bool:
+    """Use local snippet injection instead of SDK file tools for proxy streams.
+
+    Native Gemini API-key runs keep Antigravity's file tools. For
+    Gemini-compatible proxy runs that need the local SSE normalizer, live runs
+    showed the SDK file-tool loop can read files and search but fail to
+    finalize before timeout. Injecting bounded read-only module snippets gives
+    the agent file grounding while keeping only the web-search tool in the SDK
+    harness.
+    """
+    return bool(
+        options.enable_file_tools
+        and options.antigravity_base_url
+        and options.normalize_sse_bytes_repr
+    )
 
 
 def _force_agent_model_targets(agent: Any, model_targets: list[Any]) -> None:
@@ -451,7 +480,15 @@ def _maybe_compact_spotlights_prompt(
         )
         or "(repository root)"
     )
-    max_findings = _extract_first_group(r"Include at most (\d+) findings\.", prompt) or "3"
+    requested_max_findings = _extract_first_group(
+        r"Include at most (\d+) findings\.", prompt
+    )
+    max_findings = str(
+        min(
+            int(requested_max_findings or _DEFAULT_COMPACT_PROXY_MAX_FINDINGS),
+            _DEFAULT_COMPACT_PROXY_MAX_FINDINGS,
+        )
+    )
     if enable_file_tools:
         return (
             "SPOTLIGHTS_COMPACT_MODULE_RESEARCH\n"
