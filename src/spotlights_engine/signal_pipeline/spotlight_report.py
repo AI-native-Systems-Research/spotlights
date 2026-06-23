@@ -364,12 +364,21 @@ _DEFAULT_SIGNAL_OBJECTIVE = "Address performance issues surfaced by telemetry si
 
 
 def _default_context(signals: Signals) -> SpotlightContext:
-    """Synthesize a `SpotlightContext` for signal runs.
+    """Fallback `SpotlightContext` when the caller didn't supply one.
 
-    Signal pipeline has no caller-supplied objective today; the unified
-    schema requires one (`SpotlightContext.objective: str` with
-    `min_length=1`). Use a fixed general objective for now — future runs
-    will supply real ones (e.g. "Reduce TTFT", "Improve median TPOT").
+    Used by `emit_spotlight_report(layout, ..., context=None)` and by
+    `run_pipeline` when `SignalPipelineInput.context is None` (today's
+    `signal-pipeline` CLI default — the standalone CLI doesn't expose
+    `--objective` and never sets the field). Programmatic callers
+    (notably the unified runner) thread an explicit
+    `SpotlightContext` so signal- and DR-side reports agree on
+    `objective` for clean merging — when they do, this fallback is
+    not used.
+
+    The unified `SpotlightReport` schema requires
+    `SpotlightContext.objective` to be a (possibly empty) string;
+    using a stable, descriptive default here keeps the standalone
+    signal output self-describing.
     """
     return SpotlightContext(
         objective=_DEFAULT_SIGNAL_OBJECTIVE,

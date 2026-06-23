@@ -19,17 +19,21 @@ at module top) so a missing origin/main layout fails fast in the runner's
 Stage 02 is the most expensive stage that doesn't depend on telemetry —
 running it against the same subject checkout produces a byte-identical
 ProjectTree (modulo schema drift). The cache lives at
-`~/.cache/spotlights-engine/projecttree/pt-<repo-hash>-<git-sha>[-<dirty-hash>].v1.json`
+`~/.cache/spotlights-engine/projecttree/pt-<repo-hash>-<git-sha>[-<dirty-hash>].v2.json`
 and short-circuits extraction when the (resolved repo path, git HEAD,
 porcelain status) tuple matches. Bypass with `--no-projecttree-cache`
-or `SignalPipelineInput.projecttree_cache=False`.
+or `SignalPipelineInput.projecttree_cache=False`. The unified runner
+(`spotlights-engine both`) skips this cache and pre-populates stage 02's
+artifact directly; this cache is exercised only by direct
+`signal-pipeline` / `spotlights-engine signal` invocations.
 
 Cache misses cleanly when:
 - subject_root isn't a git repo (no SHA available)
 - HEAD has moved
 - working tree is dirty in a way that hashes differently (porcelain output
   is part of the key)
-- ProjectTree schema has bumped past v1 (filename suffix)
+- ProjectTree schema has bumped past v2 (filename suffix; bumped from v1
+  when qualified names became source-root-relative)
 """
 
 from __future__ import annotations

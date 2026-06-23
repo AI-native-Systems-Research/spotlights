@@ -851,15 +851,24 @@ real module names.
 
 ### 4.6 Where the `SpotlightReport` is written
 
-- DR adapter writes `<artifacts_dir>/spotlight_report.json` next to
-  the existing `result.json`.
-- Signal adapter writes `runs/<id>/spotlight_report.json` next to
-  the existing artifacts.
+- **Signal pipeline (standalone)** auto-emits
+  `<run-dir>/spotlight_report.json` from `emit_spotlight_report` at
+  the end of the runner.
+- **Deep-research (standalone)** builds the report in-memory through
+  `SpotlightsManagerResult.report` and **does not persist it** to its
+  artifacts dir today (consumers go through the
+  `SpotlightsManagerResult` envelope; `output_folder/result.json`
+  carries the wrapper, not the bare report).
+- **Unified runner (`spotlights-engine both` / `spotlights-engine signal`)**
+  writes `<unified-run-dir>/spotlight_report.json` (the canonical
+  merged report, `pipeline="unified"`) plus, for symmetry,
+  `<unified-run-dir>/deep_research/spotlight_report.json` and
+  `<unified-run-dir>/signal/spotlight_report.json`.
 
-Both adapters can also be exposed as standalone CLI subcommands
-(`spotlights-engine report <result.json>`,
-`signal-pipeline report <run-dir>`) for re-converting historical
-artifacts without re-running the pipeline.
+Standalone re-conversion CLIs
+(`spotlights-engine report <result.json>`, `signal-pipeline report
+<run-dir>`) are still on the table for re-emitting historical
+artifacts without re-running the pipeline; not yet implemented.
 
 ### 4.7 DR diagnostic envelopes — dropped from report
 

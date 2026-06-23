@@ -8,6 +8,19 @@ architecture lives in
 and data contracts in
 [`docs/signal-based/mvp_module_apis.md`](../../../docs/signal-based/mvp_module_apis.md).
 
+Two entry points cover this pipeline:
+
+- **`spotlights-engine signal`** — the recommended top-level entry. Goes
+  through the [unified runner](../unified_runner/), shares the one-shot
+  `ProjectTree` extraction with the deep-research path when invoked as
+  `spotlights-engine both`, and emits a unified
+  `SpotlightReport` (`pipeline="unified"`).
+- **`signal-pipeline`** — the standalone CLI documented below. Exposes
+  the lower-level stage controls (`--from-stage` / `--to-stage` /
+  `--inject`) and the opt-in stage 05 (subject-mutating execution). Use
+  this for stage-replay debugging, prompt iteration, or when you
+  explicitly want stage 05 to run.
+
 ---
 
 ## The five stages
@@ -18,7 +31,7 @@ and data contracts in
 | 02 | **ProjectTree extraction** | Walks the subject repo and produces a structural map (modules, main files with roles, dependencies, descriptions). |
 | 03 | **Candidate generation** | Reasons over `Signals` + `ProjectTree` to find what's worth optimizing. **Findings only — no proposed fixes.** Drills into source via `Read`. |
 | 04 | **Change generation** *(per candidate)* | Turns each `Candidate` into a `Change` spec (`change_type`, `mechanism`, `expected_effect`, `evaluation_metric`). Spec only — no edits. |
-| 05 | **Execution backend** *(per change)* | Applies the `Change` to the subject repo via `claude -p` with edit permissions. Produces an `ExecutionResult` with file edits + rationale. |
+| 05 | **Execution backend** *(per change, opt-in)* | Applies the `Change` to the subject repo via `claude -p` with edit permissions. Produces an `ExecutionResult` with file edits + rationale. **Default `--to-stage` is 04** since stage 05 mutates the subject; pass `--to-stage 05` explicitly to run it (and never run it concurrently with deep-research on the same checkout — it would collide with `candidate_discovery/repo_guard`). |
 
 Knowledge retrieval, validation, and archive are deferred per the design
 doc and aren't implemented here.
@@ -53,12 +66,14 @@ after the fact. Stage 02 currently goes through main's
 `modules_extractor` and doesn't surface model/cost yet.
 
 **ProjectTree cache.** Stage 02 caches its output across runs at
-`~/.cache/spotlights-engine/projecttree/pt-<repo-hash>-<git-sha>[-<dirty>].v1.json`,
+`~/.cache/spotlights-engine/projecttree/pt-<repo-hash>-<git-sha>[-<dirty>].v2.json`,
 keyed by `(resolved subject path, git HEAD, working-tree porcelain hash)`.
 Re-running against the same checkout short-circuits stage 02 entirely
 (saves ~3 min and ~$0.62 per run). Bypass with `--no-projecttree-cache`
 to force a fresh extraction (the result still updates the cache).
 Non-git subject directories don't cache — no stable identity to key on.
+The cache key version is bumped on schema changes — `v2` reflects the
+qualified-name convention move to source-root-relative slash form.
 
 **Capping the candidate count.** Pass `--max-candidates N` to nudge
 stage 03 toward producing at most N candidates, prioritized by signal
@@ -82,6 +97,8 @@ model decides based on signal richness, typically 3–8 for the LRU smoke).
 If all three are unset, `claude -p` uses its own configured default.
 The actual model that ran each stage is recorded in
 `status.json[stages].<id>.model` and `_logs/<NN>_<name>/meta.json`.
+
+**Caller-supplied `SpotlightContext`.** `SignalPipelineInput.context: SpotlightContext | None` lets a programmatic caller pin the report's `objective` / `workload_hints` / `validation_plan`. When `None` (today's `signal-pipeline` CLI default), the runner synthesizes a context from the workload description in stage 01's signals. The unified runner (`spotlights-engine both`) sets it explicitly so signal- and DR-side reports agree on context — they then merge cleanly into one `SpotlightReport`.
 
 ---
 
@@ -281,6 +298,8 @@ Tests live at [`tests/unit/signal_pipeline/`](../../../tests/unit/signal_pipelin
 
 ## See also
 
+- [`spotlights_engine/unified_runner/`](../unified_runner/) — the package behind `spotlights-engine both` / `spotlights-engine signal`; pre-populates this pipeline's stage 02 artifact so the extractor only runs once when both pipelines run together.
+- [`docs/specs/spotlight_report.md`](../../../docs/specs/spotlight_report.md) — unified `SpotlightReport` schema.
 - [`docs/signal-based/signal_discovery_flow.md`](../../../docs/signal-based/signal_discovery_flow.md) — architecture (mermaid + demo stories).
 - [`docs/signal-based/signal_discovery_overview.md`](../../../docs/signal-based/signal_discovery_overview.md) — 5-min human-friendly read.
 - [`docs/signal-based/mvp_module_apis.md`](../../../docs/signal-based/mvp_module_apis.md) — per-module schemas + interaction walks.
