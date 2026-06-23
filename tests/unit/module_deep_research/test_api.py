@@ -230,7 +230,7 @@ def test_research_module_parallel_runner_pool() -> None:
     assert output.issues == []
 
 
-def test_research_module_treats_finding_cap_as_per_runner() -> None:
+def test_research_module_treats_finding_cap_as_per_module() -> None:
     runners = [
         NamedFakeRunner("codex", _payload("A", "https://example.com/a")),
         NamedFakeRunner("claude", _payload("B", "https://example.com/b")),
@@ -241,10 +241,8 @@ def test_research_module_treats_finding_cap_as_per_runner() -> None:
 
     assert [finding.finding_id for finding in output.findings] == [
         "find-inference_attention-0001",
-        "find-inference_attention-0002",
-        "find-inference_attention-0003",
     ]
-    assert [finding.title for finding in output.findings] == ["A", "B", "C"]
+    assert [finding.title for finding in output.findings] == ["A"]
 
 
 def test_claude_default_max_turns_is_16() -> None:
@@ -282,7 +280,9 @@ def test_claude_command_shape_uses_litellm_safe_research_tools(tmp_path: Path) -
 def test_select_runners_defaults_to_codex_claude_antigravity(tmp_path: Path) -> None:
     from spotlights_engine.module_deep_research.antigravity_exec import AntigravityExecOptions
     from spotlights_engine.module_deep_research.orchestration import select_runners
+    from spotlights_engine.schemas.project import Module
 
+    module = Module(name="sample", path="vllm/v1/sample")
     runners = select_runners(
         repo_path=tmp_path,
         codex_options=None,
@@ -290,12 +290,14 @@ def test_select_runners_defaults_to_codex_claude_antigravity(tmp_path: Path) -> 
             cwd=tmp_path,
             base_url="https://litellm.example.com",
         ),
+        target_module=module,
         runner=None,
         runners=None,
     )
 
     assert [runner.name for runner in runners] == ["codex", "claude", "antigravity"]
     assert runners[-1].options.response_schema is ModuleDeepResearchOutput
+    assert runners[-1].options.workspaces == [tmp_path / "vllm/v1/sample"]
 
 
 def test_antigravity_litellm_proxy_enables_sse_bytes_repr_normalizer(tmp_path: Path) -> None:
@@ -307,6 +309,40 @@ def test_antigravity_litellm_proxy_enables_sse_bytes_repr_normalizer(tmp_path: P
     )
 
     assert options.normalize_sse_bytes_repr is True
+
+
+def test_antigravity_extracts_json_after_thought_text() -> None:
+    import asyncio
+
+    from spotlights_engine.module_deep_research.antigravity_exec import (
+        _chat_text_or_structured_json,
+    )
+
+    class FakeResponse:
+        async def text(self) -> str:
+            return (
+                "**Thinking about JSON**\n\n"
+                "{\"findings\":[{\"finding_id\":\"find-0001\",\"title\":\"...\","
+                "\"url\":\"...\",\"source_type\":\"other\","
+                "\"technique_summary\":\"...\",\"supporting_evidence\":\"...\"}],"
+                "\"issues\":[]}\n"
+                "{\"findings\":[{\"finding_id\":\"find-0001\",\"title\":\"T\","
+                "\"url\":\"https://example.com\",\"source_type\":\"paper\","
+                "\"technique_summary\":\"S\",\"supporting_evidence\":\"E\"}],"
+                "\"issues\":[]}\nextra trailing text"
+            )
+
+    class FakeAgent:
+        async def chat(self, prompt: str) -> FakeResponse:
+            return FakeResponse()
+
+    output = asyncio.run(_chat_text_or_structured_json(FakeAgent(), "prompt"))
+
+    assert output.startswith("{")
+    assert output.endswith("}")
+    parsed = json.loads(output)
+    assert parsed["findings"][0]["finding_id"] == "find-0001"
+    assert parsed["findings"][0]["url"] == "https://example.com"
 
 
 def test_antigravity_proxy_default_timeout_covers_file_and_web_research(
@@ -430,7 +466,7 @@ def test_antigravity_normalizer_preserves_vertex_thought_signature() -> None:
     normalized = normalize_litellm_sse_bytes_repr_line(line)
 
     assert normalized is not None
-    assert b"thoughtSignature" in normalized
+    assert b"thoughtSignature" not in normalized
     assert b'"text":"hi"' in normalized
     assert b"usageMetadata" not in normalized
     assert b"modelVersion" not in normalized
@@ -459,15 +495,17 @@ def test_antigravity_normalizer_preserves_vertex_thought_signature() -> None:
     )
     normalized_plain = normalize_litellm_vertex_sse_line(plain_vertex)
     assert normalized_plain is not None
-    assert b"thoughtSignature" in normalized_plain
+    assert b"thoughtSignature" not in normalized_plain
     assert b"usageMetadata" not in normalized_plain
     assert b'"text":"hi"' in normalized_plain
 
-    thought_only = normalize_litellm_vertex_sse_line(
+    thought_text = normalize_litellm_vertex_sse_line(
         'data: {"candidates":[{"content":{"parts":[{"text":"thinking",'
         '"thought":true}]}}],"usageMetadata":{"x":1}}'
     )
-    assert thought_only == b""
+    assert thought_text is not None
+    assert b'"text":"thinking"' in thought_text
+    assert b'"thought"' not in thought_text
 
     fragmented = list(
         _normalize_sse_lines(
@@ -777,12 +815,15 @@ Output rules:
     assert "Use web search" in compacted
     assert "up to 2" in compacted
     assert "speed up speculative decoding" in compacted
+    assert "target module's owned responsibilities" in compacted
+    assert "Reject broad repository-level" in compacted
+    assert "exact source page" in compacted
 
     broad_prompt = prompt.replace("Include at most 2 findings.", "Include at most 30 findings.")
     broad_compacted = _maybe_compact_spotlights_prompt(
         broad_prompt, compact=True, enable_file_tools=False
     )
-    assert "up to 3" in broad_compacted
+    assert "up to 30" in broad_compacted
 
     wrapped = _wrap_simple_web_result(
         '{"findings":['
@@ -837,11 +878,20 @@ Output rules:
     assert "SPOTLIGHTS_COMPACT_MODULE_RESEARCH" in file_compacted
     assert "Read the target module main files" in file_compacted
     assert "Use file tools" in file_compacted
-    assert "Include at most 2 findings" in file_compacted
+    assert "Include up to 2 findings" in file_compacted
+
+    missing_cap_prompt = prompt.replace("- Include at most 2 findings.\n", "")
+    missing_cap_compacted = _maybe_compact_spotlights_prompt(
+        missing_cap_prompt, compact=True, enable_file_tools=False
+    )
+    assert "up to 3" not in missing_cap_compacted
+    assert "only the requested number of" in missing_cap_compacted
 
 
 def test_antigravity_inline_context_skips_large_ignored_dirs(tmp_path: Path) -> None:
     from spotlights_engine.module_deep_research.antigravity_exec import (
+        AntigravityExecOptions,
+        _append_inline_workspace_context,
         _iter_inline_context_files,
     )
 
@@ -856,6 +906,28 @@ def test_antigravity_inline_context_skips_large_ignored_dirs(tmp_path: Path) -> 
     files = list(_iter_inline_context_files([repo], max_files=4, max_scanned_entries=10))
 
     assert files == [(module_dir / "sampler.py").resolve()]
+
+    (repo / "noise.py").write_text("def wrong_module(): return 'noise'\n")
+    prompt = """You are running the Spotlights module_deep_research pipeline step.
+
+Target module:
+Qualified name: missing
+
+Caller context:
+Objective: reduce latency
+"""
+    with_context = _append_inline_workspace_context(
+        prompt, AntigravityExecOptions(cwd=repo)
+    )
+    assert "wrong_module" not in with_context
+    assert "no readable workspace files found" in with_context
+
+    outside_prompt = prompt.replace("Qualified name: missing", f"Path: {tmp_path / 'outside'}")
+    outside_context = _append_inline_workspace_context(
+        outside_prompt, AntigravityExecOptions(cwd=repo)
+    )
+    assert "wrong_module" not in outside_context
+    assert "no readable workspace files found" in outside_context
 
 
 def test_antigravity_proxy_path_keeps_file_tools_and_stages_workspace(
@@ -1034,6 +1106,7 @@ def test_antigravity_proxy_default_injects_inline_context_instead_of_file_tools(
     repo = tmp_path / "repo"
     module_dir = repo / "vllm" / "v1" / "sample"
     module_dir.mkdir(parents=True)
+    (repo / "aaa_noise.py").write_text("def wrong_module(): return 'noise'\n")
     (module_dir / "sampler.py").write_text("def sample(): return 'ok'\n")
 
     class BuiltinTools:
@@ -1133,7 +1206,7 @@ Output rules:
         base_url="https://litellm.example.com",
         model="proxy/gemini",
         env={"LITELLM_API_KEY": "test-key"},
-    ).model_copy(update={"workspaces": [module_dir]})
+    )
     result = AntigravityExecClient(options).run(prompt, check=False)
 
     assert result.ok
@@ -1141,7 +1214,9 @@ Output rules:
     assert captured["local_config_kwargs"]["workspaces"] == []
     assert captured["prompt"].startswith("SPOTLIGHTS_SIMPLE_WEB_RESULT\n")
     assert "def sample(): return 'ok'" in captured["prompt"]
-    assert "up to 3" in captured["prompt"]
+    assert "wrong_module" not in captured["prompt"]
+    assert "End inline target module context." not in captured["prompt"]
+    assert "up to 30" in captured["prompt"]
     assert json.loads(result.final_message)["findings"][0]["finding_id"] == "find-0001"
 
 

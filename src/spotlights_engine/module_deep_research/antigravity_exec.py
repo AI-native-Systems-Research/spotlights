@@ -30,7 +30,6 @@ DEFAULT_LITELLM_ANTIGRAVITY_MODEL = "gcp/gemini-3.1-pro-preview"
 # object. Keep the provider-neutral proxy default long enough for a normal
 # end-to-end module survey while still bounding stuck SDK/harness calls.
 _DEFAULT_PROXY_TIMEOUT_SECONDS = 600
-_DEFAULT_COMPACT_PROXY_MAX_FINDINGS = 3
 _PROXY_PLACEHOLDER_API_KEY = "proxy-placeholder-key"
 
 
@@ -480,15 +479,8 @@ def _maybe_compact_spotlights_prompt(
         )
         or "(repository root)"
     )
-    requested_max_findings = _extract_first_group(
-        r"Include at most (\d+) findings\.", prompt
-    )
-    max_findings = str(
-        min(
-            int(requested_max_findings or _DEFAULT_COMPACT_PROXY_MAX_FINDINGS),
-            _DEFAULT_COMPACT_PROXY_MAX_FINDINGS,
-        )
-    )
+    max_findings = _extract_first_group(r"Include at most (\d+) findings\.", prompt)
+    findings_limit = f"up to {max_findings}" if max_findings else "only the requested number of"
     if enable_file_tools:
         return (
             "SPOTLIGHTS_COMPACT_MODULE_RESEARCH\n"
@@ -507,10 +499,10 @@ def _maybe_compact_spotlights_prompt(
             "\"title\":string,\"url\":string,\"source_type\":\"paper|blog|docs|"
             "issue|pr|talk|codebase|other\",\"technique_summary\":string,"
             "\"supporting_evidence\":string}],\"issues\":[]}.\n"
-            f"Include at most {max_findings} findings. Keep only sources with a "
-            "specific transferable optimization idea for speculative decoding "
-            "sampling/rejection hot paths. If evidence is insufficient, return "
-            "empty findings with a recoverable issue."
+            f"Include {findings_limit} findings. Keep only sources with a "
+            "specific transferable optimization idea for the caller objective "
+            "and target module responsibilities. If evidence is insufficient, "
+            "return empty findings with a recoverable issue."
         )
     inline_context = _extract_prompt_section(
         prompt,
@@ -523,10 +515,17 @@ def _maybe_compact_spotlights_prompt(
         "a module summary, file inventory, or keys named module/name/path/files.\n\n"
         f"Target module:\n{target_module}\n\n"
         f"Inline module code context:\n{inline_context}\n\n"
-        f"Use web search to find up to {max_findings} recent papers, blogs, "
-        "docs pages, issues, or PRs with concrete techniques related to this "
-        "caller objective. "
+        f"Use web search to find {findings_limit} recent papers, blogs, "
+        "docs pages, issues, or PRs with concrete techniques that apply to the "
+        "target module's owned responsibilities, as evidenced by the target "
+        "module description and inline code context above. Reject broad "
+        "repository-level, deployment-level, or serving-system techniques unless "
+        "the source gives a concrete method that could be implemented inside this "
+        "target module's local responsibility. "
         f"Caller objective: {objective}. "
+        "supporting_evidence must include a short verbatim quote or a precise "
+        "source pointer; url must be the exact source page rather than a domain "
+        "homepage; do not invent benchmark numbers or URLs. "
         "Return ONLY JSON: "
         "{\"findings\":[{\"title\": string, \"url\": string, "
         "\"source_type\": \"paper|blog|docs|issue|pr|talk|codebase|other\", "
@@ -546,9 +545,7 @@ def _append_inline_workspace_context(
     if "Inline target module context:" in prompt:
         return prompt
     cwd = Path(options.cwd).expanduser().resolve()
-    workspace_paths = [
-        Path(path).expanduser().resolve() for path in (options.workspaces or [cwd])
-    ]
+    workspace_paths = _inline_context_workspace_paths(prompt, options, cwd)
     chunks: list[str] = []
     remaining = max_total_chars
     for file_path in _iter_inline_context_files(workspace_paths, max_files=max_files):
@@ -654,13 +651,36 @@ def _iter_inline_context_files(
     yield from candidates[:max_files]
 
 
+def _inline_context_workspace_paths(
+    prompt: str, options: AntigravityExecOptions, cwd: Path
+) -> list[Path]:
+    if options.workspaces:
+        return [Path(path).expanduser().resolve() for path in options.workspaces]
+    target_path = _extract_first_group(r"^Path: ([^\n]+)", prompt, flags=re.MULTILINE)
+    if target_path:
+        candidate = Path(target_path.strip())
+        if not candidate.is_absolute():
+            candidate = cwd / candidate
+        candidate = candidate.expanduser().resolve()
+        try:
+            candidate.relative_to(cwd)
+        except ValueError:
+            return []
+        if candidate.exists():
+            return [candidate]
+    return []
+
+
 def _is_simple_web_grounded_spotlights_prompt(prompt: str) -> bool:
     return prompt.startswith("SPOTLIGHTS_SIMPLE_WEB_RESULT\n")
 
 
 def _wrap_simple_web_result(output: str) -> str:
     try:
-        payload = json.loads(_extract_json_object_text(output))
+        payload = json.loads(
+            _extract_module_deep_research_json_text(output)
+            or _extract_json_object_text(output)
+        )
     except (TypeError, json.JSONDecodeError):
         return output
     if not isinstance(payload, dict):
@@ -670,9 +690,9 @@ def _wrap_simple_web_result(output: str) -> str:
         findings = [
             _simple_web_finding(item, index)
             for index, item in enumerate(raw_findings, start=1)
-            if isinstance(item, dict) and item.get("title") and item.get("url")
+            if _is_usable_finding_payload(item)
         ]
-    elif payload.get("title") and payload.get("url"):
+    elif _is_usable_finding_payload(payload):
         findings = [_simple_web_finding(payload, 1)]
     else:
         return output
@@ -713,7 +733,7 @@ def _normalize_source_type(value: Any) -> str:
 
 
 def _extract_prompt_section(prompt: str, start: str, end: str) -> str:
-    pattern = rf"{re.escape(start)}:\n(?P<body>.*?)(?:\n\n{re.escape(end)}:|\Z)"
+    pattern = rf"{re.escape(start)}:\n(?P<body>.*?)(?:\n\n?{re.escape(end)}:?\n?|\Z)"
     match = re.search(pattern, prompt, flags=re.DOTALL)
     if match is None:
         return "(not provided)"
@@ -742,9 +762,14 @@ def _structured_output_repair_prompt(attempt: int) -> str:
         + "Finalize now using only the context already gathered in this conversation. "
         + "Do not call search, file, shell, or planning tools. Return a raw JSON "
         + "object only, with no markdown or explanation. Required shape: "
-        + '{"findings":[{"finding_id":"find-0001","title":"...","url":"...",'
+        + '{"findings":[{"finding_id":"find-0001","title":"real source title",'
+        + '"url":"https://exact-source.example/path",'
         + '"source_type":"paper|blog|docs|issue|pr|talk|codebase|other",'
-        + '"technique_summary":"...","supporting_evidence":"..."}],"issues":[]}. '
+        + '"technique_summary":"concrete technique summary",'
+        + '"supporting_evidence":"quote or precise source pointer"}],"issues":[]}. '
+        + "Do not copy these example values, return literal ellipses, or use "
+        + "placeholder titles/URLs; if evidence is insufficient, return empty "
+        + "findings with a recoverable issue. "
         + "Do not return module summaries or keys such as module, name, path, "
         + "description, depends_on, files, or key_classes. If a finish tool is the "
         + "only available finalization channel, call finish with only findings and "
@@ -767,8 +792,9 @@ async def _chat_text_or_structured_json(
             if structured is not None:
                 return json.dumps(structured, default=_json_default)
         text = await response.text()
-        if _looks_like_json_object(text) and _is_module_deep_research_json(text):
-            return text
+        json_text = _extract_module_deep_research_json_text(text)
+        if json_text is not None:
+            return json_text
         if attempt + 1 >= attempts:
             return text
         response = await agent.chat(_structured_output_repair_prompt(attempt + 1))
@@ -780,16 +806,51 @@ def _looks_like_json_object(value: str) -> bool:
     return stripped.startswith("{") and stripped.endswith("}")
 
 
+def _extract_module_deep_research_json_text(value: str) -> str | None:
+    stripped = value.strip()
+    if not stripped:
+        return None
+    decoder = json.JSONDecoder()
+    for index, character in enumerate(stripped):
+        if character != "{":
+            continue
+        try:
+            parsed, end = decoder.raw_decode(stripped[index:])
+        except json.JSONDecodeError:
+            continue
+        if _is_module_deep_research_payload(parsed):
+            return stripped[index : index + end]
+    return None
+
+
 def _is_module_deep_research_json(value: str) -> bool:
-    try:
-        parsed = json.loads(_extract_json_object_text(value))
-    except (TypeError, json.JSONDecodeError):
-        return False
+    return _extract_module_deep_research_json_text(value) is not None
+
+
+def _is_module_deep_research_payload(parsed: Any) -> bool:
     if not isinstance(parsed, dict):
         return False
-    if isinstance(parsed.get("findings"), list):
-        return True
-    return bool(parsed.get("title") and parsed.get("url"))
+    findings = parsed.get("findings")
+    if isinstance(findings, list):
+        return all(_is_usable_finding_payload(item) for item in findings)
+    return _is_usable_finding_payload(parsed)
+
+
+def _is_usable_finding_payload(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    title = value.get("title")
+    url = value.get("url")
+    if not isinstance(title, str) or not isinstance(url, str):
+        return False
+    if _is_placeholder_text(title) or _is_placeholder_text(url):
+        return False
+    return url.startswith(("http://", "https://"))
+
+
+def _is_placeholder_text(value: str) -> bool:
+    stripped = value.strip().lower()
+    return stripped in {"", "...", "…", "n/a", "none", "null", "todo"}
 
 
 def _json_default(value: Any) -> Any:
@@ -1379,7 +1440,24 @@ def _drop_inert_candidate_parts(obj: Any) -> None:
         parts = content.get("parts")
         if not isinstance(parts, list):
             continue
-        content["parts"] = [part for part in parts if not _is_inert_candidate_part(part)]
+        normalized_parts = []
+        for part in parts:
+            if _is_inert_candidate_part(part):
+                continue
+            normalized_parts.append(_normalize_candidate_part(part))
+        content["parts"] = normalized_parts
+
+
+def _normalize_candidate_part(part: Any) -> Any:
+    if not isinstance(part, dict):
+        return part
+    text = part.get("text")
+    if isinstance(text, str) and text.strip() and not part.get("functionCall"):
+        normalized = dict(part)
+        normalized.pop("thought", None)
+        normalized.pop("thoughtSignature", None)
+        return normalized
+    return part
 
 
 def _is_inert_candidate_part(part: Any) -> bool:
@@ -1406,7 +1484,7 @@ def _is_inert_candidate_part(part: Any) -> bool:
     if any(part.get(key) for key in meaningful_payload_keys):
         return False
     text = part.get("text")
-    if isinstance(text, str) and text.strip() and part.get("thought") is not True:
+    if isinstance(text, str) and text.strip():
         return False
     return True
 
@@ -1450,17 +1528,6 @@ def _is_empty_terminal_candidate_chunk(obj: Any) -> bool:
             if part.get("functionCall"):
                 return False
     return has_finish
-
-
-def _drop_keys_recursive(value: Any, keys: set[str]) -> None:
-    if isinstance(value, dict):
-        for key in keys:
-            value.pop(key, None)
-        for child in value.values():
-            _drop_keys_recursive(child, keys)
-    elif isinstance(value, list):
-        for child in value:
-            _drop_keys_recursive(child, keys)
 
 
 def _write_chunked(wfile: Any, chunk: bytes) -> None:

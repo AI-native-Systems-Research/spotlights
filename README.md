@@ -195,7 +195,7 @@ antigravity_runner = AntigravityExecClient(
 Notes:
 
 - `base_url` is the proxy root for a Gemini API-compatible endpoint; do not hardcode environment-specific hosts in shared code.
-- Bearer auth maps the configured key environment variable (default `LITELLM_API_KEY`) to the SDK endpoint `Authorization` header.
+- Bearer auth maps the configured key environment variable (default `LITELLM_API_KEY`) to the upstream gateway `Authorization` header; when the local SSE normalizer is enabled, the normalizer injects that header while the SDK receives only a placeholder key needed for endpoint construction.
 - Antigravity SDK uses Gemini streaming APIs internally. `AntigravityExecOptions.litellm_proxy(...)` enables a provider-neutral local SSE normalizer by default for gateways that wrap Gemini stream chunks as Python bytes repr frames or append OpenAI-style `[DONE]` sentinels. Pass `normalize_sse_bytes_repr=False` if your proxy already emits standards-compliant Gemini SSE.
 - For Gemini-compatible proxy runs, Spotlights injects bounded read-only module snippets into the Antigravity prompt and leaves only web search enabled in the SDK harness. Native Gemini API-key runs keep the SDK file tools; proxy users still get file grounding without depending on fragile workspace attachment behavior.
 - If your LiteLLM deployment uses different public model names, replace `gcp/gemini-3.1-pro-preview` with a public model that supports the research tools your gateway exposes.

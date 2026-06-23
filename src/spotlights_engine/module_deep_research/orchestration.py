@@ -61,12 +61,18 @@ def resolve_target_module(project_tree: ProjectTree, module_qualified_name: str)
 
 
 def _module_antigravity_options(
-    options: AntigravityExecOptions | None, *, repo_path: Path
+    options: AntigravityExecOptions | None,
+    *,
+    repo_path: Path,
+    module: Module | None = None,
 ) -> AntigravityExecOptions:
     base = options or AntigravityExecOptions(cwd=repo_path)
-    if base.response_schema is not None:
-        return base
-    return base.model_copy(update={"response_schema": ModuleDeepResearchOutput})
+    updates: dict[str, object] = {}
+    if base.response_schema is None:
+        updates["response_schema"] = ModuleDeepResearchOutput
+    if base.workspaces is None and module is not None:
+        updates["workspaces"] = [repo_path / module.path]
+    return base.model_copy(update=updates) if updates else base
 
 
 def select_runners(
@@ -74,6 +80,7 @@ def select_runners(
     repo_path: Path,
     codex_options: CodexExecOptions | None,
     antigravity_options: AntigravityExecOptions | None = None,
+    target_module: Module | None = None,
     runner: ModuleResearchRunner | None,
     runners: Sequence[ModuleResearchRunner] | None,
 ) -> tuple[ModuleResearchRunner, ...]:
@@ -89,7 +96,11 @@ def select_runners(
         CodexExecClient(codex_options or CodexExecOptions(cwd=repo_path)),
         ClaudeExecClient(ClaudeExecOptions(cwd=repo_path)),
         AntigravityExecClient(
-            _module_antigravity_options(antigravity_options, repo_path=repo_path)
+            _module_antigravity_options(
+                antigravity_options,
+                repo_path=repo_path,
+                module=target_module,
+            )
         ),
     )
 
@@ -177,10 +188,9 @@ def merge_outcomes(
             findings.append(finding)
 
     merged = AgentModuleDeepResearchOutput(findings=findings, issues=issues)
-    merged_findings_cap = max_findings_per_module * len(outcomes)
     return normalize_module_deep_research_output(
         merged,
-        max_findings_per_module=merged_findings_cap,
+        max_findings_per_module=max_findings_per_module,
         segment=segment,
     )
 

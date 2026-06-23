@@ -53,6 +53,7 @@ def research_module(
         repo_path=request.repo_path,
         codex_options=codex_options,
         antigravity_options=antigravity_options,
+        target_module=module,
         runner=runner,
         runners=runners,
     )
