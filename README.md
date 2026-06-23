@@ -210,28 +210,28 @@ The public CLI also exposes provider-neutral runtime overrides, so callers do
 not need to hardcode organization-specific hosts in shared code:
 
 ```bash
+export GATEWAY_API_KEY="<your-gateway-key>"
+
 spotlights-engine \
   --repo /path/to/target-repo \
   --codex-profile <codex-profile> \
   --claude-model <claude-model-id> \
   --claude-base-url https://your-claude-compatible-host.example.com \
-  --claude-auth-token-env LITELLM_API_KEY \
+  --claude-auth-token-env GATEWAY_API_KEY \
   --claude-unset-env ANTHROPIC_API_KEY \
   --claude-disable-experimental-betas \
   --antigravity-base-url https://your-gemini-compatible-host.example.com \
   --antigravity-model <gemini-model-id> \
-  --antigravity-api-key-env LITELLM_API_KEY
+  --antigravity-api-key-env GATEWAY_API_KEY
 ```
 
 `--claude-auth-token-env` copies the named environment variable into
 `ANTHROPIC_AUTH_TOKEN` only for child Claude processes. If your Claude Code
-uses the official Anthropic API key directly, omit the Claude proxy flags. If
-you use a Python environment manager such as conda or micromamba and the engine
-already imports successfully there, prefer running from that active environment
-(or `python -m pip install -e .`) over re-syncing all optional extras into it.
+uses the official Anthropic API key directly, omit the Claude proxy flags.
 
-Swap the host and model IDs for your deployment. After editing config or
-environment, re-run `claude --version` / `codex --version` and the Antigravity SDK smoke test
+Swap the host, model IDs, and key environment variable for your deployment.
+After editing config or environment, re-run `claude --version` /
+`codex --version` and the Antigravity SDK smoke test
 from a fresh shell.
 
 ### Verify CLI and SDK dependencies from a fresh shell
@@ -254,8 +254,11 @@ If any command is not found, re-open your terminal so shell PATH updates from th
 ```bash
 git clone https://github.com/AI-native-Systems-Research/spotlights.git
 cd spotlights
-uv sync --all-extras
+uv sync
 source .venv/bin/activate
+
+# Contributors who need test/lint tools can install the dev extra instead:
+# uv sync --extra dev
 ```
 
 ### Deep-research quickstart (code + literature, no telemetry required)
@@ -269,8 +272,9 @@ preview or a profiling capture.
 
    ```bash
    cd /path/to/spotlights
-   source .venv/bin/activate        # uv-created env
-   # or, if you use conda/micromamba and imports already work there:
+   source .venv/bin/activate
+
+   # Optional: install the checkout into any already-active Python environment.
    # python -m pip install -e .
    ```
 
@@ -291,7 +295,7 @@ PY
    expands to its leaf modules.
 
    ```bash
-   PYTHONPATH=src spotlights-engine \
+   spotlights-engine \
      --repo /path/to/target-repo \
      --include path/to/module_or_subtree \
      --objective "Find high-leverage latency/throughput improvements." \
@@ -305,9 +309,9 @@ PY
    of hardcoding provider details in code:
 
    ```bash
-   export LITELLM_API_KEY="<your-gateway-key>"
+   export GATEWAY_API_KEY="<your-gateway-key>"
 
-   PYTHONPATH=src spotlights-engine \
+   spotlights-engine \
      --repo /path/to/target-repo \
      --include path/to/module_or_subtree \
      --objective "Find high-leverage latency/throughput improvements." \
@@ -315,12 +319,12 @@ PY
      --codex-profile <codex-profile-name> \
      --claude-model <claude-model-id> \
      --claude-base-url https://your-claude-compatible-host.example.com \
-     --claude-auth-token-env LITELLM_API_KEY \
+     --claude-auth-token-env GATEWAY_API_KEY \
      --claude-unset-env ANTHROPIC_API_KEY \
      --claude-disable-experimental-betas \
      --antigravity-base-url https://your-gemini-compatible-host.example.com \
      --antigravity-model <gemini-model-id> \
-     --antigravity-api-key-env LITELLM_API_KEY \
+     --antigravity-api-key-env GATEWAY_API_KEY \
      --output-folder tmp/spotlights_results \
      --artifacts-dir tmp/spotlights_artifacts \
      --verbose
