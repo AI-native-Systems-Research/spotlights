@@ -73,9 +73,10 @@ def _build_argparser() -> argparse.ArgumentParser:
         metavar="QN",
         help=(
             "Restrict to one or more slash-form qualified names (e.g. "
-            "v1/kv_offload). A parent name expands to all leaves beneath "
-            "it (e.g. v1/worker matches v1/worker/gpu). Repeat the flag "
-            "or pass multiple values after one flag. Default: all modules."
+            "v1/kv_offload). A parent name selects itself plus every module "
+            "beneath it (e.g. v1/worker matches v1/worker and v1/worker/gpu). "
+            "Repeat the flag or pass multiple values after one flag. "
+            "Default: all modules."
         ),
     )
     p.add_argument(

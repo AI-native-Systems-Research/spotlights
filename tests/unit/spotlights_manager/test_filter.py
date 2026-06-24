@@ -33,6 +33,14 @@ def test_parent_prefix_expands_to_descendants() -> None:
     assert out == ["v1/worker/gpu", "v1/worker/tpu"]
 
 
+def test_parent_name_selects_itself_and_descendants() -> None:
+    """When the parent module is itself a target (non-leaf modules run too),
+    naming it selects the parent node plus everything nested beneath it."""
+    modules = ["v1/worker", "v1/worker/gpu", "v1/worker/tpu", "v1/kv_offload"]
+    out = apply_filter(modules, ModuleFilter(include=["v1/worker"]))
+    assert out == ["v1/worker", "v1/worker/gpu", "v1/worker/tpu"]
+
+
 def test_parent_prefix_dedupes_with_explicit_leaves() -> None:
     leaves = ["v1/worker/gpu", "v1/worker/tpu"]
     out = apply_filter(
