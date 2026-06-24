@@ -411,6 +411,69 @@ def test_id_monotonicity_violation(repo_artifacts, monkeypatch):
         discover(_make_input(), config=cfg)
 
 
+def test_dropped_candidate_can_be_readded(repo_artifacts, monkeypatch):
+    """A candidate dropped by a later pass is fed back and can be re-added at
+    its original id and file without tripping id-integrity."""
+    repo, artifacts = repo_artifacts
+    # bootstrap (claude, iter0): {0001, 0002}
+    # review 1 (codex, iter1): drops 0002 -> {0001}
+    # review 2 (claude, iter2): re-adds 0002 at its original file -> {0001, 0002}
+    claude = FakeAgentRunner(
+        "claude_code",
+        responses=[
+            _cands([("cand-0001", "src/v1/foo/x.py"), ("cand-0002", "src/v1/foo/y.py")]),
+            _cands([("cand-0001", "src/v1/foo/x.py"), ("cand-0002", "src/v1/foo/y.py")]),
+        ],
+    )
+    codex = FakeAgentRunner(
+        "codex",
+        responses=[
+            _cands([("cand-0001", "src/v1/foo/x.py")]),  # drops 0002
+        ],
+    )
+    _install_runners(monkeypatch, claude, codex)
+
+    result = _run(repo, artifacts, num_reviews=2)
+
+    final_ids = sorted(c.id for c in result.candidates.candidates)
+    assert final_ids == ["cand-v1_foo-0001", "cand-v1_foo-0002"]
+
+    # The dropped candidate must have been offered back to iter2's review prompt
+    # (bare id space, like prev_json).
+    iter2_prompt = (
+        artifacts / "candidate_discovery" / "iter_2_claude_code" / "prompt.md"
+    ).read_text(encoding="utf-8")
+    assert "Previously removed candidates" in iter2_prompt
+    assert "cand-0002" in iter2_prompt.split("Previously removed candidates", 1)[1]
+
+
+def test_readd_with_changed_file_raises(repo_artifacts, monkeypatch):
+    """Re-adding a previously dropped id but pointing at a different file is a
+    collision, not a re-add, and must raise."""
+    repo, artifacts = repo_artifacts
+    claude = FakeAgentRunner(
+        "claude_code",
+        responses=[
+            _cands([("cand-0001", "src/v1/foo/x.py"), ("cand-0002", "src/v1/foo/y.py")]),
+            _cands([("cand-0001", "src/v1/foo/x.py"), ("cand-0002", "src/v1/foo/z.py")]),
+        ],
+    )
+    codex = FakeAgentRunner(
+        "codex",
+        responses=[
+            _cands([("cand-0001", "src/v1/foo/x.py")]),  # drops 0002
+        ],
+    )
+    _install_runners(monkeypatch, claude, codex)
+
+    cfg = _make_config(repo, artifacts, num_reviews=2)
+    with pytest.raises(DiscoveryValidationError, match="re-added id changed file") as exc:
+        discover(_make_input(), config=cfg)
+    assert exc.value.context["id"] == "cand-v1_foo-0002"
+    assert exc.value.context["prev_file"] == "src/v1/foo/y.py"
+    assert exc.value.context["new_file"] == "src/v1/foo/z.py"
+
+
 def test_within_iter_duplicate_ids_raises(repo_artifacts, monkeypatch):
     """§6.7 sub-check 1: ids must be unique within a single iteration."""
     repo, artifacts = repo_artifacts

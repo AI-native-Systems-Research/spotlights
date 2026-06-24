@@ -103,6 +103,12 @@ class Orchestrator:
         self._prev_raw: Candidates | None = None
         self._prev_post_drop: Candidates | None = None
         self._prev_post_drop_ids: set[str] = set()
+        # Every candidate that has survived some earlier iteration, keyed by id
+        # (latest surviving version wins). Candidates whose id is here but not in
+        # `_prev_post_drop_ids` were dropped by a later pass; they are fed back
+        # into the review prompt so a reviewer can argue to re-add them, and the
+        # id-integrity check exempts their re-add from strict monotonicity.
+        self._seen_by_id: dict[str, Candidate] = {}
         # High-water mark in the agent-local *bare* counter space. The review
         # loop and prompt speak bare `cand-NNNN`; schema objects carry the
         # prefixed form. `parse_id` recovers the counter from a prefixed id.
@@ -139,11 +145,13 @@ class Orchestrator:
                     # the bare high-water mark, so the agent contract stays
                     # `cand-NNNN` (D3 option A).
                     prev_json = self._to_bare_json(self._prev_post_drop)  # type: ignore[arg-type]
+                    removed_json = self._removed_pool_bare_json()
                     review_prompt = prompts.render_review(
                         self._input.module_qualified_name,
                         self._module,
                         prev_json,
                         _bare_id(self._max_seen_counter),
+                        removed_candidates_json=removed_json,
                         repo_context_markdown=self._config.repo_context_markdown,
                         spotlight_context=self._input.context,
                     )
@@ -299,13 +307,14 @@ class Orchestrator:
                 ids=raw_ids,
             )
 
-        if self._prev_raw is not None:
-            prev_by_id = {c.id: c for c in self._prev_raw.candidates}
-            for c in parsed.candidates:
-                if (
-                    c.id in prev_by_id
-                    and primary_file(c) != primary_file(prev_by_id[c.id])
-                ):
+        prev_by_id = (
+            {c.id: c for c in self._prev_raw.candidates}
+            if self._prev_raw is not None
+            else {}
+        )
+        for c in parsed.candidates:
+            if c.id in prev_by_id:
+                if primary_file(c) != primary_file(prev_by_id[c.id]):
                     raise DiscoveryValidationError(
                         "carry-over id changed file",
                         iteration=n,
@@ -314,10 +323,28 @@ class Orchestrator:
                         prev_file=primary_file(prev_by_id[c.id]),
                         new_file=primary_file(c),
                     )
+            elif c.id in self._seen_by_id:
+                # Re-add of a previously dropped candidate (not in the immediately
+                # previous raw set, but seen in some earlier iteration). It must
+                # keep its original file — an id reused for a different file is a
+                # collision, not a re-add.
+                seen = self._seen_by_id[c.id]
+                if primary_file(c) != primary_file(seen):
+                    raise DiscoveryValidationError(
+                        "re-added id changed file",
+                        iteration=n,
+                        agent=agent,
+                        id=c.id,
+                        prev_file=primary_file(seen),
+                        new_file=primary_file(c),
+                    )
 
         survivor_ids = {c.id for c in survivors}
-        new_ids = survivor_ids - self._prev_post_drop_ids
-        for nid in new_ids:
+        # Re-added ids (seen in an earlier iteration) keep their original
+        # counter, so they are exempt from strict monotonicity; only genuinely
+        # new ids must exceed the high-water mark.
+        truly_new = survivor_ids - self._prev_post_drop_ids - set(self._seen_by_id)
+        for nid in truly_new:
             # Monotonicity is on the per-(module, session) counter, which is the
             # same whether ids are bare or prefixed (uniqueness across modules
             # comes from the slug, not the number). Compare counters, not the
@@ -350,6 +377,27 @@ class Orchestrator:
         )
         return normalized
 
+    def _removed_pool_bare_json(self) -> str | None:
+        """Render previously-dropped candidates for the review prompt.
+
+        A candidate is "dropped" when it survived some earlier iteration (so it
+        is in `_seen_by_id`) but is absent from the latest survivor set
+        (`_prev_post_drop_ids`). Rendered in the agent-local bare id space, like
+        `prev_json`, so the agent can re-emit it verbatim to re-add it. Returns
+        `None` when nothing has been dropped.
+        """
+        dropped = [
+            c for cid, c in self._seen_by_id.items()
+            if cid not in self._prev_post_drop_ids
+        ]
+        if not dropped:
+            return None
+        pool = Candidates(
+            module_qualified_name=self._input.module_qualified_name,
+            candidates=dropped,
+        )
+        return self._to_bare_json(pool)
+
     def _to_bare_json(self, candidates: Candidates) -> str:
         """Render `candidates` with their bare `cand-NNNN` ids for the agent.
 
@@ -375,6 +423,9 @@ class Orchestrator:
         self._prev_post_drop = outcome.candidates
         self._prev_post_drop_ids = {c.id for c in outcome.candidates.candidates}
         for c in outcome.candidates.candidates:
+            # Remember the latest surviving version of each candidate so a later
+            # iteration can be shown (and re-add) anything a subsequent pass drops.
+            self._seen_by_id[c.id] = c
             counter = parse_id(c.id)[2]
             if counter > self._max_seen_counter:
                 self._max_seen_counter = counter
