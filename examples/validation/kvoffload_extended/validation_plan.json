@@ -670,7 +670,7 @@
             "kv_cache",
             "scheduler"
           ],
-          "description": "DeepSeek-V4-Flash multi-turn A\u2192B\u2192A pattern: verifies prefix-cache soft-pin prevents 0% hit rate on re-sent requests when a different request B runs between identical A prompts."
+          "description": "DeepSeek-V4-Flash synthetic A.1\u2192A.2\u2192B\u2192A.3 request sequence (procedurally generated ~250K-token prompts via a urllib client, not a recorded trace): verifies prefix-cache soft-pin prevents 0% hit rate on the re-sent A.3 request when a different request B runs between identical A prompts."
         }
       ]
     },

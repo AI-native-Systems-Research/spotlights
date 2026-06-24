@@ -19,7 +19,7 @@ Best run metrics: `cpu_hit_rate = 44.7%`, `ttft_ratio = 1.79x`, `throughput_rati
 
 | Rank | Score | Workload ID | Rationale |
 |------|-------|-------------|-----------|
-| 1 | **10/10** | [`gh_wl_deepseek_v4_multi_turn_prefix`](#1-gh_wl_deepseek_v4_multi_turn_prefix-1010) | A→B→A pattern with shared prefix is the *exact* scenario session merging + position bonus is built for. Directly measures whether prefix blocks survive between interleaved requests — CPU hit rate and TTFT on the second A request are the primary signals. |
+| 1 | **10/10** | [`gh_wl_deepseek_v4_multi_turn_prefix`](#1-gh_wl_deepseek_v4_multi_turn_prefix-1010) | Synthetic A.1→A.2→B→A.3 sequence with a shared prefix is the *exact* scenario session merging + position bonus is built for. Directly measures whether prefix blocks survive an interleaved request B — CPU hit rate and TTFT on the final A.3 request are the primary signals. |
 | 2 | **9/10** | [`wl-agentic`](#2-wl-agentic-910) | Multi-turn with retained KV across turns. Session merging accumulates hits per conversation, hierarchical scoring protects active sessions. Directly exercises the core design intent. TTFT on later turns depends on reload. |
 | 3 | **9/10** | [`wl-prefix-heavy`](#3-wl-prefix-heavy-910) | High prefix reuse with eviction pressure. Position bonus (30000 / (1 + pos/8)) massively favors prefix heads. Measures whether shared roots stay cached and how fast TTFT is on reuse after eviction. |
 | 4 | **8/10** | [`gh_wl_hma_hybrid_model_offload`](#4-gh_wl_hma_hybrid_model_offload-810) | Multi-turn (3 turns/session) with prefix caching enabled. Tests session merging across turns in hybrid-attention context. Good for CPU hit rate on subsequent turns. |
@@ -43,7 +43,7 @@ The **bottom tier** are correctness/liveness scenarios or workloads that never t
 
 ## Recommended Benchmark Suite (score >= 7)
 
-1. `gh_wl_deepseek_v4_multi_turn_prefix` — A-B-A prefix survival
+1. `gh_wl_deepseek_v4_multi_turn_prefix` — A.1→A.2→B→A.3 prefix survival
 2. `wl-agentic` — multi-turn session continuity
 3. `wl-prefix-heavy` — prefix reuse under pressure
 4. `gh_wl_hma_hybrid_model_offload` — multi-turn hybrid model
@@ -57,21 +57,62 @@ The **bottom tier** are correctness/liveness scenarios or workloads that never t
 vLLM ref: [issue #42948](https://github.com/vllm-project/vllm/issues/42948)
 
 ```bash
-# Server
-vllm serve deepseek-ai/DeepSeek-V3-0324 \
+# Server (per issue #42948 repro)
+vllm serve deepseek-ai/DeepSeek-V4-Flash \
+  --tensor-parallel-size 2 \
+  --enable-expert-parallel \
+  --kv-cache-dtype fp8 \
+  --block-size 256 \
   --enable-prefix-caching \
-  --max-model-len 8192 \
-  --kv-transfer-config '{"kv_connector":"OffloadingConnector"}'
-
-# Benchmark
-vllm bench serve \
-  --model deepseek-ai/DeepSeek-V3-0324 \
-  --num-prompts 20 \
-  --sharegpt-pattern "A-B-A" \
-  --shared-prefix-tokens 512 \
-  --unique-suffix-tokens 128 \
-  --request-rate inf
+  --gpu-memory-utilization 0.95 \
+  --max-num-seqs 512 \
+  --max-num-batched-tokens 4096
 ```
+
+The "A-B-A" workload is **synthetically generated**, not a recorded trace and
+not a `vllm bench serve` dataset. The repro is a self-contained client that
+procedurally builds two ~250K-token prompts sharing only the chat-template
+prelude, then issues them in an A→A→B→A sequence and reads the prefix-cache
+hit counters around each call:
+
+```python
+import urllib.request, json, hashlib, time
+
+def long_prompt(seed_phrase, target_tokens=250_000):
+    # filler chunks = MD5(seed_phrase + i) padded with "x"*100
+    chunks, i = [], 0
+    while sum(len(c) for c in chunks) // 4 < target_tokens:
+        chunks.append(hashlib.md5(f"{seed_phrase}{i}".encode()).hexdigest() + "x" * 100)
+        i += 1
+    return "".join(chunks)
+
+PROMPT_A = long_prompt("alpha")   # shared prelude + divergent user content
+PROMPT_B = long_prompt("bravo")   # different prefix from the first user token
+
+def send(prompt, label):
+    body = json.dumps({
+        "model": "deepseek-ai/DeepSeek-V4-Flash",
+        "messages": [{"role": "user", "content": prompt}],
+        "max_tokens": 3, "temperature": 0.0, "stream": False,
+        "chat_template_kwargs": {"enable_thinking": False},
+    }).encode()
+    req = urllib.request.Request(
+        "http://localhost:8000/v1/chat/completions", body,
+        {"Content-Type": "application/json"})
+    t0 = time.time()
+    urllib.request.urlopen(req).read()
+    print(label, f"{time.time()-t0:.2f}s")
+    # also scrape prefix_cache_hits_total / queries_total from /metrics here
+
+send(PROMPT_A, "A.1"); time.sleep(1)
+send(PROMPT_A, "A.2"); time.sleep(1)   # warm: should be ~100% prefix-cache hit
+send(PROMPT_B, "B");   time.sleep(1)   # different prefix, cold
+send(PROMPT_A, "A.3")                  # should be ~100% hit; bug makes it 0%
+```
+
+The signal: with the soft-pin fix (PRs #42985, #43191) the final `A.3` regains
+a near-100% prefix-cache hit; without it, B's arrival evicts A's prefix blocks
+and `A.3` reports 0%. Deterministic, runs in <5 minutes.
 
 ### 2. `wl-agentic` (9/10)
 

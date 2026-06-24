@@ -110,15 +110,18 @@
       "source_ref": "https://github.com/vllm-project/vllm/issues/42948",
       "config_path": null,
       "components_exercised": ["kv_cache", "scheduler"],
-      "description": "DeepSeek-V4-Flash multi-turn with repeated shared prefix: 3-step pattern A→B→A where A is the same prompt with a long shared system prompt/prefix. Repro for prefix-cache 0% hit on re-sent requests in hybrid model groups. Tests that recently-used prefix blocks are not prematurely evicted when a new request B runs between two identical requests A. Fixed by soft-pin mechanisms in PRs #42985 and #43191.",
+      "description": "DeepSeek-V4-Flash multi-turn with repeated shared prefix: synthetic A.1→A.2→B→A.3 sequence where A is the same ~250K-token prompt sharing only the chat-template prelude. Repro for prefix-cache 0% hit on re-sent requests in hybrid model groups. Tests that recently-used prefix blocks are not prematurely evicted when a different request B runs between identical requests A. Reproduced by a self-contained urllib client (synthetic prompt generation via MD5 filler chunks), not a recorded trace or bench dataset. Fixed by soft-pin mechanisms in PRs #42985 and #43191.",
       "parameters": {
-        "model": "deepseek-ai/DeepSeek-V3-0324",
+        "model": "deepseek-ai/DeepSeek-V4-Flash",
         "enable_prefix_caching": true,
-        "num_requests": 20,
-        "shared_prefix_tokens": 512,
-        "unique_suffix_tokens": 128,
-        "request_pattern": "A-B-A",
-        "max_model_len": 8192
+        "tensor_parallel_size": 2,
+        "kv_cache_dtype": "fp8",
+        "block_size": 256,
+        "prompt_tokens": 250000,
+        "prompt_generation": "synthetic",
+        "request_pattern": "A.1-A.2-B-A.3",
+        "max_num_seqs": 512,
+        "max_num_batched_tokens": 4096
       }
     },
     {

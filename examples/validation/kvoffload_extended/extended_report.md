@@ -49,7 +49,9 @@ in PR #26813 ("KV Load Failure Recovery/Abort Configuration").
 > test exists in v0.18.0. See the Excluded entries table for the gap entry.
 
 **Workload — `gh_wl_deepseek_v4_multi_turn_prefix`** (agentic, source: [#42948](https://github.com/vllm-project/vllm/issues/42948))
-DeepSeek-V4-Flash A→B→A multi-turn pattern. Originally attributed to this
+DeepSeek-V4-Flash synthetic A.1→A.2→B→A.3 request sequence (procedurally
+generated ~250K-token prompts via a urllib client, not a recorded trace).
+Originally attributed to this
 entry by the discovery process due to the shared "cache pollution" label;
 the workload exercises the #42948 regression (0% hit rate after an
 interleaved request destroys the first block's cache key) rather than the
