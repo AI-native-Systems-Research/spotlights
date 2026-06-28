@@ -1,4 +1,4 @@
-"""Merge two `SpotlightReport`s into one with `RunInfo.pipeline="unified"`.
+"""Merge two `SpotlightReport`s into one combined report.
 
 Field-by-field rules (see plan §"Merging two SpotlightReports"):
 
@@ -10,11 +10,16 @@ Field-by-field rules (see plan §"Merging two SpotlightReports"):
   to both pipelines).
 - `candidates`, `findings`, `anomalies`: concatenated; `id` uniqueness is
   re-checked because the segmented id pattern doesn't by itself guarantee
-  disjointness.  A DR module slug literally named `signal` would collide with
-  the signal pipeline's hard-coded `signal` segment.  Collision raises
-  `MergeIdCollisionError` rather than producing a report with non-unique ids.
+  disjointness.  A DR module slug literally named `telemetry` would collide
+  with the telemetry pipeline's hard-coded `telemetry` segment.  Collision
+  raises `MergeIdCollisionError` rather than producing a report with
+  non-unique ids.
 - `issues`: concatenated.
-- `run`: minted fresh (`pipeline="unified"`, run_id supplied by the caller).
+- `run`: minted fresh; `pipelines` is the sorted union of contributors'
+  `pipelines` lists.  Single-contributor merges flatten to that contributor's
+  pipeline (e.g. `["telemetry"]`); multi-contributor merges produce the
+  full list (e.g. `["deep_research", "telemetry"]`).  No `"unified"` /
+  `"multi"` sentinel — the list itself is the signal.
   Cost handling: every contributor that supplied a `cost_usd` is summed; the
   result is `None` only when all contributors were `None`.
 """
@@ -72,24 +77,24 @@ def _latest(*values: str | None) -> str | None:
 
 def merge_reports(
     *,
-    signal: SpotlightReport | None,
+    telemetry: SpotlightReport | None,
     dr: SpotlightReport | None,
     run_id: str,
 ) -> SpotlightReport:
-    """Merge two `SpotlightReport`s into one with `pipeline="unified"`.
+    """Merge two `SpotlightReport`s into one combined report.
 
-    Either side may be `None` (`mode="signal"` skips DR; `mode="dr"` skips
-    signal).  At least one must be non-None.
+    Either side may be `None` (`--pipelines telemetry` skips DR; `--pipelines
+    deep-research` skips telemetry).  At least one must be non-None.
 
     Caller supplies the `run_id`; the unified runner derives it from a hash
     of the `UnifiedInput` so it's resume-stable.
     """
-    if signal is None and dr is None:
+    if telemetry is None and dr is None:
         raise ValueError("merge_reports requires at least one report")
 
     # Pick the canonical project_tree + context + run-anchor side.
-    primary = dr if dr is not None else signal
-    other = signal if dr is not None else None
+    primary = dr if dr is not None else telemetry
+    other = telemetry if dr is not None else None
     assert primary is not None  # narrows the type for the checker
 
     if other is not None:
@@ -120,15 +125,21 @@ def merge_reports(
     _check_unique(anomalies, key=lambda a: a.anomaly_id, kind="anomaly")
 
     started_at = _earliest(
-        *(r.run.started_at for r in (signal, dr) if r is not None)
+        *(r.run.started_at for r in (telemetry, dr) if r is not None)
     )
     finished_at = _latest(
-        *(r.run.finished_at for r in (signal, dr) if r is not None)
+        *(r.run.finished_at for r in (telemetry, dr) if r is not None)
     )
-    cost = _sum_costs(r.run.cost_usd for r in (signal, dr) if r is not None)
+    cost = _sum_costs(r.run.cost_usd for r in (telemetry, dr) if r is not None)
+    # Union the contributors' pipeline lists (sorted, deduped).  A single
+    # contributor's pipelines list flows through verbatim; a two-contributor
+    # merge produces e.g. `["deep_research", "telemetry"]`.
+    contributors = sorted({
+        p for r in (telemetry, dr) if r is not None for p in r.run.pipelines
+    })
 
     run_info = RunInfo(
-        pipeline="unified",
+        pipelines=contributors,  # type: ignore[arg-type]
         run_id=run_id,
         started_at=started_at,
         finished_at=finished_at,

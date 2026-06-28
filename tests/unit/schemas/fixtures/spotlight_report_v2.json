@@ -100,10 +100,10 @@
     }
   ],
   "run": {
-    "pipeline": "deep_research",
-    "run_id": "demo-2026-06-22",
-    "started_at": "2026-06-22T12:00:00Z",
-    "finished_at": "2026-06-22T12:05:00Z",
+    "pipelines": ["deep_research", "telemetry"],
+    "run_id": "demo-2026-06-28",
+    "started_at": "2026-06-28T12:00:00Z",
+    "finished_at": "2026-06-28T12:05:00Z",
     "cost_usd": 1.23
   },
   "issues": []

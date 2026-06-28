@@ -508,16 +508,23 @@ def main(argv: list[str] | None = None) -> int:
         from spotlights_engine.prep_evolve.cli import main as prep_main
 
         return prep_main(raw_argv[1:])
-    if raw_argv and raw_argv[0] == "both":
-        from spotlights_engine.unified_runner.cli_unified import main as both_main
+    if raw_argv and raw_argv[0] == "telemetry":
+        # Single-pipeline shortcut: route to the unified runner with the
+        # telemetry pipeline pinned.
+        from spotlights_engine.unified_runner.cli import main as unified_main
 
-        return both_main(raw_argv[1:])
-    if raw_argv and raw_argv[0] == "signal":
-        from spotlights_engine.unified_runner.cli_signal import main as signal_main
+        return unified_main(raw_argv[1:], force_pipelines=["telemetry"])
+    if raw_argv and "--pipelines" in raw_argv:
+        # Multi-pipeline (or explicit-single) invocation via the top-level
+        # --pipelines flag. Routes to the unified runner.
+        from spotlights_engine.unified_runner.cli import main as unified_main
 
-        return signal_main(raw_argv[1:])
-    if raw_argv and raw_argv[0] == "dr":
-        # Explicit alias for the no-prefix path (today's flat DR CLI).
+        return unified_main(raw_argv, force_pipelines=None)
+    if raw_argv and raw_argv[0] == "deep-research":
+        # Explicit alias for the no-verb flat-DR path (backwards-compat).
+        # `spotlights-engine deep-research [flags]` ≡ today's
+        # `spotlights-engine [flags]`. To run deep-research through the
+        # unified runner, use `--pipelines deep-research` instead.
         argv = raw_argv[1:]
 
     args = _build_argparser().parse_args(argv)

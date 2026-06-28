@@ -98,23 +98,23 @@ def test_spotlight_report_emitted_after_full_run(tmp_path):
     assert report_path.exists(), "spotlight_report.json should be written by the runner"
 
     report = SpotlightReport.model_validate_json(report_path.read_text())
-    assert report.run.pipeline == "signal"
+    assert report.run.pipelines == ["telemetry"]
     # `run_id` is a `run-<16-hex>` content hash of input.json (mirrors DR);
     # see `_compute_run_id` for the formula.
     assert report.run.run_id.startswith("run-")
     assert len(report.run.run_id) == len("run-") + 16
     # Two stub candidates, two stub changes -> two proposals total
-    assert [c.id for c in report.candidates] == ["cand-signal-0001", "cand-signal-0002"]
+    assert [c.id for c in report.candidates] == ["cand-telemetry-0001", "cand-telemetry-0002"]
     assert all(c.origin == "telemetry_anomaly" for c in report.candidates)
     proposals = [p for c in report.candidates for p in c.proposals]
-    assert [p.id for p in proposals] == ["prop-signal-0001", "prop-signal-0002"]
+    assert [p.id for p in proposals] == ["prop-telemetry-0001", "prop-telemetry-0002"]
     assert all(p.source == "telemetry_anomaly" for p in proposals)
     # One stub anomaly carries through into the closed-shape `Anomaly`
     # (synthetic fallback path -- telemetry_from is None in `_input(...)`).
     assert len(report.anomalies) == 1
     # Upstream `stub-anomaly-1` (synthetic stage-01 placeholder) is
     # renumbered to the segmented form at the report-build boundary.
-    assert report.anomalies[0].anomaly_id == "anom-signal-0001"
+    assert report.anomalies[0].anomaly_id == "anom-telemetry-0001"
 
 
 def test_compute_run_id_is_resume_stable_for_same_input(tmp_path):

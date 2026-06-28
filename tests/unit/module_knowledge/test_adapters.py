@@ -152,7 +152,7 @@ def test_records_from_module_run_and_spotlights_result_collect_memory_records() 
             context=context,
             candidates=[candidate],
             findings=[finding],
-            run=RunInfo(pipeline="deep_research", run_id="run-test", started_at="2026-06-20T00:00:00+00:00"),
+            run=RunInfo(pipelines=["deep_research"], run_id="run-test", started_at="2026-06-20T00:00:00+00:00"),
         ),
         module_runs={"engine/cache": module_run},
         extractor_invocation=ExtractionInvocation(

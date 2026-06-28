@@ -60,9 +60,13 @@ from spotlights_engine.signal_pipeline.schemas import (
 __all__ = ["build_spotlight_report", "emit_spotlight_report"]
 
 
-# Fixed pipeline segment for the unified id pattern (`<type>-signal-NNNN`),
-# per the resolution in #28.
-_SEGMENT = "signal"
+# Fixed pipeline segment for the unified id pattern (`<type>-telemetry-NNNN`).
+# Originally `"signal"` (per the resolution in #28); flipped to `"telemetry"`
+# in the unified-runner PR to align with the user-facing CLI verb + schema
+# Literal value. The variable name `_SEGMENT` is kept intentionally (internal
+# code still talks about "the signal pipeline's segment"); only its value
+# crosses into the output report's id strings.
+_SEGMENT = "telemetry"
 
 
 # ---- Module assignment ------------------------------------------------------
@@ -415,7 +419,7 @@ def emit_spotlight_report(
     changes = _load_changes(layout)
 
     run_info = RunInfo(
-        pipeline="signal",
+        pipelines=["telemetry"],
         run_id=run_id,
         started_at=started_at,
         finished_at=finished_at,

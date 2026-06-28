@@ -1,11 +1,19 @@
-"""CLI for `spotlights-engine both` — runs DR + signal pipelines from one verb.
+"""CLI for unified-runner invocations.
 
-Dispatched from `spotlights_engine.cli.main`'s prefix branch.
+Two ways the top-level `spotlights-engine` dispatcher (`cli.py:main`) routes
+work into this entry:
 
-Flag set is the union of the existing DR + signal CLIs, with shared flags
-(`--repo`, `--objective`, `--artifacts-dir`, `--output-folder`, `--include`)
-applying to both, and per-pipeline-only flags forwarded to the relevant
-sub-pipeline.
+- **`spotlights-engine telemetry [flags...]`** — single-pipeline shortcut.
+  Calls `main(argv, force_pipelines=["telemetry"])`; the `--pipelines` flag
+  is rejected on this path (the verb pins the pipeline).
+- **`spotlights-engine --pipelines a,b [flags...]`** — multi-pipeline (or
+  explicit single).  Calls `main(argv, force_pipelines=None)`; the value of
+  `--pipelines` drives `UnifiedInput.pipelines`.
+
+The `deep-research` verb and the no-verb path do *not* route here — they go
+to the flat-DR CLI (`_build_argparser()` in `cli.py`) for backwards-compat.
+Programmatic callers wanting deep-research through the unified plumbing can
+use `--pipelines deep-research`.
 """
 
 from __future__ import annotations
@@ -24,6 +32,7 @@ from spotlights_engine.defaults import (
 from spotlights_engine.schemas.common import SpotlightContext
 from spotlights_engine.spotlights_manager import ModuleFilter
 from spotlights_engine.unified_runner import (
+    PipelineName,
     UnifiedConfig,
     UnifiedInput,
     UnifiedResult,
@@ -32,16 +41,60 @@ from spotlights_engine.unified_runner import (
 
 _DEFAULT_OBJECTIVE = "reduce hot-path latency on common workloads"
 
+# Mapping between user-facing CLI verb / flag values (hyphenated) and the
+# schema's Literal values (snake_case).
+_CLI_TO_SCHEMA: dict[str, PipelineName] = {
+    "deep-research": "deep_research",
+    "telemetry": "telemetry",
+}
 
-def _build_parser() -> argparse.ArgumentParser:
+
+def _parse_pipelines(raw: str) -> list[PipelineName]:
+    """Parse a comma-separated `--pipelines deep-research,telemetry` value."""
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    if not parts:
+        raise argparse.ArgumentTypeError("--pipelines requires at least one value")
+    mapped: list[PipelineName] = []
+    seen: set[PipelineName] = set()
+    for part in parts:
+        if part not in _CLI_TO_SCHEMA:
+            valid = ", ".join(sorted(_CLI_TO_SCHEMA))
+            raise argparse.ArgumentTypeError(
+                f"unknown pipeline {part!r}; valid: {valid}"
+            )
+        canonical = _CLI_TO_SCHEMA[part]
+        if canonical in seen:
+            raise argparse.ArgumentTypeError(
+                f"pipeline {part!r} listed twice in --pipelines"
+            )
+        seen.add(canonical)
+        mapped.append(canonical)
+    return mapped
+
+
+def _build_parser(*, allow_pipelines_flag: bool) -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="spotlights-engine both",
+        prog="spotlights-engine",
         description=(
-            "Run the deep-research and signal-based discovery pipelines together "
-            "with a single shared module-extraction step. Emits a unified "
-            "SpotlightReport at <run_dir>/spotlight_report.json."
+            "Run one or more spotlights pipelines through the unified runner. "
+            "Module extraction happens exactly once; selected pipelines run "
+            "concurrently and their outputs are merged into a single "
+            "SpotlightReport."
         ),
     )
+
+    if allow_pipelines_flag:
+        p.add_argument(
+            "--pipelines",
+            type=_parse_pipelines,
+            required=True,
+            metavar="A,B",
+            help=(
+                "Comma-separated list of pipelines to run. Valid values: "
+                "deep-research, telemetry. Single value runs that pipeline "
+                "alone; multiple values run them concurrently and merge."
+            ),
+        )
 
     # Shared inputs ----------------------------------------------------------
     p.add_argument("--repo", type=Path, default=DEFAULT_REPO)
@@ -52,8 +105,9 @@ def _build_parser() -> argparse.ArgumentParser:
         default=None,
         metavar="QN",
         help=(
-            "Restrict the DR fan-out to one or more slash-form qualified names "
-            "(signal pipeline doesn't filter by module today)."
+            "Restrict the deep-research fan-out to one or more slash-form "
+            "qualified names (the telemetry pipeline doesn't filter by "
+            "module today)."
         ),
     )
     p.add_argument("--objective", default=_DEFAULT_OBJECTIVE)
@@ -64,13 +118,13 @@ def _build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_ARTIFACTS,
         help=(
             "Top-level artifacts root. Each unified run lands at "
-            "<artifacts-dir>/<run_id>/ with `_extractor/`, `signal/`, and "
-            "`deep_research/` sub-dirs."
+            "<artifacts-dir>/<run_id>/ with `_extractor/`, `telemetry/`, "
+            "and `deep_research/` sub-dirs."
         ),
     )
     p.add_argument("--output-folder", type=Path, default=DEFAULT_OUTPUT)
 
-    # DR knobs ---------------------------------------------------------------
+    # Deep-research knobs ----------------------------------------------------
     p.add_argument("--max-findings-per-module", type=int, default=None)
     p.add_argument("--max-parallel", type=int, default=1)
     p.add_argument("--max-parallel-pairs", type=int, default=None)
@@ -78,7 +132,7 @@ def _build_parser() -> argparse.ArgumentParser:
     p.add_argument("--debug-first-n-pairs", type=int, default=None)
     p.add_argument("--debug-first-n-candidates", type=int, default=None)
 
-    # Signal knobs -----------------------------------------------------------
+    # Telemetry knobs --------------------------------------------------------
     p.add_argument("--telemetry-from", type=Path, default=None)
     p.add_argument("--backend-id", default="claude_code")
     p.add_argument("--max-candidates", type=int, default=None, metavar="N")
@@ -146,13 +200,15 @@ def _configure_logging(args: argparse.Namespace) -> None:
         root.addHandler(fh)
 
 
-def _build_input(args: argparse.Namespace, *, mode: str) -> UnifiedInput:
+def _build_input(
+    args: argparse.Namespace, *, pipelines: list[PipelineName]
+) -> UnifiedInput:
     return UnifiedInput(
         repo_path=args.repo,
         context=SpotlightContext(
             objective=args.objective, workload_hints=list(args.hint)
         ),
-        mode=mode,  # type: ignore[arg-type]
+        pipelines=pipelines,
         telemetry_from=args.telemetry_from,
         backend_id=args.backend_id,
         max_candidates=args.max_candidates,
@@ -176,8 +232,20 @@ def _build_config(args: argparse.Namespace) -> UnifiedConfig:
     )
 
 
-def main(argv: list[str] | None = None, *, mode: str = "both") -> int:
-    args = _build_parser().parse_args(argv)
+def main(
+    argv: list[str] | None = None,
+    *,
+    force_pipelines: list[PipelineName] | None = None,
+) -> int:
+    """Entry point. `force_pipelines` pins the pipeline list (e.g. the
+    `telemetry` verb path); when None, `--pipelines` on the CLI drives it.
+    """
+    allow_flag = force_pipelines is None
+    args = _build_parser(allow_pipelines_flag=allow_flag).parse_args(argv)
+    pipelines: list[PipelineName] = (
+        force_pipelines if force_pipelines is not None else args.pipelines
+    )
+
     args.repo = args.repo.resolve()
     args.artifacts_dir = args.artifacts_dir.resolve()
     args.output_folder = args.output_folder.resolve()
@@ -185,13 +253,14 @@ def main(argv: list[str] | None = None, *, mode: str = "both") -> int:
     args.output_folder.mkdir(parents=True, exist_ok=True)
     _configure_logging(args)
 
-    inp = _build_input(args, mode=mode)
+    inp = _build_input(args, pipelines=pipelines)
     cfg = _build_config(args)
 
     result: UnifiedResult = run_unified(inp, config=cfg)
     summary = {
         "run_dir": str(result.run_dir),
         "report": str(result.run_dir / "spotlight_report.json"),
+        "pipelines": list(result.report.run.pipelines),
         "candidates": len(result.report.candidates),
         "findings": len(result.report.findings),
         "anomalies": len(result.report.anomalies),

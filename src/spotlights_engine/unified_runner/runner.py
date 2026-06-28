@@ -1,7 +1,8 @@
-"""Unified runner — orchestrates signal + deep-research over one extraction.
+"""Unified runner — orchestrates the selected pipelines over one extraction.
 
 `run_unified(input, config) -> UnifiedResult` is the single entry. The CLI
-(`spotlights-engine both`) is a thin argparse wrapper.
+surface is the top-level `--pipelines` flag (multi) and the
+`spotlights-engine telemetry` prefix (telemetry-only).
 
 High-level flow:
 
@@ -10,15 +11,17 @@ High-level flow:
    fingerprint and `resume=False`, clear it; with `resume=True`, raise
    `UnifiedResumeMismatchError`.
 2. Run the structural extractor once into `<run_dir>/_extractor/`.
-3. Pre-populate each sub-pipeline's run dir so its own resume logic sees
-   stage 02 / step 1 as already complete.
-4. Run signal + DR concurrently via `asyncio.gather`.  Signal is `to_stage=04`
-   for mode=both (s05 mutates the subject; DR's `repo_guard` would catch it).
-5. Build per-pipeline `SpotlightReport`s (DR returns one in-memory; signal
-   produced one to `<signal_run_dir>/spotlight_report.json`), persist DR's
+3. Pre-populate the selected sub-pipelines' run dirs so each one's own
+   resume logic sees stage 02 / step 1 as already complete.
+4. Run the selected pipelines concurrently via `asyncio.gather`.  Telemetry
+   is locked at `to_stage=04` (s05 mutates the subject; DR's `repo_guard`
+   would catch it); enable s05 explicitly via the standalone `signal-pipeline`
+   CLI.
+5. Build per-pipeline `SpotlightReport`s (DR returns one in-memory; telemetry
+   produced one to `<telemetry_run_dir>/spotlight_report.json`), persist DR's
    to `<run_dir>/deep_research/spotlight_report.json` for symmetry, then
-   merge into the top-level `<run_dir>/spotlight_report.json` with
-   `RunInfo.pipeline="unified"`.
+   merge into the top-level `<run_dir>/spotlight_report.json` whose
+   `RunInfo.pipelines` lists every contributor.
 """
 
 from __future__ import annotations
@@ -59,7 +62,6 @@ from spotlights_engine.unified_runner.merge import merge_reports
 from spotlights_engine.unified_runner.schemas import (
     UnifiedConfig,
     UnifiedInput,
-    UnifiedMode,
     UnifiedResult,
     UnifiedRunSummary,
 )
@@ -73,7 +75,7 @@ _log = logging.getLogger(__name__)
 
 _MANIFEST_NAME = "manifest.json"
 _EXTRACTOR_DIR = "_extractor"
-_SIGNAL_DIR = "signal"
+_TELEMETRY_DIR = "telemetry"
 _DR_DIR = "deep_research"
 
 
@@ -99,7 +101,7 @@ def _unified_fingerprint(
     resumes cleanly.
     """
     return {
-        "mode": input.mode,
+        "pipelines": sorted(input.pipelines),
         "repo_path": str(input.repo_path),
         "context_hash": _stable_hash(input.context.model_dump(mode="json")),
         "telemetry_from": str(input.telemetry_from)
@@ -201,15 +203,17 @@ def _finalize_unified_manifest(
     )
 
 
-def _build_signal_input(input: UnifiedInput, signal_run_dir: Path) -> SignalPipelineInput:
+def _build_telemetry_input(
+    input: UnifiedInput, telemetry_run_dir: Path
+) -> SignalPipelineInput:
     return SignalPipelineInput(
         subject_root=input.repo_path,
         telemetry_from=input.telemetry_from,
         backend_id=input.backend_id,
-        # The unified runner pre-populates stage 02 artifacts; signal's
-        # built-in cross-run cache becomes a no-op for this run.  Set False
-        # so any cache miss surfaces clearly rather than silently re-running
-        # the agent.
+        # The unified runner pre-populates stage 02 artifacts; the telemetry
+        # pipeline's built-in cross-run cache becomes a no-op for this run.
+        # Set False so any cache miss surfaces clearly rather than silently
+        # re-running the agent.
         projecttree_cache=False,
         max_candidates=input.max_candidates,
         model=input.model,
@@ -269,20 +273,21 @@ def _build_dr_config(
     )
 
 
-def _load_signal_report(signal_run_dir: Path) -> SpotlightReport | None:
-    """Read signal's auto-emitted `spotlight_report.json` (best-effort)."""
-    path = signal_run_dir / "spotlight_report.json"
+def _load_telemetry_report(telemetry_run_dir: Path) -> SpotlightReport | None:
+    """Read the telemetry pipeline's auto-emitted `spotlight_report.json`."""
+    path = telemetry_run_dir / "spotlight_report.json"
     if not path.exists():
         return None
     try:
         return SpotlightReport.model_validate_json(path.read_text(encoding="utf-8"))
     except Exception as exc:  # noqa: BLE001
-        _log.warning("failed to load signal report at %s: %s", path, exc)
+        _log.warning("failed to load telemetry report at %s: %s", path, exc)
         return None
 
 
 def _persist_dr_report(report: SpotlightReport, dr_dir: Path) -> Path:
-    """Mirror signal's behaviour by writing DR's report to its sub-run-dir."""
+    """Mirror the telemetry pipeline's behavior by writing DR's report to its
+    sub-run-dir (DR doesn't persist its own SpotlightReport today)."""
     dr_dir.mkdir(parents=True, exist_ok=True)
     target = dr_dir / "spotlight_report.json"
     target.write_text(
@@ -323,7 +328,7 @@ async def _run_async(input: UnifiedInput, *, config: UnifiedConfig) -> UnifiedRe
     )
 
     extractor_dir = run_dir / _EXTRACTOR_DIR
-    signal_run_dir = run_dir / _SIGNAL_DIR
+    telemetry_run_dir = run_dir / _TELEMETRY_DIR
     dr_artifacts_dir = run_dir / _DR_DIR
     extractor_done_marker = run_dir / _EXTRACTOR_DIR / ".extracted"
 
@@ -362,12 +367,12 @@ async def _run_async(input: UnifiedInput, *, config: UnifiedConfig) -> UnifiedRe
         extractor_done_marker.write_text(_now_iso() + "\n", encoding="utf-8")
 
     # ── Step 2 — pre-populate sub-pipeline run dirs ──────────────────────
-    will_run_signal = input.mode in ("both", "signal")
-    will_run_dr = input.mode in ("both", "dr")
+    will_run_telemetry = "telemetry" in input.pipelines
+    will_run_dr = "deep_research" in input.pipelines
 
-    if will_run_signal:
+    if will_run_telemetry:
         populate_signal_run_dir(
-            signal_run_dir=signal_run_dir, project_tree=project_tree
+            signal_run_dir=telemetry_run_dir, project_tree=project_tree
         )
 
     dr_input: SpotlightsManagerInput | None = None
@@ -387,24 +392,27 @@ async def _run_async(input: UnifiedInput, *, config: UnifiedConfig) -> UnifiedRe
         )
 
     # ── Step 3 — run sub-pipelines concurrently ──────────────────────────
-    signal_input = _build_signal_input(input, signal_run_dir) if will_run_signal else None
+    telemetry_input = (
+        _build_telemetry_input(input, telemetry_run_dir)
+        if will_run_telemetry
+        else None
+    )
 
-    async def _signal_task() -> tuple[SpotlightReport | None, list[str]]:
-        if signal_input is None:
+    async def _telemetry_task() -> tuple[SpotlightReport | None, list[str]]:
+        if telemetry_input is None:
             return None, []
-        # Lock signal to stage 04 in `mode=both` (s05 mutates the subject and
-        # would collide with DR's repo_guard).  In `mode=signal` we still hold
-        # the same lock — stage 05 stays opt-in via the standalone
-        # `signal-pipeline` CLI for now.
+        # Telemetry pipeline is locked to stage 04: stage 05 mutates the
+        # subject and would collide with DR's repo_guard.  Stage 05 stays
+        # opt-in via the standalone `signal-pipeline` CLI for now.
         sel = StageSelection(from_stage="01", to_stage="04")
         result = await asyncio.to_thread(
             run_signal_pipeline,
-            signal_input,
-            run_dir=signal_run_dir,
+            telemetry_input,
+            run_dir=telemetry_run_dir,
             stages=sel,
             resume=True,
         )
-        report = _load_signal_report(signal_run_dir)
+        report = _load_telemetry_report(telemetry_run_dir)
         return report, list(result.issues)
 
     async def _dr_task() -> tuple[SpotlightReport | None, list[str]]:
@@ -418,20 +426,21 @@ async def _run_async(input: UnifiedInput, *, config: UnifiedConfig) -> UnifiedRe
         )
 
         result: SpotlightsManagerResult = await dr_run_async(dr_input, config=dr_config)
-        # Persist DR's per-pipeline report for symmetry with signal's.
+        # Persist DR's per-pipeline report for symmetry with the telemetry
+        # pipeline's auto-emit.
         _persist_dr_report(result.report, dr_artifacts_dir)
         dr_issues = [
             f"{issue.step}: {issue.message}" for issue in result.manager_issues
         ]
         return result.report, dr_issues
 
-    signal_pair, dr_pair = await asyncio.gather(_signal_task(), _dr_task())
-    signal_report, signal_issues = signal_pair
+    telemetry_pair, dr_pair = await asyncio.gather(_telemetry_task(), _dr_task())
+    telemetry_report, telemetry_issues = telemetry_pair
     dr_report, dr_issues = dr_pair
-    issues.extend(f"signal: {i}" for i in signal_issues)
+    issues.extend(f"telemetry: {i}" for i in telemetry_issues)
     issues.extend(f"dr: {i}" for i in dr_issues)
 
-    if signal_report is None and dr_report is None:
+    if telemetry_report is None and dr_report is None:
         finished_at = _now_iso()
         _finalize_unified_manifest(
             run_dir=run_dir,
@@ -440,12 +449,14 @@ async def _run_async(input: UnifiedInput, *, config: UnifiedConfig) -> UnifiedRe
             cost_usd=None,
         )
         raise UnifiedSetupError(
-            "unified runner: neither sub-pipeline produced a SpotlightReport; "
+            "unified runner: no selected pipeline produced a SpotlightReport; "
             f"see issues: {issues}"
         )
 
     # ── Step 4 — merge ───────────────────────────────────────────────────
-    merged = merge_reports(signal=signal_report, dr=dr_report, run_id=run_id)
+    merged = merge_reports(
+        telemetry=telemetry_report, dr=dr_report, run_id=run_id
+    )
 
     target = run_dir / "spotlight_report.json"
     target.write_text(
@@ -454,11 +465,11 @@ async def _run_async(input: UnifiedInput, *, config: UnifiedConfig) -> UnifiedRe
 
     finished_at = _now_iso()
     summary = UnifiedRunSummary(
-        mode=input.mode,
+        pipelines=sorted(input.pipelines),
         started_at=started_at,
         finished_at=finished_at,
         cost_usd=merged.run.cost_usd,
-        signal_run_dir=signal_run_dir if will_run_signal else None,
+        telemetry_run_dir=telemetry_run_dir if will_run_telemetry else None,
         dr_artifacts_dir=dr_artifacts_dir if will_run_dr else None,
         issues=issues,
     )

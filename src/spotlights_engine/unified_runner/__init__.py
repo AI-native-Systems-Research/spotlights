@@ -1,23 +1,22 @@
-"""Unified runner — extract once, run signal + deep-research, merge into one report.
+"""Unified runner — extract once, run selected pipelines, merge into one report.
 
-Public entry: `run_unified(input, config) -> UnifiedResult`. CLI surface lives in
-`cli_unified` (the `spotlights-engine both` prefix dispatch in
-`spotlights_engine.cli`) and `cli_signal` (the `spotlights-engine signal` prefix).
+Public entry: `run_unified(input, config) -> UnifiedResult`. CLI surface lives
+in `cli_telemetry` (the `spotlights-engine telemetry` prefix) and the
+top-level `--pipelines` flag dispatch in `spotlights_engine.cli`.
 
-See `docs/specs/spotlight_report.md` and the design at
-`docs/_review-notes/2026-06-15_spotlight_report_schema.md` for the schema this
-package targets. The signal stage 05 / `repo_guard` collision (signal mutates
-the subject; DR fingerprints it) is sidestepped by locking signal's
-`--to-stage 04` for `mode=both`; stage 05 is opt-in via the standalone
-`signal-pipeline` CLI for now.
+See `docs/specs/spotlight_report.md` for the schema this package targets. The
+telemetry-pipeline stage 05 / `repo_guard` collision (telemetry mutates the
+subject; DR fingerprints it) is sidestepped by locking telemetry's
+`--to-stage 04` whenever the unified runner invokes it; stage 05 is opt-in
+via the standalone `signal-pipeline` CLI for now.
 """
 
 from __future__ import annotations
 
 from spotlights_engine.unified_runner.schemas import (
+    PipelineName,
     UnifiedConfig,
     UnifiedInput,
-    UnifiedMode,
     UnifiedResult,
     UnifiedRunSummary,
 )
@@ -31,9 +30,9 @@ from spotlights_engine.unified_runner.runner import run_unified
 
 __all__ = [
     "MergeIdCollisionError",
+    "PipelineName",
     "UnifiedConfig",
     "UnifiedInput",
-    "UnifiedMode",
     "UnifiedResult",
     "UnifiedResumeMismatchError",
     "UnifiedRunSummary",

@@ -74,7 +74,7 @@ def _finding(*, id: str = "find-core-0001") -> Finding:
     )
 
 
-def _anomaly(*, id: str = "anom-signal-0001") -> Anomaly:
+def _anomaly(*, id: str = "anom-telemetry-0001") -> Anomaly:
     return Anomaly(anomaly_id=id, type="latency_spike")
 
 
@@ -91,11 +91,11 @@ def _signal_report(
     return SpotlightReport(
         project_tree=_tree(),
         context=ctx,
-        candidates=candidates if candidates is not None else [_candidate(id="cand-signal-0001", origin="telemetry_anomaly")],
+        candidates=candidates if candidates is not None else [_candidate(id="cand-telemetry-0001", origin="telemetry_anomaly")],
         findings=[],
-        anomalies=anomalies if anomalies is not None else [_anomaly(id="anom-signal-0001")],
+        anomalies=anomalies if anomalies is not None else [_anomaly(id="anom-telemetry-0001")],
         run=RunInfo(
-            pipeline="signal",
+            pipelines=["telemetry"],
             run_id="run-sig",
             started_at=started_at,
             finished_at=finished_at,
@@ -122,7 +122,7 @@ def _dr_report(
         findings=findings if findings is not None else [_finding(id="find-core-0001")],
         anomalies=[],
         run=RunInfo(
-            pipeline="deep_research",
+            pipelines=["deep_research"],
             run_id="run-dr",
             started_at=started_at,
             finished_at=finished_at,

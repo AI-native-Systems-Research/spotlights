@@ -97,7 +97,7 @@ def test_run_returns_spotlight_report(
     )
     report = run(make_input(repo), config=cfg)
     assert isinstance(report, SpotlightReport)
-    assert report.run.pipeline == "deep_research"
+    assert report.run.pipelines == ["deep_research"]
     assert report.run.run_id
     # The kv_offload module's candidates are flattened into the report; their
     # slug-segmented ids stay globally unique.

@@ -5,8 +5,9 @@ overview).
 
 Entry points:
 - `run_pipeline(...)` — programmatic
-- `spotlights-engine signal` — top-level CLI (recommended; goes through
-  the unified runner, emits a `SpotlightReport` with `pipeline="unified"`)
+- `spotlights-engine telemetry` — top-level CLI (recommended; goes through
+  the unified runner, emits a `SpotlightReport` whose `run.pipelines`
+  lists the contributors)
 - `signal-pipeline` — standalone CLI (lower-level controls:
   `--from-stage` / `--to-stage` / `--inject`, plus opt-in stage 05)
 

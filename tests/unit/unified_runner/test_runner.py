@@ -1,10 +1,13 @@
 """End-to-end tests for `unified_runner.run_unified` with mocked sub-pipelines.
 
 Covers:
-- mode=both runs extraction once, runs both sub-pipelines concurrently,
-  produces a merged `SpotlightReport` with `pipeline="unified"`.
-- mode=signal skips DR entirely; mode=dr skips signal entirely.
-- Signal is forced to `--to-stage 04` (the unified runner never opts into s05).
+- `pipelines=["deep_research", "telemetry"]` runs extraction once, runs both
+  sub-pipelines concurrently, produces a merged `SpotlightReport` carrying
+  both contributors in `run.pipelines`.
+- `pipelines=["telemetry"]` skips DR; `pipelines=["deep_research"]` skips
+  telemetry.
+- Telemetry is forced to `--to-stage 04` (the unified runner never opts into
+  s05).
 - DR's per-pipeline report is persisted to its sub-run-dir for symmetry.
 - Resume / fingerprint mismatch policy at the unified layer.
 """
@@ -76,14 +79,16 @@ def _candidate(*, id: str, origin: str = "code_agent") -> Candidate:
     )
 
 
-def _report(*, pipeline: str, candidates, ctx: SpotlightContext, cost: float) -> SpotlightReport:
+def _report(
+    *, pipelines: list[str], candidates, ctx: SpotlightContext, cost: float
+) -> SpotlightReport:
     return SpotlightReport(
         project_tree=_tree(),
         context=ctx,
         candidates=candidates,
         run=RunInfo(
-            pipeline=pipeline,  # type: ignore[arg-type]
-            run_id=f"run-{pipeline}",
+            pipelines=pipelines,  # type: ignore[arg-type]
+            run_id="run-" + "-".join(pipelines),
             started_at="2026-06-22T10:00:00+00:00",
             finished_at="2026-06-22T10:30:00+00:00",
             cost_usd=cost,
@@ -106,9 +111,10 @@ def patched_extractor(monkeypatch):
 
 
 @pytest.fixture
-def patched_signal(monkeypatch):
-    """Stub the signal pipeline to write the expected `spotlight_report.json`
-    (matching what `emit_spotlight_report` would have produced)."""
+def patched_telemetry(monkeypatch):
+    """Stub the telemetry sub-pipeline to write the expected
+    `spotlight_report.json` (matching what `emit_spotlight_report` would have
+    produced)."""
     captured: dict = {}
 
     def _fake_run_pipeline(input, *, run_dir, stages=None, resume=True, **_):
@@ -116,10 +122,9 @@ def patched_signal(monkeypatch):
         captured["stages"] = stages
         captured["resume"] = resume
         layout = RunDirLayout(run_dir.resolve())
-        # Imitate emit_spotlight_report: drop a report at the canonical path.
         report = _report(
-            pipeline="signal",
-            candidates=[_candidate(id="cand-signal-0001", origin="telemetry_anomaly")],
+            pipelines=["telemetry"],
+            candidates=[_candidate(id="cand-telemetry-0001", origin="telemetry_anomaly")],
             ctx=input.context if input.context is not None else SpotlightContext(objective="o"),
             cost=1.0,
         )
@@ -151,7 +156,7 @@ def patched_dr(monkeypatch):
         from spotlights_engine.spotlights_manager.api import SpotlightsManagerResult
 
         report = _report(
-            pipeline="deep_research",
+            pipelines=["deep_research"],
             candidates=[_candidate(id="cand-core-0001")],
             ctx=input.context,
             cost=2.0,
@@ -165,18 +170,19 @@ def patched_dr(monkeypatch):
             renderer_result=None,
         )
 
-    # Patch on the orchestrator module so the runner's late import picks it up.
     import spotlights_engine.spotlights_manager.orchestrator as orchestrator
 
     monkeypatch.setattr(orchestrator, "_run_async", _fake_run_async)
     return captured
 
 
-def _make_input(tmp_path, mode="both") -> UnifiedInput:
+def _make_input(tmp_path, pipelines=None) -> UnifiedInput:
+    if pipelines is None:
+        pipelines = ["deep_research", "telemetry"]
     return UnifiedInput(
         repo_path=tmp_path / "repo",
         context=SpotlightContext(objective="reduce p99", workload_hints=["batch=8"]),
-        mode=mode,  # type: ignore[arg-type]
+        pipelines=pipelines,  # type: ignore[arg-type]
     )
 
 
@@ -191,26 +197,26 @@ def _make_config(tmp_path) -> UnifiedConfig:
 
 
 def test_run_both_extracts_once_and_emits_unified_report(
-    tmp_path, patched_extractor, patched_signal, patched_dr
+    tmp_path, patched_extractor, patched_telemetry, patched_dr
 ):
-    inp = _make_input(tmp_path, mode="both")
+    inp = _make_input(tmp_path, pipelines=["deep_research", "telemetry"])
     cfg = _make_config(tmp_path)
 
     result = run_unified(inp, config=cfg)
 
     assert len(patched_extractor) == 1, "extractor should run exactly once"
-    assert result.report.run.pipeline == "unified"
+    assert result.report.run.pipelines == ["deep_research", "telemetry"]
     assert {c.id for c in result.report.candidates} == {
-        "cand-signal-0001",
+        "cand-telemetry-0001",
         "cand-core-0001",
     }
     assert result.report.run.cost_usd == pytest.approx(3.0)
 
 
 def test_run_both_writes_top_level_report_and_summary(
-    tmp_path, patched_extractor, patched_signal, patched_dr
+    tmp_path, patched_extractor, patched_telemetry, patched_dr
 ):
-    inp = _make_input(tmp_path, mode="both")
+    inp = _make_input(tmp_path, pipelines=["deep_research", "telemetry"])
     cfg = _make_config(tmp_path)
 
     result = run_unified(inp, config=cfg)
@@ -220,39 +226,39 @@ def test_run_both_writes_top_level_report_and_summary(
     SpotlightReport.model_validate_json(top.read_text(encoding="utf-8"))
 
     summary = json.loads((result.run_dir / "summary.json").read_text(encoding="utf-8"))
-    assert summary["mode"] == "both"
+    assert summary["pipelines"] == ["deep_research", "telemetry"]
 
 
-def test_run_both_signal_locked_to_stage_04(
-    tmp_path, patched_extractor, patched_signal, patched_dr
+def test_run_both_telemetry_locked_to_stage_04(
+    tmp_path, patched_extractor, patched_telemetry, patched_dr
 ):
-    inp = _make_input(tmp_path, mode="both")
+    inp = _make_input(tmp_path, pipelines=["deep_research", "telemetry"])
     cfg = _make_config(tmp_path)
     run_unified(inp, config=cfg)
 
-    sel = patched_signal["stages"]
+    sel = patched_telemetry["stages"]
     assert sel.from_stage == "01"
-    assert sel.to_stage == "04", "stage 05 must be locked off in mode=both"
-    assert patched_signal["resume"] is True
+    assert sel.to_stage == "04", "stage 05 must be locked off by the unified runner"
+    assert patched_telemetry["resume"] is True
 
 
-def test_run_both_threads_context_into_signal(
-    tmp_path, patched_extractor, patched_signal, patched_dr
+def test_run_both_threads_context_into_telemetry(
+    tmp_path, patched_extractor, patched_telemetry, patched_dr
 ):
-    inp = _make_input(tmp_path, mode="both")
+    inp = _make_input(tmp_path, pipelines=["deep_research", "telemetry"])
     cfg = _make_config(tmp_path)
     run_unified(inp, config=cfg)
 
-    sig_input = patched_signal["input"]
-    assert sig_input.context is not None
-    assert sig_input.context.objective == "reduce p99"
-    assert sig_input.context.workload_hints == ["batch=8"]
+    tel_input = patched_telemetry["input"]
+    assert tel_input.context is not None
+    assert tel_input.context.objective == "reduce p99"
+    assert tel_input.context.workload_hints == ["batch=8"]
 
 
 def test_run_both_persists_dr_report_for_symmetry(
-    tmp_path, patched_extractor, patched_signal, patched_dr
+    tmp_path, patched_extractor, patched_telemetry, patched_dr
 ):
-    inp = _make_input(tmp_path, mode="both")
+    inp = _make_input(tmp_path, pipelines=["deep_research", "telemetry"])
     cfg = _make_config(tmp_path)
     result = run_unified(inp, config=cfg)
 
@@ -261,52 +267,53 @@ def test_run_both_persists_dr_report_for_symmetry(
     SpotlightReport.model_validate_json(dr_report.read_text(encoding="utf-8"))
 
 
-def test_run_signal_only_skips_dr(
-    tmp_path, patched_extractor, patched_signal, monkeypatch
+def test_run_telemetry_only_skips_dr(
+    tmp_path, patched_extractor, patched_telemetry, monkeypatch
 ):
-    # Patch DR's _run_async to raise so we know it's NOT called.
     import spotlights_engine.spotlights_manager.orchestrator as orchestrator
 
     async def _should_not_be_called(*a, **kw):
-        raise AssertionError("DR _run_async called in mode=signal")
+        raise AssertionError("DR _run_async called for telemetry-only run")
 
     monkeypatch.setattr(orchestrator, "_run_async", _should_not_be_called)
 
-    inp = _make_input(tmp_path, mode="signal")
+    inp = _make_input(tmp_path, pipelines=["telemetry"])
     cfg = _make_config(tmp_path)
     result = run_unified(inp, config=cfg)
 
-    assert result.report.run.pipeline == "unified"
-    assert {c.id for c in result.report.candidates} == {"cand-signal-0001"}
+    assert result.report.run.pipelines == ["telemetry"]
+    assert {c.id for c in result.report.candidates} == {"cand-telemetry-0001"}
     assert result.summary.dr_artifacts_dir is None
 
 
-def test_run_dr_only_skips_signal(tmp_path, patched_extractor, patched_dr, monkeypatch):
+def test_run_dr_only_skips_telemetry(
+    tmp_path, patched_extractor, patched_dr, monkeypatch
+):
     def _should_not_be_called(*a, **kw):
-        raise AssertionError("signal pipeline called in mode=dr")
+        raise AssertionError("telemetry pipeline called for DR-only run")
 
     monkeypatch.setattr(unified_runner, "run_signal_pipeline", _should_not_be_called)
 
-    inp = _make_input(tmp_path, mode="dr")
+    inp = _make_input(tmp_path, pipelines=["deep_research"])
     cfg = _make_config(tmp_path)
     result = run_unified(inp, config=cfg)
 
-    assert result.report.run.pipeline == "unified"
+    assert result.report.run.pipelines == ["deep_research"]
     assert {c.id for c in result.report.candidates} == {"cand-core-0001"}
-    assert result.summary.signal_run_dir is None
+    assert result.summary.telemetry_run_dir is None
 
 
 def test_resume_mismatch_raises_when_resume_true(
-    tmp_path, patched_extractor, patched_signal, patched_dr
+    tmp_path, patched_extractor, patched_telemetry, patched_dr
 ):
-    inp = _make_input(tmp_path, mode="both")
+    inp = _make_input(tmp_path, pipelines=["deep_research", "telemetry"])
     cfg = _make_config(tmp_path)
     result = run_unified(inp, config=cfg)
 
     # Tamper with the manifest so the next run sees a fingerprint mismatch.
     manifest_path = result.run_dir / "manifest.json"
     payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-    payload["fingerprint"]["mode"] = "signal"
+    payload["fingerprint"]["pipelines"] = ["telemetry"]
     manifest_path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
 
     # Same UnifiedInput → same run_id → same run_dir on second invocation.
@@ -315,28 +322,28 @@ def test_resume_mismatch_raises_when_resume_true(
 
 
 def test_no_resume_clears_run_dir_on_mismatch(
-    tmp_path, patched_extractor, patched_signal, patched_dr
+    tmp_path, patched_extractor, patched_telemetry, patched_dr
 ):
-    inp = _make_input(tmp_path, mode="both")
+    inp = _make_input(tmp_path, pipelines=["deep_research", "telemetry"])
     cfg = _make_config(tmp_path)
     result1 = run_unified(inp, config=cfg)
 
     # Tamper with the manifest then re-run with resume=False.
     payload = json.loads((result1.run_dir / "manifest.json").read_text(encoding="utf-8"))
-    payload["fingerprint"]["mode"] = "signal"
+    payload["fingerprint"]["pipelines"] = ["telemetry"]
     (result1.run_dir / "manifest.json").write_text(json.dumps(payload), encoding="utf-8")
 
     cfg2 = _make_config(tmp_path).model_copy(update={"resume": False})
     result2 = run_unified(inp, config=cfg2)
     assert result2.run_dir == result1.run_dir
-    assert result2.report.run.pipeline == "unified"
+    assert result2.report.run.pipelines == ["deep_research", "telemetry"]
 
 
 def test_clean_resume_reuses_extractor(
-    tmp_path, patched_extractor, patched_signal, patched_dr
+    tmp_path, patched_extractor, patched_telemetry, patched_dr
 ):
     """A second invocation with the same fingerprint should not re-extract."""
-    inp = _make_input(tmp_path, mode="both")
+    inp = _make_input(tmp_path, pipelines=["deep_research", "telemetry"])
     cfg = _make_config(tmp_path)
     run_unified(inp, config=cfg)
     assert len(patched_extractor) == 1

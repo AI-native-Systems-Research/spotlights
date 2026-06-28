@@ -1,9 +1,11 @@
 """Public types for the unified runner.
 
-The unified runner orchestrates the deep-research and signal pipelines from a
-single CLI verb. Module extraction runs once at the top; both sub-pipelines
-receive the same `ProjectTree` via their own resume mechanism. The output is a
-single `SpotlightReport` with `RunInfo.pipeline="unified"`.
+The unified runner orchestrates the deep-research and telemetry pipelines from
+the top-level `spotlights-engine` CLI. Module extraction runs once at the top;
+sub-pipelines selected via `UnifiedInput.pipelines` receive the same
+`ProjectTree` via their own resume mechanism. The output is a single merged
+`SpotlightReport` carrying every contributor's pipeline name in
+`run.pipelines`.
 """
 
 from __future__ import annotations
@@ -18,10 +20,10 @@ from spotlights_engine.schemas.pipeline import SpotlightReport
 from spotlights_engine.spotlights_manager.filters import ModuleFilter
 
 
-# Three-way mode selector.  `dr` and `signal` run a single pipeline through the
-# unified plumbing (still extract-once, still emit a unified-shape report);
-# `both` is the canonical fan-out.
-UnifiedMode = Literal["both", "signal", "dr"]
+# Closed enum of pipeline names selectable via `--pipelines`.  Matches the
+# `RunInfo.pipelines` Literal in `schemas/pipeline.py` so a `UnifiedInput`
+# `pipelines` list flows verbatim into the emitted report.
+PipelineName = Literal["deep_research", "telemetry"]
 
 
 class UnifiedInput(BaseModel):
@@ -31,15 +33,19 @@ class UnifiedInput(BaseModel):
 
     repo_path: Path
     context: SpotlightContext
-    mode: UnifiedMode = "both"
+    # Which pipelines this run should execute.  Single-element list runs that
+    # one pipeline alone; multi-element list runs them concurrently and merges
+    # results.  Order is irrelevant — the unified runner sorts the union into
+    # `RunInfo.pipelines`.
+    pipelines: list[PipelineName] = Field(min_length=1, default_factory=lambda: ["deep_research"])
 
-    # Signal-only knobs forwarded into the signal sub-pipeline.
+    # Telemetry-pipeline knobs forwarded into `SignalPipelineInput`.
     telemetry_from: Path | None = None
     backend_id: str = "claude_code"
     max_candidates: int | None = Field(default=None, ge=1)
     model: str | None = None
 
-    # DR-only knobs forwarded into `SpotlightsManagerInput`.
+    # DR-pipeline knobs forwarded into `SpotlightsManagerInput`.
     max_findings_per_module: int | None = Field(default=None, ge=0)
     continue_on_module_failure: bool = True
 
@@ -72,18 +78,19 @@ class UnifiedConfig(BaseModel):
 class UnifiedRunSummary(BaseModel):
     """Compact per-pipeline summary persisted alongside the merged report.
 
-    `dr` / `signal` are `None` when their sub-pipeline did not run (e.g.
-    `mode="signal"` skips DR). `cost_usd` follows the merge rule: `None` only
-    if every contributor was `None`; otherwise non-None values sum.
+    `telemetry_run_dir` / `dr_artifacts_dir` are `None` when the corresponding
+    sub-pipeline did not run (e.g. `pipelines=["telemetry"]` skips DR).
+    `cost_usd` follows the merge rule: `None` only if every contributor was
+    `None`; otherwise non-None values sum.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    mode: UnifiedMode
+    pipelines: list[PipelineName] = Field(min_length=1)
     started_at: str
     finished_at: str | None = None
     cost_usd: float | None = None
-    signal_run_dir: Path | None = None
+    telemetry_run_dir: Path | None = None
     dr_artifacts_dir: Path | None = None
     issues: list[str] = Field(default_factory=list)
 
@@ -99,9 +106,9 @@ class UnifiedResult(BaseModel):
 
 
 __all__ = [
+    "PipelineName",
     "UnifiedConfig",
     "UnifiedInput",
-    "UnifiedMode",
     "UnifiedResult",
     "UnifiedRunSummary",
 ]

@@ -10,11 +10,12 @@ and data contracts in
 
 Two entry points cover this pipeline:
 
-- **`spotlights-engine signal`** — the recommended top-level entry. Goes
-  through the [unified runner](../unified_runner/), shares the one-shot
-  `ProjectTree` extraction with the deep-research path when invoked as
-  `spotlights-engine both`, and emits a unified
-  `SpotlightReport` (`pipeline="unified"`).
+- **`spotlights-engine telemetry`** — the recommended top-level entry.
+  Goes through the [unified runner](../unified_runner/), shares the
+  one-shot `ProjectTree` extraction with the deep-research path when
+  invoked as `spotlights-engine --pipelines deep-research,telemetry`,
+  and emits a `SpotlightReport` whose `run.pipelines` lists the
+  contributors.
 - **`signal-pipeline`** — the standalone CLI documented below. Exposes
   the lower-level stage controls (`--from-stage` / `--to-stage` /
   `--inject`) and the opt-in stage 05 (subject-mutating execution). Use
