@@ -99,7 +99,7 @@ If all three are unset, `claude -p` uses its own configured default.
 The actual model that ran each stage is recorded in
 `status.json[stages].<id>.model` and `_logs/<NN>_<name>/meta.json`.
 
-**Caller-supplied `SpotlightContext`.** `SignalPipelineInput.context: SpotlightContext | None` lets a programmatic caller pin the report's `objective` / `workload_hints` / `validation_plan`. When `None` (today's `signal-pipeline` CLI default), the runner synthesizes a context from the workload description in stage 01's signals. The unified runner (`spotlights-engine both`) sets it explicitly so signal- and DR-side reports agree on context — they then merge cleanly into one `SpotlightReport`.
+**Caller-supplied `SpotlightContext`.** `SignalPipelineInput.context: SpotlightContext | None` lets a programmatic caller pin the report's `objective` / `workload_hints` / `validation_plan`. When `None` (today's `signal-pipeline` CLI default), the runner synthesizes a context from the workload description in stage 01's signals. The unified runner (`spotlights-engine --pipelines deep-research,telemetry`) sets it explicitly so telemetry- and DR-side reports agree on context — they then merge cleanly into one `SpotlightReport`.
 
 ---
 
@@ -299,7 +299,7 @@ Tests live at [`tests/unit/signal_pipeline/`](../../../tests/unit/signal_pipelin
 
 ## See also
 
-- [`spotlights_engine/unified_runner/`](../unified_runner/) — the package behind `spotlights-engine both` / `spotlights-engine signal`; pre-populates this pipeline's stage 02 artifact so the extractor only runs once when both pipelines run together.
+- [`spotlights_engine/unified_runner/`](../unified_runner/) — the package behind `spotlights-engine telemetry` and `spotlights-engine --pipelines ...`; pre-populates this pipeline's stage 02 artifact so the extractor only runs once when multiple pipelines run together.
 - [`docs/specs/spotlight_report.md`](../../../docs/specs/spotlight_report.md) — unified `SpotlightReport` schema.
 - [`docs/signal-based/signal_discovery_flow.md`](../../../docs/signal-based/signal_discovery_flow.md) — architecture (mermaid + demo stories).
 - [`docs/signal-based/signal_discovery_overview.md`](../../../docs/signal-based/signal_discovery_overview.md) — 5-min human-friendly read.

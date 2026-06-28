@@ -455,7 +455,7 @@ Renumber + flatten + reshape:
 6. Issues from each `module_run.issues` are concatenated into top-level
    `SpotlightReport.issues`.
 
-`RunInfo.pipeline = "deep_research"`. The adapter populates
+`RunInfo.pipelines = ["deep_research"]`. The adapter populates
 `run_id`, `started_at`, `finished_at` (when available), and
 `cost_usd` (sum of pipeline-side cost envelopes).
 
@@ -854,19 +854,20 @@ real module names.
 
 ### 4.6 Where the `SpotlightReport` is written
 
-- **Signal pipeline (standalone)** auto-emits
+- **Telemetry pipeline (standalone `signal-pipeline`)** auto-emits
   `<run-dir>/spotlight_report.json` from `emit_spotlight_report` at
   the end of the runner.
-- **Deep-research (standalone)** builds the report in-memory through
-  `SpotlightsManagerResult.report` and **does not persist it** to its
-  artifacts dir today (consumers go through the
+- **Deep-research (standalone, no-verb `spotlights-engine`)** builds the
+  report in-memory through `SpotlightsManagerResult.report` and **does
+  not persist it** to its artifacts dir today (consumers go through the
   `SpotlightsManagerResult` envelope; `output_folder/result.json`
   carries the wrapper, not the bare report).
-- **Unified runner (`spotlights-engine both` / `spotlights-engine signal`)**
-  writes `<unified-run-dir>/spotlight_report.json` (the canonical
-  merged report, `pipeline="unified"`) plus, for symmetry,
+- **Unified runner (`spotlights-engine telemetry` / `spotlights-engine
+  --pipelines ...`)** writes `<unified-run-dir>/spotlight_report.json`
+  (the canonical merged report, `RunInfo.pipelines` listing every
+  contributor) plus, for symmetry,
   `<unified-run-dir>/deep_research/spotlight_report.json` and
-  `<unified-run-dir>/signal/spotlight_report.json`.
+  `<unified-run-dir>/telemetry/spotlight_report.json`.
 
 Standalone re-conversion CLIs
 (`spotlights-engine report <result.json>`, `signal-pipeline report
@@ -899,7 +900,7 @@ decides if their change is breaking.
 - *Additive* (new optional field with a default) — no bump.
 - *Breaking* (rename/remove a field, change a type, change a field's
   meaning, **widen a `Literal` like `CandidateOrigin`,
-  `ProposalSource`, `RunInfo.pipeline`, or `CodeKind`**) — bump
+  `ProposalSource`, `RunInfo.pipelines` (inner Literal), or `CodeKind`**) — bump
   `schema_version` to the next integer-as-string. The historical
   fixture file is kept on disk as evidence the previous shape existed
   but is no longer parseable by the current `SpotlightReport`

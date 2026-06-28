@@ -23,9 +23,9 @@ ProjectTree (modulo schema drift). The cache lives at
 and short-circuits extraction when the (resolved repo path, git HEAD,
 porcelain status) tuple matches. Bypass with `--no-projecttree-cache`
 or `SignalPipelineInput.projecttree_cache=False`. The unified runner
-(`spotlights-engine both`) skips this cache and pre-populates stage 02's
+(`spotlights-engine --pipelines …`) skips this cache and pre-populates stage 02's
 artifact directly; this cache is exercised only by direct
-`signal-pipeline` / `spotlights-engine signal` invocations.
+`signal-pipeline` / `spotlights-engine telemetry` invocations.
 
 Cache misses cleanly when:
 - subject_root isn't a git repo (no SHA available)
