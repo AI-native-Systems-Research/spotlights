@@ -62,7 +62,7 @@ jobs:
         with:
           anthropic_api_key: ${{ secrets.LITELLM_API_KEY }}
           # github_token: ${{ secrets.GITHUB_TOKEN }}
-          allowed_bots: 'github-actions'
+          allowed_bots: 'github-actions,claude'
           claude_args: '--model claude-sonnet-4-6 --dangerously-skip-permissions --allowedTools "Skill Agent Bash Read Edit Write"'
           show_full_output: true
           plugin_marketplaces: |
