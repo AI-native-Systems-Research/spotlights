@@ -1,0 +1,74 @@
+name: Claude Code Action
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+jobs:
+  claude:
+    if: |
+      github.event_name == 'pull_request' ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude'))
+    runs-on: self-hosted
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set prompt for PR review
+        id: set-prompt
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            {
+              echo 'prompt<<PROMPT_EOF'
+              echo '/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
+              echo ''
+              echo 'When posting the review comment prefix it with ## 🤖 Claude Code Review'
+              echo 'PROMPT_EOF'
+            } >> $GITHUB_OUTPUT
+          else
+            echo "prompt=" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Debug prompt
+        run: |
+          echo "Event: ${{ github.event_name }}"
+          echo "Prompt: ${{ steps.set-prompt.outputs.prompt }}"
+          
+      - uses: anthropics/claude-code-action@v1
+        env:
+          ANTHROPIC_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
+          CLAUDE_CODE_DISABLE_THINKING: "1"
+          CLAUDE_CONFIG_DIR: /tmp/claude-ci-config
+          GH_HOST: github.com
+        with:
+          anthropic_api_key: ${{ secrets.LITELLM_API_KEY }}
+          # github_token: ${{ secrets.GITHUB_TOKEN }}
+          allowed_bots: 'github-actions'
+          claude_args: '--model claude-sonnet-4-6 --dangerously-skip-permissions --allowedTools "Skill Agent Bash Read Edit Write"'
+          show_full_output: true
+          plugin_marketplaces: |
+            https://github.com/anthropics/claude-plugins-official.git
+            https://github.com/obra/superpowers-marketplace.git
+          plugins: |
+            code-review@claude-plugins-official
+            superpowers@superpowers-marketplace
+          prompt: ${{ steps.set-prompt.outputs.prompt }}
