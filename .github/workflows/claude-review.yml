@@ -41,7 +41,7 @@ jobs:
               echo 'prompt<<PROMPT_EOF'
               echo '/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
               echo ''
-              echo 'When posting the review comment prefix it with ## 🤖 Claude Code Review'
+              echo 'When posting the review comment prefix it with ## 🤖 Claude Code Review For Inbar'
               echo 'PROMPT_EOF'
             } >> $GITHUB_OUTPUT
           else
