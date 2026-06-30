@@ -91,7 +91,9 @@ def _build_parser() -> argparse.ArgumentParser:
             f"(default: {DEFAULT_REPO})."
         ),
     )
-    p.add_argument(
+    # Telemetry source — file path vs live SigNoz, mutually exclusive.
+    src_group = p.add_mutually_exclusive_group()
+    src_group.add_argument(
         "--telemetry-from",
         type=Path,
         default=None,
@@ -99,6 +101,24 @@ def _build_parser() -> argparse.ArgumentParser:
             "Path to a directory or file holding pre-computed signals "
             "(e.g. data/for_idan/runs/run-N50-kvprobe-tierC-hotpath-v2/). "
             "Real Bundle A is deferred — see step 4 of the plan."
+        ),
+    )
+    src_group.add_argument(
+        "--signoz",
+        action="store_true",
+        help=(
+            "Read the run's telemetry live from SigNoz instead of "
+            "--telemetry-from. Without --run-id, stage 01 auto-selects the "
+            "latest run (and warns if more than one exists)."
+        ),
+    )
+    p.add_argument(
+        "--run-id",
+        default=None,
+        metavar="ID",
+        help=(
+            "SigNoz run to analyze (e.g. 20260615T073440Z). Refines --signoz; "
+            "requires it. Omit to auto-select the latest run."
         ),
     )
     p.add_argument(
@@ -206,12 +226,19 @@ def _resolve_selection(args: argparse.Namespace) -> tuple[StageSelection, bool]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _build_parser().parse_args(argv)
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+    # --signoz/--telemetry-from mutual exclusion is enforced by the arg group;
+    # --run-id is a refiner, so its dependency on --signoz is checked here.
+    if args.run_id is not None and not args.signoz:
+        parser.error("--run-id requires --signoz")
     sel, resume = _resolve_selection(args)
 
     sp_input = SignalPipelineInput(
         subject_root=args.subject_root,
         telemetry_from=args.telemetry_from,
+        signoz=args.signoz,
+        run_id=args.run_id,
         backend_id=args.backend_id,
         projecttree_cache=args.projecttree_cache,
         max_candidates=args.max_candidates,
