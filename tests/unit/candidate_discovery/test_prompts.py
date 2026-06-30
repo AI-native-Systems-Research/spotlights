@@ -102,6 +102,30 @@ def test_review_includes_prev_json_and_max_seen_id():
     assert "cand-0042" in out
 
 
+def test_review_renders_removed_section_default():
+    m = _module()
+    out = render_review("v1/engine/core", m, "{}", "cand-0001")
+    assert "## Previously removed candidates" in out
+    assert "_(none)_" in out
+    leftovers = _PLACEHOLDER.findall(out)
+    assert leftovers == [], f"leftover placeholders: {leftovers}"
+
+
+def test_review_includes_removed_candidates_when_supplied():
+    m = _module()
+    removed = '{"module_qualified_name": "v1/engine/core", "candidates": [{"id": "cand-0004"}]}'
+    out = render_review(
+        "v1/engine/core",
+        m,
+        "{}",
+        "cand-0007",
+        removed_candidates_json=removed,
+    )
+    assert removed in out
+    leftovers = _PLACEHOLDER.findall(out)
+    assert leftovers == [], f"leftover placeholders: {leftovers}"
+
+
 def test_review_preserves_literal_json_braces():
     m = _module()
     out = render_review("v1/engine/core", m, "{}", "cand-0001")

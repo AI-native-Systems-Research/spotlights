@@ -10,6 +10,13 @@ previous pass missed that clear the same quality bar.
 - module.path: {module_path}                     # every candidate's `file` MUST live here
 - highest id accepted so far: {max_seen_candidate_id}
 
+## Previously removed candidates
+These were proposed in an earlier pass and later dropped by a reviewer. They are
+shown so you can reconsider them — NOT to pad the list. Most should stay
+removed. But if one was dropped in error and genuinely clears the evolve-target
+bar, you MAY re-add it (see the re-add rule below).
+{removed_candidates}
+
 ## Repository context
 
 {repo_context}
@@ -20,6 +27,17 @@ previous pass missed that clear the same quality bar.
 
 ## Rules
 - DO NOT inflate the list. If the previous pass was good, return it nearly unchanged.
+- DROP CONSERVATIVELY. Removing a prior candidate requires a concrete reason it
+  fails the evolve-target bar (no oracle, no real headroom, out of range,
+  outside `module.path`, or a duplicate of another kept candidate). A candidate
+  being merely lower-impact than its siblings is NOT a reason to drop it. When
+  you are uncertain whether a candidate qualifies, KEEP it.
+- RE-ADDING a previously removed candidate: if one listed under "Previously
+  removed candidates" was dropped in error, you MAY re-add it by emitting it
+  with its **original `id` and `file` unchanged**. Do NOT mint a new id for it —
+  its id will be less than or equal to `{max_seen_candidate_id}`, which is
+  expected and allowed for a re-add. You MUST NOT change a re-added candidate's
+  `file`. You MAY tighten its other fields, as for any kept candidate.
 - Remove any candidate whose `file` does not exist, whose `file` is outside
   `module.path`, or whose `line_start..line_end` is out of range for that file.
 - Remove candidates that fail the evolve-target test: no correctness oracle,

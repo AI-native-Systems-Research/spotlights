@@ -40,6 +40,7 @@ STRICT_RETRY_REMINDER: str = _load("strict_retry.md").rstrip("\n")
 
 _REPO_CONTEXT_DEFAULT = "_(none provided)_"
 _SPOTLIGHT_CONTEXT_DEFAULT = "_(none provided)_"
+_REMOVED_DEFAULT = "_(none)_"
 
 
 def _substitute(template: str, values: dict[str, str]) -> str:
@@ -131,6 +132,7 @@ def render_review(
     prev_candidates_json: str,
     max_seen_candidate_id: str,
     *,
+    removed_candidates_json: str | None = None,
     repo_context_markdown: str | None = None,
     spotlight_context: SpotlightContext | None = None,
 ) -> str:
@@ -139,6 +141,7 @@ def render_review(
         "module_path": module.path,
         "prev_candidates_json": prev_candidates_json,
         "max_seen_candidate_id": max_seen_candidate_id,
+        "removed_candidates": removed_candidates_json or _REMOVED_DEFAULT,
         "repo_context": _format_repo_context(repo_context_markdown),
         "spotlight_context": _format_spotlight_context(spotlight_context),
     }

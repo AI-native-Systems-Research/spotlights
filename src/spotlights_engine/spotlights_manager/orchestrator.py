@@ -136,7 +136,7 @@ def _build_report(
     Candidates already carry unified `proposals` and globally-unique,
     slug-segmented ids, so flattening preserves uniqueness with no renumbering.
     Iteration follows `module_runs` insertion order (mirrors `ordered_qns` /
-    tree leaf order), giving a deterministic, run-stable ordering.
+    tree walk order), giving a deterministic, run-stable ordering.
     """
     candidates: list[Candidate] = []
     findings: list[Finding] = []
@@ -443,9 +443,9 @@ def _run_extractor_if_needed(
     P.write_extractor_outputs(paths, result.project_tree, result.invocation)
     manifest["extractor"] = {"completed": True, "duration_s": duration}
     P.write_manifest(paths, manifest)
-    n_leaves = sum(1 for _ in result.project_tree.leaves())
+    n_modules = sum(1 for _ in result.project_tree.walk())
     _log.info(
-        "extractor: complete in %.1fs — kept %d leaf modules", duration, n_leaves
+        "extractor: complete in %.1fs — kept %d modules", duration, n_modules
     )
     return result.project_tree, result.invocation
 
@@ -1457,10 +1457,12 @@ async def _run_async(
 
     # Compute target list. Qualified names are slash-form (source-root-relative
     # paths) and are the single canonical key throughout — `module_runs`, slugs,
-    # the CLI filter, and `EvolveSpec` all key on this string.
-    leaves: list[tuple[str, Module]] = list(tree.leaves())
-    leaf_qns = [qn for qn, _ in leaves]
-    selected = apply_filter(leaf_qns, config.module_filter)
+    # the CLI filter, and `EvolveSpec` all key on this string. Every module in
+    # the tree is a target, not just leaves: a parent module is pipelined on its
+    # own merits alongside its submodules.
+    all_modules: list[tuple[str, Module]] = list(tree.walk())
+    all_qns = [qn for qn, _ in all_modules]
+    selected = apply_filter(all_qns, config.module_filter)
 
     # Slug collision check (theoretical — slash form is unique by construction).
     seen_slugs: dict[str, str] = {}
@@ -1477,7 +1479,7 @@ async def _run_async(
     ordered_qns = (
         list(selected)
         if (config.module_filter and config.module_filter.include)
-        else [qn for qn in leaf_qns if qn in selected_set]
+        else [qn for qn in all_qns if qn in selected_set]
     )
 
     sem = asyncio.Semaphore(config.max_parallel_sessions)
