@@ -64,7 +64,8 @@ A full engine run per PR is the dominant cost (minutes + API $) — which is
 exactly why this skill **does not run it**: it emits the scoped-blind command and
 stops, leaving the run under your control. The `--include` scoping is the main
 lever — surface the scoped `include` set so the user sees what will be audited.
-This is **one PR per invocation**; there is no list-level fan-out.
+This is **one PR per invocation**; there is no list-level fan-out. Each run gets
+its own full clone under `$RUN/checkout` — nothing is shared across runs.
 
 ## Procedure
 
@@ -85,21 +86,28 @@ PR, no list grammar.
 
 Derive two deterministic keys (no `Date.now()` — identical inputs must resume,
 but a changed objective must not collide with an old engine artifacts dir):
-- **`pr_key`** = a slug of the PR URL (e.g. `owner__repo__pr<n>`). Used for the
-  reusable clone cache `runs/run-on-pr/_repos/<pr_key>`.
-- **`run_id`** = a short hash over (pr_url + objective + sorted hints + include
-  override + base override + relevant engine knobs). `RUN=runs/run-on-pr/<run_id>`.
+- **`pr_key`** = a slug of the PR URL (e.g. `owner__repo__pr<n>`). Used for
+  progress-log labels.
+- **`title_slug`** = a short slug of the PR title. Fetch the title cheaply here
+  with `gh pr view <pr_url> --json title -q .title` (metadata only, no clone).
+  Lowercase, replace non-alphanumerics with `-`, collapse repeats, trim, and cap
+  to ~40 chars. If the fetch fails, omit this segment (fall back gracefully).
+- **`run_id`** = `<pr_key>__<title_slug>__<hash>`, where `<hash>` is a short hash
+  over (pr_url + objective + sorted hints + include override + base override +
+  relevant engine knobs). The `pr_key` + `title_slug` prefix makes the folder
+  human-readable (e.g. `owner__repo__pr<n>__add-fused-moe-kernel__bc8d9c701211`);
+  the hash keeps distinct objectives/knobs from colliding. `RUN=runs/run-on-pr/<run_id>`.
 
 `mkdir -p $RUN`. Echo the parsed inputs (PR, objective, hints, any
 override/base, run_id) back to the user for confirmation before the expensive
 run.
 
 ### 2. Checkout (agent: `pr-checkout`)
-Spawn `pr-checkout` with `{repo, pr_url, pr_key, repos_dir:"runs/run-on-pr/_repos",
-out_dir:"$RUN", progress_log:"$RUN/progress.log", base_commit?}`. It resolves PR
-metadata, full-clones (cached by `pr_key`), fetches `refs/pull/<n>/head` + base,
-computes the merge-base, checks out detached, and writes `$RUN/pr.json`.
-On `status:error` → stop and report.
+Spawn `pr-checkout` with `{repo, pr_url, pr_key, out_dir:"$RUN",
+progress_log:"$RUN/progress.log", base_commit?}`. It resolves PR metadata,
+full-clones into `$RUN/checkout`, fetches `refs/pull/<n>/head` + base, computes
+the merge-base, checks out detached, and writes `$RUN/pr.json` (with
+`checkout_path` = `$RUN/checkout`). On `status:error` → stop and report.
 
 ### 3. Diff scope / ground truth + cited papers (agent: `pr-diff-scope`)
 Spawn `pr-diff-scope` with `{checkout_path, base_commit, head_commit, pr_url,
@@ -141,7 +149,10 @@ uv run --no-sync spotlights-engine \
   --hint            "<hint1>"  --hint "<hint2>" ...   # one --hint per hint, omit if none
   --output-folder   $RUN/spotlights-out \
   --artifacts-dir   $RUN/artifacts \
-  [--max-parallel <N>]  [--max-findings-per-module <N>]
+  --max-parallel    3 \
+  --max-parallel-pairs 10 \
+  --max-findings-per-module 30 \
+  --no-review
 ```
 - ⚠️ **Scoped blindness (do not break):** the command carries **only** the
   objective + hints + scoped qns. Never add the diff, PR title/description,
@@ -171,7 +182,8 @@ and paper verdicts are issued by `compare-pr-run`. The buckets it can set:
 ## Notes
 - `runs/` is entirely gitignored — never `git add` anything under it.
 - Re-running identical inputs reuses the same `run_id` (addressable, resumable);
-  the PR-keyed clone cache avoids recloning across objectives.
+  a resumed run reuses its own `$RUN/checkout` clone (fetches instead of
+  recloning). Distinct objectives get distinct `run_id`s and thus separate clones.
 - The module map is LLM-produced and may vary across deliberate re-extracts;
   note this where recall numbers are cited.
 - **Versioning:** `.claude/` is version-controlled in this repo (the `.claude/`

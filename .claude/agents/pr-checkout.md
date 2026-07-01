@@ -15,10 +15,9 @@ invariants" #2.
 ## Inputs (passed by the skill)
 - `repo` — clone URL `https://github.com/<owner>/<repo>`.
 - `pr_url` — canonical `https://github.com/<owner>/<repo>/pull/<n>`.
-- `pr_key` — deterministic PR slug used as the clone-cache key.
-- `repos_dir` — `runs/run-on-pr/_repos` (you create `<pr_key>/` under it as the
-  reusable clone).
-- `out_dir` — `runs/run-on-pr/<run_id>` (where you write `pr.json`).
+- `pr_key` — deterministic PR slug (used only for progress-log labels).
+- `out_dir` — `runs/run-on-pr/<run_id>` (where you write `pr.json`; you clone
+  into `<out_dir>/checkout/`).
 - `progress_log` — `<out_dir>/progress.log`.
 - optional `base_commit` — explicit override.
 
@@ -35,14 +34,13 @@ invariants" #2.
    Record `mergeCommit.oid` (may be null), `baseRefOid`, `headRefOid`,
    `baseRefName`, and the PR number `<n>`.
 
-3. **Clone cache (full history) — never shallow.** The clone is keyed by
-   `pr_key` and reused across objectives, so a re-run on a different objective
-   does not reclone:
-   - If `<repos_dir>/<pr_key>/.git` is absent: `git clone <repo> <repos_dir>/<pr_key>`.
-   - Else: `git -C <repos_dir>/<pr_key> fetch origin`.
+3. **Clone (full history) into the run dir — never shallow.** The clone lives
+   under this run's own directory, so each run gets an isolated tree:
+   - If `<out_dir>/checkout/.git` is absent: `git clone <repo> <out_dir>/checkout`.
+   - Else (resumed run): `git -C <out_dir>/checkout fetch origin`.
    ⚠️ Do **not** `--depth 1`. Step 2's `git merge-base` needs the common
    ancestry locally; a shallow clone omits it and merge-base returns nothing.
-   Call the checkout path `<ckt> = <repos_dir>/<pr_key>`.
+   Call the checkout path `<ckt> = <out_dir>/checkout`.
 
 4. **Fetch the PR head and base refs explicitly.** A *merged* PR's source branch
    is usually deleted, so `headRefOid` is unreachable via any branch. GitHub
@@ -75,9 +73,8 @@ invariants" #2.
    ```
    git -C <ckt> checkout --detach <base_commit>
    ```
-   Because the clone is shared across objectives for the same `pr_key`, this is
-   the single working tree — that is fine: run-on-pr processes one PR at a time,
-   so there is no parallel detached-HEAD collision.
+   The clone is private to this run dir, so there is no cross-run detached-HEAD
+   collision.
 
 7. **Write `pr.json`** to `<out_dir>/pr.json`:
    ```jsonc

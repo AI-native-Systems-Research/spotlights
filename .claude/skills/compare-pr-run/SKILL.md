@@ -61,8 +61,9 @@ symbol, kind, estimated_impact, origin, rank}`, preserving engine order so
 `rank` is meaningful. Then read `result.json`'s `module_runs` keys for
 `modules_run` and count the flat records for `num_candidates`. Log it:
 `bash scripts/run_on_pr/log.sh $RUN/progress.log <pr_key> compare-pr-run CANDIDATES "<N> candidates, <k> modules"`
-(`<pr_key>` is not stored in `pr.json`; derive it as `basename(checkout_path)`,
-e.g. `vllm-project__vllm__pr39008`.)
+(`<pr_key>` is not stored in `pr.json`; use `basename($RUN)` — the run_id, e.g.
+`vllm-project__vllm__pr39008__add-fused-moe__bc8d9c70` — as the progress-log
+label. It is only a log tag, so the exact PR slug is not required.)
 
 ### 3. Match (agent: `match-evaluator` — run-on-pr step 5, verbatim)
 Spawn `match-evaluator` with:
