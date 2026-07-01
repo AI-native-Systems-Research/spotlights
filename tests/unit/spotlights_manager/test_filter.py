@@ -27,26 +27,29 @@ def test_unknown_name_raises() -> None:
         apply_filter(leaves, ModuleFilter(include=["does/not/exist"]))
 
 
-def test_parent_prefix_expands_to_descendants() -> None:
+def test_virtual_prefix_expands_to_descendants() -> None:
+    """A name that resolves to no module is a virtual prefix and expands."""
     leaves = ["v1/worker/gpu", "v1/worker/tpu", "v1/kv_offload"]
     out = apply_filter(leaves, ModuleFilter(include=["v1/worker"]))
     assert out == ["v1/worker/gpu", "v1/worker/tpu"]
 
 
-def test_parent_name_selects_itself_and_descendants() -> None:
-    """When the parent module is itself a target (non-leaf modules run too),
-    naming it selects the parent node plus everything nested beneath it."""
+def test_real_module_selects_only_itself() -> None:
+    """When the named module exists, it selects exactly that module and none
+    of its submodules."""
     modules = ["v1/worker", "v1/worker/gpu", "v1/worker/tpu", "v1/kv_offload"]
     out = apply_filter(modules, ModuleFilter(include=["v1/worker"]))
-    assert out == ["v1/worker", "v1/worker/gpu", "v1/worker/tpu"]
+    assert out == ["v1/worker"]
 
 
-def test_parent_prefix_dedupes_with_explicit_leaves() -> None:
-    leaves = ["v1/worker/gpu", "v1/worker/tpu"]
+def test_explicit_module_and_submodule_both_selected() -> None:
+    """Naming a module and one of its submodules selects exactly those two,
+    in user-supplied order."""
+    modules = ["v1/worker", "v1/worker/gpu", "v1/worker/tpu"]
     out = apply_filter(
-        leaves, ModuleFilter(include=["v1/worker/gpu", "v1/worker"])
+        modules, ModuleFilter(include=["v1/worker/gpu", "v1/worker"])
     )
-    assert out == ["v1/worker/gpu", "v1/worker/tpu"]
+    assert out == ["v1/worker/gpu", "v1/worker"]
 
 
 def test_source_root_prefixed_names() -> None:
