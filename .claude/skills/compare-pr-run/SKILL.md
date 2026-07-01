@@ -14,8 +14,8 @@ or re-run the engine. Authority: `design/check_pr.md` §5(tail)–§7 and
 "Bucketing"; this is a strict subset of the `run-on-pr` skill.
 
 ## When to use vs. run-on-pr
-- **`run-on-pr`** — full harness from a bare PR URL (checkout → diff → scope →
-  engine → match → report).
+- **`run-on-pr`** — prep harness from a bare PR URL (checkout → diff → scope →
+  emit the scoped-blind engine command).
 - **`compare-pr-run`** (this) — the engine already finished (e.g. an earlier
   run errored mid-engine and you re-ran the command by hand); you just want the
   verdict. Also the right tool to re-score after a manual engine re-run without
@@ -44,9 +44,9 @@ Given a run dir `$RUN` (e.g. `runs/run-on-pr/<run_id>`):
 Accept the run dir (`$RUN`). If the user gives a PR URL or run_id instead,
 resolve to the matching `runs/run-on-pr/<run_id>` (there is exactly one dir per
 run_id). Read `$RUN/pr.json` for the PR link/base/head and `$RUN/scope.json`
-(if present) for the `--include` set and `unmapped_files`, so the report can
-state what was audited. Echo the resolved `$RUN`, PR, and scope back before
-proceeding.
+(if present) for the `--include` set, `scope_source`, `all_modules_fallback`,
+`fallback_reason`, and `root_level_files`, so the report can state what was
+audited. Echo the resolved `$RUN`, PR, and scope back before proceeding.
 
 ### 2. Explode candidates (done inline, no full engine)
 The engine already produced `result.json`; only its candidate-extraction tail
@@ -65,7 +65,7 @@ symbol, kind, estimated_impact, origin, rank}`, preserving engine order so
 `vllm-project__vllm__pr39008__add-fused-moe__bc8d9c70` — as the progress-log
 label. It is only a log tag, so the exact PR slug is not required.)
 
-### 3. Match (agent: `match-evaluator` — run-on-pr step 5, verbatim)
+### 3. Match (agent: `match-evaluator`)
 Spawn `match-evaluator` with:
 `{candidates_path:"$RUN/candidates.json", ground_truth_path:"$RUN/ground_truth.json",
 addition_tolerance:3, cited_papers_path:"$RUN/cited_papers.json",
@@ -76,15 +76,16 @@ It writes `$RUN/match.json` (line recall) and — only when papers were cited �
 Do not re-derive ranges or overlaps yourself; the agent owns the deterministic
 interval/key arithmetic.
 
-### 4. Persist + report (run-on-pr step 7)
+### 4. Persist + report
 Write/overwrite `$RUN/report.md` (human-readable). If a prior `report.md`
 exists from a failed run, **replace** its verdict sections rather than leaving
 the stale `error` bucket. Include:
 - PR link, base commit (short), head; the objective the engine was given (from
   `report.md`/`result.json` run header if recorded).
 - Changed source files + base-side ranges (from `ground_truth.json`); modules
-  run (the `--include` set, or all-modules fallback) and any `unmapped_files`
-  (carry the known blind spot forward); candidate count.
+  run (the `--include` set, or all-modules fallback), the `scope_source`, and
+  any `root_level_files` / `fallback_reason` (carry the structural scope caveat
+  forward); candidate count.
 - **Verdict:** `pr_line_hit` headline + `file_hit`/`folder_hit` diagnostics +
   `new_file_only`. For each hit range, the matching candidate(s) with
   `estimated_impact` and rank ("found, ranked #k"). List `missed_ranges` for
@@ -109,7 +110,7 @@ Print: `pr_line_hit` (hit/miss), the matched candidate + true rank, the line
 bucket, the **paper signal** (`paper_hit`/`n/a`, with the matched paper title on
 a hit), and where the artifacts live (`$RUN`).
 
-## Bucketing (same as run-on-pr; this skill only issues line-recall verdicts)
+## Bucketing
 - `new_file_only` — every changed source file is brand-new → structurally
   unrecallable by base-side line overlap (reported, not a plain miss).
 - `valid` — matcher ran; `pr_line_hit ∈ {true,false}` is the result.
@@ -127,7 +128,7 @@ a same-paper match (URL/title dedup keys), not semantic prior-art.
 ## Notes
 - Never re-run the engine here — that's the expensive step this skill
   deliberately skips. If `result.json` is missing, tell the user to run the
-  `spotlights-engine` command first (or use `run-on-pr` end-to-end).
+  `spotlights-engine` command first (or use `run-on-pr` to regenerate it).
 - Re-running this skill on the same `$RUN` is idempotent: it just re-explodes,
   re-matches, and rewrites the report.
 - `.claude/` is version-controlled in this repo (its `.gitignore` line is

@@ -1,6 +1,6 @@
 ---
 name: run-on-pr
-description: "Prep + command emitter for a PR-grounded recall run of the full spotlights-engine. Given ONE merged GitHub PR plus a generic objective, prepares a scoped-blind engine run on the PR's pre-merge code: checks out the merge-base, computes base-side ground-truth line ranges + cited-paper URLs, and maps the changed files to module qns for --include. It then RETURNS the exact scoped-blind `spotlights-engine` command for you to run yourself — it does NOT invoke the engine (that expensive step you launch manually). After the engine finishes, use the `compare-pr-run` skill to score candidates against the ground truth (module-scoped line recall) and cited papers (paper-citation recall). Use when asked to set up / prepare an engine run against a real merged PR, or to get the scoped-blind command for a specific PR's pre-merge code."
+description: "Prep + command emitter for a PR-grounded recall run of the full spotlights-engine. Given ONE merged GitHub PR plus a generic objective, prepares a scoped-blind engine run on the PR's pre-merge code: checks out the merge-base, computes base-side ground-truth line ranges + cited-paper URLs, and derives the --include scope from the changed files' folder paths (deterministic, no LLM extractor). It then RETURNS the exact scoped-blind `spotlights-engine` command for you to run yourself — it does NOT invoke the engine (that expensive step you launch manually). After the engine finishes, use the `compare-pr-run` skill to score candidates against the ground truth (module-scoped line recall) and cited papers (paper-citation recall). Use when asked to set up / prepare an engine run against a real merged PR, or to get the scoped-blind command for a specific PR's pre-merge code."
 ---
 
 # run-on-pr — single-PR recall prep + engine-command emitter
@@ -17,8 +17,7 @@ scoped-blind command to run the engine cold on that tree.
 `spotlights-engine` command** for you to run yourself (the engine run is the
 dominant cost — minutes + API $ — so it stays under your explicit control). When
 the engine finishes, run the **`compare-pr-run`** skill on the same run dir to
-score candidates against the ground truth and cited papers. Full design +
-rationale: `design/check_pr.md` (read it before changing behavior).
+score candidates against the ground truth and cited papers. 
 
 This is the heavier sibling of the reference `check-prs` skill: the auditor is
 no longer a lightweight bootstrap prompt — it is the full five-step engine
@@ -28,10 +27,11 @@ invoked exactly as the README documents.
 1. **Scoped blindness.** The engine runs on the pre-PR checkout with **no** PR
    title, description, diff, changed-file list, or ground-truth ranges. The one
    deliberate exception is the coarse **module scope** (`--include`) derived from
-   the changed files. The only natural-language input is the **generic,
-   PR-independent objective** (+ generic hints). The PR prose is read **only** by
-   `pr-diff-scope` for cited-paper extraction, and that result is never given to
-   the engine.
+   the changed files — specifically from the *folders* those files live in, so
+   the leaked signal is only "which directories changed", never the diff itself.
+   The only natural-language input is the **generic, PR-independent objective**
+   (+ generic hints). The PR prose is read **only** by `pr-diff-scope` for
+   cited-paper extraction, and that result is never given to the engine.
 2. **Base = `merge-base(baseRefOid, headRefOid)`**, never `mergeCommit^1`. Full
    clone, never shallow.
 3. **Two-dot diff** `git diff <base> <head>` so ranges are in the pre-PR file's
@@ -43,7 +43,7 @@ invoked exactly as the README documents.
 run-on-pr skill (you, main session)        — single-PR prep orchestrator
   ├─ pr-checkout       (step 1) — pre-PR checkout at the merge-base
   ├─ pr-diff-scope     (step 2) — base-side line ranges + cited-paper URLs
-  ├─ pr-module-scope   (step 3) — module map + changed-files→modules → --include
+  ├─ pr-module-scope   (step 3) — changed-file *folders* → --include (path-derived, no LLM)
   └─ emit command      (step 4) — print the scoped-blind spotlights-engine command
                                    (YOU run it; this skill does not)
 
@@ -74,7 +74,7 @@ its own full clone under `$RUN/checkout` — nothing is shared across runs.
 - Confirm the engine is callable: `uv run --no-sync spotlights-engine --help`
   (so the command you emit will actually run). Stop if absent.
 - Confirm the prep helpers exist under `scripts/run_on_pr/`:
-  `diff_ranges.py`, `log.sh`, `map_files_to_modules.py`, `extract_pr_papers.py`.
+  `diff_ranges.py`, `log.sh`, `derive_scope_from_paths.py`, `extract_pr_papers.py`.
   (The match/report helpers — `extract_candidates.py`, `overlap.py`,
   `match_papers.py` — are used by `compare-pr-run`, not here.)
 
@@ -122,22 +122,25 @@ arxiv/DOI/paper-host URLs from the PR prose — the only place PR prose is read)
   `cited_papers.json` and the paper signal becomes `n/a`.
 
 ### 4. Module scope (agent: `pr-module-scope`)
-Spawn `pr-module-scope` with `{checkout_path, changed_source_files (from step 3),
-pr_key, out_dir:"$RUN", progress_log, include_override?}`. It runs the modules
-extractor **blind** on the checkout (→ `$RUN/project_tree.json`; reuse if
-present), maps changed files → slash-form qns via `map_files_to_modules.py`, and
-writes `$RUN/scope.json`.
-- Mapper-derived scope is the normal path.
+Spawn `pr-module-scope` with `{changed_source_files (from step 3), pr_key,
+out_dir:"$RUN", progress_log, include_override?, checkout_path?}`. It derives the
+scope **directly from the changed-file paths** — a module is the *folder* the
+changed code lives in — via `derive_scope_from_paths.py`, and writes
+`$RUN/scope.json`. No modules extractor, no `project_tree.json`, nothing about
+the code content is read. The engine expands each derived folder qn to the real
+modules beneath it (virtual-prefix matching in `spotlights_manager/filters.py`).
+- Path-derived scope is the normal path.
 - **All-modules fallback** (record the reason, run with no `--include`) when the
-  derived `include` is empty, or any changed source file is unmapped or
-  ambiguous — never let mapper uncertainty become a silent false negative.
-- A user `--include` override must validate against the tree or fail clearly; it
-  is not auto-expanded.
+  derived `include` is empty, or any changed source file sits at the source root
+  (no sub-folder to scope to) — never let a root-level change become a silent
+  under-scope / false negative.
+- A user `--include` override is passed through verbatim; the engine fails fast
+  on an unknown qn, so it is never auto-expanded here.
 - On `status: error` → stop.
 
 ### 5. Emit the scoped-blind engine command (do NOT run it)
 Prep is done: `$RUN` now holds `pr.json`, `ground_truth.json`,
-`cited_papers.json`, `project_tree.json`, and `scope.json`. Build the exact
+`cited_papers.json`, and `scope.json`. Build the exact
 command the user should run themselves, reading `include` from `$RUN/scope.json`
 (empty ⇒ all-modules fallback: omit `--include` entirely). Surface it verbatim in
 a copyable block:
@@ -184,8 +187,9 @@ and paper verdicts are issued by `compare-pr-run`. The buckets it can set:
 - Re-running identical inputs reuses the same `run_id` (addressable, resumable);
   a resumed run reuses its own `$RUN/checkout` clone (fetches instead of
   recloning). Distinct objectives get distinct `run_id`s and thus separate clones.
-- The module map is LLM-produced and may vary across deliberate re-extracts;
-  note this where recall numbers are cited.
+- The `--include` scope is derived deterministically from the changed-file
+  folder paths (no LLM), so it is stable across re-runs. It is coarse by design:
+  each folder qn expands to every module the engine finds beneath that folder.
 - **Versioning:** `.claude/` is version-controlled in this repo (the `.claude/`
   line in `.gitignore` is commented out). These skill/agent files live directly
   under `.claude/` and are committed alongside the code. `runs/` remains

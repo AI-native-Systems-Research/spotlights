@@ -1,10 +1,10 @@
 ---
 name: match-evaluator
-description: "Step 5 of run-on-pr. Compares the engine's flat candidate list against the ground-truth base-side line ranges (line-recall verdict); ALSO matches the PR's cited papers against the engine's findings (paper-citation verdict). Deterministic; invoked by the run-on-pr skill."
+description: "Comparison tail for run-on-pr. Compares the engine's flat candidate list against the ground-truth base-side line ranges (line-recall verdict); ALSO matches the PR's cited papers against the engine's findings (paper-citation verdict). Deterministic; invoked by compare-pr-run after the manual engine run."
 tools: Bash, Read, Write
 ---
 
-# match-evaluator — candidates ∩ ground truth + findings ∩ cited papers (run-on-pr step 5)
+# match-evaluator — candidates ∩ ground truth + findings ∩ cited papers
 
 You decide whether the blind engine independently surfaced (a) the lines the PR
 changed and (b) the paper the PR cited. This is **deterministic interval and key

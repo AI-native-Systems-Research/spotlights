@@ -1,7 +1,7 @@
 """Unit tests for the run-on-pr helper scripts (scripts/run_on_pr/).
 
-Covers the schema translation (`extract_candidates`), the file→module qn
-mapper (`map_files_to_modules`), conservative paper extraction
+Covers the schema translation (`extract_candidates`), the path→folder-qn scope
+deriver (`derive_scope_from_paths`), conservative paper extraction
 (`extract_pr_papers`), the paper matcher (`match_papers`), and — most
 importantly — that the matcher's key logic stays in lockstep with the engine's
 own finding-dedup keys (`_finding_keys`). Divergence there would silently
@@ -30,12 +30,11 @@ def _load(module_name: str):
 
 
 extract_candidates = _load("extract_candidates")
-map_files_to_modules = _load("map_files_to_modules")
+derive_scope_from_paths = _load("derive_scope_from_paths")
 extract_pr_papers = _load("extract_pr_papers")
 match_papers = _load("match_papers")
 
 from spotlights_engine.module_deep_research.orchestration import _finding_keys  # noqa: E402
-from spotlights_engine.schemas.project import ProjectTree  # noqa: E402
 
 # --- extract_candidates: nested locations[].spans[] → flat records -----------
 
@@ -121,51 +120,41 @@ def test_off_schema_empties_emit_no_junk_records():
     assert extract_candidates.explode([{"id": "cand-m-0003"}]) == []
 
 
-# --- map_files_to_modules: deepest-match, source_root, unmapped --------------
+# --- derive_scope_from_paths: folder qn, source_root, root-level files -------
 
-def _tree(data: dict) -> ProjectTree:
-    return ProjectTree.model_validate(data)
-
-
-def test_deepest_module_wins_and_uses_walk_qn():
-    tree = _tree({
-        "repository": {"name": "vllm", "summary": "s", "source_root": ""},
-        "modules": [
-            {"name": "v1", "path": "vllm/v1", "submodules": [
-                {"name": "kv_offload", "path": "vllm/v1/kv_offload", "submodules": [
-                    {"name": "cpu", "path": "vllm/v1/kv_offload/cpu", "submodules": []},
-                ]},
-            ]},
-        ],
-    })
-    out = map_files_to_modules.map_files(
-        tree,
-        ["vllm/v1/kv_offload/cpu/manager.py", "vllm/v1/kv_offload/top.py", "vllm/other/x.py"],
+def test_folder_qn_is_the_containing_dir_repo_root_layout():
+    # Repo-root layout (source_root=""): the qn is the file's folder verbatim.
+    out = derive_scope_from_paths.derive(
+        ["vllm/v1/kv_offload/cpu/manager.py", "vllm/v1/kv_offload/top.py"],
     )
+    assert out["source_root"] == ""
     assert out["file_module"]["vllm/v1/kv_offload/cpu/manager.py"] == "vllm/v1/kv_offload/cpu"
     assert out["file_module"]["vllm/v1/kv_offload/top.py"] == "vllm/v1/kv_offload"
-    assert out["unmapped_files"] == ["vllm/other/x.py"]
-    assert "vllm/v1/kv_offload/cpu" in out["include"]
+    assert out["include"] == ["vllm/v1/kv_offload", "vllm/v1/kv_offload/cpu"]
 
 
-def test_source_root_stripped_in_qn():
-    tree = _tree({
-        "repository": {"name": "pkg", "summary": "s", "source_root": "src"},
-        "modules": [{"name": "cache", "path": "src/pkg/cache", "submodules": []}],
-    })
-    out = map_files_to_modules.map_files(tree, ["src/pkg/cache/x.py"])
+def test_source_root_stripped_when_all_under_src():
+    # source_root inferred as "src" (every file under src/), then stripped.
+    out = derive_scope_from_paths.derive(["src/pkg/cache/x.py"])
+    assert out["source_root"] == "src"
     assert out["include"] == ["pkg/cache"]
 
 
-def test_segment_aware_no_prefix_false_match():
-    tree = _tree({
-        "repository": {"name": "r", "summary": "s", "source_root": ""},
-        "modules": [{"name": "cache", "path": "pkg/cache", "submodules": []}],
-    })
-    # pkg/cache_v2/x.py must NOT match module pkg/cache.
-    out = map_files_to_modules.map_files(tree, ["pkg/cache_v2/x.py"])
-    assert out["include"] == []
-    assert out["unmapped_files"] == ["pkg/cache_v2/x.py"]
+def test_segment_normalized_to_engine_token():
+    # A folder segment the engine would normalize (e.g. "2d-utils") is emitted
+    # in the same normalized form so it round-trips through the engine's parser.
+    out = derive_scope_from_paths.derive(["pkg/2d-utils/x.py"])
+    assert out["include"] == ["pkg/m_2d_utils"]
+
+
+def test_root_level_file_has_no_folder_qn():
+    # A file directly at the source root has no sub-folder to scope to: it is
+    # reported in root_level_files (the agent turns this into all-modules).
+    # `setup.py` sits at the repo root (source_root=""); its folder IS the root.
+    out = derive_scope_from_paths.derive(["setup.py", "vllm/v1/x.py"])
+    assert out["source_root"] == ""
+    assert out["root_level_files"] == ["setup.py"]
+    assert out["include"] == ["vllm/v1"]
 
 
 # --- extract_pr_papers: conservative, arxiv/DOI/host only --------------------

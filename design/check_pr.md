@@ -35,10 +35,12 @@ README documents (`spotlights-engine --repo … --include … --objective …`).
 
 ### Scope decisions (confirmed)
 - **One PR per invocation** (no list-level fan-out).
-- **Scope the run via `--include`**: extract the module map, map the PR's changed
-  files to the modules that contain them, and pass only those modules to the
-  engine. Falls back to all-modules when the mapper-derived scope is empty,
-  ambiguous, or leaves any changed source file unmapped.
+- **Scope the run via `--include`**: derive the scope directly from the PR's
+  changed-file *folder* paths (a module = the folder the code lives in) and pass
+  those folder qns to the engine, which expands each to the real modules beneath
+  it (virtual-prefix matching). No LLM modules extractor is involved. Falls back
+  to all-modules when the derived scope is empty or a changed file sits at the
+  source root (no sub-folder to scope to).
 - **Standalone `runs/` harness**: skill + agents live in `.claude/`, helper
   scripts in `scripts/run_on_pr/`, all run artifacts under gitignored `runs/`.
   This is a validation tool, not something shipped through `spotlights-engine
@@ -165,10 +167,10 @@ meaningful, and they are the hardest parts to get right.
   (`utils/id_helpers.py:slug_for`,
   `results_renderer/writer.py`). The page links use these slug filenames, not
   the raw slash-form qn.
-- The modules extractor is runnable standalone via
-  `scripts/run_modules_extractor.py` (or
-  `spotlights_engine.modules_extractor.extract_with_telemetry`), writing a
-  `ProjectTree` JSON — used by the file→module mapping step.
+- The `--include` scope is derived deterministically from the changed-file
+  folder paths (`scripts/run_on_pr/derive_scope_from_paths.py`) — no modules
+  extractor is run. The engine expands each folder qn to the modules beneath it
+  (virtual-prefix matching in `spotlights_manager/filters.py:apply_filter`).
 
 ## Architecture
 
@@ -181,7 +183,7 @@ run-on-pr skill (you, main session)        — single-PR orchestrator
   ├─ pr-checkout       (step 1) — pre-PR checkout at the merge-base
   ├─ pr-diff-scope     (step 2) — ground-truth base-side line ranges
   │                              + cited-paper URLs (paper ground truth)
-  ├─ pr-module-scope   (step 3) — module map + changed-files→modules → --include
+  ├─ pr-module-scope   (step 3) — changed-file folders → --include (path-derived, no LLM)
   ├─ engine-runner     (step 4) — run the full engine scoped-blind via --include
   └─ match-evaluator   (step 5) — candidates ∩ ground truth → line-recall verdict
                                  + findings ∩ cited papers → paper-citation verdict
@@ -219,8 +221,8 @@ engine-specific logic. The paper-citation signal extends the existing
   extract the PR's cited paper URLs (via `extract_pr_papers.py`) into
   `cited_papers.json`. This is the one place PR prose is read for paper refs —
   the engine never sees it.
-- `.claude/agents/pr-module-scope.md` — **new**: produce the module map for the
-  pre-PR tree and map changed source files → engine module qualified names.
+- `.claude/agents/pr-module-scope.md` — **new**: derive the `--include` scope
+  directly from the changed source files' folder paths (no modules extractor).
 - `.claude/agents/engine-runner.md` — **new**: invoke `spotlights-engine`
   scoped-blind by `--include`, into the run's output/artifacts dirs; extract a
   flat `candidates.json` from `result.json`.
@@ -244,14 +246,15 @@ Copy/adapt the reference helpers (they are repo-agnostic and already battle-test
   `overlap.py` consumes. Deterministic; preserves `report.candidates` order so
   `rank` is meaningful. (One candidate spanning multiple files/spans yields
   multiple flat records sharing its `id` and `rank`.)
-- `map_files_to_modules.py` — **new**: given the extractor's `ProjectTree` JSON
-  and the changed source file list, return the set of module qualified names
-  whose repo-relative `path` contains a changed file, choosing the
-  **most-specific (deepest) module** per file. Match paths segment-aware
-  (`file == module.path` or `file.startswith(module.path + "/")`), and get qns
-  from `ProjectTree.walk()` so `source_root` stripping and segment normalization
-  stay identical to the engine. Emits
-  `{include:[...], unmapped_files:[...], ambiguous_files:[...]}`.
+- `derive_scope_from_paths.py` — **new**: given only the changed source file
+  list, return the set of `--include` folder qns — the folder each changed file
+  lives in, made `source_root`-relative and per-segment normalized. Reuses the
+  engine's own `_normalize_source_root` / `_normalize_module_segment` and infers
+  `source_root` the same way `ProjectTree` does (`"src"` iff every file is under
+  a top-level `src/`, else `""`), so the emitted qns round-trip through the
+  engine's parser. Emits
+  `{source_root, include:[...], root_level_files:[...], file_module:{...}}`.
+  No modules extractor / `ProjectTree` JSON is involved.
 - `extract_pr_papers.py` — **new**: read the PR title + body + linked-issue
   bodies (fetched by the harness, never given to the engine) and extract
   referenced paper URLs. Scan for arxiv links (`arxiv.org/abs|pdf/<id>`), DOIs,
@@ -337,30 +340,23 @@ recall on this: paper extraction failing or finding nothing must not abort the
 run.
 
 ### 4. Module scope (agent: `pr-module-scope`) — NEW
-1. If `$RUN/project_tree.json` already exists for this exact run, reuse it.
-   Otherwise run the modules extractor on the **pre-PR checkout** (blind —
-   extractor sees only the code, never the PR), writing `$RUN/project_tree.json`.
-   Reuse
-   `scripts/run_modules_extractor.py --repo <checkout_path> --output-json
-   $RUN/project_tree.json --artifacts-dir $RUN/extractor_artifacts`.
-   Because `extract_with_telemetry` rejects an existing
-   `extractor_artifacts/modules_extractor` dir, the harness must either skip the
-   extractor when the cached tree exists or allocate a fresh extractor artifact
-   directory for a deliberate re-extract.
-2. Run `map_files_to_modules.py` over the tree + `changed_source_files` to get
-   the slash-form `--include` list. Write `$RUN/scope.json`
-   (`{include, unmapped_files, ambiguous_files, all_modules_fallback}`).
-   If an explicit `--include` override was supplied, validate it against
-   `tree.walk()` and use it instead, recording `scope_source: "user_override"`.
-3. Fallback: for mapper-derived scope, if `include` is empty, or any changed
-   source file is unmapped or ambiguous, run the engine on **all** modules (omit
-   `--include`) and record the reason in `scope.json`. This avoids turning
-   mapper uncertainty into a silent false negative. A user override is not
-   auto-expanded; it must validate or fail clearly.
+1. Run `derive_scope_from_paths.py` over `changed_source_files` to get the
+   slash-form `--include` list — the `source_root`-relative folder each changed
+   file lives in. Write `$RUN/scope.json`
+   (`{source_root, include, root_level_files, all_modules_fallback}`). No modules
+   extractor is run; nothing about the code content is read here.
+   If an explicit `--include` override was supplied, use it verbatim and record
+   `scope_source: "user_override"` (the engine fails fast on an unknown qn, so it
+   is never auto-expanded).
+2. Fallback: for path-derived scope, if `include` is empty, or any changed source
+   file sits at the source root (no sub-folder to scope to), run the engine on
+   **all** modules (omit `--include`) and record the reason in `scope.json`. This
+   avoids turning a root-level change into a silent under-scope / false negative.
 
-> Blindness note: the extractor input is only the checkout path. It must not
-> receive the objective, hints, PR title, PR description, changed-file list, or
-> diff.
+> Blindness note: the scope is derived from the changed-file *folder* paths only.
+> The engine still never receives the objective's counterpart signals — PR title,
+> description, per-file changed-line ranges, or diff. The leaked signal is the
+> coarse "which folders changed", by design.
 
 ### 5. Engine run (agent: `engine-runner`) — NEW
 Invoke the full engine scoped-blind on the pre-PR checkout, scoped to the mapped
@@ -410,7 +406,7 @@ it," only "not within the audited scope."
 - Write `$RUN/report.md` (human-readable, in the spirit of the reference
   `examples/`): PR link, base commit (short), merge style; changed source files
   + base-side ranges; modules run (the `--include` set, or all-modules fallback)
-  and any `unmapped_files`; candidate count; **verdict** (`pr_line_hit`
+  and any `root_level_files`; candidate count; **verdict** (`pr_line_hit`
   headline + file/folder diagnostics + `new_file_only`); for each hit range the
   matching candidate(s) with `estimated_impact` + rank ("found, ranked #k");
   `missed_ranges` for error analysis; **paper-citation section** when
@@ -449,21 +445,22 @@ signal is still `n/a` when the run never reached the engine (`error` /
 - **qn derivation, not skew.** Everything is slash-form — both `--include` and
   the `result.json` `module_runs` keys / `candidate.module_qualified_name`
   (`api.py:90`). There is no dot-form to reconcile. The one real transform is in
-  `map_files_to_modules.py`: a changed file is matched against the module's
-  **repo-relative `path`**, but the emitted qn must be the qn returned by
-  `ProjectTree.walk()` for that module, not a hand-built string. That keeps
-  `source_root` stripping and segment normalization in lockstep with
-  `project.py:_qualified_name`.
+  `derive_scope_from_paths.py`: a changed file's **folder** becomes the qn, but
+  through the engine's own `_normalize_source_root` / `_normalize_module_segment`
+  (not a hand-built string), so `source_root` stripping and segment normalization
+  stay in lockstep with `project.py:_qualified_name`. The engine then treats each
+  folder qn as a *virtual prefix* and expands it to the modules beneath it.
 - **Module granularity vs ground-truth folder.** The engine module `path` may be
   coarser or finer than the changed file's directory. Recall is judged on
   **line overlap within the file**, so as long as the module containing the file
   is run, the candidate can match — folder/file/line diagnostics from
   `overlap.py` explain near-misses.
-- **Extractor determinism.** The module map is LLM-produced and may vary run to
-  run; the deterministic `run_id` lets identical inputs reuse the same `$RUN`,
-  while the separate PR-keyed clone cache avoids recloning across objectives.
-  The extractor/engine outputs themselves are not guaranteed identical across
-  deliberate re-extracts. Note this where recall numbers are cited.
+- **Scope determinism.** The `--include` scope is derived deterministically from
+  the changed-file folder paths, so it is stable across re-runs; the
+  deterministic `run_id` lets identical inputs reuse the same `$RUN`, while the
+  separate PR-keyed clone cache avoids recloning across objectives. The *engine*
+  outputs themselves are still LLM-produced and not guaranteed identical across
+  re-runs — note this where recall numbers are cited.
 - **Versioning the skill.** `.claude/` is gitignored here. Decide with the user
   whether to un-ignore the new skill/agents/scripts before committing.
 - **Paper-citation signal is opportunistic.** Most PRs cite no paper, so the
@@ -489,7 +486,7 @@ signal is still `n/a` when the run never reached the engine (`error` /
   `log.sh`; and the `pr-checkout`, `pr-diff-scope`, `match-evaluator` agents
   (trimmed of `check-prs`-specific framing). `pr-diff-scope` and
   `match-evaluator` are then **extended** for the paper-citation signal.
-- **New**: `pr-module-scope` + `engine-runner` agents, `map_files_to_modules.py`,
+- **New**: `pr-module-scope` + `engine-runner` agents, `derive_scope_from_paths.py`,
   `extract_candidates.py`, `extract_pr_papers.py`, `match_papers.py`, and the
   single-PR `SKILL.md`.
 - **Normalizer reuse (the matching must mirror the engine's dedup).** The URL/
