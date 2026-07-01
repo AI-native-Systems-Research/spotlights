@@ -1,18 +1,24 @@
 ---
 name: run-on-pr
-description: "PR-grounded recall harness for the full spotlights-engine. Given ONE merged GitHub PR plus a generic objective, re-runs the real spotlights-engine pipeline BLIND on the PR's pre-merge code — scoped via --include to the module(s) containing the changed files — and measures whether the engine independently surfaces a candidate whose code region overlaps the lines the PR changed (module-scoped line recall). Also records a paper-citation hit when the PR cites a paper the engine's deep research independently surfaces. Use when asked to validate/score the engine against a real merged PR, or to run the engine on a specific PR's pre-merge code."
+description: "Prep + command emitter for a PR-grounded recall run of the full spotlights-engine. Given ONE merged GitHub PR plus a generic objective, prepares a scoped-blind engine run on the PR's pre-merge code: checks out the merge-base, computes base-side ground-truth line ranges + cited-paper URLs, and maps the changed files to module qns for --include. It then RETURNS the exact scoped-blind `spotlights-engine` command for you to run yourself — it does NOT invoke the engine (that expensive step you launch manually). After the engine finishes, use the `compare-pr-run` skill to score candidates against the ground truth (module-scoped line recall) and cited papers (paper-citation recall). Use when asked to set up / prepare an engine run against a real merged PR, or to get the scoped-blind command for a specific PR's pre-merge code."
 ---
 
-# run-on-pr — single-PR recall harness for the full engine
+# run-on-pr — single-PR recall prep + engine-command emitter
 
-Measure whether the **real `spotlights-engine`** independently flags the code a
-merged PR actually changed — and, when the PR cites a paper, whether the
-engine's deep research independently surfaces that same paper. Each merged PR is
-ground truth ("an expert decided *this* location was worth changing"); the
-harness runs the engine **cold on the pre-PR tree**, scoped to the PR-derived
-modules but never seeing the diff, and asks: did the engine's candidates land on
-the same lines? Full design + rationale: `design/check_pr.md` (read it before
-changing behavior).
+Prepare a recall run that measures whether the **real `spotlights-engine`**
+independently flags the code a merged PR actually changed — and, when the PR
+cites a paper, whether the engine's deep research independently surfaces that
+same paper. Each merged PR is ground truth ("an expert decided *this* location
+was worth changing"); the harness pins the pre-PR tree, derives the module scope
+from the changed files (but never leaks the diff), and produces the exact
+scoped-blind command to run the engine cold on that tree.
+
+**This skill does NOT run the engine.** It stops after scoping and **returns the
+`spotlights-engine` command** for you to run yourself (the engine run is the
+dominant cost — minutes + API $ — so it stays under your explicit control). When
+the engine finishes, run the **`compare-pr-run`** skill on the same run dir to
+score candidates against the ground truth and cited papers. Full design +
+rationale: `design/check_pr.md` (read it before changing behavior).
 
 This is the heavier sibling of the reference `check-prs` skill: the auditor is
 no longer a lightweight bootstrap prompt — it is the full five-step engine
@@ -32,33 +38,44 @@ invoked exactly as the README documents.
    line numbers — the same frame the engine's candidates use.
 4. **`runs/` is gitignored scratch.** Never `git add` anything under it.
 
-## Architecture (linear pipeline, you drive it)
+## Architecture (linear prep pipeline, you drive it)
 ```
-run-on-pr skill (you, main session)        — single-PR orchestrator
+run-on-pr skill (you, main session)        — single-PR prep orchestrator
   ├─ pr-checkout       (step 1) — pre-PR checkout at the merge-base
   ├─ pr-diff-scope     (step 2) — base-side line ranges + cited-paper URLs
   ├─ pr-module-scope   (step 3) — module map + changed-files→modules → --include
-  ├─ engine-runner     (step 4) — run the full engine scoped-blind via --include
-  └─ match-evaluator   (step 5) — candidates ∩ ground truth (line recall)
-                                 + findings ∩ cited papers (paper recall)
+  └─ emit command      (step 4) — print the scoped-blind spotlights-engine command
+                                   (YOU run it; this skill does not)
+
+   … you run the engine by hand …
+
+compare-pr-run skill (separate)            — the comparison tail
+  ├─ explode candidates          — result.json → flat candidates.json
+  └─ match-evaluator             — candidates ∩ ground truth (line recall)
+                                   + findings ∩ cited papers (paper recall) → report
 ```
-Delegate each step to its subagent (one at a time — steps are dependent).
+Delegate each prep step to its subagent (one at a time — steps are dependent).
 Deterministic math lives in `scripts/run_on_pr/` helpers; agents call them.
+The flow emits the scoped-blind command and hands off to `compare-pr-run`; it
+never runs the engine itself.
 
 ## Cost note
-A full engine run per PR is the dominant cost (minutes + API $). The `--include`
-scoping is the main lever — surface `modules_run` so the user sees what was
-audited. This is **one PR per invocation**; there is no list-level fan-out.
+A full engine run per PR is the dominant cost (minutes + API $) — which is
+exactly why this skill **does not run it**: it emits the scoped-blind command and
+stops, leaving the run under your control. The `--include` scoping is the main
+lever — surface the scoped `include` set so the user sees what will be audited.
+This is **one PR per invocation**; there is no list-level fan-out.
 
 ## Procedure
 
 ### 0. Pre-flight
 - `gh auth status` must succeed (clone + PR metadata). Stop clearly if not.
-- Confirm the engine is callable: `uv run --no-sync spotlights-engine --help`.
-  Stop if absent.
-- Confirm helpers exist under `scripts/run_on_pr/`:
-  `diff_ranges.py`, `overlap.py`, `log.sh`, `extract_candidates.py`,
-  `map_files_to_modules.py`, `extract_pr_papers.py`, `match_papers.py`.
+- Confirm the engine is callable: `uv run --no-sync spotlights-engine --help`
+  (so the command you emit will actually run). Stop if absent.
+- Confirm the prep helpers exist under `scripts/run_on_pr/`:
+  `diff_ranges.py`, `log.sh`, `map_files_to_modules.py`, `extract_pr_papers.py`.
+  (The match/report helpers — `extract_candidates.py`, `overlap.py`,
+  `match_papers.py` — are used by `compare-pr-run`, not here.)
 
 ### 1. Parse inputs
 Accept a **single PR URL** plus an **objective** (required), and optional:
@@ -90,8 +107,8 @@ pr_key, out_dir:"$RUN", progress_log, addition_tolerance:3}`. It writes
 `$RUN/ground_truth.json` (base-side `changed_ranges`, `changed_source_files`,
 `subfolders`, `new_files`) **and** `$RUN/cited_papers.json` (conservative
 arxiv/DOI/paper-host URLs from the PR prose — the only place PR prose is read).
-- If `status: no_source_changes` → skip steps 4–6, report bucket
-  `no_source_changes` (paper signal `n/a`).
+- If `status: no_source_changes` → skip steps 4–5, report bucket
+  `no_source_changes` (paper signal `n/a`); there is nothing to run.
 - On `status: error` → stop.
 - A paper-extraction failure is **not** fatal — it yields an empty
   `cited_papers.json` and the paper signal becomes `n/a`.
@@ -110,62 +127,46 @@ writes `$RUN/scope.json`.
   is not auto-expanded.
 - On `status: error` → stop.
 
-### 5. Engine run (agent: `engine-runner`)
-Spawn `engine-runner` with `{checkout_path, objective, hints, include (from
-scope.json; empty ⇒ all-modules), pr_key, out_dir:"$RUN", progress_log,
-max_parallel?, max_findings_per_module?}`. It runs
-`uv run --no-sync spotlights-engine` into `$RUN/spotlights-out` +
-`$RUN/artifacts`, then explodes candidates → `$RUN/candidates.json`.
-- ⚠️ Pass the **objective + hints + scoped qns only** — never the diff, PR
-  title/description, changed-file list, or ranges.
-- Use a generous timeout; the run can take many minutes.
-- On `status: error` → stop, bucket `error`.
+### 5. Emit the scoped-blind engine command (do NOT run it)
+Prep is done: `$RUN` now holds `pr.json`, `ground_truth.json`,
+`cited_papers.json`, `project_tree.json`, and `scope.json`. Build the exact
+command the user should run themselves, reading `include` from `$RUN/scope.json`
+(empty ⇒ all-modules fallback: omit `--include` entirely). Surface it verbatim in
+a copyable block:
+```
+uv run --no-sync spotlights-engine \
+  --repo            <checkout_path> \
+  --include         <qn1> <qn2> ...        # OMIT this whole flag if scope.json's include is empty
+  --objective       "<objective>" \
+  --hint            "<hint1>"  --hint "<hint2>" ...   # one --hint per hint, omit if none
+  --output-folder   $RUN/spotlights-out \
+  --artifacts-dir   $RUN/artifacts \
+  [--max-parallel <N>]  [--max-findings-per-module <N>]
+```
+- ⚠️ **Scoped blindness (do not break):** the command carries **only** the
+  objective + hints + scoped qns. Never add the diff, PR title/description,
+  changed-file list, or ground-truth ranges.
+- Tell the user: the run takes many minutes; `result.json` lands at
+  `$RUN/spotlights-out/result.json`.
+- Log the handoff:
+  `bash scripts/run_on_pr/log.sh $RUN/progress.log <pr_key> run-on-pr READY "emitted engine command; run then use compare-pr-run"`
 
-### 6. Match (agent: `match-evaluator`)
-Spawn `match-evaluator` with `{candidates_path:"$RUN/candidates.json",
-ground_truth_path:"$RUN/ground_truth.json", addition_tolerance:3,
-cited_papers_path:"$RUN/cited_papers.json",
-result_json_path:"$RUN/spotlights-out/result.json", pr_key, out_dir:"$RUN",
-progress_log}`. It writes `$RUN/match.json` (line recall) and — when papers were
-cited — `$RUN/paper_match.json` (paper-citation recall).
+### 6. Hand off to `compare-pr-run`
+Tell the user explicitly: **after the engine finishes**, run the
+`compare-pr-run` skill on `$RUN` to explode candidates, match against the ground
+truth + cited papers, and write `$RUN/report.md`. Give them the run dir so they
+can pass it straight in. This skill stops here — it does not match or report.
 
-### 7. Persist + report
-Write `$RUN/report.md` (human-readable): PR link, base commit (short), merge
-style; changed source files + base-side ranges; modules run (the `--include`
-set, or all-modules fallback) and any `unmapped_files`; candidate count;
-**verdict** (`pr_line_hit` headline + file/folder diagnostics + `new_file_only`);
-for each hit range the matching candidate(s) with `estimated_impact` + rank
-("found, ranked #k"); `missed_ranges` for error analysis;
-> Rank note: `overlap.py` (verbatim) numbers `rank` by flat-record position,
-> which differs from the candidate's discovery rank when a candidate has
-> multiple spans. For the "ranked #k" line, recover the true candidate rank by
-> joining each `matched_pairs[].candidates[].id` back to the candidate-level
-> `rank` in `candidates.json` (which preserves `report.candidates` order).
+## Buckets set by this skill (prep only)
+This skill reaches at most the point of emitting the command; the line-recall
+and paper verdicts are issued by `compare-pr-run`. The buckets it can set:
+- `error` — any prep step (checkout / diff / scope) failed → stop.
+- `no_source_changes` — step 3 found no source files → skip the command,
+  nothing to run (paper signal `n/a`).
+- `ready` — prep succeeded, command emitted, awaiting the manual engine run.
 
-Include a **paper-citation section** when `paper_cited` (the cited paper(s), and
-for each `paper_hit` the matched `Finding` title/url/source_type plus which
-candidate it rode in on via `via_candidate_ids`, or "in findings, unattached");
-and a pointer to the rendered `$RUN/spotlights-out/index.md` and per-candidate
-pages.
-
-Print the headline to the user: `pr_line_hit` (hit/miss), the matched candidate
-+ rank, the line bucket, the **paper signal** (`paper_hit` / `n/a`, with the
-matched paper title when hit), and where the artifacts live.
-
-## Bucketing (line-recall verdict)
-- `error` — any step failed.
-- `no_source_changes` — step 3 found no source files (steps 4–6 skipped).
-- `new_file_only` — every changed source file is brand-new → structurally
-  unrecallable by base-side line overlap (reported, not a plain miss).
-- `valid` — reached the matcher; `pr_line_hit ∈ {true,false}` is the result.
-
-The **paper-citation** signal is a separate orthogonal axis (not a bucket value):
-- `paper_cited: false` → `n/a` (also `n/a` when the run never reached the engine).
-- `paper_cited: true, paper_hit: true` → engine independently surfaced the paper.
-- `paper_cited: true, paper_hit: false` → cited paper not among the findings.
-A PR can be a line miss but a paper hit, or vice versa — record both. `paper_hit`
-is a **same-paper** match (engine's URL/title dedup keys), not semantic prior-art;
-`matched_on: "url"|"title"` lets a title-only match be eyeballed.
+`new_file_only`, `valid`, and the paper-citation axis are decided downstream by
+`compare-pr-run` — see that skill's "Bucketing" section.
 
 ## Notes
 - `runs/` is entirely gitignored — never `git add` anything under it.
@@ -173,6 +174,7 @@ is a **same-paper** match (engine's URL/title dedup keys), not semantic prior-ar
   the PR-keyed clone cache avoids recloning across objectives.
 - The module map is LLM-produced and may vary across deliberate re-extracts;
   note this where recall numbers are cited.
-- **Versioning:** `.claude/` is gitignored in this repo. These skill/agent files
-  live directly under `.claude/`. If they should be version-controlled, add a
-  parent-chain un-ignore block and call it out before committing.
+- **Versioning:** `.claude/` is version-controlled in this repo (the `.claude/`
+  line in `.gitignore` is commented out). These skill/agent files live directly
+  under `.claude/` and are committed alongside the code. `runs/` remains
+  gitignored scratch — never `git add` anything under it.

@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from spotlights_engine import cli
 
@@ -85,6 +86,40 @@ def test_quiet_and_verbose_are_mutually_exclusive() -> None:
 
     with pytest.raises(SystemExit):
         parser.parse_args(["--quiet", "--verbose"])
+
+
+def test_review_iterations_defaults_to_manager_default() -> None:
+    args = cli._build_argparser().parse_args(["--repo", "."])
+
+    # No flag => leave DiscoveryConfig unset so the manager default (3) holds.
+    assert args.review_iterations is None
+    assert cli._build_config(args).discovery is None
+
+
+def test_no_review_disables_review_session() -> None:
+    args = cli._build_argparser().parse_args(["--repo", ".", "--no-review"])
+
+    assert cli._build_config(args).discovery.num_review_iterations == 0
+
+
+def test_review_iterations_sets_count() -> None:
+    args = cli._build_argparser().parse_args(["--repo", ".", "--review-iterations", "5"])
+
+    assert cli._build_config(args).discovery.num_review_iterations == 5
+
+
+def test_review_iterations_and_no_review_are_mutually_exclusive() -> None:
+    parser = cli._build_argparser()
+
+    with pytest.raises(SystemExit):
+        parser.parse_args(["--no-review", "--review-iterations", "3"])
+
+
+def test_negative_review_iterations_rejected() -> None:
+    args = cli._build_argparser().parse_args(["--review-iterations", "-1"])
+
+    with pytest.raises(ValidationError):
+        cli._build_config(args)
 
 
 def test_main_preserves_summary_stdout_contract(

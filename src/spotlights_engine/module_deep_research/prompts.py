@@ -7,6 +7,7 @@ import json
 from spotlights_engine.module_deep_research.validation import (
     AgentModuleDeepResearchOutput,
 )
+from spotlights_engine.schemas.candidate import Candidate
 from spotlights_engine.schemas.pipeline import ModuleDeepResearchInput
 from spotlights_engine.schemas.project import File, Module, Repository
 
@@ -32,6 +33,28 @@ def _format_repository(repository: Repository) -> str:
     )
 
 
+def _format_candidate_location(candidate: Candidate) -> str:
+    """Render `symbol (file)` for the candidate's first span, the primary hot
+    spot. Candidates always carry at least one location with one span."""
+    location = candidate.locations[0]
+    span = location.spans[0]
+    return f"`{span.symbol}` ({location.file})"
+
+
+def _format_candidates(candidates: list[Candidate]) -> str:
+    if not candidates:
+        return "(none)"
+    blocks: list[str] = []
+    for candidate in candidates:
+        blocks.append(
+            f"- Symbol: {_format_candidate_location(candidate)}\n"
+            f"  Estimated impact: {candidate.estimated_impact}\n"
+            f"  Description: {candidate.description}\n"
+            f"  Evolve rationale: {candidate.evolve_rationale}"
+        )
+    return "\n\n".join(blocks)
+
+
 def _format_module(module: Module, module_qualified_name: str) -> str:
     depends_on = ", ".join(module.depends_on) or "(none)"
     return (
@@ -55,6 +78,15 @@ def render_module_deep_research_prompt(
         AgentModuleDeepResearchOutput.model_json_schema(), indent=2
     )
     repo_path = str(request.repo_path)
+    hotspots_section = ""
+    if request.include_candidate_hotspots and request.candidates:
+        hotspots_section = (
+            "\nIdentified hot spots (from candidate_discovery):\n"
+            "These are the symbols the discovery step flagged as worth\n"
+            "evolving in this module. Use them to steer your search toward\n"
+            "sources that address them; they are hints, not a strict scope.\n"
+            f"{_format_candidates(request.candidates)}\n"
+        )
     return f"""You are running the Spotlights module_deep_research pipeline step.
 Do not modify files. Do not ask questions.
 
@@ -75,7 +107,7 @@ below): {repo_path}
 
 Target module:
 {_format_module(module, request.module_qualified_name)}
-
+{hotspots_section}
 Caller context:
 Objective: {request.context.objective}
 Workload hints:
