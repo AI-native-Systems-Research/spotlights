@@ -17,11 +17,12 @@ scoped-blind command to run the engine cold on that tree.
 `spotlights-engine` command** for you to run yourself (the engine run is the
 dominant cost — minutes + API $ — so it stays under your explicit control). When
 the engine finishes, run the **`compare-pr-run`** skill on the same run dir to
-score candidates against the ground truth and cited papers. 
+score candidates against the ground truth and cited papers.
 
 This is the heavier sibling of the reference `check-prs` skill: the auditor is
-no longer a lightweight bootstrap prompt — it is the full five-step engine
-invoked exactly as the README documents.
+no longer a lightweight bootstrap prompt — it is the full five-step engine, run
+exactly as the README documents. (This skill only *emits* that engine command;
+you run it yourself — see "This skill does NOT run the engine" above.)
 
 ## Critical rules — do not break (design "Critical invariants")
 1. **Scoped blindness.** The engine runs on the pre-PR checkout with **no** PR

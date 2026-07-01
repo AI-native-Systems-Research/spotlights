@@ -15,8 +15,9 @@ the helper scripts.
 Authority: `design/check_pr.md` §6 and "Bucketing".
 
 ## Inputs (passed by the skill)
-- `candidates_path` — flat `candidates.json` from step 4 (already exploded from
-  the engine's nested `locations[].spans[]`).
+- `candidates_path` — flat `candidates.json` from the candidate-explosion step
+  (`compare-pr-run` §2; already exploded from the engine's nested
+  `locations[].spans[]`).
 - `ground_truth_path` — step 2's `ground_truth.json`.
 - `addition_tolerance` — ±lines applied **only** to `addition_only` ranges
   (default 3). Read it from `ground_truth.json` if not passed explicitly.

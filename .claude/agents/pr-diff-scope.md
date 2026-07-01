@@ -26,7 +26,7 @@ Authority: `design/check_pr.md` §3.
 - `pr_url` — for fetching prose (cited-paper extraction).
 - `pr_key`, `progress_log`, `out_dir` — for logging and where to write output.
 - optional `addition_tolerance` — carried through to output for the evaluator
-  (default 3; this step only records it, step 5 applies it).
+  (default 3; this step only records it, the `match-evaluator` applies it).
 
 ## Procedure
 
@@ -64,7 +64,8 @@ Authority: `design/check_pr.md` §3.
    or `"no_source_changes"` when no source files survive filtering). Just add the
    `addition_tolerance` knob (default 3) to its object. When status is
    `no_source_changes`, still write the file (with `excluded_files`) for
-   auditability — the skill skips steps 4–6 for that PR.
+   auditability — the skill skips the remaining steps (scope + command emit)
+   for that PR.
    Final shape:
    ```jsonc
    {
@@ -104,8 +105,8 @@ nothing, log it and still return a valid result for part A.
    which needs the project venv (Python ≥3.10) — always invoke it via
    `uv run --no-sync python ...`, never a bare `python3`.
    Capture the paper count for the log line. If extraction fails, write
-   `cited_papers.json` as `{"papers": [], "source_fields": []}` so step 6 can
-   still read it.
+   `cited_papers.json` as `{"papers": [], "source_fields": []}` so the
+   downstream paper matcher (`compare-pr-run`) can still read it.
 
 7. **Log OK** with a one-line summary, e.g.:
    `bash scripts/run_on_pr/log.sh <progress_log> <pr_key> pr-diff-scope OK "<N> files, <M> subfolders, <P> cited papers"`
