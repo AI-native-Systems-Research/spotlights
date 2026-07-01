@@ -8,6 +8,8 @@ previous pass missed that clear the same quality bar.
 {prev_candidates_json}
 - module_qualified_name: {module_qualified_name}
 - module.path: {module_path}                     # every candidate's `file` MUST live here
+- sub-module paths (EXCLUDED — audited separately; no candidate may live under these):
+{submodule_paths}
 - highest id accepted so far: {max_seen_candidate_id}
 
 ## Previously removed candidates
@@ -39,7 +41,9 @@ bar, you MAY re-add it (see the re-add rule below).
   expected and allowed for a re-add. You MUST NOT change a re-added candidate's
   `file`. You MAY tighten its other fields, as for any kept candidate.
 - Remove any candidate whose `file` does not exist, whose `file` is outside
-  `module.path`, or whose `line_start..line_end` is out of range for that file.
+  `module.path`, whose `file` is under one of the sub-module paths listed above
+  (those are audited separately), or whose `line_start..line_end` is out of
+  range for that file.
 - Remove candidates that fail the evolve-target test: no correctness oracle,
   no real headroom, or so entangled that the line range doesn't capture the
   optimization unit. Treat passive config parsing as

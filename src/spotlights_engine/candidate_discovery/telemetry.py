@@ -37,6 +37,7 @@ class TelemetryBuilder:
             candidate_count=len(survivors.candidates),
             schema_retries=schema_retries,
             dropped_outside_module=drops.dropped_outside_module,
+            dropped_in_submodule=drops.dropped_in_submodule,
             dropped_missing_file=drops.dropped_missing_file,
             dropped_invalid_ranges=drops.dropped_invalid_ranges,
             added=added,

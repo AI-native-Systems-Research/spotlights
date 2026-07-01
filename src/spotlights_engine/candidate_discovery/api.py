@@ -68,6 +68,7 @@ class IterationTelemetry(BaseModel):
     candidate_count: int
     schema_retries: int = 0
     dropped_outside_module: int = 0
+    dropped_in_submodule: int = 0
     dropped_missing_file: int = 0
     dropped_invalid_ranges: int = 0
     added: list[str] = Field(default_factory=list)

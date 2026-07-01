@@ -63,6 +63,12 @@ def _format_submodule_names(submodules: list[Module]) -> str:
     return ", ".join(m.name for m in submodules) or "(none)"
 
 
+def _format_submodule_paths(submodules: list[Module]) -> str:
+    if not submodules:
+        return "(none)"
+    return "\n".join(f"- {m.path}" for m in submodules)
+
+
 def _format_depends_on(deps: list[str]) -> str:
     return ", ".join(deps) or "(none)"
 
@@ -120,6 +126,7 @@ def render_bootstrap(
         "depends_on": _format_depends_on(module.depends_on),
         "main_files": _format_main_files(module.main_files),
         "submodule_names": _format_submodule_names(module.submodules),
+        "submodule_paths": _format_submodule_paths(module.submodules),
         "repo_context": _format_repo_context(repo_context_markdown),
         "spotlight_context": _format_spotlight_context(spotlight_context),
     }
@@ -139,6 +146,7 @@ def render_review(
     values = {
         "module_qualified_name": module_qualified_name,
         "module_path": module.path,
+        "submodule_paths": _format_submodule_paths(module.submodules),
         "prev_candidates_json": prev_candidates_json,
         "max_seen_candidate_id": max_seen_candidate_id,
         "removed_candidates": removed_candidates_json or _REMOVED_DEFAULT,

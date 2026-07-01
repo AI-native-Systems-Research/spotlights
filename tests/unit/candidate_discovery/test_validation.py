@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,8 +12,14 @@ from spotlights_engine.schemas.candidate import Candidate, Candidates
 from spotlights_engine.utils.schema_compat import make_location
 
 
-def _validator(repo_path: Path, module_path: str) -> Validator:
-    return Validator(repo_path=repo_path, module_path=module_path)
+def _validator(
+    repo_path: Path, module_path: str, submodule_paths: Sequence[str] = ()
+) -> Validator:
+    return Validator(
+        repo_path=repo_path,
+        module_path=module_path,
+        submodule_paths=submodule_paths,
+    )
 
 
 def _cand(
@@ -71,6 +78,36 @@ def test_drops_candidate_outside_module(tmp_path):
     survivors, counters = v.run(parsed)
     assert [c.id for c in survivors] == ["cand-mod-0001"]
     assert counters.dropped_outside_module == 1
+
+
+def test_drops_candidate_inside_submodule(tmp_path):
+    _make_file(tmp_path, "src/foo/x.py")
+    _make_file(tmp_path, "src/foo/sub/y.py")
+    v = _validator(tmp_path, "src/foo", submodule_paths=["src/foo/sub"])
+    parsed = Candidates(
+        module_qualified_name="m",
+        candidates=[
+            _cand(id="cand-mod-0001", file="src/foo/x.py"),
+            _cand(id="cand-mod-0002", file="src/foo/sub/y.py"),
+        ],
+    )
+    survivors, counters = v.run(parsed)
+    assert [c.id for c in survivors] == ["cand-mod-0001"]
+    assert counters.dropped_in_submodule == 1
+    assert counters.dropped_outside_module == 0
+
+
+def test_no_submodule_paths_keeps_nested_files(tmp_path):
+    # Leaf module (no submodule_paths): files in nested dirs are still kept.
+    _make_file(tmp_path, "src/foo/sub/y.py")
+    v = _validator(tmp_path, "src/foo")
+    parsed = Candidates(
+        module_qualified_name="m",
+        candidates=[_cand(id="cand-mod-0001", file="src/foo/sub/y.py")],
+    )
+    survivors, counters = v.run(parsed)
+    assert [c.id for c in survivors] == ["cand-mod-0001"]
+    assert counters.dropped_in_submodule == 0
 
 
 def test_drops_absolute_path(tmp_path):

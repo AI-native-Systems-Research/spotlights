@@ -16,6 +16,8 @@ with a short prose justification under `estimated_impact_explanation`.
 - module.main_files:                                     # start here, in order
 {main_files}
 - submodules:            {submodule_names}               # nested modules under this one
+- submodule paths:                                       # EXCLUDED — audited separately; no candidate may live under these
+{submodule_paths}
 
 ## Repository context
 
@@ -138,7 +140,9 @@ chain registry → values → interface → reference implementations.
 ## Process
 
 1. **Read every file in `module.main_files`** and any sibling files under
-   `module.path` that look load-bearing. Use `view` / `bash` (`rg`, `wc -l`) —
+   `module.path` that look load-bearing — but NOT files under any of the
+   sub-module paths listed above; those belong to their own module and are
+   audited separately. Use `view` / `bash` (`rg`, `wc -l`) —
    do not guess line numbers; verify them against the actual file.
 2. **Rank** candidates internally by (impact × tractability). Return every
    candidate that clears the quality bar in §"What counts as a good evolve
@@ -183,6 +187,9 @@ Emit ONE JSON object matching the `Candidates` schema enforced by the wrapper:
   ranges are not acceptable.
 - Every `file` MUST be under `{module_path}` and exist in the checkout. No
   invented files or symbols.
+- Every `file` MUST NOT be under any of the sub-module paths listed above.
+  Those sub-modules are audited as their own runs; candidates from their files
+  will be dropped.
 - `id` values must be unique within this list; use `cand-NNNN` zero-padded,
   starting at `cand-0001` and increasing monotonically.
 - **Be specific in `estimated_impact_explanation`.** "Make it faster" is not
