@@ -136,6 +136,47 @@ def test_merge_outcomes_collapses_to_matching_finding() -> None:
     assert output.issues == []
 
 
+def test_merge_outcomes_preserves_prefilter_findings() -> None:
+    outcome = _outcome(
+        [
+            _wire("find-0001", "Flash attention", "https://example.com/flash"),
+            _wire("find-0002", "Preble", "https://arxiv.org/abs/2504.19874v2"),
+        ]
+    )
+
+    output = merge_outcomes(
+        [outcome],
+        max_findings_per_module=30,
+        segment="mod",
+        paper_filter=PaperFilter(url="https://arxiv.org/pdf/2504.19874"),
+    )
+
+    # The retained finding is a single one, but the full deduped set survives
+    # on `unfiltered_findings` so the artifact records what was discarded.
+    assert [f.title for f in output.unfiltered_findings] == [
+        "Flash attention",
+        "Preble",
+    ]
+    # Diagnostic ids use a distinct segment so they can't collide with the
+    # retained finding's id.
+    assert [f.finding_id for f in output.unfiltered_findings] == [
+        "find-mod-prefilter-0001",
+        "find-mod-prefilter-0002",
+    ]
+    assert output.findings[0].finding_id == "find-mod-0001"
+
+
+def test_merge_outcomes_without_filter_has_no_prefilter_findings() -> None:
+    outcome = _outcome(
+        [_wire("find-0001", "Flash attention", "https://example.com/flash")]
+    )
+
+    output = merge_outcomes([outcome], max_findings_per_module=30, segment="mod")
+
+    assert len(output.findings) == 1
+    assert output.unfiltered_findings == []
+
+
 def test_merge_outcomes_no_match_yields_empty_plus_recoverable_issue() -> None:
     outcome = _outcome(
         [_wire("find-0001", "Flash attention", "https://example.com/flash")]

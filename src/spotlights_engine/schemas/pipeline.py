@@ -95,6 +95,14 @@ class ModuleDeepResearchOutput(BaseModel):
     findings: list[Finding] = Field(default_factory=list)
     issues: list[StepIssue] = Field(default_factory=list)
 
+    # Diagnostic only: the full deduped finding set as it stood BEFORE a
+    # `paper_filter` collapsed `findings` to the single matching paper. Empty
+    # on the normal (unfiltered) path — populated only when a `PaperFilter` ran,
+    # so the persisted artifact records what the filter discarded. Downstream
+    # steps consume `findings`, not this field. Ids carry a `-prefilter` segment
+    # suffix to avoid colliding with the retained finding's id.
+    unfiltered_findings: list[Finding] = Field(default_factory=list)
+
 
 class ProposalFromFindingCreatorInput(BaseModel):
     """Input contract for step 4 (`proposal_from_finding_creator`).

@@ -21,6 +21,7 @@ from spotlights_engine.module_deep_research.validation import (
     parse_agent_output,
 )
 from spotlights_engine.schemas.common import StepIssue
+from spotlights_engine.schemas.finding import Finding
 from spotlights_engine.schemas.pipeline import ModuleDeepResearchOutput, PaperFilter
 from spotlights_engine.schemas.project import Module, ProjectTree
 
@@ -135,7 +136,9 @@ def merge_outcomes(
 
     When `paper_filter` is set, the deduped findings are collapsed to the single
     finding matching that paper (URL first, then title) before normalize (D2);
-    a no-match yields empty findings plus a recoverable issue."""
+    a no-match yields empty findings plus a recoverable issue. The full deduped
+    set (pre-filter) is normalized separately onto `unfiltered_findings` so the
+    persisted artifact records what the filter discarded."""
     findings = []
     issues: list[StepIssue] = []
     seen: set[str] = set()
@@ -167,7 +170,21 @@ def merge_outcomes(
             seen.update(keys)
             findings.append(finding)
 
+    merged_findings_cap = max_findings_per_module * len(outcomes)
+
+    prefilter_findings: list[Finding] = []
     if paper_filter is not None:
+        # Normalize the full deduped set before collapsing, so the discarded
+        # findings survive as proper `Finding`s on the diagnostic field. A
+        # distinct segment suffix keeps their ids from colliding with the
+        # single retained finding's id.
+        prefilter_findings = list(
+            normalize_module_deep_research_output(
+                AgentModuleDeepResearchOutput(findings=findings, issues=[]),
+                max_findings_per_module=merged_findings_cap,
+                segment=f"{segment}-prefilter",
+            ).findings
+        )
         findings, matched_on = select_paper_finding(
             findings, url=paper_filter.url, title=paper_filter.title
         )
@@ -180,12 +197,16 @@ def merge_outcomes(
             )
 
     merged = AgentModuleDeepResearchOutput(findings=findings, issues=issues)
-    merged_findings_cap = max_findings_per_module * len(outcomes)
-    return normalize_module_deep_research_output(
+    normalized = normalize_module_deep_research_output(
         merged,
         max_findings_per_module=merged_findings_cap,
         segment=segment,
     )
+    if prefilter_findings:
+        return normalized.model_copy(
+            update={"unfiltered_findings": prefilter_findings}
+        )
+    return normalized
 
 
 def _run_one_runner(

@@ -1052,6 +1052,15 @@ async def _run_module(
                 dr_duration,
                 len(research_output.findings),
             )
+            if research_output.unfiltered_findings:
+                _log.info(
+                    "[%s] deep_research: paper filter kept %d of %d findings; "
+                    "pre-filter set persisted to %s",
+                    qn,
+                    len(research_output.findings),
+                    len(research_output.unfiltered_findings),
+                    module_paths.deep_research_path.name,
+                )
             for iss in research_output.issues:
                 _log.warning(
                     "[%s] deep_research: %s: %s", qn, iss.severity, iss.message
