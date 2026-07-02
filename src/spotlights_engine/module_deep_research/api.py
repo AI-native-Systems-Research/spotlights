@@ -3,18 +3,18 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from pathlib import Path
 
 from spotlights_engine.module_deep_research.agent_exec import ModuleResearchRunner
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
+from spotlights_engine.module_deep_research.debug import write_prompt
 from spotlights_engine.module_deep_research.orchestration import (
     merge_outcomes,
     module_deep_research_issue,
-    resolve_target_module,
     run_runners,
     select_runners,
 )
 from spotlights_engine.module_deep_research.prompts import render_module_deep_research_prompt
-from spotlights_engine.module_deep_research.validation import parse_module_deep_research_output
 from spotlights_engine.schemas.common import StepIssue
 from spotlights_engine.schemas.pipeline import (
     ModuleDeepResearchInput,
@@ -46,12 +46,17 @@ def research_module(
     runner: ModuleResearchRunner | None = None,
     runners: Sequence[ModuleResearchRunner] | None = None,
     segment: str | None = None,
+    debug_dir: Path | None = None,
 ) -> ModuleDeepResearchOutput:
     """Run module deep research and return the architecture output contract.
 
     `segment` is the module id segment (decision D3) used to prefix finding ids
     to `find-<segment>-NNNN`; the manager supplies the resolved value. Standalone
     callers may omit it, in which case the module slug is used.
+
+    When `debug_dir` is set, the rendered prompt, each runner's raw output, and
+    the merged findings (before any paper filter) are written there as
+    diagnostics. Nothing downstream reads them.
     """
     seg = segment if segment is not None else slug_for(request.module_qualified_name)
     module = resolve_target_module(request.project_tree, request.module_qualified_name)
@@ -67,6 +72,8 @@ def research_module(
         )
 
     prompt = render_module_deep_research_prompt(request, module)
+    if debug_dir is not None:
+        write_prompt(debug_dir, prompt)
     active_runners = select_runners(
         repo_path=request.repo_path,
         codex_options=codex_options,
@@ -84,6 +91,7 @@ def research_module(
         max_findings_per_module=request.max_findings_per_module,
         segment=seg,
         paper_filter=request.paper_filter,
+        debug_dir=debug_dir,
     )
 
 

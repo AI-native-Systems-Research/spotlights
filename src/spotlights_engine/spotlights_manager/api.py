@@ -108,7 +108,7 @@ class SpotlightsManagerResult(BaseModel):
     extractor_invocation: ExtractionInvocation
     per_module_telemetry: dict[str, ModuleTelemetry] = Field(default_factory=dict)
     manager_issues: list[StepIssue] = Field(default_factory=list)
-    renderer_result: "RendererResult | None" = None
+    renderer_result: RendererResult | None = None
 
 
 def run(

@@ -644,7 +644,12 @@ async def _do_step3(
     )
     start = time.monotonic()
     output = await asyncio.to_thread(
-        lambda: research_module(research_input, options, segment=segment)
+        lambda: research_module(
+            research_input,
+            options,
+            segment=segment,
+            debug_dir=module_paths.deep_research_debug_dir,
+        )
     )
     duration = time.monotonic() - start
     return output, duration

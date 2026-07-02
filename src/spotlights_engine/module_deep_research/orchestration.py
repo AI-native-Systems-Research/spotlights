@@ -13,6 +13,10 @@ from pathlib import Path
 from spotlights_engine.module_deep_research.agent_exec import AgentExecResult, ModuleResearchRunner
 from spotlights_engine.module_deep_research.claude_exec import ClaudeExecClient, ClaudeExecOptions
 from spotlights_engine.module_deep_research.codex_exec import CodexExecClient, CodexExecOptions
+from spotlights_engine.module_deep_research.debug import (
+    write_merged_before_filter,
+    write_runner_outputs,
+)
 from spotlights_engine.module_deep_research.gemini_exec import GeminiExecClient, GeminiExecOptions
 from spotlights_engine.module_deep_research.validation import (
     AgentFinding,
@@ -126,6 +130,7 @@ def merge_outcomes(
     max_findings_per_module: int,
     segment: str,
     paper_filter: PaperFilter | None = None,
+    debug_dir: Path | None = None,
 ) -> ModuleDeepResearchOutput:
     """Merge agent outputs into the stable module deep-research contract.
 
@@ -138,10 +143,16 @@ def merge_outcomes(
     finding matching that paper (URL first, then title) before normalize (D2);
     a no-match yields empty findings plus a recoverable issue. The full deduped
     set (pre-filter) is normalized separately onto `unfiltered_findings` so the
-    persisted artifact records what the filter discarded."""
+    persisted artifact records what the filter discarded.
+
+    When `debug_dir` is set, each runner's raw output and the merged finding set
+    (before any paper filter) are written there as diagnostics."""
     findings = []
     issues: list[StepIssue] = []
     seen: set[str] = set()
+
+    if debug_dir is not None:
+        write_runner_outputs(debug_dir, outcomes)
 
     for outcome in outcomes:
         if outcome.error is not None:
@@ -169,6 +180,9 @@ def merge_outcomes(
                 continue
             seen.update(keys)
             findings.append(finding)
+
+    if debug_dir is not None:
+        write_merged_before_filter(debug_dir, findings)
 
     merged_findings_cap = max_findings_per_module * len(outcomes)
 

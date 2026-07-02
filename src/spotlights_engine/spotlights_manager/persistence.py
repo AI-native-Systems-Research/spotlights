@@ -182,6 +182,13 @@ class ModulePaths:
         return self.dir / "module_deep_research.last_message.md"
 
     @property
+    def deep_research_debug_dir(self) -> Path:
+        """Per-module subfolder holding step-3 debug artifacts: the rendered
+        prompt, each runner's raw output, and the merged findings as they stood
+        before the paper filter collapsed them."""
+        return self.dir / "module_deep_research.debug"
+
+    @property
     def proposal_from_finding_path(self) -> Path:
         return self.dir / "proposal_from_finding_creator.json"
 
@@ -507,6 +514,8 @@ def clear_discovery_artifacts(module_paths: ModulePaths) -> None:
 
 
 def clear_deep_research_artifacts(module_paths: ModulePaths) -> None:
+    if module_paths.deep_research_debug_dir.exists():
+        shutil.rmtree(module_paths.deep_research_debug_dir)
     for p in (
         module_paths.deep_research_path,
         module_paths.deep_research_last_message_path,
