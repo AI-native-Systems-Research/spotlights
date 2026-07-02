@@ -15,12 +15,13 @@ from spotlights_engine.module_deep_research.claude_exec import ClaudeExecClient,
 from spotlights_engine.module_deep_research.codex_exec import CodexExecClient, CodexExecOptions
 from spotlights_engine.module_deep_research.gemini_exec import GeminiExecClient, GeminiExecOptions
 from spotlights_engine.module_deep_research.validation import (
+    AgentFinding,
     AgentModuleDeepResearchOutput,
     normalize_module_deep_research_output,
     parse_agent_output,
 )
 from spotlights_engine.schemas.common import StepIssue
-from spotlights_engine.schemas.pipeline import ModuleDeepResearchOutput
+from spotlights_engine.schemas.pipeline import ModuleDeepResearchOutput, PaperFilter
 from spotlights_engine.schemas.project import Module, ProjectTree
 
 _log = logging.getLogger(__name__)
@@ -123,13 +124,18 @@ def merge_outcomes(
     *,
     max_findings_per_module: int,
     segment: str,
+    paper_filter: PaperFilter | None = None,
 ) -> ModuleDeepResearchOutput:
     """Merge agent outputs into the stable module deep-research contract.
 
     Per-runner outputs are parsed into the lenient wire shape (bare ids), then
     deduped and merged; the single promotion to persisted `Finding`s — capping,
     renumbering, and prefixing each id to `find-<segment>-NNNN` (D3) — happens
-    once here via `normalize_module_deep_research_output`."""
+    once here via `normalize_module_deep_research_output`.
+
+    When `paper_filter` is set, the deduped findings are collapsed to the single
+    finding matching that paper (URL first, then title) before normalize (D2);
+    a no-match yields empty findings plus a recoverable issue."""
     findings = []
     issues: list[StepIssue] = []
     seen: set[str] = set()
@@ -160,6 +166,18 @@ def merge_outcomes(
                 continue
             seen.update(keys)
             findings.append(finding)
+
+    if paper_filter is not None:
+        findings, matched_on = select_paper_finding(
+            findings, url=paper_filter.url, title=paper_filter.title
+        )
+        if matched_on is None:
+            issues.append(
+                module_deep_research_issue(
+                    f"paper filter {paper_filter.url!r} matched no finding",
+                    recoverable=True,
+                )
+            )
 
     merged = AgentModuleDeepResearchOutput(findings=findings, issues=issues)
     merged_findings_cap = max_findings_per_module * len(outcomes)
@@ -230,6 +248,36 @@ def _agent_issues(agent_name: str, issues: Sequence[StepIssue]) -> list[StepIssu
         issue.model_copy(update={"message": f"{agent_name}: {issue.message}"})
         for issue in issues
     ]
+
+
+def select_paper_finding(
+    findings: list[AgentFinding], *, url: str, title: str | None
+) -> tuple[list[AgentFinding], str | None]:
+    """Return `([single matching finding] or [], matched_on)` for one paper.
+
+    Walks `findings` in (relevance) order and keeps the **first** whose keys
+    contain the paper's URL key (`matched_on="url"`); failing that, the first
+    whose keys contain the title key (`matched_on="title"`). URL wins over title
+    when both are present in the list. No match → `([], None)`. Reuses the same
+    normalized key space (`_finding_keys`) as dedup and the run-on-pr matcher, so
+    "does the engine's finding match this paper" is answered identically."""
+    url_key = ""
+    normalized_url = _normalize_url(url)
+    if normalized_url:
+        url_key = f"url:{normalized_url}"
+    title_key = f"title:{_normalize_text(title)}" if title else ""
+
+    title_match: AgentFinding | None = None
+    for finding in findings:
+        keys = _finding_keys(finding.title, finding.url)
+        if url_key and url_key in keys:
+            return ([finding], "url")
+        if title_key and title_match is None and title_key in keys:
+            title_match = finding
+
+    if title_match is not None:
+        return ([title_match], "title")
+    return ([], None)
 
 
 def _finding_keys(title: str, url: str) -> set[str]:

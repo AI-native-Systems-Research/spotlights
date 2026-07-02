@@ -207,3 +207,26 @@ def test_config_fingerprint_treats_none_as_effective_defaults() -> None:
         agent_proposals_cfg=AgentProposalsConfig(),
     )
     assert base == explicit
+
+
+def test_input_fingerprint_changes_with_paper_filter() -> None:
+    from spotlights_engine.schemas.pipeline import PaperFilter
+
+    common = {
+        "repo_path": Path("/repo"),
+        "context": SpotlightContext(objective="x"),
+        "max_findings_per_module": 30,
+        "continue_on_module_failure": True,
+    }
+    none_fp = P.build_input_fingerprint(**common, paper_filter=None)
+    with_fp = P.build_input_fingerprint(
+        **common, paper_filter=PaperFilter(url="https://arxiv.org/abs/1", title="A")
+    )
+    other_fp = P.build_input_fingerprint(
+        **common, paper_filter=PaperFilter(url="https://arxiv.org/abs/2", title="B")
+    )
+
+    assert none_fp != with_fp
+    assert with_fp != other_fp
+    # Unset must equal the default (no paper filter) case.
+    assert none_fp == P.build_input_fingerprint(**common)

@@ -7,11 +7,12 @@ description: "Prep + command emitter for a PR-grounded recall run of the full sp
 
 Prepare a recall run that measures whether the **real `spotlights-engine`**
 independently flags the code a merged PR actually changed — and, when the PR
-cites a paper, whether the engine's deep research independently surfaces that
-same paper. Each merged PR is ground truth ("an expert decided *this* location
-was worth changing"); the harness pins the pre-PR tree, derives the module scope
-from the changed files (but never leaks the diff), and produces the exact
-scoped-blind command to run the engine cold on that tree.
+cites a paper, whether the engine's deep research can **locate** that same paper
+(the paper is fed to the engine via `--paper-link`, so this axis is a *focused*
+locate check, not blind recall — see Critical rule 1). Each merged PR is ground
+truth ("an expert decided *this* location was worth changing"); the harness pins
+the pre-PR tree, derives the module scope from the changed files (but never leaks
+the diff), and produces the exact command to run the engine cold on that tree.
 
 **This skill does NOT run the engine.** It stops after scoping and **returns the
 `spotlights-engine` command** for you to run yourself (the engine run is the
@@ -25,14 +26,22 @@ exactly as the README documents. (This skill only *emits* that engine command;
 you run it yourself — see "This skill does NOT run the engine" above.)
 
 ## Critical rules — do not break (design "Critical invariants")
-1. **Scoped blindness.** The engine runs on the pre-PR checkout with **no** PR
-   title, description, diff, changed-file list, or ground-truth ranges. The one
-   deliberate exception is the coarse **module scope** (`--include`) derived from
-   the changed files — specifically from the *folders* those files live in, so
-   the leaked signal is only "which directories changed", never the diff itself.
-   The only natural-language input is the **generic, PR-independent objective**
-   (+ generic hints). The PR prose is read **only** by `pr-diff-scope` for
-   cited-paper extraction, and that result is never given to the engine.
+1. **Scoped blindness (line-recall axis only).** The engine runs on the pre-PR
+   checkout with **no** PR title, description, diff, changed-file list, or
+   ground-truth ranges. The deliberate exceptions are two: (a) the coarse
+   **module scope** (`--include`) derived from the changed files — specifically
+   from the *folders* those files live in, so the leaked signal is only "which
+   directories changed", never the diff itself; and (b) the **cited paper**,
+   which is **always** passed to the engine via `--paper-link` (+ `--paper-title`)
+   when the PR cites one — see step 5. The only natural-language input beyond the
+   paper is the **generic, PR-independent objective** (+ generic hints).
+
+   ⚠ **The paper axis is therefore NOT a blind independent-recall signal.**
+   Because the cited paper is fed into the engine, the `compare-pr-run` paper
+   verdict means "can the engine *locate* this known paper in this module",
+   **not** "did the engine independently surface it". The **line-recall axis
+   stays fully blind** — `--include` carries no ground-truth-specific signal
+   beyond the folder.
 2. **Base = `merge-base(baseRefOid, headRefOid)`**, never `mergeCommit^1`. Full
    clone, never shallow.
 3. **Two-dot diff** `git diff <base> <head>` so ranges are in the pre-PR file's
@@ -45,7 +54,8 @@ run-on-pr skill (you, main session)        — single-PR prep orchestrator
   ├─ pr-checkout       (step 1) — pre-PR checkout at the merge-base
   ├─ pr-diff-scope     (step 2) — base-side line ranges + cited-paper URLs
   ├─ pr-module-scope   (step 3) — changed-file *folders* → --include (path-derived, no LLM)
-  └─ emit command      (step 4) — print the scoped-blind spotlights-engine command
+  └─ emit command      (step 4) — print the spotlights-engine command (line-scope
+                                   blind; always +--paper-link when a paper exists)
                                    (YOU run it; this skill does not)
 
    … you run the engine by hand …
@@ -57,12 +67,12 @@ compare-pr-run skill (separate)            — the comparison tail
 ```
 Delegate each prep step to its subagent (one at a time — steps are dependent).
 Deterministic math lives in `scripts/run_on_pr/` helpers; agents call them.
-The flow emits the scoped-blind command and hands off to `compare-pr-run`; it
-never runs the engine itself.
+The flow emits the command (line-scope blind, paper always fed in) and hands off
+to `compare-pr-run`; it never runs the engine itself.
 
 ## Cost note
 A full engine run per PR is the dominant cost (minutes + API $) — which is
-exactly why this skill **does not run it**: it emits the scoped-blind command and
+exactly why this skill **does not run it**: it emits the command and
 stops, leaving the run under your control. The `--include` scoping is the main
 lever — surface the scoped `include` set so the user sees what will be audited.
 This is **one PR per invocation**; there is no list-level fan-out. Each run gets
@@ -115,7 +125,10 @@ Spawn `pr-diff-scope` with `{checkout_path, base_commit, head_commit, pr_url,
 pr_key, out_dir:"$RUN", progress_log, addition_tolerance:3}`. It writes
 `$RUN/ground_truth.json` (base-side `changed_ranges`, `changed_source_files`,
 `subfolders`, `new_files`) **and** `$RUN/cited_papers.json` (conservative
-arxiv/DOI/paper-host URLs from the PR prose — the only place PR prose is read).
+arxiv/DOI/paper-host URLs — with optional `title` from the markdown link text —
+from the PR prose; the only place PR prose is read). The first cited paper is
+fed to the engine in step 5 via `--paper-link`, so this is the source of the
+(non-blind) paper axis.
 - If `status: no_source_changes` → skip steps 4–5, report bucket
   `no_source_changes` (paper signal `n/a`); there is nothing to run.
 - On `status: error` → stop.
@@ -139,32 +152,51 @@ modules beneath it (virtual-prefix matching in `spotlights_manager/filters.py`).
   on an unknown qn, so it is never auto-expanded here.
 - On `status: error` → stop.
 
-### 5. Emit the scoped-blind engine command (do NOT run it)
+### 5. Emit the engine command (do NOT run it)
 Prep is done: `$RUN` now holds `pr.json`, `ground_truth.json`,
 `cited_papers.json`, and `scope.json`. Build the exact
 command the user should run themselves, reading `include` from `$RUN/scope.json`
-(empty ⇒ all-modules fallback: omit `--include` entirely). Surface it verbatim in
-a copyable block:
+(empty ⇒ all-modules fallback: omit `--include` entirely).
+
+**Always append the paper filter when a paper exists.** Read the **first** entry
+of `$RUN/cited_papers.json`; if present, append `--paper-link <raw_url>` and,
+when that entry has a non-empty `title`, `--paper-title "<title>"`. This restricts
+step 3 to the single finding matching that paper (per module). There is **no
+opt-in flag** — this is the default and only behavior.
+- **Fallback:** when `cited_papers.json` has no papers, skip cleanly — emit the
+  command with **no** `--paper-link` and note that no cited paper was available
+  (the paper axis becomes `n/a`).
+
+Surface it verbatim in a copyable block:
 ```
 uv run --no-sync spotlights-engine \
   --repo            <checkout_path> \
   --include         <qn1> <qn2> ...        # OMIT this whole flag if scope.json's include is empty
   --objective       "<objective>" \
   --hint            "<hint1>"  --hint "<hint2>" ...   # one --hint per hint, omit if none
+  --paper-link      "<raw_url>" \          # from cited_papers.json[0]; OMIT (with --paper-title) if no paper
+  --paper-title     "<title>" \            # only when cited_papers.json[0].title is non-empty
   --output-folder   $RUN/spotlights-out \
   --artifacts-dir   $RUN/artifacts \
-  --max-parallel    3 \
+  --max-parallel    7 \
   --max-parallel-pairs 10 \
-  --max-findings-per-module 30 \
+  --max-findings-per-module 50 \
   --no-review
 ```
-- ⚠️ **Scoped blindness (do not break):** the command carries **only** the
-  objective + hints + scoped qns. Never add the diff, PR title/description,
-  changed-file list, or ground-truth ranges.
+- ⚠️ **Scoped blindness (line-recall axis):** apart from the always-appended
+  `--paper-link`/`--paper-title`, the command carries **only** the objective +
+  hints + scoped qns. Never add the diff, PR title/description, changed-file
+  list, or ground-truth ranges. The line-recall axis stays blind.
+- ⚠️ **Print a loud warning** that feeding `--paper-link` leaks the cited paper
+  to the engine, so the paper axis is **no longer a blind independent-recall
+  signal**: the `compare-pr-run` paper verdict now means "can the engine locate
+  this known paper in this module", not "did the engine independently surface
+  it". Add a `paper_focus` marker to the emitted-command notes (e.g. write it to
+  `$RUN/progress.log` and echo it) so the downstream report is not misread.
 - Tell the user: the run takes many minutes; `result.json` lands at
   `$RUN/spotlights-out/result.json`.
 - Log the handoff:
-  `bash scripts/run_on_pr/log.sh $RUN/progress.log <pr_key> run-on-pr READY "emitted engine command; run then use compare-pr-run"`
+  `bash scripts/run_on_pr/log.sh $RUN/progress.log <pr_key> run-on-pr READY "emitted engine command (paper_focus=<yes|no>); run then use compare-pr-run"`
 
 ### 6. Hand off to `compare-pr-run`
 Tell the user explicitly: **after the engine finishes**, run the

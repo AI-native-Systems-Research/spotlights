@@ -83,6 +83,7 @@ def research_module(
         outcomes,
         max_findings_per_module=request.max_findings_per_module,
         segment=seg,
+        paper_filter=request.paper_filter,
     )
 
 

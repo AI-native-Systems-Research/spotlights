@@ -27,6 +27,21 @@ from spotlights_engine.schemas.finding import Finding
 from spotlights_engine.schemas.project import ProjectTree
 
 
+class PaperFilter(BaseModel):
+    """Restrict step-3 findings to the single one matching a specific paper.
+
+    Matched first by normalized URL, falling back to the paper title when the
+    URLs differ (the same paper is frequently surfaced at a different URL —
+    arxiv `abs` vs. a conference-proceedings PDF vs. a DOI). A bare URL activates
+    the filter; `title` is optional and only enables the title fallback.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    url: str = Field(min_length=1)
+    title: str | None = None
+
+
 class ModulesExtractorInput(BaseModel):
     """Input contract for step 1 (`modules_extractor`).
 
@@ -66,6 +81,10 @@ class ModuleDeepResearchInput(BaseModel):
     # toward the symbols the discovery step already flagged as worth evolving.
     candidates: list[Candidate] = Field(default_factory=list)
     include_candidate_hotspots: bool = True
+
+    # When set, step 3 emits at most one finding — the one matching this paper
+    # (per module). See `PaperFilter` and `orchestration.select_paper_finding`.
+    paper_filter: PaperFilter | None = None
 
 
 class ModuleDeepResearchOutput(BaseModel):
@@ -151,6 +170,9 @@ class SpotlightsManagerInput(BaseModel):
     include_candidate_hotspots: bool = True
     continue_on_module_failure: bool = True
 
+    # Optional per-module single-paper filter applied to step 3 (see PaperFilter).
+    paper_filter: PaperFilter | None = None
+
 
 class RunInfo(BaseModel):
     """Info about the run that produced a `SpotlightReport`."""
@@ -191,6 +213,7 @@ __all__ = [
     "ModuleDeepResearchOutput",
     "ModuleRun",
     "ModulesExtractorInput",
+    "PaperFilter",
     "ProposalFromFindingCreatorInput",
     "ProposalFromFindingCreatorOutput",
     "RunInfo",

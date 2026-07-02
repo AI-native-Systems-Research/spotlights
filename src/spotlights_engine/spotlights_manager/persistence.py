@@ -252,6 +252,7 @@ def build_input_fingerprint(
     max_findings_per_module: int,
     continue_on_module_failure: bool,
     include_candidate_hotspots: bool = True,
+    paper_filter: BaseModel | None = None,
 ) -> dict[str, Any]:
     return {
         "repo_path": str(repo_path),
@@ -259,6 +260,11 @@ def build_input_fingerprint(
         "max_findings_per_module": max_findings_per_module,
         "continue_on_module_failure": continue_on_module_failure,
         "include_candidate_hotspots": include_candidate_hotspots,
+        "paper_filter_hash": (
+            _stable_hash(paper_filter.model_dump(mode="json"))
+            if paper_filter is not None
+            else _stable_hash(None)
+        ),
     }
 
 

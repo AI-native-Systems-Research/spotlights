@@ -39,7 +39,7 @@ from spotlights_engine.proposal_from_finding_creator import (
     ProposalFromFindingConfig,
 )
 from spotlights_engine.schemas.common import SpotlightContext
-from spotlights_engine.schemas.pipeline import SpotlightsManagerInput
+from spotlights_engine.schemas.pipeline import PaperFilter, SpotlightsManagerInput
 from spotlights_engine.spotlights_manager import (
     ModuleFilter,
     SpotlightsManagerConfig,
@@ -146,6 +146,27 @@ def _build_argparser() -> argparse.ArgumentParser:
             "Default: SpotlightsManagerInput default (30)."
         ),
     )
+    p.add_argument(
+        "--paper-link",
+        default=None,
+        metavar="URL",
+        help=(
+            "Restrict step-3 (module_deep_research) findings to the single "
+            "finding matching this paper (matched by normalized URL, falling "
+            "back to --paper-title). Applied per module: the paper survives only "
+            "in the module(s) whose research actually surfaced it."
+        ),
+    )
+    p.add_argument(
+        "--paper-title",
+        default=None,
+        metavar="TITLE",
+        help=(
+            "Optional paper name used for the title fallback match when the "
+            "URL differs from --paper-link. Requires --paper-link."
+        ),
+    )
+
     review = p.add_mutually_exclusive_group()
     review.add_argument(
         "--review-iterations",
@@ -336,6 +357,10 @@ def _build_input(args: argparse.Namespace) -> SpotlightsManagerInput:
     if args.max_findings_per_module is not None:
         input_kwargs["max_findings_per_module"] = args.max_findings_per_module
     input_kwargs["include_candidate_hotspots"] = args.include_candidate_hotspots
+    if args.paper_link is not None:
+        input_kwargs["paper_filter"] = PaperFilter(
+            url=args.paper_link, title=args.paper_title
+        )
     return SpotlightsManagerInput(**input_kwargs)
 
 
@@ -547,7 +572,11 @@ def main(argv: list[str] | None = None) -> int:
 
         return prep_main(raw_argv[1:])
 
-    args = _build_argparser().parse_args(argv)
+    parser = _build_argparser()
+    args = parser.parse_args(argv)
+
+    if args.paper_title is not None and args.paper_link is None:
+        parser.error("--paper-title requires --paper-link")
 
     # Resolve to absolute up-front: codex runs subprocesses with `-C <repo_path>`,
     # so any relative path baked into a config (schema, last_message, artifacts)
