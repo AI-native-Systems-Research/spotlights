@@ -55,6 +55,11 @@ class SpotlightsManagerConfig(BaseModel):
     proposal_from_finding: ProposalFromFindingConfig | None = None
     agent_proposals: AgentProposalsConfig | None = None
 
+    # When True, step 5 (agent_proposals) is skipped entirely: modules finalize
+    # after step 4 (proposal_from_finding_creator) with no agent-knowledge
+    # proposals attached. Useful for cheaper, research-only runs.
+    skip_agent_proposals: bool = False
+
     resume: bool = True
 
 

@@ -198,6 +198,17 @@ def _build_argparser() -> argparse.ArgumentParser:
     )
 
     p.add_argument(
+        "--no-agent-proposals",
+        dest="agent_proposals_enabled",
+        action="store_false",
+        help=(
+            "Disable step 5 (agent_proposals): modules finalize after step 4 "
+            "with only research-backed proposals attached, no agent-knowledge "
+            "proposals. Cheaper, research-only runs."
+        ),
+    )
+
+    p.add_argument(
         "--no-resume",
         dest="resume",
         action="store_false",
@@ -399,6 +410,7 @@ def _build_config(args: argparse.Namespace) -> SpotlightsManagerConfig:
         discovery=discovery_cfg,
         proposal_from_finding=proposal_cfg,
         agent_proposals=agent_cfg,
+        skip_agent_proposals=not args.agent_proposals_enabled,
         resume=args.resume,
     )
 

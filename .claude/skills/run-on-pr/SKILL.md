@@ -181,8 +181,14 @@ uv run --no-sync spotlights-engine \
   --max-parallel    7 \
   --max-parallel-pairs 10 \
   --max-findings-per-module 50 \
-  --no-review
+  --no-review \
+  --no-agent-proposals
 ```
+- **Always pass `--no-agent-proposals`.** The recall axes this skill measures
+  (line recall + paper-citation recall) are decided by the step-2 candidates and
+  step-3 research findings; step 5 (agent_proposals) adds only agent-knowledge
+  proposals that do not affect either verdict. Skipping it makes each PR run
+  cheaper and faster with no loss to the `compare-pr-run` scoring.
 - ⚠️ **Scoped blindness (line-recall axis):** apart from the always-appended
   `--paper-link`/`--paper-title`, the command carries **only** the objective +
   hints + scoped qns. Never add the diff, PR title/description, changed-file

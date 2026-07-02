@@ -1210,19 +1210,27 @@ async def _run_module(
 
         # ------------------------- step 5 -----------------------------------
         run_step5 = (
-            plan.redo_step2
-            or plan.redo_step3
-            or plan.redo_step4
-            or plan.redo_step5
-            or state.agent_proposals is None
+            not cfg.skip_agent_proposals
+            and (
+                plan.redo_step2
+                or plan.redo_step3
+                or plan.redo_step4
+                or plan.redo_step5
+                or state.agent_proposals is None
+            )
         )
-        if plan.redo_step5 and not (
-            plan.redo_step2 or plan.redo_step3 or plan.redo_step4
+        if (
+            not cfg.skip_agent_proposals
+            and plan.redo_step5
+            and not (plan.redo_step2 or plan.redo_step3 or plan.redo_step4)
         ):
             P.clear_agent_proposals_artifacts(module_paths)
 
         agent_output: AgentProposalsOutput | None = None
-        if run_step5:
+        if cfg.skip_agent_proposals:
+            _log.info("[%s] agent_proposals: skipped (--no-agent-proposals)", qn)
+            agent_output = state.agent_proposals
+        elif run_step5:
             n_candidates = len(proposal_output.candidates.candidates)
             _log.info(
                 "[%s] agent_proposals: start — %d candidates", qn, n_candidates
@@ -1368,7 +1376,15 @@ async def _run_module(
             )
         else:
             failed_step = None
-            last_step_for_cp = "agent_proposals"
+            # When step 5 is skipped no agent_proposals sidecar exists, so the
+            # furthest completed step is step 4. Recording it as such lets a
+            # later resume without --no-agent-proposals acquire step 5 via the
+            # pre-step-5 forward-migration path in `_plan_module`.
+            last_step_for_cp = (
+                "proposal_from_finding_creator"
+                if cfg.skip_agent_proposals
+                else "agent_proposals"
+            )
 
         cp = _now_checkpoint(
             qn=qn,
