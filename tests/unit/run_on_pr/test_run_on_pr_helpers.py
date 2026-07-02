@@ -140,6 +140,30 @@ def test_source_root_stripped_when_all_under_src():
     assert out["include"] == ["pkg/cache"]
 
 
+def test_source_root_stripped_when_all_under_python():
+    # sglang layout: package lives under python/ (python/sglang/…). The engine's
+    # extractor strips `python` as source_root, so the derived qns must too, or
+    # `--include` matches no module (0 kept).
+    out = derive_scope_from_paths.derive(
+        [
+            "python/sglang/srt/model_executor/x.py",
+            "python/sglang/srt/speculative/y.py",
+        ],
+    )
+    assert out["source_root"] == "python"
+    assert out["include"] == ["sglang/srt/model_executor", "sglang/srt/speculative"]
+
+
+def test_source_root_not_stripped_when_only_some_under_python():
+    # A wrapper folder is only stripped when EVERY file lives under it; a mixed
+    # layout keeps the full paths (repo-root layout).
+    out = derive_scope_from_paths.derive(
+        ["python/sglang/srt/x.py", "docs/build.py"],
+    )
+    assert out["source_root"] == ""
+    assert out["include"] == ["docs", "python/sglang/srt"]
+
+
 def test_segment_normalized_to_engine_token():
     # A folder segment the engine would normalize (e.g. "2d-utils") is emitted
     # in the same normalized form so it round-trips through the engine's parser.

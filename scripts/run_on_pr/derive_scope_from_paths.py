@@ -14,9 +14,10 @@ Why this is safe / correct:
 - We reuse the engine's own `_normalize_source_root` and
   `_normalize_module_segment`, so the qn we emit is byte-for-byte what the
   engine derives from a module whose `path` is that folder.
-- `source_root` is inferred deterministically the same way `ProjectTree` does
-  it: `"src"` when *every* changed source file lives under a top-level `src/`,
-  else `""` (repo-root layout, e.g. vLLM's `vllm/…`).
+- `source_root` is inferred deterministically to match the engine: a common
+  wrapper folder (`"src"`, or `"python"` for sglang's `python/sglang/…` layout)
+  when *every* changed source file lives under that same top-level folder, else
+  `""` (repo-root layout, e.g. vLLM's `vllm/…`).
 - A file that sits directly at the source root (e.g. `src/foo.py`, whose folder
   *is* the source root) yields no sub-folder qn; it is reported in
   `root_level_files`. The agent turns any such case into the all-modules
@@ -61,12 +62,30 @@ def _norm(path: str) -> str:
     return path.strip().strip("/")
 
 
+# Top-level folders the LLM extractor commonly promotes to `source_root` so the
+# emitted qns drop the wrapper (e.g. `src/` in most repos, `python/` in sglang's
+# `python/sglang/…` layout). We mirror that here — the deterministic script has
+# no LLM, so it must recognize the same wrappers or the derived `--include` qns
+# won't match the engine's real modules. Ordered by specificity is irrelevant;
+# only one can apply since the check requires *every* file under the same root.
+_SOURCE_ROOT_CANDIDATES = ("src", "python")
+
+
 def _infer_source_root(changed_files: list[str]) -> str:
-    """Mirror `ProjectTree._infer_source_root_when_omitted`: `"src"` iff every
-    changed file lives under a top-level `src/`, else `""`."""
+    """Mirror the engine's `source_root` handling: strip a common wrapper folder
+    (`src/` or `python/`) iff *every* changed file lives under that same
+    top-level folder, else `""`.
+
+    `ProjectTree._infer_source_root_when_omitted` only *infers* `"src"`, but the
+    LLM extractor sets `source_root` explicitly for other layouts (e.g. sglang's
+    `python/`). We recognize those wrappers here so the path-derived qns match
+    the modules the engine actually emits."""
     norm = [_norm(f) for f in changed_files if _norm(f)]
-    if norm and all(f.startswith("src/") for f in norm):
-        return "src"
+    if not norm:
+        return ""
+    for root in _SOURCE_ROOT_CANDIDATES:
+        if all(f.startswith(root + "/") for f in norm):
+            return root
     return ""
 
 
