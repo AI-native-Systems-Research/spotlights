@@ -139,11 +139,16 @@ chain registry → values → interface → reference implementations.
 
 ## Process
 
-1. **Read every file in `module.main_files`** and any sibling files under
-   `module.path` that look load-bearing — but NOT files under any of the
-   sub-module paths listed above; those belong to their own module and are
-   audited separately. Use `view` / `bash` (`rg`, `wc -l`) —
-   do not guess line numbers; verify them against the actual file.
+1. **Read every file in the module, not just `module.main_files`.** The
+   `main_files` are only a starting point / reading order — they are NOT the
+   full scope. Enumerate every source file under `module.path` (e.g.
+   `rg --files {module_path}`) and read each one that could plausibly hold a
+   candidate, not only the main files. Strong evolve targets frequently live
+   in helper, util, kernel, or backend files that are not listed as main
+   files. Do NOT read files under any of the sub-module paths listed above;
+   those belong to their own module and are audited separately. Use `view` /
+   `bash` (`rg`, `wc -l`) — do not guess line numbers; verify them against the
+   actual file.
 2. **Rank** candidates internally by (impact × tractability). Return every
    candidate that clears the quality bar in §"What counts as a good evolve
    target" — do not cap or truncate. Equally, do NOT pad: if a module only
