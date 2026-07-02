@@ -15,6 +15,16 @@ paper hosts count. When a URL appears inside a markdown link `[title](url)`, the
 link text is captured as an optional human `title` (the matcher uses it as a
 fallback key).
 
+For **arxiv** refs the link text is an unreliable title source — it is often a
+citation label (`[Zandieh et al., arXiv:2504.19874](...)`) or entirely absent
+(a bare `https://arxiv.org/pdf/<id>` link has no link text at all). Since the
+engine surfaces the finding under the paper's *real* name, a citation-label
+`--paper-title` never matches and a missing one wastes the fallback. So for
+arxiv refs we resolve the **canonical title from the arxiv API** (keyed on the
+normalized `arxiv:<id>`), overriding any scraped link text. This is best-effort:
+on any network/parse failure we degrade gracefully to the link-text behavior
+(pass `--offline` to skip the fetch entirely).
+
 Emits `cited_papers.json`:
     {
       "papers": [
@@ -46,6 +56,8 @@ import argparse
 import json
 import re
 import sys
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 # Reuse the engine's URL normalizer verbatim (design: do NOT hand-roll).
@@ -112,11 +124,43 @@ def _strip_trailing(url: str) -> str:
     return url.rstrip(_TRAILING_PUNCT)
 
 
-def extract(texts: list[str]) -> list[dict]:
+# arxiv Atom API: one entry per id, <title> holds the canonical paper name.
+_ARXIV_API = "http://export.arxiv.org/api/query?id_list={id}"
+_ARXIV_TITLE_RE = re.compile(r"<entry>.*?<title>(.*?)</title>", re.IGNORECASE | re.DOTALL)
+
+
+def _fetch_arxiv_title(arxiv_id: str, *, timeout: float = 10.0) -> str | None:
+    """Best-effort canonical title for an arxiv id via the public API.
+
+    Returns the whitespace-collapsed <title> of the matching entry, or None on
+    any network / HTTP / parse failure (caller degrades to link-text behavior).
+    """
+    try:
+        req = urllib.request.Request(
+            _ARXIV_API.format(id=arxiv_id),
+            headers={"User-Agent": "spotlights-run-on-pr/1.0"},
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (fixed host)
+            body = resp.read().decode("utf-8", "replace")
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+    m = _ARXIV_TITLE_RE.search(body)
+    if not m:
+        return None
+    title = re.sub(r"\s+", " ", m.group(1)).strip()
+    return title or None
+
+
+def extract(texts: list[str], *, resolve_arxiv_titles: bool = True) -> list[dict]:
     """Extract conservative paper references from the given prose blocks.
 
     Returns a deduped list (keyed by normalized URL) of
     {raw_url, normalized, kind, title?}, in first-seen order.
+
+    When `resolve_arxiv_titles` is set (the default), an arxiv ref's title is
+    resolved from the arxiv API and overrides any scraped link text (the link
+    text is often a citation label or absent). The fetch is best-effort: on
+    failure the link-text title, if any, is kept.
     """
     titles: dict[str, str] = {}  # raw_url -> link text (first seen)
     raw_urls: list[str] = []
@@ -150,6 +194,11 @@ def extract(texts: list[str]) -> list[dict]:
         entry: dict = {"raw_url": url, "normalized": normalized, "kind": kind}
         if url in titles:
             entry["title"] = titles[url]
+        # For arxiv refs, prefer the canonical API title over scraped link text.
+        if resolve_arxiv_titles and kind == "arxiv" and normalized.startswith("arxiv:"):
+            arxiv_title = _fetch_arxiv_title(normalized.removeprefix("arxiv:"))
+            if arxiv_title:
+                entry["title"] = arxiv_title
         papers.append(entry)
     return papers
 
@@ -192,10 +241,15 @@ def main() -> None:
     ap.add_argument("--pr-json", help="gh pr view JSON file ('-' for stdin)")
     ap.add_argument("--text", action="append", help="Extra prose to scan (repeatable)")
     ap.add_argument("-o", "--output", default=None, help="Write JSON here (default: stdout)")
+    ap.add_argument(
+        "--offline",
+        action="store_true",
+        help="Skip arxiv API title resolution; use scraped link text only.",
+    )
     args = ap.parse_args()
 
     texts, fields = _collect_texts(args)
-    papers = extract(texts)
+    papers = extract(texts, resolve_arxiv_titles=not args.offline)
     out = {"papers": papers, "source_fields": fields}
 
     text = json.dumps(out, indent=2) + "\n"
