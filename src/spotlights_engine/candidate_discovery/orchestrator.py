@@ -95,7 +95,9 @@ class Orchestrator:
         # which case the module slug is the segment.
         self._segment = config.id_segment or slug_for(input.module_qualified_name)
         self._validator = Validator(
-            repo_path=config.repo_path, module_path=module.path
+            repo_path=config.repo_path,
+            module_path=module.path,
+            submodule_paths=[s.path for s in module.submodules],
         )
         self._repo_guard = RepoGuard(config.repo_path)
         self._telemetry_builder = TelemetryBuilder()

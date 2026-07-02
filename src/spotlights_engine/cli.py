@@ -20,6 +20,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from spotlights_engine.agent_proposals import AgentProposalsConfig
+from spotlights_engine.candidate_discovery import DiscoveryConfig
 from spotlights_engine.defaults import (
     DEFAULT_ARTIFACTS as _DEFAULT_ARTIFACTS,
 )
@@ -145,6 +146,36 @@ def _build_argparser() -> argparse.ArgumentParser:
             "Default: SpotlightsManagerInput default (30)."
         ),
     )
+    review = p.add_mutually_exclusive_group()
+    review.add_argument(
+        "--review-iterations",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Number of candidate-discovery review iterations (step 2). "
+            "0 disables the review session (bootstrap pass only). "
+            "Default: DiscoveryConfig default (3)."
+        ),
+    )
+    review.add_argument(
+        "--no-review",
+        dest="review_iterations",
+        action="store_const",
+        const=0,
+        help="Disable the candidate-discovery review session (alias for --review-iterations 0).",
+    )
+
+    p.add_argument(
+        "--no-candidate-hotspots",
+        dest="include_candidate_hotspots",
+        action="store_false",
+        help=(
+            "Do not surface step-2 candidate_discovery hot spots in the "
+            "step-3 (module_deep_research) prompt. Default: they are included."
+        ),
+    )
+
     p.add_argument(
         "--no-resume",
         dest="resume",
@@ -304,6 +335,7 @@ def _build_input(args: argparse.Namespace) -> SpotlightsManagerInput:
     }
     if args.max_findings_per_module is not None:
         input_kwargs["max_findings_per_module"] = args.max_findings_per_module
+    input_kwargs["include_candidate_hotspots"] = args.include_candidate_hotspots
     return SpotlightsManagerInput(**input_kwargs)
 
 
@@ -329,12 +361,17 @@ def _build_config(args: argparse.Namespace) -> SpotlightsManagerConfig:
             kwargs["debug_first_n_candidates"] = args.debug_first_n_candidates
         agent_cfg = AgentProposalsConfig(**kwargs)
 
+    discovery_cfg: DiscoveryConfig | None = None
+    if args.review_iterations is not None:
+        discovery_cfg = DiscoveryConfig(num_review_iterations=args.review_iterations)
+
     include = _flatten_include(args.include)
     return SpotlightsManagerConfig(
         artifacts_dir=args.artifacts_dir,
         output_folder=args.output_folder,
         max_parallel_sessions=args.max_parallel,
         module_filter=ModuleFilter(include=include) if include else None,
+        discovery=discovery_cfg,
         proposal_from_finding=proposal_cfg,
         agent_proposals=agent_cfg,
         resume=args.resume,

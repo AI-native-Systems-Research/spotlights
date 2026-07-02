@@ -621,16 +621,22 @@ async def _do_step3(
     cfg: SpotlightsManagerConfig,
     module_paths: ModulePaths,
     segment: str,
+    candidates: Candidates,
 ) -> tuple[ModuleDeepResearchOutput, float]:
     """`segment` is the module id segment (D3): deep research renumbers and
     prefixes each finding id to `find-<segment>-NNNN` before returning, so the
-    findings are already globally-prefixed (no manager-side rebase)."""
+    findings are already globally-prefixed (no manager-side rebase).
+
+    The step-2 `candidates` are forwarded so the prompt can surface them as
+    hot spots (gated by `mgr_input.include_candidate_hotspots`)."""
     research_input = ModuleDeepResearchInput(
         project_tree=tree,
         module_qualified_name=qn,
         context=mgr_input.context,
         repo_path=mgr_input.repo_path,
         max_findings_per_module=mgr_input.max_findings_per_module,
+        candidates=list(candidates.candidates),
+        include_candidate_hotspots=mgr_input.include_candidate_hotspots,
     )
     options = _build_deep_research_options(
         cfg, mgr_input.repo_path, module_paths.deep_research_last_message_path
@@ -998,6 +1004,7 @@ async def _run_module(
                     cfg=cfg,
                     module_paths=module_paths,
                     segment=segment,
+                    candidates=candidates,
                 )
             except Exception as e:  # noqa: BLE001
                 cp = _now_checkpoint(
@@ -1439,6 +1446,7 @@ async def _run_async(
         context=input.context,
         max_findings_per_module=input.max_findings_per_module,
         continue_on_module_failure=input.continue_on_module_failure,
+        include_candidate_hotspots=input.include_candidate_hotspots,
     )
     config_fp = P.build_config_fingerprint(
         module_filter=config.module_filter,

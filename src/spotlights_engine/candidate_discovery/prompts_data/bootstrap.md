@@ -16,6 +16,8 @@ with a short prose justification under `estimated_impact_explanation`.
 - module.main_files:                                     # start here, in order
 {main_files}
 - submodules:            {submodule_names}               # nested modules under this one
+- submodule paths:                                       # EXCLUDED — audited separately; no candidate may live under these
+{submodule_paths}
 
 ## Repository context
 
@@ -137,9 +139,16 @@ chain registry → values → interface → reference implementations.
 
 ## Process
 
-1. **Read every file in `module.main_files`** and any sibling files under
-   `module.path` that look load-bearing. Use `view` / `bash` (`rg`, `wc -l`) —
-   do not guess line numbers; verify them against the actual file.
+1. **Read every file in the module, not just `module.main_files`.** The
+   `main_files` are only a starting point / reading order — they are NOT the
+   full scope. Enumerate every source file under `module.path` (e.g.
+   `rg --files {module_path}`) and read each one that could plausibly hold a
+   candidate, not only the main files. Strong evolve targets frequently live
+   in helper, util, kernel, or backend files that are not listed as main
+   files. Do NOT read files under any of the sub-module paths listed above;
+   those belong to their own module and are audited separately. Use `view` /
+   `bash` (`rg`, `wc -l`) — do not guess line numbers; verify them against the
+   actual file.
 2. **Rank** candidates internally by (impact × tractability). Return every
    candidate that clears the quality bar in §"What counts as a good evolve
    target" — do not cap or truncate. Equally, do NOT pad: if a module only
@@ -183,6 +192,9 @@ Emit ONE JSON object matching the `Candidates` schema enforced by the wrapper:
   ranges are not acceptable.
 - Every `file` MUST be under `{module_path}` and exist in the checkout. No
   invented files or symbols.
+- Every `file` MUST NOT be under any of the sub-module paths listed above.
+  Those sub-modules are audited as their own runs; candidates from their files
+  will be dropped.
 - `id` values must be unique within this list; use `cand-NNNN` zero-padded,
   starting at `cand-0001` and increasing monotonically.
 - **Be specific in `estimated_impact_explanation`.** "Make it faster" is not

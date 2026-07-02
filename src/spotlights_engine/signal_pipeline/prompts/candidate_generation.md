@@ -54,8 +54,11 @@ For each anomaly that warrants further investigation:
 
 1. **Form an insight.** What does the signal indicate, and where in the
    project tree does it likely live?
-2. **Drill the implicated module.** Use `Read` on its main_files to
-   confirm or refine the insight.
+2. **Drill the implicated module.** Start with its `main_files`, but do not
+   stop there — `main_files` is only a starting point, not the module's full
+   scope. Read the other source files under the module's path too when they
+   could hold the anomaly; the relevant code often lives in helper, util,
+   kernel, or backend files that are not listed as main files.
 3. **Build a `Candidate`.** Locate it (file + line range + symbol),
    describe what's happening (`description`, `current_approach`), and
    spell out *why this is worth optimizing* (`evolve_rationale`,

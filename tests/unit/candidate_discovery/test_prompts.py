@@ -17,6 +17,7 @@ from spotlights_engine.candidate_discovery.prompts import (
     _format_repo_context,
     _format_spotlight_context,
     _format_submodule_names,
+    _format_submodule_paths,
     _REPO_CONTEXT_DEFAULT,
     _SPOTLIGHT_CONTEXT_DEFAULT,
     _substitute,
@@ -51,7 +52,15 @@ def test_strict_retry_reminder_loads():
 def test_format_helpers_none_fallbacks():
     assert _format_main_files([]) == "(none)"
     assert _format_submodule_names([]) == "(none)"
+    assert _format_submodule_paths([]) == "(none)"
     assert _format_depends_on([]) == "(none)"
+
+
+def test_format_submodule_paths_lists_paths():
+    subs = [
+        Module.model_validate({"name": "sub", "path": "src/engine/core/sub"}),
+    ]
+    assert _format_submodule_paths(subs) == "- src/engine/core/sub"
 
 
 def test_format_main_files_uses_role():

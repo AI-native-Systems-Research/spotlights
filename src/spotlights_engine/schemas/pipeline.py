@@ -60,6 +60,13 @@ class ModuleDeepResearchInput(BaseModel):
     repo_path: Path
     max_findings_per_module: int = Field(default=30, ge=0)
 
+    # Hot spots surfaced by step 2 (`candidate_discovery`) for this module.
+    # When `include_candidate_hotspots` is true and this list is non-empty,
+    # the prompt shows them to the research agent so its search can be steered
+    # toward the symbols the discovery step already flagged as worth evolving.
+    candidates: list[Candidate] = Field(default_factory=list)
+    include_candidate_hotspots: bool = True
+
 
 class ModuleDeepResearchOutput(BaseModel):
     """Output contract for step 3 (`module_deep_research`)."""
@@ -141,6 +148,7 @@ class SpotlightsManagerInput(BaseModel):
     repo_path: Path
     context: SpotlightContext
     max_findings_per_module: int = Field(default=30, ge=0)
+    include_candidate_hotspots: bool = True
     continue_on_module_failure: bool = True
 
 
