@@ -18,6 +18,7 @@ from spotlights_engine.candidate_discovery.api import (
     DiscoveryConfig,
     IterationTelemetry,
 )
+from spotlights_engine.module_deep_research.arxiv_exec import ArxivSearchOptions
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
 from spotlights_engine.modules_extractor import ExtractorConfig
 from spotlights_engine.modules_extractor.agent import ExtractionInvocation
@@ -52,6 +53,12 @@ class SpotlightsManagerConfig(BaseModel):
     extractor: ExtractorConfig = Field(default_factory=ExtractorConfig)
     discovery: DiscoveryConfig | None = None
     deep_research: CodexExecOptions | None = None
+
+    # arXiv-search runner (step 3). `None` disables it; the populated default is
+    # what makes the runner on-by-default for engine runs. `--no-arxiv-search`
+    # sets this back to `None`.
+    arxiv_search: ArxivSearchOptions | None = Field(default_factory=ArxivSearchOptions)
+
     proposal_from_finding: ProposalFromFindingConfig | None = None
     agent_proposals: AgentProposalsConfig | None = None
 

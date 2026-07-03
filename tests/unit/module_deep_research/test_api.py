@@ -188,6 +188,57 @@ def test_research_module_runs_codex_claude_gemini_and_dedups_outputs() -> None:
     assert output.issues == []
 
 
+def test_select_runners_appends_extra_runners() -> None:
+    from spotlights_engine.module_deep_research.orchestration import select_runners
+
+    extra = NamedFakeRunner("arxiv", "{}")
+    runners = select_runners(
+        repo_path=Path("/tmp/r"),
+        codex_options=None,
+        runner=None,
+        runners=None,
+        extra_runners=(extra,),
+    )
+    assert len(runners) == 4
+    assert runners[-1] is extra
+
+    default = select_runners(
+        repo_path=Path("/tmp/r"), codex_options=None, runner=None, runners=None
+    )
+    assert len(default) == 3
+
+
+def test_select_runners_ignores_extra_when_explicit_runner_given() -> None:
+    from spotlights_engine.module_deep_research.orchestration import select_runners
+
+    explicit = NamedFakeRunner("codex", "{}")
+    extra = NamedFakeRunner("arxiv", "{}")
+    only = select_runners(
+        repo_path=Path("/tmp/r"),
+        codex_options=None,
+        runner=explicit,
+        runners=None,
+        extra_runners=(extra,),
+    )
+    assert only == (explicit,)
+
+    listed = select_runners(
+        repo_path=Path("/tmp/r"),
+        codex_options=None,
+        runner=None,
+        runners=[explicit],
+        extra_runners=(extra,),
+    )
+    assert listed == (explicit,)
+
+
+def test_research_module_arxiv_options_none_adds_no_runner() -> None:
+    runner = FakeRunner('{"findings": [], "issues": []}')
+    # arxiv_options defaults to None: only the explicit runner runs.
+    research_module(_request(), runner=runner, arxiv_options=None)
+    assert len(runner.prompts) == 1
+
+
 def test_research_module_dedups_exact_title_matches_with_different_urls() -> None:
     first = NamedFakeRunner("codex", _payload("Cache eviction", "https://example.com/paper-a"))
     second = NamedFakeRunner("gemini", _payload("Cache eviction", "https://example.com/paper-b"))
@@ -244,7 +295,7 @@ def test_claude_default_max_turns_is_16() -> None:
     assert cmd[cmd.index("--max-turns") + 1] == "16"
 
 
-def test_claude_command_shape_uses_litellm_safe_research_tools(tmp_path: Path) -> None:
+def test_claude_command_shape_exposes_web_research_tools(tmp_path: Path) -> None:
     from spotlights_engine.module_deep_research.claude_exec import (
         ClaudeExecClient,
         ClaudeExecOptions,
@@ -262,7 +313,8 @@ def test_claude_command_shape_uses_litellm_safe_research_tools(tmp_path: Path) -
     allowed_tools = cmd[cmd.index("--allowedTools") + 1]
     assert "WebFetch" in tools
     assert "WebFetch" in allowed_tools
-    assert "WebSearch" not in tools
+    assert "WebSearch" in tools
+    assert "WebSearch" in allowed_tools
     assert "Edit" not in tools
 
 

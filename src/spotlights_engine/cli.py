@@ -30,6 +30,7 @@ from spotlights_engine.defaults import (
 from spotlights_engine.defaults import (
     DEFAULT_REPO as _DEFAULT_REPO,
 )
+from spotlights_engine.module_deep_research import ArxivSearchOptions
 from spotlights_engine.module_knowledge import (
     KnowledgeBase,
     KnowledgeRecord,
@@ -205,6 +206,34 @@ def _build_argparser() -> argparse.ArgumentParser:
             "Disable step 5 (agent_proposals): modules finalize after step 4 "
             "with only research-backed proposals attached, no agent-knowledge "
             "proposals. Cheaper, research-only runs."
+        ),
+    )
+
+    p.add_argument(
+        "--no-arxiv-search",
+        dest="arxiv_search_enabled",
+        action="store_false",
+        help=(
+            "Disable the step-3 arXiv-search runner. Default: it is enabled and "
+            "makes unauthenticated calls to export.arxiv.org during step 3."
+        ),
+    )
+    p.add_argument(
+        "--arxiv-mailto",
+        dest="arxiv_mailto",
+        default=None,
+        metavar="EMAIL",
+        help="Contact email embedded in the arXiv API User-Agent (recommended).",
+    )
+    p.add_argument(
+        "--arxiv-query-planner",
+        dest="arxiv_query_planner",
+        choices=["claude", "template"],
+        default="claude",
+        help=(
+            "arXiv query-planning mode. 'claude' (default) runs a read-only "
+            "Claude session for vocabulary translation; 'template' uses only "
+            "the deterministic planner."
         ),
     )
 
@@ -401,6 +430,14 @@ def _build_config(args: argparse.Namespace) -> SpotlightsManagerConfig:
     if args.review_iterations is not None:
         discovery_cfg = DiscoveryConfig(num_review_iterations=args.review_iterations)
 
+    # arXiv runner is on by default; `--no-arxiv-search` sets it to None.
+    arxiv_cfg: ArxivSearchOptions | None = None
+    if args.arxiv_search_enabled:
+        arxiv_cfg = ArxivSearchOptions(
+            mailto=args.arxiv_mailto,
+            query_planner=args.arxiv_query_planner,
+        )
+
     include = _flatten_include(args.include)
     return SpotlightsManagerConfig(
         artifacts_dir=args.artifacts_dir,
@@ -408,6 +445,7 @@ def _build_config(args: argparse.Namespace) -> SpotlightsManagerConfig:
         max_parallel_sessions=args.max_parallel,
         module_filter=ModuleFilter(include=include) if include else None,
         discovery=discovery_cfg,
+        arxiv_search=arxiv_cfg,
         proposal_from_finding=proposal_cfg,
         agent_proposals=agent_cfg,
         skip_agent_proposals=not args.agent_proposals_enabled,

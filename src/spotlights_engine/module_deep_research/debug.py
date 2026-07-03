@@ -9,6 +9,13 @@ intermediate outputs there so a run can be inspected after the fact:
   error instead.
 - `merged_before_filter.json` — the deduped, merged finding set as it stood
   BEFORE any paper filter collapsed it to a single finding.
+- `arxiv.plan.json` — the arXiv runner's planner trace: planner configured/used,
+  fallback reason, surviving structured plan, rejected phrases/queries with
+  reasons, rendered `search_query` strings, and per-query fetch records.
+- `arxiv.planner_prompt.md` — the rendered Claude arXiv-query-planner prompt
+  (Claude planner path only; written before the session starts).
+- `arxiv.planner_output.md` — the arXiv planner session's raw output (or error);
+  written whenever a session was attempted, even if its output failed to parse.
 
 These are diagnostics only; nothing downstream reads them.
 """
@@ -82,7 +89,37 @@ def write_merged_before_filter(
         )
 
 
+def write_arxiv_plan(debug_dir: Path, record: dict) -> None:
+    """Persist the arXiv runner's structured planner trace as `arxiv.plan.json`."""
+    try:
+        _write_text(
+            debug_dir / "arxiv.plan.json",
+            json.dumps(record, indent=2, sort_keys=True) + "\n",
+        )
+    except OSError as exc:
+        _log.warning("deep_research: failed to write arxiv plan: %s", exc)
+
+
+def write_arxiv_planner_prompt(debug_dir: Path, prompt: str) -> None:
+    """Persist the rendered Claude arXiv-query-planner prompt (before the session)."""
+    try:
+        _write_text(debug_dir / "arxiv.planner_prompt.md", prompt)
+    except OSError as exc:
+        _log.warning("deep_research: failed to write arxiv planner prompt: %s", exc)
+
+
+def write_arxiv_planner_output(debug_dir: Path, text: str) -> None:
+    """Persist the arXiv planner session's raw output (or error text)."""
+    try:
+        _write_text(debug_dir / "arxiv.planner_output.md", text)
+    except OSError as exc:
+        _log.warning("deep_research: failed to write arxiv planner output: %s", exc)
+
+
 __all__ = [
+    "write_arxiv_plan",
+    "write_arxiv_planner_output",
+    "write_arxiv_planner_prompt",
     "write_merged_before_filter",
     "write_prompt",
     "write_runner_outputs",

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from spotlights_engine.agent_proposals import AgentProposalsConfig
 from spotlights_engine.candidate_discovery.api import DiscoveryConfig
+from spotlights_engine.module_deep_research.arxiv_exec import ArxivSearchOptions
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
 from spotlights_engine.modules_extractor import ExtractorConfig
 from spotlights_engine.proposal_from_finding_creator import (
@@ -195,6 +196,7 @@ def test_config_fingerprint_treats_none_as_effective_defaults() -> None:
         extractor_cfg=ExtractorConfig(),
         discovery_cfg=None,
         deep_research_cfg=None,
+        arxiv_search_cfg=ArxivSearchOptions(),
         proposal_from_finding_cfg=None,
         agent_proposals_cfg=None,
     )
@@ -203,10 +205,36 @@ def test_config_fingerprint_treats_none_as_effective_defaults() -> None:
         extractor_cfg=ExtractorConfig(),
         discovery_cfg=DiscoveryConfig(),
         deep_research_cfg=CodexExecOptions(),
+        arxiv_search_cfg=ArxivSearchOptions(),
         proposal_from_finding_cfg=ProposalFromFindingConfig(),
         agent_proposals_cfg=AgentProposalsConfig(),
     )
     assert base == explicit
+
+
+def test_config_fingerprint_distinguishes_arxiv_enabled_from_disabled() -> None:
+    common = dict(
+        module_filter=None,
+        extractor_cfg=ExtractorConfig(),
+        discovery_cfg=None,
+        deep_research_cfg=None,
+        proposal_from_finding_cfg=None,
+        agent_proposals_cfg=None,
+    )
+    enabled = P.build_config_fingerprint(arxiv_search_cfg=ArxivSearchOptions(), **common)
+    disabled = P.build_config_fingerprint(arxiv_search_cfg=None, **common)
+    mailto = P.build_config_fingerprint(
+        arxiv_search_cfg=ArxivSearchOptions(mailto="me@example.com"), **common
+    )
+    planner = P.build_config_fingerprint(
+        arxiv_search_cfg=ArxivSearchOptions(query_planner="template"), **common
+    )
+
+    # `None` (disabled) must NOT collapse to the default object (enabled).
+    assert enabled["arxiv_search_hash"] != disabled["arxiv_search_hash"]
+    # Changing mailto or query_planner changes the fingerprint.
+    assert enabled["arxiv_search_hash"] != mailto["arxiv_search_hash"]
+    assert enabled["arxiv_search_hash"] != planner["arxiv_search_hash"]
 
 
 def test_input_fingerprint_changes_with_paper_filter() -> None:

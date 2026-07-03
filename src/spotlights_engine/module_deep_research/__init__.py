@@ -2,6 +2,10 @@
 
 from spotlights_engine.module_deep_research.agent_exec import AgentExecResult, ModuleResearchRunner
 from spotlights_engine.module_deep_research.api import research_module
+from spotlights_engine.module_deep_research.arxiv_exec import (
+    ArxivSearchClient,
+    ArxivSearchOptions,
+)
 from spotlights_engine.module_deep_research.claude_exec import ClaudeExecClient, ClaudeExecOptions
 from spotlights_engine.module_deep_research.codex_exec import (
     CodexExecClient,
@@ -14,6 +18,8 @@ from spotlights_engine.module_deep_research.validation import parse_module_deep_
 
 __all__ = [
     "AgentExecResult",
+    "ArxivSearchClient",
+    "ArxivSearchOptions",
     "ClaudeExecClient",
     "ClaudeExecOptions",
     "CodexExecClient",

@@ -281,6 +281,7 @@ def build_config_fingerprint(
     extractor_cfg: BaseModel,
     discovery_cfg: BaseModel | None,
     deep_research_cfg: BaseModel | None,
+    arxiv_search_cfg: BaseModel | None,
     proposal_from_finding_cfg: BaseModel | None,
     agent_proposals_cfg: BaseModel | None,
 ) -> dict[str, Any]:
@@ -301,6 +302,11 @@ def build_config_fingerprint(
         "deep_research_hash": hash_pydantic_excluding(
             effective_deep_research_cfg, exclude={"cwd", "output_last_message"}
         ),
+        # Hashed WITHOUT an `or Default()` fallback: unlike the other step
+        # configs, `None` here means DISABLED (not "use defaults"), and the
+        # default object means ENABLED. `hash_pydantic_excluding` already returns
+        # a distinct stable hash for `None`, so the two states stay distinct.
+        "arxiv_search_hash": hash_pydantic_excluding(arxiv_search_cfg, exclude=set()),
         "proposal_from_finding_hash": hash_pydantic_excluding(
             effective_proposal_cfg, exclude={"artifacts_dir", "repo_path"}
         ),

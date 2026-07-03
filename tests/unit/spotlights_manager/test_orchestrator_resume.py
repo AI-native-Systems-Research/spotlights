@@ -290,6 +290,34 @@ def test_resume_rejects_pre_change_schema_version(
         run_with_telemetry(make_input(repo), config=cfg)
 
 
+def test_resume_rejects_manifest_predating_arxiv_hash(
+    monkeypatch, repo: Path, artifacts: Path
+) -> None:
+    """A run dir whose config fingerprint predates `arxiv_search_hash` must fail
+    resume with an explicit ResumeMismatchError — no silent migration (§1.2)."""
+    tree = make_tree()
+    _wire_step_doubles(monkeypatch, tree=tree, discover_calls=[], research_calls=[])
+
+    cfg = SpotlightsManagerConfig(
+        artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
+    )
+    run_with_telemetry(make_input(repo), config=cfg)
+
+    # Simulate a pre-arXiv manifest by dropping the new fingerprint key.
+    paths = P.ManagerPaths(artifacts)
+    manifest = P.read_manifest(paths)
+    assert manifest is not None
+    fp = dict(manifest["config_fingerprint"])
+    fp.pop("arxiv_search_hash", None)
+    manifest["config_fingerprint"] = fp
+    P.write_manifest(paths, manifest)
+
+    with pytest.raises(ResumeMismatchError, match="config fingerprint"):
+        run_with_telemetry(make_input(repo), config=cfg)
+
+
 def test_resume_reruns_only_step4_when_proposal_artifact_missing(
     monkeypatch, repo: Path, artifacts: Path
 ) -> None:

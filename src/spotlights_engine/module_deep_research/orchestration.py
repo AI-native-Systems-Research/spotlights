@@ -69,8 +69,15 @@ def select_runners(
     codex_options: CodexExecOptions | None,
     runner: ModuleResearchRunner | None,
     runners: Sequence[ModuleResearchRunner] | None,
+    extra_runners: Sequence[ModuleResearchRunner] = (),
 ) -> tuple[ModuleResearchRunner, ...]:
-    """Resolve caller-provided runners or create the default Codex/Claude/Gemini set."""
+    """Resolve caller-provided runners or create the default Codex/Claude/Gemini set.
+
+    `extra_runners` are appended to the default set (e.g. the arXiv runner, built
+    by `research_module` where the structured inputs are in scope). They are
+    ignored when the caller passes an explicit `runner`/`runners`: those paths
+    already fully specify the runner set.
+    """
     if runner is not None and runners is not None:
         raise ValueError("pass either runner or runners, not both")
     if runner is not None:
@@ -82,6 +89,7 @@ def select_runners(
         CodexExecClient(codex_options or CodexExecOptions(cwd=repo_path)),
         ClaudeExecClient(ClaudeExecOptions(cwd=repo_path)),
         GeminiExecClient(GeminiExecOptions(cwd=repo_path)),
+        *extra_runners,
     )
 
 

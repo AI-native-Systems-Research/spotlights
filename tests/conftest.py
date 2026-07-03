@@ -12,6 +12,8 @@ from __future__ import annotations
 import sys
 import types
 
+import pytest
+
 
 def _install_observability_stub() -> None:
     try:
@@ -38,3 +40,21 @@ def _install_observability_stub() -> None:
 
 
 _install_observability_stub()
+
+
+def pytest_collection_modifyitems(config, items):  # noqa: ANN001
+    """Skip live-network tests unless the user explicitly selects them.
+
+    Running `pytest -m network` is the opt-in path. A plain `pytest` stays fully
+    offline, matching the marker contract in `pyproject.toml`.
+    """
+    markexpr = getattr(config.option, "markexpr", "") or ""
+    if "network" in markexpr:
+        return
+
+    skip_network = pytest.mark.skip(
+        reason="network test skipped by default; run `pytest -m network` to opt in"
+    )
+    for item in items:
+        if "network" in item.keywords:
+            item.add_marker(skip_network)

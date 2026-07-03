@@ -647,6 +647,7 @@ async def _do_step3(
         lambda: research_module(
             research_input,
             options,
+            arxiv_options=cfg.arxiv_search,
             segment=segment,
             debug_dir=module_paths.deep_research_debug_dir,
         )
@@ -1485,6 +1486,7 @@ async def _run_async(
         extractor_cfg=config.extractor,
         discovery_cfg=config.discovery,
         deep_research_cfg=config.deep_research,
+        arxiv_search_cfg=config.arxiv_search,
         proposal_from_finding_cfg=config.proposal_from_finding,
         agent_proposals_cfg=config.agent_proposals,
     )

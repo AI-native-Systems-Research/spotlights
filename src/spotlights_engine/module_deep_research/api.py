@@ -6,6 +6,10 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from spotlights_engine.module_deep_research.agent_exec import ModuleResearchRunner
+from spotlights_engine.module_deep_research.arxiv_exec import (
+    ArxivSearchClient,
+    ArxivSearchOptions,
+)
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
 from spotlights_engine.module_deep_research.debug import write_prompt
 from spotlights_engine.module_deep_research.orchestration import (
@@ -45,6 +49,7 @@ def research_module(
     check: bool = False,
     runner: ModuleResearchRunner | None = None,
     runners: Sequence[ModuleResearchRunner] | None = None,
+    arxiv_options: ArxivSearchOptions | None = None,
     segment: str | None = None,
     debug_dir: Path | None = None,
 ) -> ModuleDeepResearchOutput:
@@ -74,11 +79,21 @@ def research_module(
     prompt = render_module_deep_research_prompt(request, module)
     if debug_dir is not None:
         write_prompt(debug_dir, prompt)
+    # The arXiv runner needs structured inputs (module model + candidates) to
+    # build queries, so it is constructed here — where `request`/`module` are in
+    # scope — and appended to the default set. It is ignored when the caller
+    # passes an explicit `runner`/`runners`.
+    extra_runners: tuple[ModuleResearchRunner, ...] = ()
+    if arxiv_options is not None:
+        extra_runners = (
+            ArxivSearchClient(request, module, arxiv_options, debug_dir=debug_dir),
+        )
     active_runners = select_runners(
         repo_path=request.repo_path,
         codex_options=codex_options,
         runner=runner,
         runners=runners,
+        extra_runners=extra_runners,
     )
     outcomes = run_runners(
         prompt=prompt,
