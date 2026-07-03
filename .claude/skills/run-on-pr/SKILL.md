@@ -7,12 +7,17 @@ description: "Prep + command emitter for a PR-grounded recall run of the full sp
 
 Prepare a recall run that measures whether the **real `spotlights-engine`**
 independently flags the code a merged PR actually changed — and, when the PR
-cites a paper, whether the engine's deep research can **locate** that same paper
-(the paper is fed to the engine via `--paper-link`, so this axis is a *focused*
-locate check, not blind recall — see Critical rule 1). Each merged PR is ground
-truth ("an expert decided *this* location was worth changing"); the harness pins
-the pre-PR tree, derives the module scope from the changed files (but never leaks
-the diff), and produces the exact command to run the engine cold on that tree.
+cites a paper, whether the engine's deep research **independently surfaces** that
+same paper. When the PR cites one, `--paper-link` is passed to the engine, but it
+is a **post-hoc results filter on the deep-research block's output**, not an input
+to the blind search: it collapses the findings the research produced *on its own*
+down to the single one matching the cited paper (a no-match ⇒ the engine did not
+surface it). The paper URL/title never enters the research runners' prompts, so
+it does **not** make the paper easier to find — see Critical rule 1. Each merged
+PR is ground truth ("an expert decided *this* location was worth changing"); the
+harness pins the pre-PR tree, derives the module scope from the changed files (but
+never leaks the diff), and produces the exact command to run the engine cold on
+that tree.
 
 **This skill does NOT run the engine.** It stops after scoping and **returns the
 `spotlights-engine` command** for you to run yourself (the engine run is the
@@ -26,21 +31,26 @@ exactly as the README documents. (This skill only *emits* that engine command;
 you run it yourself — see "This skill does NOT run the engine" above.)
 
 ## Critical rules — do not break (design "Critical invariants")
-1. **Scoped blindness (line-recall axis only).** The engine runs on the pre-PR
-   checkout with **no** PR title, description, diff, changed-file list, or
-   ground-truth ranges. The deliberate exceptions are two: (a) the coarse
-   **module scope** (`--include`) derived from the changed files — specifically
-   from the *folders* those files live in, so the leaked signal is only "which
-   directories changed", never the diff itself; and (b) the **cited paper**,
-   which is **always** passed to the engine via `--paper-link` (+ `--paper-title`)
-   when the PR cites one — see step 5. The only natural-language input beyond the
-   paper is the **generic, PR-independent objective** (+ generic hints).
+1. **Scoped blindness.** The engine runs on the pre-PR checkout with **no** PR
+   title, description, diff, changed-file list, or ground-truth ranges. The one
+   deliberate exception is the coarse **module scope** (`--include`) derived from
+   the changed files — specifically from the *folders* those files live in, so the
+   leaked signal is only "which directories changed", never the diff itself. The
+   only natural-language input is the **generic, PR-independent objective**
+   (+ generic hints).
 
-   ⚠ **The paper axis is therefore NOT a blind independent-recall signal.**
-   Because the cited paper is fed into the engine, the `compare-pr-run` paper
-   verdict means "can the engine *locate* this known paper in this module",
-   **not** "did the engine independently surface it". The **line-recall axis
-   stays fully blind** — `--include` carries no ground-truth-specific signal
+   **`--paper-link` does NOT break blindness.** When the PR cites a paper the
+   command appends `--paper-link` (+ `--paper-title`) — see step 5 — but this maps
+   to a `PaperFilter` that is applied **only after** the deep-research runners have
+   already produced their findings on their own. It collapses that independently
+   surfaced set down to the single finding matching the cited paper (URL first,
+   then title); a no-match yields empty findings. The paper URL/title is **never**
+   injected into the research prompts, so it cannot bias what the engine searches
+   for or make the paper easier to find. The `compare-pr-run` paper verdict is
+   therefore still a genuine **independent-recall** signal: "did the engine's own
+   research surface this paper in this module" — the filter only isolates that
+   finding from the noise of the other findings. Both the line-recall axis and the
+   paper axis stay blind; `--include` carries no ground-truth-specific signal
    beyond the folder.
 2. **Base = `merge-base(baseRefOid, headRefOid)`**, never `mergeCommit^1`. Full
    clone, never shallow.
@@ -54,8 +64,9 @@ run-on-pr skill (you, main session)        — single-PR prep orchestrator
   ├─ pr-checkout       (step 1) — pre-PR checkout at the merge-base
   ├─ pr-diff-scope     (step 2) — base-side line ranges + cited-paper URLs
   ├─ pr-module-scope   (step 3) — changed-file *folders* → --include (path-derived, no LLM)
-  └─ emit command      (step 4) — print the spotlights-engine command (line-scope
-                                   blind; always +--paper-link when a paper exists)
+  └─ emit command      (step 4) — print the spotlights-engine command (blind;
+                                   +--paper-link when a paper exists — a post-hoc
+                                   filter on research output, not a search bias)
                                    (YOU run it; this skill does not)
 
    … you run the engine by hand …
@@ -67,8 +78,9 @@ compare-pr-run skill (separate)            — the comparison tail
 ```
 Delegate each prep step to its subagent (one at a time — steps are dependent).
 Deterministic math lives in `scripts/run_on_pr/` helpers; agents call them.
-The flow emits the command (line-scope blind, paper always fed in) and hands off
-to `compare-pr-run`; it never runs the engine itself.
+The flow emits the command (blind; `--paper-link` is a post-hoc filter on the
+research output, not a search input) and hands off to `compare-pr-run`; it never
+runs the engine itself.
 
 ## Cost note
 A full engine run per PR is the dominant cost (minutes + API $) — which is
@@ -124,8 +136,10 @@ pr_key, out_dir:"$RUN", progress_log, addition_tolerance:3}`. It writes
 `subfolders`, `new_files`) **and** `$RUN/cited_papers.json` (conservative
 arxiv/DOI/paper-host URLs — with optional `title` from the markdown link text —
 from the PR prose; the only place PR prose is read). The first cited paper is
-fed to the engine in step 5 via `--paper-link`, so this is the source of the
-(non-blind) paper axis.
+passed to the engine in step 5 via `--paper-link` as a **post-hoc filter on the
+research block's output** (it isolates the matching finding after the research
+runs — it does not bias the search; see Critical rule 1), so the paper axis stays
+a blind independent-recall signal.
 - If `status: no_source_changes` → skip steps 4–5, report bucket
   `no_source_changes` (paper signal `n/a`); there is nothing to run.
 - On `status: error` → stop.
@@ -157,9 +171,13 @@ command the user should run themselves, reading `include` from `$RUN/scope.json`
 
 **Always append the paper filter when a paper exists.** Read the **first** entry
 of `$RUN/cited_papers.json`; if present, append `--paper-link <raw_url>` and,
-when that entry has a non-empty `title`, `--paper-title "<title>"`. This restricts
-step 3 to the single finding matching that paper (per module). There is **no
-opt-in flag** — this is the default and only behavior.
+when that entry has a non-empty `title`, `--paper-title "<title>"`. This is a
+**post-hoc filter on step 3's output**: after the deep-research runners produce
+their findings on their own, it collapses that set to the single finding matching
+that paper (per module), so the paper's presence is isolated from the noise of
+the other findings. It does **not** feed the paper into the search — the URL/title
+never reaches the research prompts, so it can't make the paper easier to find.
+There is **no opt-in flag** — this is the default and only behavior.
 - **Fallback:** when `cited_papers.json` has no papers, skip cleanly — emit the
   command with **no** `--paper-link` and note that no cited paper was available
   (the paper axis becomes `n/a`).
@@ -186,20 +204,22 @@ uv run --no-sync spotlights-engine \
   step-3 research findings; step 5 (agent_proposals) adds only agent-knowledge
   proposals that do not affect either verdict. Skipping it makes each PR run
   cheaper and faster with no loss to the `compare-pr-run` scoring.
-- ⚠️ **Scoped blindness (line-recall axis):** apart from the always-appended
-  `--paper-link`/`--paper-title`, the command carries **only** the objective +
-  hints + scoped qns. Never add the diff, PR title/description, changed-file
-  list, or ground-truth ranges. The line-recall axis stays blind.
-- ⚠️ **Print a loud warning** that feeding `--paper-link` leaks the cited paper
-  to the engine, so the paper axis is **no longer a blind independent-recall
-  signal**: the `compare-pr-run` paper verdict now means "can the engine locate
-  this known paper in this module", not "did the engine independently surface
-  it". Add a `paper_focus` marker to the emitted-command notes (e.g. write it to
-  `$RUN/progress.log` and echo it) so the downstream report is not misread.
+- ⚠️ **Scoped blindness:** the command carries **only** the objective + hints +
+  scoped qns (plus `--paper-link`/`--paper-title`, which only filter step 3's
+  *output* and never enter the search). Never add the diff, PR title/description,
+  changed-file list, or ground-truth ranges. Both the line-recall and paper axes
+  stay blind.
+- ⚠️ **`--paper-link` does not leak the paper into the search.** It maps to a
+  `PaperFilter` applied *after* the research runners have already produced their
+  findings — it collapses that independently surfaced set to the single matching
+  finding (a no-match ⇒ empty). The URL/title never reaches the research prompts.
+  So the `compare-pr-run` paper verdict remains a genuine independent-recall
+  signal ("did the engine's own research surface this paper in this module"), not
+  a "can it locate a known paper" check.
 - Tell the user: the run takes many minutes; `result.json` lands at
   `$RUN/spotlights-out/result.json`.
 - Log the handoff:
-  `bash scripts/run_on_pr/log.sh $RUN/progress.log <pr_key> run-on-pr READY "emitted engine command (paper_focus=<yes|no>); run then use compare-pr-run"`
+  `bash scripts/run_on_pr/log.sh $RUN/progress.log <pr_key> run-on-pr READY "emitted engine command (paper_filter=<yes|no>); run then use compare-pr-run"`
 
 ### 6. Hand off to `compare-pr-run`
 Tell the user explicitly: **after the engine finishes**, run the
