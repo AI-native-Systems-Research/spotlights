@@ -99,15 +99,12 @@ Derive two deterministic keys (no `Date.now()` — identical inputs must resume,
 but a changed objective must not collide with an old engine artifacts dir):
 - **`pr_key`** = a slug of the PR URL (e.g. `owner__repo__pr<n>`). Used for
   progress-log labels.
-- **`title_slug`** = a short slug of the PR title. Fetch the title cheaply here
-  with `gh pr view <pr_url> --json title -q .title` (metadata only, no clone).
-  Lowercase, replace non-alphanumerics with `-`, collapse repeats, trim, and cap
-  to ~40 chars. If the fetch fails, omit this segment (fall back gracefully).
-- **`run_id`** = `<pr_key>__<title_slug>__<hash>`, where `<hash>` is a short hash
+- **`run_id`** = `<pr_key>__<hash>`, where `<hash>` is a short hash
   over (pr_url + objective + sorted hints + include override + base override +
-  relevant engine knobs). The `pr_key` + `title_slug` prefix makes the folder
-  human-readable (e.g. `owner__repo__pr<n>__add-fused-moe-kernel__bc8d9c701211`);
-  the hash keeps distinct objectives/knobs from colliding. `RUN=runs/run-on-pr/<run_id>`.
+  relevant engine knobs). The `pr_key` prefix makes the folder identifiable by
+  PR number (e.g. `owner__repo__pr<n>__bc8d9c701211`) without leaking the PR
+  title; the hash keeps distinct objectives/knobs from colliding.
+  `RUN=runs/run-on-pr/<run_id>`.
 
 `mkdir -p $RUN`. Echo the parsed inputs (PR, objective, hints, any
 override/base, run_id) back to the user for confirmation before the expensive
