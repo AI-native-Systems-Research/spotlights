@@ -178,7 +178,7 @@ uv run --no-sync spotlights-engine \
   --max-parallel    7 \
   --max-parallel-pairs 10 \
   --max-findings-per-module 50 \
-  --no-review \
+  --review-iterations 1 \
   --no-agent-proposals
 ```
 - **Always pass `--no-agent-proposals`.** The recall axes this skill measures
