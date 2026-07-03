@@ -6,12 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from spotlights_engine.candidate_discovery import DiscoverySetupError
+from spotlights_engine.candidate_discovery import BootstrapMerge, DiscoverySetupError
 from spotlights_engine.candidate_discovery.api import (
     DiscoveryConfig,
+    DiscoveryResult,
     discover,
     resolve_target_module,
 )
+from spotlights_engine.schemas.candidate import Candidates
 from spotlights_engine.schemas.common import SpotlightContext
 from spotlights_engine.schemas.pipeline import CandidateDiscoveryInput
 from spotlights_engine.schemas.project import File, Module, ProjectTree, Repository
@@ -108,6 +110,28 @@ def test_discover_raises_when_artifacts_dir_none(tmp_path: Path) -> None:
     cfg = DiscoveryConfig(repo_path=tmp_path)
     with pytest.raises(DiscoverySetupError, match="artifacts_dir is required"):
         discover(inp, config=cfg)
+
+
+def test_discovery_result_bootstrap_merge_optional() -> None:
+    """`bootstrap_merge` is additive and back-compatible: absent → `None`."""
+    result = DiscoveryResult(
+        candidates=Candidates(module_qualified_name="foo", candidates=[]),
+        iterations=[],
+        total_duration_s=1.0,
+    )
+    assert result.bootstrap_merge is None
+
+
+def test_discovery_result_bootstrap_merge_roundtrips() -> None:
+    merge = BootstrapMerge(claude_code_n=3, codex_n=2, deduped_n=1, merged_n=4)
+    result = DiscoveryResult(
+        candidates=Candidates(module_qualified_name="foo", candidates=[]),
+        iterations=[],
+        total_duration_s=1.0,
+        bootstrap_merge=merge,
+    )
+    reloaded = DiscoveryResult.model_validate_json(result.model_dump_json())
+    assert reloaded.bootstrap_merge == merge
 
 
 def test_resolve_target_module_unknown_raises() -> None:

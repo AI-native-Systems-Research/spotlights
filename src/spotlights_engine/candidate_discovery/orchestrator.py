@@ -28,6 +28,7 @@ from spotlights_engine.candidate_discovery.agents import (
     _SchemaParseError,
 )
 from spotlights_engine.candidate_discovery.api import (
+    BootstrapMerge,
     DiscoveryConfig,
     DiscoveryResult,
     IterationTelemetry,
@@ -46,8 +47,8 @@ from spotlights_engine.candidate_discovery.validation import Validator
 from spotlights_engine.schemas.candidate import Candidate, Candidates
 from spotlights_engine.schemas.pipeline import CandidateDiscoveryInput
 from spotlights_engine.schemas.project import Module
-from spotlights_engine.utils.id_helpers import parse_id, slug_for
-from spotlights_engine.utils.schema_compat import primary_file
+from spotlights_engine.utils.id_helpers import parse_id, prefix_local_id, slug_for
+from spotlights_engine.utils.schema_compat import primary_file, primary_span
 
 _log = logging.getLogger(__name__)
 
@@ -61,6 +62,49 @@ _MIN_SEEN_COUNTER = 0
 def _bare_id(counter: int) -> str:
     """The agent-local bare form `cand-NNNN` for a counter."""
     return f"cand-{counter:04d}"
+
+
+def _ranges_overlap(a: Candidate, b: Candidate) -> bool:
+    """True iff `a` and `b` share a file and their inclusive spans overlap (M3)."""
+    if primary_file(a) != primary_file(b):
+        return False
+    sa, sb = primary_span(a), primary_span(b)
+    return sa.line_start <= sb.line_end and sb.line_start <= sa.line_end
+
+
+def _dedup_by_overlap(candidates: list[Candidate]) -> tuple[list[Candidate], int]:
+    """Keep the first candidate of each file+overlap cluster; drop later overlaps.
+
+    Iterates in the given (stable) order — Claude Code survivors first, then
+    Codex — so the first candidate of an overlapping pair wins and results are
+    deterministic. Mirrors the review prompt's own overlap-merge rule
+    (`prompts_data/review.md`). Returns `(kept, dropped_count)`.
+    """
+    kept: list[Candidate] = []
+    dropped = 0
+    for c in candidates:
+        if any(_ranges_overlap(c, k) for k in kept):
+            dropped += 1
+            continue
+        kept.append(c)
+    return kept, dropped
+
+
+def _renumber_candidate(c: Candidate, *, counter: int, segment: str) -> Candidate:
+    """Reassign `c` a fresh `cand-<segment>-<counter>` id (M5).
+
+    The merge mints one contiguous id space over the deduped survivors, so each
+    kept candidate becomes a new id owned by the merged seed. `c` already carries
+    a prefixed id from its bootstrap promotion; rewrite it to the bare form for
+    the new counter, then re-prefix with the same module segment.
+    """
+    return c.model_copy(
+        update={
+            "id": prefix_local_id(
+                _bare_id(counter), expected_type="cand", segment=segment
+            )
+        }
+    )
 
 # Per plan §17: Linux MAX_ARG_STRLEN is 131_072 bytes per argument. Claude
 # inlines the schema via `--json-schema <text>`; if a future schema addition
@@ -76,6 +120,18 @@ class _IterOutcome:
     candidates: Candidates
     telemetry: IterationTelemetry
     agent_invocation: AgentInvocation
+
+
+@dataclass
+class _MergeOutcome:
+    # `raw` and `candidates` are identical for the merge (the renumbered set is
+    # both the raw seed and the post-drop seed — the merge does no content
+    # dropping beyond dedup), but both are kept so `_seed_state` has the same
+    # (raw, candidates) shape it gets from a review iteration.
+    raw: Candidates
+    candidates: Candidates
+    summary: BootstrapMerge
+    iter_dir: Path
 
 
 class Orchestrator:
@@ -119,6 +175,7 @@ class Orchestrator:
         self._iterations: list[IterationTelemetry] = []
         self._iterations_fh = None
         self._last_iter_dir: Path | None = None
+        self._bootstrap_merge: BootstrapMerge | None = None
 
     def run(self) -> DiscoveryResult:
         run_start = time.monotonic()
@@ -126,7 +183,10 @@ class Orchestrator:
         # raises before the directory exists (avoids a false "resume" on next call).
         claude = ClaudeRunner(self._config)
         codex = CodexRunner(self._config)
-        review_agents: list[AgentRunner] = [codex, claude]
+        # M4: Codex now participates in the bootstrap, so review leads with
+        # Claude Code (iteration 1) to avoid two adjacent Codex turns around the
+        # merged seed.
+        review_agents: list[AgentRunner] = [claude, codex]
 
         self._mint_run_dir()
         try:
@@ -137,8 +197,21 @@ class Orchestrator:
                     repo_context_markdown=self._config.repo_context_markdown,
                     spotlight_context=self._input.context,
                 )
-                boot = self._run_iteration(n=0, agent=claude, prompt=boot_prompt)
-                self._record(boot)
+                # M4b: both bootstraps run at n=0 against fresh cross-iteration
+                # state (`_prev_raw is None`, `_seen_by_id` empty,
+                # `_max_seen_counter == 0`), so each validates independently and
+                # both legitimately start at bare `cand-0001`. State seeding is
+                # deferred to the merge, which is the single authoritative mint
+                # point (M5). We record telemetry for each bootstrap call but do
+                # NOT seed state from either one.
+                claude_boot = self._run_iteration(n=0, agent=claude, prompt=boot_prompt)
+                self._record_telemetry(claude_boot)
+                codex_boot = self._run_iteration(n=0, agent=codex, prompt=boot_prompt)
+                self._record_telemetry(codex_boot)
+
+                merge = self._merge_bootstraps(claude_boot, codex_boot)
+                self._bootstrap_merge = merge.summary
+                self._seed_state(merge.raw, merge.candidates)
 
                 for n in range(1, self._config.num_review_iterations + 1):
                     agent = review_agents[(n - 1) % 2]
@@ -158,7 +231,8 @@ class Orchestrator:
                         spotlight_context=self._input.context,
                     )
                     out = self._run_iteration(n=n, agent=agent, prompt=review_prompt)
-                    self._record(out)
+                    self._record_telemetry(out)
+                    self._seed_state(out.raw, out.candidates)
 
                 self._copy_final()
         finally:
@@ -369,6 +443,14 @@ class Orchestrator:
     ) -> Candidates:
         # An empty `survivors` is valid per the architecture: the manager will
         # mark the module run `SKIPPED` if discovery returns zero candidates.
+        #
+        # Pre-merge id overlap is expected and harmless: both bootstrap calls
+        # (n == 0) prefix with the same run `segment`, so
+        # `iter_0_bootstrap_claude_code/candidates.json` and
+        # `..._codex/candidates.json` will both contain `cand-<segment>-0001…`.
+        # Each file is internally unique; the merge renumbers into the single
+        # authoritative `iter_0_merge/candidates.json`. Do not "fix" this cross-
+        # file collision — it is a display artifact of the deferred mint (M5).
         normalized = Candidates(
             module_qualified_name=self._input.module_qualified_name,
             candidates=survivors,
@@ -415,16 +497,29 @@ class Orchestrator:
             indent=2
         )
 
-    def _record(self, outcome: _IterOutcome) -> None:
+    def _record_telemetry(self, outcome: _IterOutcome) -> None:
+        """Append an agent-call telemetry row to the jsonl audit trail.
+
+        Split out from state seeding (M2/M4b): the two bootstrap calls record
+        telemetry here but seed no cross-iteration state (that is deferred to the
+        merge). Review iterations call this and `_seed_state`.
+        """
         self._iterations.append(outcome.telemetry)
         assert self._iterations_fh is not None
         self._iterations_fh.write(outcome.telemetry.model_dump_json() + "\n")
         self._iterations_fh.flush()
 
-        self._prev_raw = outcome.raw
-        self._prev_post_drop = outcome.candidates
-        self._prev_post_drop_ids = {c.id for c in outcome.candidates.candidates}
-        for c in outcome.candidates.candidates:
+    def _seed_state(self, raw: Candidates, candidates: Candidates) -> None:
+        """Advance cross-iteration state from a (raw, post-drop) candidate pair.
+
+        Seeds `_prev_raw`, `_prev_post_drop`, `_prev_post_drop_ids`,
+        `_seen_by_id`, and `_max_seen_counter`. Called once from the merge (M5,
+        the authoritative mint point) and once per review iteration.
+        """
+        self._prev_raw = raw
+        self._prev_post_drop = candidates
+        self._prev_post_drop_ids = {c.id for c in candidates.candidates}
+        for c in candidates.candidates:
             # Remember the latest surviving version of each candidate so a later
             # iteration can be shown (and re-add) anything a subsequent pass drops.
             self._seen_by_id[c.id] = c
@@ -433,11 +528,69 @@ class Orchestrator:
                 self._max_seen_counter = counter
 
         _log.info(
-            "[%s] discovery: iteration %d (%s) — %d candidates so far",
+            "[%s] discovery: %d candidates carried forward",
             self._input.module_qualified_name,
-            outcome.telemetry.n,
-            outcome.telemetry.agent,
-            len(outcome.candidates.candidates),
+            len(candidates.candidates),
+        )
+
+    def _merge_bootstraps(
+        self, claude_out: _IterOutcome, codex_out: _IterOutcome
+    ) -> _MergeOutcome:
+        """Deterministically merge the two bootstrap survivor lists (M3/M5).
+
+        Concatenate `[*claude_survivors, *codex_survivors]`, dedup by
+        `primary_file` + overlapping `[line_start, line_end]` (keep first, drop
+        later overlaps), then renumber the kept candidates into one contiguous
+        `cand-<segment>-0001..K` id space. This is the single authoritative mint
+        point; every later monotonicity check builds on `_max_seen_counter == K`.
+        """
+        claude_survivors = list(claude_out.candidates.candidates)
+        codex_survivors = list(codex_out.candidates.candidates)
+
+        kept, deduped_n = _dedup_by_overlap(
+            [*claude_survivors, *codex_survivors]
+        )
+        merged = [
+            _renumber_candidate(c, counter=i, segment=self._segment)
+            for i, c in enumerate(kept, start=1)
+        ]
+        merged_candidates = Candidates(
+            module_qualified_name=self._input.module_qualified_name,
+            candidates=merged,
+        )
+        summary = BootstrapMerge(
+            claude_code_n=len(claude_survivors),
+            codex_n=len(codex_survivors),
+            deduped_n=deduped_n,
+            merged_n=len(merged),
+        )
+
+        merge_dir = layout.merge_dir(self._config.artifacts_dir)
+        merge_dir.mkdir(parents=True)
+        (merge_dir / "candidates.json").write_text(
+            merged_candidates.model_dump_json(indent=2), encoding="utf-8"
+        )
+        (merge_dir / "merge.json").write_text(
+            summary.model_dump_json(indent=2), encoding="utf-8"
+        )
+        # `_last_iter_dir` becomes the merge dir so `_copy_final` is branch-free:
+        # with `num_review_iterations == 0` the merged seed IS the final result;
+        # with ≥1 review each review iteration overwrites this as before.
+        self._last_iter_dir = merge_dir
+
+        _log.info(
+            "[%s] discovery: bootstrap merge — claude=%d codex=%d deduped=%d merged=%d",
+            self._input.module_qualified_name,
+            summary.claude_code_n,
+            summary.codex_n,
+            summary.deduped_n,
+            summary.merged_n,
+        )
+        return _MergeOutcome(
+            raw=merged_candidates,
+            candidates=merged_candidates,
+            summary=summary,
+            iter_dir=merge_dir,
         )
 
     def _copy_final(self) -> None:
@@ -455,6 +608,7 @@ class Orchestrator:
             iterations=list(self._iterations),
             total_duration_s=total_duration_s,
             total_cost_usd=total_cost,
+            bootstrap_merge=self._bootstrap_merge,
         )
 
 

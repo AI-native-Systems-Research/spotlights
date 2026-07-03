@@ -17,6 +17,7 @@ mistake this re-export for a regression.
 from __future__ import annotations
 
 from spotlights_engine.candidate_discovery.api import (
+    BootstrapMerge,
     DiscoveryConfig,
     DiscoveryResult,
     IterationTelemetry,
@@ -30,6 +31,7 @@ from spotlights_engine.candidate_discovery.errors import (
 )
 
 __all__ = [
+    "BootstrapMerge",
     "DiscoveryConfig",
     "DiscoveryMutationError",
     "DiscoveryResult",

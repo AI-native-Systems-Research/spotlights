@@ -3,13 +3,18 @@
 These tests cover the orchestration of all Stage-1 components and the
 §14 scenarios in the implementation plan; the real Claude / Codex CLIs
 are never invoked.
+
+Iteration 0 is now a *pair* of bootstrap calls (Claude Code then Codex) whose
+validated survivor lists are deterministically merged (renumber + dedup) into
+the seed for the alternating review loop. Review leads with Claude Code
+(iteration 1), Codex second (iteration 2), etc.
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import pytest
 
@@ -24,11 +29,9 @@ from spotlights_engine.candidate_discovery.errors import (
     DiscoverySetupError,
     DiscoveryValidationError,
 )
-from spotlights_engine.schemas.candidate import Candidates
 from spotlights_engine.schemas.common import SpotlightContext
 from spotlights_engine.schemas.pipeline import CandidateDiscoveryInput
 from spotlights_engine.schemas.project import File, Module, ProjectTree, Repository
-
 
 # ----- Test scaffolding -----------------------------------------------------
 
@@ -149,7 +152,7 @@ def _run(repo: Path, artifacts: Path, num_reviews: int = 3) -> DiscoveryResult:
     return discover(_make_input(), config=_make_config(repo, artifacts, num_reviews))
 
 
-def _cands(ids_and_files, qn: str = "v1/foo") -> str:
+def _cands(ids_and_files, qn: str = "v1/foo", line_start: int = 1, line_end: int = 10) -> str:
     return json.dumps(
         {
             "module_qualified_name": qn,
@@ -157,8 +160,8 @@ def _cands(ids_and_files, qn: str = "v1/foo") -> str:
                 {
                     "id": cid,
                     "file": f,
-                    "line_start": 1,
-                    "line_end": 10,
+                    "line_start": line_start,
+                    "line_end": line_end,
                     "symbol": f"module.{cid}",
                     "kind": "function",
                     "description": f"work for {cid}",
@@ -201,19 +204,31 @@ def _install_runners(
 # ----- §14 scenarios --------------------------------------------------------
 
 
-def test_happy_path_four_iterations(repo_artifacts, monkeypatch):
+def test_happy_path_two_bootstraps_merge_then_reviews(repo_artifacts, monkeypatch):
     repo, artifacts = repo_artifacts
     claude = FakeAgentRunner(
         "claude_code",
         responses=[
+            # bootstrap (n=0)
             _cands([("cand-0001", "src/v1/foo/x.py")]),
+            # review 1 (n=1): drop merged 0002 (y), add 0003 (z)
             _cands([("cand-0001", "src/v1/foo/x.py"), ("cand-0003", "src/v1/foo/z.py")]),
+            # review 3 (n=3): carry all three
+            _cands(
+                [
+                    ("cand-0001", "src/v1/foo/x.py"),
+                    ("cand-0003", "src/v1/foo/z.py"),
+                    ("cand-0004", "src/v1/foo/x.py"),
+                ]
+            ),
         ],
     )
     codex = FakeAgentRunner(
         "codex",
         responses=[
-            _cands([("cand-0001", "src/v1/foo/x.py"), ("cand-0002", "src/v1/foo/y.py")]),
+            # bootstrap (n=0): different file from Claude → both survive merge
+            _cands([("cand-0001", "src/v1/foo/y.py")]),
+            # review 2 (n=2): add 0004 (x)
             _cands(
                 [
                     ("cand-0001", "src/v1/foo/x.py"),
@@ -228,35 +243,85 @@ def test_happy_path_four_iterations(repo_artifacts, monkeypatch):
     result = _run(repo, artifacts, num_reviews=3)
 
     assert isinstance(result, DiscoveryResult)
-    assert len(result.iterations) == 4
-    assert [t.n for t in result.iterations] == [0, 1, 2, 3]
+    # Two bootstrap rows (both n=0) + three review rows.
+    assert len(result.iterations) == 5
+    assert [t.n for t in result.iterations] == [0, 0, 1, 2, 3]
     assert [t.agent for t in result.iterations] == [
         "claude_code",
         "codex",
         "claude_code",
         "codex",
+        "claude_code",
     ]
+
+    cd = artifacts / "candidate_discovery"
+
+    # M1: two distinct bootstrap dirs.
+    assert (cd / "iter_0_bootstrap_claude_code" / "candidates.json").exists()
+    assert (cd / "iter_0_bootstrap_codex" / "candidates.json").exists()
+
+    # M2/M5: merge dir holds the renumbered seed + a merge summary.
+    merge_cands = json.loads((cd / "iter_0_merge" / "candidates.json").read_text())
+    merged_ids = sorted(c["id"] for c in merge_cands["candidates"])
+    assert merged_ids == ["cand-v1_foo-0001", "cand-v1_foo-0002"]
+    merge_summary = json.loads((cd / "iter_0_merge" / "merge.json").read_text())
+    assert merge_summary == {
+        "claude_code_n": 1,
+        "codex_n": 1,
+        "deduped_n": 0,
+        "merged_n": 2,
+    }
+    assert result.bootstrap_merge is not None
+    assert result.bootstrap_merge.merged_n == 2
+    iter1_prompt = (cd / "iter_1_claude_code" / "prompt.md").read_text(
+        encoding="utf-8"
+    )
+    assert "highest id accepted so far: cand-0002" in iter1_prompt
 
     final = artifacts / "candidates.json"
     assert final.exists()
     final_data = json.loads(final.read_text())
     final_ids = sorted(c["id"] for c in final_data["candidates"])
-    # The agent emits bare `cand-NNNN`; persisted schema ids carry the module
-    # segment (default slug of `v1/foo` -> `v1_foo`).
     assert final_ids == ["cand-v1_foo-0001", "cand-v1_foo-0003", "cand-v1_foo-0004"]
 
-    last_iter_dir = artifacts / "candidate_discovery" / "iter_3_codex"
+    # Review leads with Claude Code (M4); last review dir is iter_3_claude_code.
+    last_iter_dir = cd / "iter_3_claude_code"
     assert (last_iter_dir / "candidates.json").read_bytes() == final.read_bytes()
 
-    lines = (artifacts / "candidate_discovery" / "iterations.jsonl").read_text().splitlines()
-    assert len(lines) == 4
+    lines = (cd / "iterations.jsonl").read_text().splitlines()
+    assert len(lines) == 5
 
-    for n in (1, 2, 3):
-        agent = "codex" if (n - 1) % 2 == 0 else "claude_code"
-        assert (artifacts / "candidate_discovery" / f"iter_{n}_{agent}" / "diff_from_prev.md").exists()
-    assert not (
-        artifacts / "candidate_discovery" / "iter_0_bootstrap" / "diff_from_prev.md"
-    ).exists()
+    # Review dirs get a diff; bootstrap dirs and the merge dir do not.
+    for n, agent in ((1, "claude_code"), (2, "codex"), (3, "claude_code")):
+        assert (cd / f"iter_{n}_{agent}" / "diff_from_prev.md").exists()
+    assert not (cd / "iter_0_bootstrap_claude_code" / "diff_from_prev.md").exists()
+    assert not (cd / "iter_0_bootstrap_codex" / "diff_from_prev.md").exists()
+    assert not (cd / "iter_0_merge" / "diff_from_prev.md").exists()
+
+
+def test_bootstrap_dedup_collapses_overlap(repo_artifacts, monkeypatch):
+    """A Claude + Codex pair on the same file + overlapping range collapses to
+    one merged candidate, counted in `deduped_n` (M3)."""
+    repo, artifacts = repo_artifacts
+    claude = FakeAgentRunner(
+        "claude_code",
+        responses=[_cands([("cand-0001", "src/v1/foo/x.py")], line_start=1, line_end=10)],
+    )
+    codex = FakeAgentRunner(
+        "codex",
+        responses=[_cands([("cand-0001", "src/v1/foo/x.py")], line_start=5, line_end=15)],
+    )
+    _install_runners(monkeypatch, claude, codex)
+
+    result = _run(repo, artifacts, num_reviews=0)
+
+    assert result.bootstrap_merge is not None
+    assert result.bootstrap_merge.claude_code_n == 1
+    assert result.bootstrap_merge.codex_n == 1
+    assert result.bootstrap_merge.deduped_n == 1
+    assert result.bootstrap_merge.merged_n == 1
+    # Merged seed is the final artifact when there are no review iterations.
+    assert [c.id for c in result.candidates.candidates] == ["cand-v1_foo-0001"]
 
 
 def test_schema_parse_retry_succeeds(repo_artifacts, monkeypatch):
@@ -264,20 +329,24 @@ def test_schema_parse_retry_succeeds(repo_artifacts, monkeypatch):
     claude = FakeAgentRunner(
         "claude_code",
         responses=[
-            _cands([("cand-0001", "src/v1/foo/x.py")]),
+            _cands([("cand-0001", "src/v1/foo/x.py")]),  # bootstrap
+            _cands([("cand-0001", "src/v1/foo/x.py")]),  # review 1
         ],
     )
     codex = FakeAgentRunner(
         "codex",
         responses=[
-            "not-json-on-first-attempt",  # forces a retry
-            _cands([("cand-0001", "src/v1/foo/x.py"), ("cand-0002", "src/v1/foo/y.py")]),
+            "not-json-on-first-attempt",  # bootstrap forces a retry
+            _cands([("cand-0001", "src/v1/foo/x.py")]),
         ],
     )
     _install_runners(monkeypatch, claude, codex)
 
     result = _run(repo, artifacts, num_reviews=1)
 
+    # iterations[1] is the codex bootstrap row.
+    assert result.iterations[1].agent == "codex"
+    assert result.iterations[1].n == 0
     assert result.iterations[1].schema_retries == 1
 
 
@@ -286,19 +355,21 @@ def test_schema_parse_retry_fails_twice(repo_artifacts, monkeypatch):
     claude = FakeAgentRunner(
         "claude_code",
         responses=[
-            _cands([("cand-0001", "src/v1/foo/x.py")]),
+            _cands([("cand-0001", "src/v1/foo/x.py")]),  # bootstrap succeeds
         ],
     )
     codex = FakeAgentRunner(
         "codex",
-        responses=["bad-1", "bad-2"],
+        responses=["bad-1", "bad-2"],  # codex bootstrap fails twice
     )
     _install_runners(monkeypatch, claude, codex)
 
     cfg = _make_config(repo, artifacts, num_reviews=2)
     with pytest.raises(DiscoveryValidationError) as exc:
         discover(_make_input(), config=cfg)
-    assert exc.value.context["iteration"] == 1
+    # Both bootstraps are iteration 0; the codex one fails.
+    assert exc.value.context["iteration"] == 0
+    assert exc.value.context["agent"] == "codex"
 
 
 def test_mutation_guard_fires(repo_artifacts, monkeypatch):
@@ -318,7 +389,8 @@ def test_mutation_guard_fires(repo_artifacts, monkeypatch):
     cfg = _make_config(repo, artifacts, num_reviews=0)
     with pytest.raises(DiscoveryMutationError) as exc:
         discover(_make_input(), config=cfg)
-    # Plan §6: raised iterations carry iteration/agent in context.
+    # Mutation fires during the Claude bootstrap (iteration 0); Codex is never
+    # reached. Plan §6: raised iterations carry iteration/agent in context.
     assert exc.value.context["iteration"] == 0
     assert exc.value.context["agent"] == "claude_code"
 
@@ -353,10 +425,11 @@ def test_containment_drop(repo_artifacts, monkeypatch):
             )
         ],
     )
-    codex = FakeAgentRunner("codex", responses=[])
+    codex = FakeAgentRunner("codex", responses=[_cands([])])
     _install_runners(monkeypatch, claude, codex)
 
     result = _run(repo, artifacts, num_reviews=0)
+    # The claude bootstrap row records the containment drop.
     assert result.iterations[0].dropped_outside_module == 1
     assert [c.id for c in result.candidates.candidates] == ["cand-v1_foo-0001"]
 
@@ -364,44 +437,48 @@ def test_containment_drop(repo_artifacts, monkeypatch):
 def test_all_candidates_dropped(repo_artifacts, monkeypatch):
     """Per architecture, a discovery pass that ends with zero surviving
     candidates returns an empty `Candidates` (the manager will mark the
-    module run `SKIPPED`); it is no longer fatal."""
+    module run `SKIPPED`); it is no longer fatal. Merge must handle
+    empty+empty → empty without minting `cand-0000`."""
     repo, artifacts = repo_artifacts
     claude = FakeAgentRunner(
         "claude_code",
         responses=[_cands([("cand-0001", "src/v1/foo/missing.py")])],
     )
-    codex = FakeAgentRunner("codex", responses=[])
+    codex = FakeAgentRunner("codex", responses=[_cands([])])
     _install_runners(monkeypatch, claude, codex)
 
     result = _run(repo, artifacts, num_reviews=0)
     assert result.candidates.candidates == []
     assert result.candidates.module_qualified_name == "v1/foo"
+    assert result.bootstrap_merge is not None
+    assert result.bootstrap_merge.merged_n == 0
 
 
 def test_id_monotonicity_violation(repo_artifacts, monkeypatch):
     repo, artifacts = repo_artifacts
+    # merge K=1 (max_seen counter 1). review 1 (claude) adds counter 4, leaving a
+    # gap at 2,3 in the seen set. review 2 (codex) then mints counter 3, which is
+    # ≤ max_seen (4) and never seen → strict-monotonicity violation.
     claude = FakeAgentRunner(
         "claude_code",
         responses=[
-            _cands([("cand-0001", "src/v1/foo/x.py"), ("cand-0005", "src/v1/foo/y.py")]),
+            _cands([("cand-0001", "src/v1/foo/x.py")]),  # bootstrap
             _cands(
-                [
-                    ("cand-0001", "src/v1/foo/x.py"),
-                    ("cand-0005", "src/v1/foo/y.py"),
-                ]
-            ),
+                [("cand-0001", "src/v1/foo/x.py"), ("cand-0004", "src/v1/foo/y.py")]
+            ),  # review 1
         ],
     )
     codex = FakeAgentRunner(
         "codex",
         responses=[
+            _cands([]),  # bootstrap empty
             _cands(
                 [
                     ("cand-0001", "src/v1/foo/x.py"),
-                    ("cand-0005", "src/v1/foo/y.py"),
-                    ("cand-0003", "src/v1/foo/z.py"),  # 0003 <= 0005 max_seen — violation
+                    ("cand-0004", "src/v1/foo/y.py"),
+                    ("cand-0003", "src/v1/foo/z.py"),  # 0003 <= max_seen 4 — violation
                 ]
-            ),
+            ),  # review 2
         ],
     )
     _install_runners(monkeypatch, claude, codex)
@@ -415,20 +492,23 @@ def test_dropped_candidate_can_be_readded(repo_artifacts, monkeypatch):
     """A candidate dropped by a later pass is fed back and can be re-added at
     its original id and file without tripping id-integrity."""
     repo, artifacts = repo_artifacts
-    # bootstrap (claude, iter0): {0001, 0002}
-    # review 1 (codex, iter1): drops 0002 -> {0001}
-    # review 2 (claude, iter2): re-adds 0002 at its original file -> {0001, 0002}
+    # merge (claude+codex, iter0): {0001 x, 0002 y}
+    # review 1 (claude, iter1): drops 0002 -> {0001}
+    # review 2 (codex, iter2): re-adds 0002 at its original file -> {0001, 0002}
     claude = FakeAgentRunner(
         "claude_code",
         responses=[
-            _cands([("cand-0001", "src/v1/foo/x.py"), ("cand-0002", "src/v1/foo/y.py")]),
-            _cands([("cand-0001", "src/v1/foo/x.py"), ("cand-0002", "src/v1/foo/y.py")]),
+            _cands([("cand-0001", "src/v1/foo/x.py")]),  # bootstrap
+            _cands([("cand-0001", "src/v1/foo/x.py")]),  # review 1 drops 0002
         ],
     )
     codex = FakeAgentRunner(
         "codex",
         responses=[
-            _cands([("cand-0001", "src/v1/foo/x.py")]),  # drops 0002
+            _cands([("cand-0001", "src/v1/foo/y.py")]),  # bootstrap → merged 0002
+            _cands(
+                [("cand-0001", "src/v1/foo/x.py"), ("cand-0002", "src/v1/foo/y.py")]
+            ),  # review 2 re-adds 0002
         ],
     )
     _install_runners(monkeypatch, claude, codex)
@@ -441,7 +521,7 @@ def test_dropped_candidate_can_be_readded(repo_artifacts, monkeypatch):
     # The dropped candidate must have been offered back to iter2's review prompt
     # (bare id space, like prev_json).
     iter2_prompt = (
-        artifacts / "candidate_discovery" / "iter_2_claude_code" / "prompt.md"
+        artifacts / "candidate_discovery" / "iter_2_codex" / "prompt.md"
     ).read_text(encoding="utf-8")
     assert "Previously removed candidates" in iter2_prompt
     assert "cand-0002" in iter2_prompt.split("Previously removed candidates", 1)[1]
@@ -454,14 +534,17 @@ def test_readd_with_changed_file_raises(repo_artifacts, monkeypatch):
     claude = FakeAgentRunner(
         "claude_code",
         responses=[
-            _cands([("cand-0001", "src/v1/foo/x.py"), ("cand-0002", "src/v1/foo/y.py")]),
-            _cands([("cand-0001", "src/v1/foo/x.py"), ("cand-0002", "src/v1/foo/z.py")]),
+            _cands([("cand-0001", "src/v1/foo/x.py")]),  # bootstrap
+            _cands([("cand-0001", "src/v1/foo/x.py")]),  # review 1 drops 0002
         ],
     )
     codex = FakeAgentRunner(
         "codex",
         responses=[
-            _cands([("cand-0001", "src/v1/foo/x.py")]),  # drops 0002
+            _cands([("cand-0001", "src/v1/foo/y.py")]),  # bootstrap → merged 0002 (y)
+            _cands(
+                [("cand-0001", "src/v1/foo/x.py"), ("cand-0002", "src/v1/foo/z.py")]
+            ),  # review 2 re-adds 0002 at a DIFFERENT file
         ],
     )
     _install_runners(monkeypatch, claude, codex)
@@ -497,19 +580,18 @@ def test_within_iter_duplicate_ids_raises(repo_artifacts, monkeypatch):
 
 
 def test_carry_over_id_must_retain_file(repo_artifacts, monkeypatch):
-    """§6.7 sub-check 2: an id reused from the previous raw iter MUST keep its file."""
+    """§6.7 sub-check 2: an id carried from the merged seed MUST keep its file."""
     repo, artifacts = repo_artifacts
     claude = FakeAgentRunner(
         "claude_code",
         responses=[
-            _cands([("cand-0001", "src/v1/foo/x.py")]),
+            _cands([("cand-0001", "src/v1/foo/x.py")]),  # bootstrap → merged 0001 (x)
+            _cands([("cand-0001", "src/v1/foo/y.py")]),  # review 1: same id, new file
         ],
     )
     codex = FakeAgentRunner(
         "codex",
-        responses=[
-            _cands([("cand-0001", "src/v1/foo/y.py")]),  # same id, different file → raise
-        ],
+        responses=[_cands([])],  # bootstrap empty
     )
     _install_runners(monkeypatch, claude, codex)
 
@@ -568,14 +650,15 @@ def test_final_artifact_copy_byte_identical(repo_artifacts, monkeypatch):
     claude = FakeAgentRunner(
         "claude_code",
         responses=[
-            _cands([("cand-0001", "src/v1/foo/x.py")]),
+            _cands([("cand-0001", "src/v1/foo/x.py")]),  # bootstrap
+            _cands(
+                [("cand-0001", "src/v1/foo/x.py"), ("cand-0002", "src/v1/foo/y.py")]
+            ),  # review 1 (claude leads)
         ],
     )
     codex = FakeAgentRunner(
         "codex",
-        responses=[
-            _cands([("cand-0001", "src/v1/foo/x.py"), ("cand-0002", "src/v1/foo/y.py")]),
-        ],
+        responses=[_cands([])],  # bootstrap empty
     )
     _install_runners(monkeypatch, claude, codex)
 
@@ -584,9 +667,32 @@ def test_final_artifact_copy_byte_identical(repo_artifacts, monkeypatch):
 
     final = (artifacts / "candidates.json").read_bytes()
     iter_final = (
-        artifacts / "candidate_discovery" / "iter_1_codex" / "candidates.json"
+        artifacts / "candidate_discovery" / "iter_1_claude_code" / "candidates.json"
     ).read_bytes()
     assert final == iter_final
+
+
+def test_num_reviews_zero_copies_merge_seed(repo_artifacts, monkeypatch):
+    """With no review iterations the merged seed is the final artifact — the
+    copy must come from `iter_0_merge`, not a bootstrap dir."""
+    repo, artifacts = repo_artifacts
+    claude = FakeAgentRunner(
+        "claude_code",
+        responses=[_cands([("cand-0001", "src/v1/foo/x.py")])],
+    )
+    codex = FakeAgentRunner(
+        "codex",
+        responses=[_cands([("cand-0001", "src/v1/foo/y.py")])],
+    )
+    _install_runners(monkeypatch, claude, codex)
+
+    discover(_make_input(), config=_make_config(repo, artifacts, num_reviews=0))
+
+    final = (artifacts / "candidates.json").read_bytes()
+    merge_seed = (
+        artifacts / "candidate_discovery" / "iter_0_merge" / "candidates.json"
+    ).read_bytes()
+    assert final == merge_seed
 
 
 def test_total_duration_starts_at_run_entry(repo_artifacts, monkeypatch):
@@ -595,9 +701,14 @@ def test_total_duration_starts_at_run_entry(repo_artifacts, monkeypatch):
         "claude_code",
         responses=[_cands([("cand-0001", "src/v1/foo/x.py")])],
     )
-    codex = FakeAgentRunner("codex", responses=[])
+    codex = FakeAgentRunner("codex", responses=[_cands([])])
 
-    ticks = iter([0.0, 5.0, 6.0, 7.0, 8.0, 9.0])
+    # monotonic() call sequence for num_reviews=0:
+    #   run_start, make_claude, make_codex,
+    #   claude iter_start, claude iter_end,
+    #   codex iter_start, codex iter_end,
+    #   final duration.
+    ticks = iter([0.0, 5.0, 6.0, 7.0, 8.0, 8.5, 8.9, 9.0])
 
     def fake_monotonic() -> float:
         return next(ticks)
@@ -626,6 +737,7 @@ def test_total_duration_starts_at_run_entry(repo_artifacts, monkeypatch):
 
     result = discover(_make_input(), config=_make_config(repo, artifacts, num_reviews=0))
 
+    # iterations[0] is the claude bootstrap: 8.0 - 7.0.
     assert result.iterations[0].duration_s == 1.0
     assert result.total_duration_s == 9.0
 
@@ -653,7 +765,7 @@ def test_repo_context_persisted_when_supplied(repo_artifacts, monkeypatch):
         "claude_code",
         responses=[_cands([("cand-0001", "src/v1/foo/x.py")])],
     )
-    codex = FakeAgentRunner("codex", responses=[])
+    codex = FakeAgentRunner("codex", responses=[_cands([])])
     _install_runners(monkeypatch, claude, codex)
 
     ctx = "## Tests\n\n`pytest -q`\n"
@@ -670,7 +782,7 @@ def test_repo_context_not_persisted_when_none(repo_artifacts, monkeypatch):
         "claude_code",
         responses=[_cands([("cand-0001", "src/v1/foo/x.py")])],
     )
-    codex = FakeAgentRunner("codex", responses=[])
+    codex = FakeAgentRunner("codex", responses=[_cands([])])
     _install_runners(monkeypatch, claude, codex)
 
     discover(_make_input(), config=_make_config_with_context(repo, artifacts, None, num_reviews=0))
@@ -680,22 +792,27 @@ def test_repo_context_not_persisted_when_none(repo_artifacts, monkeypatch):
 
 
 def test_repo_context_reaches_every_iteration_prompt(repo_artifacts, monkeypatch):
-    """The repo-context markdown must thread through bootstrap *and* every
-    review iteration. The orchestrator persists the attempt prompt to
+    """The repo-context markdown must thread through both bootstrap calls *and*
+    every review iteration. The orchestrator persists the attempt prompt to
     `<iter_dir>/prompt.md`; check that every such file contains the marker.
     """
     repo, artifacts = repo_artifacts
     claude = FakeAgentRunner(
         "claude_code",
         responses=[
-            _cands([("cand-0001", "src/v1/foo/x.py")]),
-            _cands([("cand-0001", "src/v1/foo/x.py"), ("cand-0003", "src/v1/foo/z.py")]),
+            _cands([("cand-0001", "src/v1/foo/x.py")]),  # bootstrap
+            _cands(
+                [("cand-0001", "src/v1/foo/x.py"), ("cand-0003", "src/v1/foo/z.py")]
+            ),  # review 1
         ],
     )
     codex = FakeAgentRunner(
         "codex",
         responses=[
-            _cands([("cand-0001", "src/v1/foo/x.py"), ("cand-0002", "src/v1/foo/y.py")]),
+            _cands([]),  # bootstrap empty
+            _cands(
+                [("cand-0001", "src/v1/foo/x.py"), ("cand-0003", "src/v1/foo/z.py")]
+            ),  # review 2
         ],
     )
     _install_runners(monkeypatch, claude, codex)
@@ -706,7 +823,8 @@ def test_repo_context_reaches_every_iteration_prompt(repo_artifacts, monkeypatch
     prompt_files = sorted(
         (artifacts / "candidate_discovery").glob("iter_*/prompt.md")
     )
-    assert len(prompt_files) == 3  # bootstrap + 2 reviews
+    # two bootstrap prompts + two review prompts (the merge dir has no prompt).
+    assert len(prompt_files) == 4
     for pf in prompt_files:
         body = pf.read_text(encoding="utf-8")
         assert ctx in body, f"missing verbatim repo context in {pf}"

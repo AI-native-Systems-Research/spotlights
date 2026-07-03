@@ -83,3 +83,14 @@ def test_discover_against_real_clis(tmp_path: Path) -> None:
     result = discover(inp, config=cfg)
     assert isinstance(result, DiscoveryResult)
     assert (artifacts / "candidates.json").exists()
+
+    # Iteration 0 is now a bootstrap pair (Claude Code + Codex) followed by a
+    # deterministic merge; both bootstrap dirs and the merge dir must appear.
+    cd = artifacts / "candidate_discovery"
+    assert (cd / "iter_0_bootstrap_claude_code").is_dir()
+    assert (cd / "iter_0_bootstrap_codex").is_dir()
+    assert (cd / "iter_0_merge" / "merge.json").exists()
+
+    # Two bootstrap telemetry rows (both n=0) + one review row.
+    assert [t.n for t in result.iterations] == [0, 0, 1]
+    assert result.bootstrap_merge is not None

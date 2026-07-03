@@ -76,11 +76,28 @@ class IterationTelemetry(BaseModel):
     modified: list[str] = Field(default_factory=list)
 
 
+class BootstrapMerge(BaseModel):
+    """Summary of the deterministic merge of the two bootstrap candidate lists.
+
+    Emitted once per run (there are two bootstrap agent calls, Claude Code and
+    Codex, whose validated survivor lists are renumbered into one non-colliding
+    id space and deduplicated by file + overlapping line range). Additive and
+    back-compatible: `DiscoveryResult.bootstrap_merge` is `None` for any caller
+    or fixture that predates the merge step.
+    """
+
+    claude_code_n: int
+    codex_n: int
+    deduped_n: int
+    merged_n: int
+
+
 class DiscoveryResult(BaseModel):
     candidates: Candidates
     iterations: list[IterationTelemetry]
     total_duration_s: float
     total_cost_usd: float | None = None
+    bootstrap_merge: BootstrapMerge | None = None
 
 
 def resolve_target_module(input: CandidateDiscoveryInput) -> Module:
@@ -160,6 +177,7 @@ def discover_candidates(
 
 
 __all__ = [
+    "BootstrapMerge",
     "DiscoveryConfig",
     "DiscoveryResult",
     "IterationTelemetry",

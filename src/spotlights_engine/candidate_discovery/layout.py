@@ -22,8 +22,17 @@ def repo_context_path(artifacts_dir: Path) -> Path:
 
 
 def iter_dir(artifacts_dir: Path, n: int, agent: str) -> Path:
-    tag = "bootstrap" if n == 0 else agent
+    # Iteration 0 is the bootstrap pair: one dir per agent
+    # (`iter_0_bootstrap_claude_code`, `iter_0_bootstrap_codex`). Both keep the
+    # `bootstrap` marker so tooling matching the `iter_0_bootstrap*` prefix still
+    # finds the seed dirs. Review dirs stay `iter_N_<agent>`.
+    tag = f"bootstrap_{agent}" if n == 0 else agent
     return candidate_discovery_root(artifacts_dir) / f"iter_{n}_{tag}"
+
+
+def merge_dir(artifacts_dir: Path) -> Path:
+    """Dir for the deterministic bootstrap merge (renumber + dedup) output."""
+    return candidate_discovery_root(artifacts_dir) / "iter_0_merge"
 
 
 def iterations_jsonl(artifacts_dir: Path) -> Path:
@@ -39,6 +48,7 @@ __all__ = [
     "final_artifact",
     "iter_dir",
     "iterations_jsonl",
+    "merge_dir",
     "repo_context_path",
     "schema_path",
 ]
