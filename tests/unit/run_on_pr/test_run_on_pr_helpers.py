@@ -187,18 +187,23 @@ def test_extract_keeps_papers_drops_repo_and_ci():
     texts = [
         "See [Preble](https://arxiv.org/abs/2504.19874v2) and repo "
         "https://github.com/vllm-project/vllm , CI https://buildkite.com/x , "
-        "DOI 10.1145/3600006.3613145 and https://openreview.net/forum?id=abc"
+        "DOI 10.1145/3600006.3613145 and [OpenReview](https://openreview.net/forum?id=abc)"
     ]
-    papers = extract_pr_papers.extract(texts)
+    # resolve_arxiv_titles=False keeps the test offline/deterministic.
+    papers = extract_pr_papers.extract(texts, resolve_arxiv_titles=False)
     norms = {p["normalized"] for p in papers}
     assert "arxiv:2504.19874" in norms
     assert "https://doi.org/10.1145/3600006.3613145" in norms
     assert "https://openreview.net/forum?id=abc" in norms
     # No github / buildkite.
     assert not any("github.com" in p["raw_url"] or "buildkite" in p["raw_url"] for p in papers)
-    # Markdown link text captured as a title for the arxiv paper.
+    # arxiv link text is NOT used as a title (unreliable; API is the only source,
+    # skipped here) — so with resolution off the arxiv title is absent, never junk.
     arxiv = next(p for p in papers if p["normalized"] == "arxiv:2504.19874")
-    assert arxiv.get("title") == "Preble"
+    assert "title" not in arxiv
+    # Non-arxiv hosts still capture markdown link text as the title fallback.
+    openreview = next(p for p in papers if "openreview.net" in p["raw_url"])
+    assert openreview.get("title") == "OpenReview"
 
 
 def test_extract_empty_when_no_papers():

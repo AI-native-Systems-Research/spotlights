@@ -16,14 +16,17 @@ link text is captured as an optional human `title` (the matcher uses it as a
 fallback key).
 
 For **arxiv** refs the link text is an unreliable title source — it is often a
-citation label (`[Zandieh et al., arXiv:2504.19874](...)`) or entirely absent
-(a bare `https://arxiv.org/pdf/<id>` link has no link text at all). Since the
-engine surfaces the finding under the paper's *real* name, a citation-label
-`--paper-title` never matches and a missing one wastes the fallback. So for
-arxiv refs we resolve the **canonical title from the arxiv API** (keyed on the
-normalized `arxiv:<id>`), overriding any scraped link text. This is best-effort:
-on any network/parse failure we degrade gracefully to the link-text behavior
-(pass `--offline` to skip the fetch entirely).
+citation label (`[Zandieh et al., arXiv:2504.19874](...)`), a bare word like
+`[paper](...)`, or entirely absent (a bare `https://arxiv.org/pdf/<id>` link has
+no link text at all). Since the engine surfaces the finding under the paper's
+*real* name, such link text never matches as a `--paper-title` fallback — worse,
+a generic word could spuriously match an unrelated finding. So for arxiv refs we
+resolve the **canonical title from the arxiv API** (keyed on the normalized
+`arxiv:<id>`) and use *only* that, never the scraped link text. The API fetch is
+best-effort with a short retry; on persistent network/parse failure we leave the
+title **absent** rather than degrade to junk link text — the normalized `arxiv:`
+URL key still matches, and an absent title simply disables the (unhelpful)
+fallback. Pass `--offline` to skip the fetch entirely (title then absent).
 
 Emits `cited_papers.json`:
     {
@@ -129,26 +132,33 @@ _ARXIV_API = "http://export.arxiv.org/api/query?id_list={id}"
 _ARXIV_TITLE_RE = re.compile(r"<entry>.*?<title>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 
 
-def _fetch_arxiv_title(arxiv_id: str, *, timeout: float = 10.0) -> str | None:
+def _fetch_arxiv_title(
+    arxiv_id: str, *, timeout: float = 10.0, attempts: int = 3
+) -> str | None:
     """Best-effort canonical title for an arxiv id via the public API.
 
     Returns the whitespace-collapsed <title> of the matching entry, or None on
-    any network / HTTP / parse failure (caller degrades to link-text behavior).
+    persistent network / HTTP / parse failure. The transient failure modes
+    (timeout, reset, 5xx) are retried up to `attempts` times before giving up;
+    on a final None the caller leaves the title absent rather than falling back
+    to unreliable link text.
     """
-    try:
-        req = urllib.request.Request(
-            _ARXIV_API.format(id=arxiv_id),
-            headers={"User-Agent": "spotlights-run-on-pr/1.0"},
-        )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (fixed host)
-            body = resp.read().decode("utf-8", "replace")
-    except (urllib.error.URLError, OSError, ValueError):
-        return None
-    m = _ARXIV_TITLE_RE.search(body)
-    if not m:
-        return None
-    title = re.sub(r"\s+", " ", m.group(1)).strip()
-    return title or None
+    req = urllib.request.Request(
+        _ARXIV_API.format(id=arxiv_id),
+        headers={"User-Agent": "spotlights-run-on-pr/1.0"},
+    )
+    for _ in range(max(1, attempts)):
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 (fixed host)
+                body = resp.read().decode("utf-8", "replace")
+        except (urllib.error.URLError, OSError, ValueError):
+            continue
+        m = _ARXIV_TITLE_RE.search(body)
+        if not m:
+            return None
+        title = re.sub(r"\s+", " ", m.group(1)).strip()
+        return title or None
+    return None
 
 
 def extract(texts: list[str], *, resolve_arxiv_titles: bool = True) -> list[dict]:
@@ -192,13 +202,19 @@ def extract(texts: list[str], *, resolve_arxiv_titles: bool = True) -> list[dict
             continue
         seen_norm.add(normalized)
         entry: dict = {"raw_url": url, "normalized": normalized, "kind": kind}
-        if url in titles:
+        is_arxiv = kind == "arxiv" and normalized.startswith("arxiv:")
+        if is_arxiv:
+            # arxiv link text is unreliable (a citation label, a bare "paper", or
+            # absent). Use ONLY the canonical API title; on failure leave the
+            # title absent rather than fall back to junk link text — the arxiv:
+            # URL key still matches, and a bad title could spuriously match an
+            # unrelated finding.
+            if resolve_arxiv_titles:
+                arxiv_title = _fetch_arxiv_title(normalized.removeprefix("arxiv:"))
+                if arxiv_title:
+                    entry["title"] = arxiv_title
+        elif url in titles:
             entry["title"] = titles[url]
-        # For arxiv refs, prefer the canonical API title over scraped link text.
-        if resolve_arxiv_titles and kind == "arxiv" and normalized.startswith("arxiv:"):
-            arxiv_title = _fetch_arxiv_title(normalized.removeprefix("arxiv:"))
-            if arxiv_title:
-                entry["title"] = arxiv_title
         papers.append(entry)
     return papers
 

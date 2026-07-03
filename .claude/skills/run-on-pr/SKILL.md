@@ -134,8 +134,10 @@ Spawn `pr-diff-scope` with `{checkout_path, base_commit, head_commit, pr_url,
 pr_key, out_dir:"$RUN", progress_log, addition_tolerance:3}`. It writes
 `$RUN/ground_truth.json` (base-side `changed_ranges`, `changed_source_files`,
 `subfolders`, `new_files`) **and** `$RUN/cited_papers.json` (conservative
-arxiv/DOI/paper-host URLs — with optional `title` from the markdown link text —
-from the PR prose; the only place PR prose is read). The first cited paper is
+arxiv/DOI/paper-host URLs — with an optional `title`: the **canonical arxiv API
+title** for arxiv refs (never the unreliable link text — absent if the API fetch
+fails), or the markdown link text for non-arxiv hosts — from the PR prose; the
+only place PR prose is read). The first cited paper is
 passed to the engine in step 5 via `--paper-link` as a **post-hoc filter on the
 research block's output** (it isolates the matching finding after the research
 runs — it does not bias the search; see Critical rule 1), so the paper axis stays
