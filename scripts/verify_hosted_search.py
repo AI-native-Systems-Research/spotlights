@@ -12,13 +12,25 @@ This is a manual/ops probe, NOT a unit test: it needs the real proxy plus
 credentials and makes live network calls. Run it before trusting the Claude or
 Codex runners' web findings.
 
+Two layers of evidence back a WORKS verdict:
+  1. Invocation — the JSON event stream must show a hosted web-search tool call
+     actually completing (for codex, a `web_search` item with a non-empty
+     query the model chose), not merely the tool being offered/registered.
+  2. Grounding — the answer must cite the *live* latest version, fetched
+     independently from PyPI. A post-cutoff version can only appear if the
+     search returned fresh data, so this proves the tool returned usable
+     results rather than the model hallucinating. A proven invocation whose
+     answer omits the ground truth is reported SUSPECT (disable with
+     --no-ground-truth). Grounding currently applies to the codex probe.
+
 Usage:
     uv run --no-sync python scripts/verify_hosted_search.py
     uv run --no-sync python scripts/verify_hosted_search.py --only claude
     uv run --no-sync python scripts/verify_hosted_search.py --project uv
+    uv run --no-sync python scripts/verify_hosted_search.py --only codex --no-ground-truth
 
-Exit code is nonzero if either probed runner is INERT or ERROR, so this can
-gate a deployment check.
+Exit code is nonzero unless every probed runner is WORKS (i.e. SUSPECT, INERT,
+or ERROR all fail), so this can gate a deployment check.
 """
 
 from __future__ import annotations
@@ -29,6 +41,9 @@ import os
 import subprocess
 import sys
 import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -47,9 +62,8 @@ _PROMPT_TEMPLATE = (
 # Substrings that, in the raw JSON event stream / transcript, evidence an
 # actual hosted-tool invocation (not merely a plausible fresh-looking answer).
 _CLAUDE_TOOL_MARKERS = ("web_search", "server_tool_use", "\"type\":\"web_search")
-_CODEX_TOOL_MARKERS = ("web_search", "web.search", "\"search\"", "browser")
 
-Verdict = str  # "WORKS" | "INERT" | "ERROR"
+Verdict = str  # "WORKS" | "SUSPECT" | "INERT" | "ERROR"
 
 
 @dataclass
@@ -57,6 +71,55 @@ class ProbeResult:
     runner: str
     verdict: Verdict
     detail: str
+
+
+def pypi_latest_version(project: str, *, timeout: float = 15.0) -> str | None:
+    """Fetch the true latest version of a PyPI project, independent of any LLM.
+
+    Returns the ``info.version`` string (e.g. "0.11.26"), or None if the
+    project isn't on PyPI or the fetch fails. Used to *ground* a runner's
+    answer: a post-cutoff version can only appear if a live search actually
+    returned fresh data, so matching it is proof the tool works — not merely
+    that it was invoked.
+    """
+    url = f"https://pypi.org/pypi/{urllib.parse.quote(project)}/json"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            data = json.load(resp)
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, ValueError):
+        return None
+    version = data.get("info", {}).get("version")
+    return version if isinstance(version, str) and version.strip() else None
+
+
+def _codex_search_query(stdout: str) -> str | None:
+    """Return the query of a genuinely-invoked web_search, else None.
+
+    Codex emits one JSON event per line. A real hosted search surfaces as a
+    ``web_search`` item that reaches ``item.completed`` carrying a non-empty
+    ``query`` the model chose (e.g. "PyPI uv latest version"). Merely
+    registering/enabling the tool never produces such an item, so this is far
+    stronger evidence than substring-matching "search" in the raw transcript —
+    that string also appears in tool-schema/config events when the tool is
+    inert.
+    """
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            event = json.loads(line)
+        except (json.JSONDecodeError, ValueError):
+            continue
+        if not isinstance(event, dict) or event.get("type") != "item.completed":
+            continue
+        item = event.get("item")
+        if not isinstance(item, dict) or item.get("type") != "web_search":
+            continue
+        query = item.get("query")
+        if isinstance(query, str) and query.strip():
+            return query.strip()
+    return None
 
 
 def _prompt(project: str) -> str:
@@ -132,9 +195,22 @@ def probe_claude(project: str, *, claude_bin: str = "claude") -> ProbeResult:
     )
 
 
-def probe_codex(project: str, *, codex_bin: str = "codex", profile: str = "litellm") -> ProbeResult:
+def probe_codex(
+    project: str,
+    *,
+    codex_bin: str = "codex",
+    profile: str = "litellm",
+    expected_version: str | None = None,
+) -> ProbeResult:
     """Invoke `codex exec --search` (through the litellm profile) and inspect
-    its JSON event stream for a web-search / tool event, else the sentinel."""
+    its JSON event stream for a web-search / tool event, else the sentinel.
+
+    When ``expected_version`` (independent PyPI ground truth) is supplied, WORKS
+    additionally requires that exact version to appear in the model's answer —
+    proof the search returned *live data the model used*, not just that the tool
+    was invoked. A proven invocation whose answer omits the ground truth is
+    reported as SUSPECT (the gateway may have accepted the call but returned
+    nothing, leaving the model to hallucinate)."""
     prompt = _prompt(project)
     with tempfile.TemporaryDirectory(prefix="verify-hosted-search-") as tmp:
         last_message = Path(tmp) / "codex_last.md"
@@ -180,11 +256,31 @@ def probe_codex(project: str, *, codex_bin: str = "codex", profile: str = "litel
             "codex", "ERROR", f"codex exited {completed.returncode} with no output"
         )
 
-    tool_used = any(m in low for m in _CODEX_TOOL_MARKERS)
+    # Parse the JSON event stream for a completed web_search carrying a
+    # non-empty query — proof the tool actually ran, not merely that it was
+    # offered. The sentinel is checked against the whole transcript so a
+    # "cannot search" reply in the final message is never masked.
+    search_query = _codex_search_query(completed.stdout)
     sentinel_seen = SENTINEL in transcript
 
-    if tool_used and not sentinel_seen:
-        return ProbeResult("codex", "WORKS", "web-search tool event present in stream")
+    if search_query is not None and not sentinel_seen:
+        if expected_version is None:
+            return ProbeResult(
+                "codex", "WORKS", f"web_search completed with query {search_query!r}"
+            )
+        if expected_version in (final or transcript):
+            return ProbeResult(
+                "codex",
+                "WORKS",
+                f"web_search ran ({search_query!r}) and answer cites live "
+                f"version {expected_version}",
+            )
+        return ProbeResult(
+            "codex",
+            "SUSPECT",
+            f"web_search ran ({search_query!r}) but answer omits ground-truth "
+            f"version {expected_version} — search may have returned nothing",
+        )
     if sentinel_seen:
         return ProbeResult(
             "codex", "INERT", f"model emitted {SENTINEL} — could not run a web search"
@@ -202,7 +298,7 @@ def _print_verdict_table(results: list[ProbeResult]) -> None:
     width = max((len(r.runner) for r in results), default=6)
     print("\n=== hosted web-search verdicts ===")
     for r in results:
-        print(f"  {r.runner.ljust(width)}  {r.verdict:<6}  {r.detail}")
+        print(f"  {r.runner.ljust(width)}  {r.verdict:<7}  {r.detail}")
     print()
 
 
@@ -224,6 +320,12 @@ def _build_argparser() -> argparse.ArgumentParser:
         default="litellm",
         help="Codex profile to run through (default: litellm).",
     )
+    p.add_argument(
+        "--no-ground-truth",
+        action="store_true",
+        help="Skip the PyPI ground-truth grounding check (accept a proven "
+        "tool invocation as WORKS even if the answer omits the live version).",
+    )
     return p
 
 
@@ -232,7 +334,20 @@ def main(argv: list[str] | None = None) -> int:
 
     base_url = os.environ.get("ANTHROPIC_BASE_URL", "(unset — vendor endpoint)")
     print(f"ANTHROPIC_BASE_URL = {base_url}")
-    print(f"probing project    = {args.project!r}\n")
+    print(f"probing project    = {args.project!r}")
+
+    expected_version: str | None = None
+    if not args.no_ground_truth:
+        expected_version = pypi_latest_version(args.project)
+        if expected_version is None:
+            print(
+                f"ground truth       = (PyPI lookup failed for "
+                f"{args.project!r}; grounding disabled)\n"
+            )
+        else:
+            print(f"ground truth       = {args.project} {expected_version} (PyPI)\n")
+    else:
+        print()
 
     results: list[ProbeResult] = []
     if args.only in (None, "claude"):
@@ -240,7 +355,13 @@ def main(argv: list[str] | None = None) -> int:
         results.append(probe_claude(args.project))
     if args.only in (None, "codex"):
         print("[codex] probing --search …")
-        results.append(probe_codex(args.project, profile=args.codex_profile))
+        results.append(
+            probe_codex(
+                args.project,
+                profile=args.codex_profile,
+                expected_version=expected_version,
+            )
+        )
 
     _print_verdict_table(results)
 
