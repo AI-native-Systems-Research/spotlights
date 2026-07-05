@@ -19,7 +19,6 @@ from pathlib import Path
 from spotlights_engine.agent_proposals.claude_exec import CandidateAgentRunResult
 from spotlights_engine.agent_proposals.errors import AgentProposalsSetupError
 
-
 _DROP_EXACT = frozenset(
     {
         "OPENAI_BASE_URL",
@@ -61,6 +60,7 @@ def run_candidate_codex(
     last_message_path: Path,
     schema_path: Path,
     codex_model: str | None = None,
+    codex_profile: str | None = None,
     codex_reasoning_effort: str | None = None,
 ) -> CandidateAgentRunResult:
     """Run one Codex session for a single candidate.
@@ -84,8 +84,10 @@ def run_candidate_codex(
     # "codex" → FileNotFoundError because subprocess on Windows doesn't
     # follow PATHEXT for unqualified argv[0].
     codex_resolved = shutil.which("codex") or "codex"
-    argv: list[str] = [
-        codex_resolved,
+    argv: list[str] = [codex_resolved]
+    if codex_profile is not None:
+        argv += ["--profile", codex_profile]
+    argv += [
         "exec",
         "-",
         "--json",
@@ -163,7 +165,7 @@ def run_candidate_codex(
             stdout=completed.stdout or b"",
             stderr=completed.stderr or b"",
         )
-    if not isinstance(parsed, (dict, list)):
+    if not isinstance(parsed, dict | list):
         return CandidateAgentRunResult(
             candidate_id=candidate_id,
             duration_s=duration,

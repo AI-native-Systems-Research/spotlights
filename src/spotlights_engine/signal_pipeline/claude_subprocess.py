@@ -25,11 +25,12 @@ and result parsing.
 from __future__ import annotations
 
 import json
-import os
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, Literal
+from typing import Literal
 
+from spotlights_engine.claude_env import build_claude_env, claude_model_args
 from spotlights_engine.signal_pipeline._subprocess_util import (
     ClaudeResolutionError,
     StreamingTimeout,
@@ -39,27 +40,8 @@ from spotlights_engine.signal_pipeline._subprocess_util import (
 )
 
 
-_DROP_EXACT = frozenset(
-    {
-        "OPENAI_BASE_URL",
-        "OPENAI_API_BASE",
-        "ANTHROPIC_BASE_URL",
-        "ANTHROPIC_AUTH_TOKEN",
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "ALL_PROXY",
-        "VIRTUAL_ENV",
-    }
-)
-_DROP_PREFIX = ("VSCODE_", "OPTQUEST_", "SPOTLIGHTS_")
-
-
 def _clean_env() -> dict[str, str]:
-    env = os.environ.copy()
-    for key in list(env):
-        if key in _DROP_EXACT or key.startswith(_DROP_PREFIX):
-            env.pop(key)
-    return env
+    return build_claude_env()
 
 
 class ClaudeNotAvailableError(RuntimeError):
@@ -148,6 +130,8 @@ def run_claude(
     ]
     if model is not None:
         argv += ["--model", model]
+    else:
+        argv += claude_model_args()
     if json_schema is not None:
         argv += ["--json-schema", json_schema]
     if allowed_tools is not None:
@@ -206,7 +190,7 @@ def run_claude(
         )
 
     cost_usd = result_event.get("total_cost_usd")
-    if not isinstance(cost_usd, (int, float)):
+    if not isinstance(cost_usd, int | float):
         cost_usd = None
     num_turns = result_event.get("num_turns")
     if not isinstance(num_turns, int):
@@ -221,7 +205,7 @@ def run_claude(
     )
 
     structured = result_event.get("structured_output")
-    if isinstance(structured, (dict, list)):
+    if isinstance(structured, dict | list):
         return ClaudeRunResult(
             structured_output=structured,
             duration_s=result.duration_s,
@@ -244,7 +228,7 @@ def run_claude(
                 cost_usd=cost_usd,
                 num_turns=num_turns,
             )
-        if isinstance(parsed, (dict, list)):
+        if isinstance(parsed, dict | list):
             return ClaudeRunResult(
                 structured_output=parsed,
                 duration_s=result.duration_s,

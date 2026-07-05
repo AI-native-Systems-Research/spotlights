@@ -209,9 +209,32 @@ that is intentionally long enough for file inspection, web/literature
 retrieval, and structured-output repair. If you set an explicit timeout for
 live research, keep it long enough for the same full turn loop.
 
-Swap the host and model IDs for your LiteLLM deployment. After editing config
-or environment, re-run `claude --version` / `codex --version` and the
-Antigravity SDK smoke test from a fresh shell.
+The public CLI also exposes provider-neutral runtime overrides, so callers do
+not need to hardcode organization-specific hosts in shared code:
+
+```bash
+export GATEWAY_API_KEY="<your-gateway-key>"
+
+spotlights-engine \
+  --repo /path/to/target-repo \
+  --codex-profile <codex-profile> \
+  --claude-model <claude-model-id> \
+  --claude-base-url https://your-claude-compatible-host.example.com \
+  --claude-auth-token-env GATEWAY_API_KEY \
+  --claude-unset-env ANTHROPIC_API_KEY \
+  --claude-disable-experimental-betas \
+  --antigravity-base-url https://your-gemini-compatible-host.example.com \
+  --antigravity-model <gemini-model-id> \
+  --antigravity-api-key-env GATEWAY_API_KEY
+```
+
+`--claude-auth-token-env` copies the named environment variable into
+`ANTHROPIC_AUTH_TOKEN` only for child Claude processes. If your Claude Code
+uses the official Anthropic API key directly, omit the Claude proxy flags.
+
+Swap the host and model IDs for your deployment. After editing config or
+environment, re-run `claude --version` / `codex --version` and the Antigravity
+SDK smoke test from a fresh shell.
 
 ### Verify CLI and SDK dependencies from a fresh shell
 
@@ -446,6 +469,13 @@ All flags are optional once `--repo` and the agent CLIs are available.
 | `--max-parallel-pairs` | `5` | Within-step parallelism for step 4. |
 | `--max-parallel-candidates` | `5` | Within-step parallelism for step 5. |
 | `--max-findings-per-module` | `30` | Cap on findings produced by step 3 per module. |
+| `--codex-profile` | Codex default | Optional Codex config profile for Codex-backed steps. |
+| `--codex-model` | profile/default | Optional Codex model override. |
+| `--claude-model` | Claude default | Optional Claude model passed to Claude Code subprocesses. |
+| `--claude-base-url` | Claude default | Optional Claude-compatible API base URL for child Claude processes. |
+| `--claude-auth-token-env` | (none) | Copies the named env var into `ANTHROPIC_AUTH_TOKEN` for child Claude processes. |
+| `--claude-unset-env` | `[]` | Removes named env vars before launching Claude; repeatable and accepts comma-separated names. |
+| `--claude-disable-experimental-betas` | off | Sets `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` for child Claude processes. |
 | `--antigravity-base-url` | native Gemini default | Optional Gemini-compatible endpoint for the Antigravity SDK runner. |
 | `--antigravity-model` | SDK/default | Optional model ID for the Antigravity SDK runner. |
 | `--antigravity-api-key-env` | `GEMINI_API_KEY`/SDK default | Env var containing the Gemini-compatible key. |

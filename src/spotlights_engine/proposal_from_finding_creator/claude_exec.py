@@ -8,38 +8,20 @@ contract (iter dirs, `_SchemaParseError`, `DiscoveryConfig`).
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from spotlights_engine.claude_env import build_claude_env, claude_model_args
 from spotlights_engine.proposal_from_finding_creator.errors import (
     ProposalFromFindingSetupError,
 )
 
 
-_DROP_EXACT = frozenset(
-    {
-        "OPENAI_BASE_URL",
-        "OPENAI_API_BASE",
-        "ANTHROPIC_BASE_URL",
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "ALL_PROXY",
-        "VIRTUAL_ENV",
-    }
-)
-_DROP_PREFIX = ("VSCODE_", "OPTQUEST_", "SPOTLIGHTS_")
-
-
 def _clean_env() -> dict[str, str]:
-    env = os.environ.copy()
-    for key in list(env):
-        if key in _DROP_EXACT or key.startswith(_DROP_PREFIX):
-            env.pop(key)
-    return env
+    return build_claude_env()
 
 
 @dataclass
@@ -96,6 +78,7 @@ def run_pair(
         "plan",
         "--max-turns",
         str(max_turns),
+        *claude_model_args(),
     ]
     env = _clean_env()
     start = time.monotonic()
