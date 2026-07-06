@@ -10,6 +10,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from spotlights_engine.costing.usage import AgentUsage, claude_usage_from_payload
 from spotlights_engine.module_deep_research.agent_exec import (
     AgentExecResult,
     resolve_cli_executable,
@@ -85,29 +86,54 @@ class ClaudeExecClient:
             timeout=self.options.timeout_seconds,
             check=False,
         )
+        # `--output-format json` puts text and usage on the same payload;
+        # parse it once so usage is captured before the stream is discarded.
+        payload = _parse_payload(completed.stdout)
         result = AgentExecResult(
             command=cmd,
             returncode=completed.returncode,
             stdout=completed.stdout,
             stderr=completed.stderr,
-            final_message=_final_message(completed.stdout),
+            final_message=_final_message(completed.stdout, payload=payload),
+            usage=_usage(payload, fallback_model=self.options.model),
         )
         if check:
             result.raise_for_status()
         return result
 
 
-def _final_message(stdout: str) -> str | None:
+def _parse_payload(stdout: str) -> dict | None:
     text = stdout.strip()
     if not text:
         return None
     try:
         payload = json.loads(text)
     except json.JSONDecodeError:
-        return text
+        return None
+    return payload if isinstance(payload, dict) else None
 
-    if not isinstance(payload, dict):
-        return text
+
+def _usage(payload: dict | None, *, fallback_model: str | None) -> AgentUsage | None:
+    if payload is None:
+        return None
+    usage = claude_usage_from_payload(payload)
+    if usage is not None and usage.model is None and fallback_model:
+        usage = usage.model_copy(update={"model": fallback_model})
+    return usage
+
+
+def _final_message(stdout: str, payload: dict | None = None) -> str | None:
+    text = stdout.strip()
+    if not text:
+        return None
+    if payload is None:
+        try:
+            parsed = json.loads(text)
+        except json.JSONDecodeError:
+            return text
+        if not isinstance(parsed, dict):
+            return text
+        payload = parsed
 
     structured = payload.get("structured_output")
     if isinstance(structured, (dict, list)):

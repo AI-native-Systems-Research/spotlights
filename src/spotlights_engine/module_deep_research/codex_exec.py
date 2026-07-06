@@ -13,6 +13,7 @@ from typing import IO
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from spotlights_engine.costing.usage import codex_usage_from_stream
 from spotlights_engine.module_deep_research.agent_exec import (
     AgentExecResult,
     resolve_cli_executable,
@@ -175,8 +176,11 @@ class CodexExecClient:
             stdout="".join(stdout_chunks),
             stderr="".join(stderr_chunks),
             final_message=final_message,
+            usage=codex_usage_from_stream("".join(stdout_chunks)),
             output_last_message=last_path,
         )
+        if result.usage is not None and result.usage.model is None and self.options.model:
+            result.usage = result.usage.model_copy(update={"model": self.options.model})
         if check:
             result.raise_for_status()
         return result

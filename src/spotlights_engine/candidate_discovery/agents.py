@@ -21,6 +21,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from spotlights_engine.candidate_discovery.errors import DiscoverySetupError
+from spotlights_engine.costing.usage import (
+    claude_usage_from_payload,
+    codex_usage_from_stream,
+)
 
 if TYPE_CHECKING:  # pragma: no cover
     from spotlights_engine.candidate_discovery.api import DiscoveryConfig
@@ -63,9 +67,17 @@ _RETRY_SEPARATOR = b"\n--- retry separator ---\n"
 class AgentInvocation:
     session_id: str | None
     duration_s: float
+    # CLI-reported cost — audit only, never used for billing (see costing).
     cost_usd: float | None
     input_tokens: int | None
     output_tokens: int | None
+    cache_read_tokens: int | None = None
+    cache_create_tokens: int | None = None
+    # Resolved model id from the CLI output (falls back to the configured
+    # model for codex); None means unresolved.
+    model: str | None = None
+    # Model-reported API duration when available (Claude `duration_api_ms`).
+    api_time_s: float | None = None
 
 
 class AgentRunner(ABC):
@@ -198,14 +210,18 @@ class ClaudeRunner(AgentRunner):
         message_text = self._final_message_text(result_event)
         last_message_path.write_text(message_text, encoding="utf-8")
 
-        usage = result_event.get("usage") or {}
+        usage = claude_usage_from_payload(result_event)
         reported_duration = _duration_seconds_from_event(result_event)
         return AgentInvocation(
             session_id=result_event.get("session_id"),
             duration_s=reported_duration if reported_duration is not None else duration,
             cost_usd=_as_float(result_event.get("total_cost_usd")),
-            input_tokens=_as_int(usage.get("input_tokens")),
-            output_tokens=_as_int(usage.get("output_tokens")),
+            input_tokens=usage.input if usage else None,
+            output_tokens=usage.output if usage else None,
+            cache_read_tokens=usage.cache_read if usage else None,
+            cache_create_tokens=usage.cache_create if usage else None,
+            model=usage.model if usage else None,
+            api_time_s=usage.api_time_s if usage else None,
         )
 
     @staticmethod
@@ -296,9 +312,6 @@ class CodexRunner(AgentRunner):
     ) -> AgentInvocation:
         duration = time.monotonic() - start
         session_id: str | None = None
-        cost_usd: float | None = None
-        input_tokens: int | None = None
-        output_tokens: int | None = None
 
         for line in stdout.splitlines():
             line = line.strip()
@@ -314,21 +327,21 @@ class CodexRunner(AgentRunner):
             if reported_duration is not None:
                 duration = reported_duration
             session_id = obj.get("session_id") or session_id
-            usage = obj.get("usage") if isinstance(obj.get("usage"), dict) else None
-            if usage is not None:
-                if input_tokens is None:
-                    input_tokens = _as_int(usage.get("input_tokens"))
-                if output_tokens is None:
-                    output_tokens = _as_int(usage.get("output_tokens"))
-            if cost_usd is None:
-                cost_usd = _as_float(obj.get("total_cost_usd") or obj.get("cost_usd"))
 
+        # Shared parser: keeps the latest cumulative usage payload and
+        # normalizes codex's cached-subset convention into disjoint buckets.
+        usage = codex_usage_from_stream(stdout)
         return AgentInvocation(
             session_id=session_id,
             duration_s=duration,
-            cost_usd=cost_usd,
-            input_tokens=input_tokens,
-            output_tokens=output_tokens,
+            cost_usd=usage.cli_reported_cost_usd if usage else None,
+            input_tokens=usage.input if usage else None,
+            output_tokens=usage.output if usage else None,
+            cache_read_tokens=usage.cache_read if usage else None,
+            cache_create_tokens=usage.cache_create if usage else None,
+            model=(usage.model if usage and usage.model else None)
+            or self._config.codex_model,
+            api_time_s=None,
         )
 
     def parse_last_message(self, iter_dir: Path) -> str:

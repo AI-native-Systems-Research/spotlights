@@ -11,10 +11,9 @@ another with typed payloads.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
-
-from typing import Literal
 
 from spotlights_engine.schemas.anomaly import Anomaly
 from spotlights_engine.schemas.candidate import Candidate, Candidates
@@ -146,6 +145,7 @@ class SpotlightsManagerInput(BaseModel):
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
     repo_path: Path
+    repo_url: str | None = None
     context: SpotlightContext
     max_findings_per_module: int = Field(default=30, ge=0)
     include_candidate_hotspots: bool = True

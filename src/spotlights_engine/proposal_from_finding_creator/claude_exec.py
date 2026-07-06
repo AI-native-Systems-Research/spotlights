@@ -15,10 +15,10 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from spotlights_engine.costing.usage import AgentUsage, claude_usage_from_stream
 from spotlights_engine.proposal_from_finding_creator.errors import (
     ProposalFromFindingSetupError,
 )
-
 
 _DROP_EXACT = frozenset(
     {
@@ -59,6 +59,7 @@ class PairRunResult:
     error: str | None = None
     stdout: bytes = b""
     stderr: bytes = b""
+    usage: AgentUsage | None = None
 
 
 def ensure_claude_available() -> None:
@@ -111,14 +112,17 @@ def run_pair(
         )
     except subprocess.TimeoutExpired as exc:
         duration = time.monotonic() - start
+        stdout = exc.stdout or b""
         return PairRunResult(
             pair_key=pair_key,
             duration_s=duration,
             error=f"claude timed out after {duration:.1f}s",
-            stdout=exc.stdout or b"",
+            stdout=stdout,
             stderr=exc.stderr or b"",
+            usage=claude_usage_from_stream(stdout),
         )
     duration = time.monotonic() - start
+    usage = claude_usage_from_stream(completed.stdout or b"")
 
     if completed.returncode != 0:
         stderr_tail = (completed.stderr or b"")[-500:].decode("utf-8", "replace")
@@ -128,6 +132,7 @@ def run_pair(
             error=f"claude exit={completed.returncode}: stderr={stderr_tail!r}",
             stdout=completed.stdout or b"",
             stderr=completed.stderr or b"",
+            usage=usage,
         )
 
     try:
@@ -139,6 +144,7 @@ def run_pair(
             error=str(exc),
             stdout=completed.stdout or b"",
             stderr=completed.stderr or b"",
+            usage=usage,
         )
 
     if result_event is None:
@@ -148,6 +154,7 @@ def run_pair(
             error="claude stream-json had no terminal result event",
             stdout=completed.stdout or b"",
             stderr=completed.stderr or b"",
+            usage=usage,
         )
 
     structured = result_event.get("structured_output")
@@ -157,6 +164,7 @@ def run_pair(
             pair_key=pair_key,
             duration_s=duration,
             structured_output=unwrapped,
+            usage=usage,
         )
 
     # Fallback: older CLI versions may put the JSON-encoded payload on `result`.
@@ -171,6 +179,7 @@ def run_pair(
                 error=f"claude result text not JSON: {exc}",
                 stdout=completed.stdout or b"",
                 stderr=completed.stderr or b"",
+                usage=usage,
             )
         unwrapped = _unwrap_proposals(parsed)
         if unwrapped is not None:
@@ -178,6 +187,7 @@ def run_pair(
                 pair_key=pair_key,
                 duration_s=duration,
                 structured_output=unwrapped,
+                usage=usage,
             )
 
     return PairRunResult(
@@ -186,6 +196,7 @@ def run_pair(
         error="claude produced no structured_output and no usable fallback text",
         stdout=completed.stdout or b"",
         stderr=completed.stderr or b"",
+        usage=usage,
     )
 
 

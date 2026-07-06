@@ -18,7 +18,7 @@ from pathlib import Path
 
 from spotlights_engine.agent_proposals.claude_exec import CandidateAgentRunResult
 from spotlights_engine.agent_proposals.errors import AgentProposalsSetupError
-
+from spotlights_engine.costing.usage import codex_usage_from_stream
 
 _DROP_EXACT = frozenset(
     {
@@ -117,14 +117,22 @@ def run_candidate_codex(
         )
     except subprocess.TimeoutExpired as exc:
         duration = time.monotonic() - start
+        stdout = exc.stdout or b""
+        usage = codex_usage_from_stream(stdout)
+        if usage is not None and usage.model is None and codex_model:
+            usage = usage.model_copy(update={"model": codex_model})
         return CandidateAgentRunResult(
             candidate_id=candidate_id,
             duration_s=duration,
             error=f"codex timed out after {duration:.1f}s",
-            stdout=exc.stdout or b"",
+            stdout=stdout,
             stderr=exc.stderr or b"",
+            usage=usage,
         )
     duration = time.monotonic() - start
+    usage = codex_usage_from_stream(completed.stdout or b"")
+    if usage is not None and usage.model is None and codex_model:
+        usage = usage.model_copy(update={"model": codex_model})
 
     if completed.returncode != 0:
         stderr_tail = (completed.stderr or b"")[-500:].decode("utf-8", "replace")
@@ -134,6 +142,7 @@ def run_candidate_codex(
             error=f"codex exit={completed.returncode}: stderr={stderr_tail!r}",
             stdout=completed.stdout or b"",
             stderr=completed.stderr or b"",
+            usage=usage,
         )
 
     if not last_message_path.exists():
@@ -143,6 +152,7 @@ def run_candidate_codex(
             error="codex output_last_message file missing",
             stdout=completed.stdout or b"",
             stderr=completed.stderr or b"",
+            usage=usage,
         )
     text = last_message_path.read_text(encoding="utf-8")
     if not text.strip():
@@ -152,6 +162,7 @@ def run_candidate_codex(
             error="codex output_last_message empty",
             stdout=completed.stdout or b"",
             stderr=completed.stderr or b"",
+            usage=usage,
         )
     try:
         parsed = json.loads(text)
@@ -162,6 +173,7 @@ def run_candidate_codex(
             error=f"codex output_last_message not JSON: {exc}",
             stdout=completed.stdout or b"",
             stderr=completed.stderr or b"",
+            usage=usage,
         )
     if not isinstance(parsed, (dict, list)):
         return CandidateAgentRunResult(
@@ -173,12 +185,14 @@ def run_candidate_codex(
             ),
             stdout=completed.stdout or b"",
             stderr=completed.stderr or b"",
+            usage=usage,
         )
 
     return CandidateAgentRunResult(
         candidate_id=candidate_id,
         duration_s=duration,
         structured_output=parsed,
+        usage=usage,
     )
 
 

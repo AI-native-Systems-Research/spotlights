@@ -47,6 +47,7 @@ from spotlights_engine.agent_proposals.prompts import (
 from spotlights_engine.agent_proposals.validation import (
     parse_candidate_payload,
 )
+from spotlights_engine.costing.usage import CliUsage
 from spotlights_engine.schemas.candidate import Candidate, Candidates
 from spotlights_engine.schemas.common import StepIssue
 from spotlights_engine.schemas.pipeline import (
@@ -103,6 +104,7 @@ class AgentProposalsResult(BaseModel):
         default_factory=dict
     )
     total_duration_s: float
+    usages_by_candidate: dict[str, list[CliUsage]] = Field(default_factory=dict)
 
 
 class _ClaudeRunner(Protocol):
@@ -244,7 +246,7 @@ async def _run_claude_pass(
     input: AgentProposalsInput,
     config: AgentProposalsConfig,
     runner: _ClaudeRunner,
-) -> tuple[AgentProposal | None, list[StepIssue], float]:
+) -> tuple[AgentProposal | None, list[StepIssue], float, CliUsage | None]:
     schema_text = build_per_candidate_schema_text(
         agent_name=config.claude_agent_name
     )
@@ -280,6 +282,7 @@ async def _run_claude_pass(
                 )
             ],
             duration,
+            None,
         )
 
     _persist_candidate_debug(
@@ -298,7 +301,11 @@ async def _run_claude_pass(
                 recoverable=True,
             )
         )
-        return None, issues, run_result.duration_s
+        return None, issues, run_result.duration_s, (
+            CliUsage(cli="claude", usage=run_result.usage)
+            if run_result.usage is not None
+            else None
+        )
 
     parsed = parse_candidate_payload(
         run_result.structured_output,
@@ -309,7 +316,11 @@ async def _run_claude_pass(
         issues.append(_issue(warn, severity="warning", recoverable=True))
 
     proposal = parsed.proposals[0] if parsed.proposals else None
-    return proposal, issues, run_result.duration_s
+    return proposal, issues, run_result.duration_s, (
+        CliUsage(cli="claude", usage=run_result.usage)
+        if run_result.usage is not None
+        else None
+    )
 
 
 async def _run_codex_pass(
@@ -319,7 +330,7 @@ async def _run_codex_pass(
     config: AgentProposalsConfig,
     runner: _CodexRunner,
     claude_proposal: AgentProposal | None,
-) -> tuple[AgentProposal | None, list[StepIssue], float]:
+) -> tuple[AgentProposal | None, list[StepIssue], float, CliUsage | None]:
     schema_text = build_per_candidate_schema_text(
         agent_name=config.codex_agent_name
     )
@@ -365,6 +376,7 @@ async def _run_codex_pass(
                 )
             ],
             duration,
+            None,
         )
 
     _persist_candidate_debug(
@@ -383,7 +395,11 @@ async def _run_codex_pass(
                 recoverable=True,
             )
         )
-        return None, issues, run_result.duration_s
+        return None, issues, run_result.duration_s, (
+            CliUsage(cli="codex", usage=run_result.usage)
+            if run_result.usage is not None
+            else None
+        )
 
     parsed = parse_candidate_payload(
         run_result.structured_output,
@@ -394,7 +410,11 @@ async def _run_codex_pass(
         issues.append(_issue(warn, severity="warning", recoverable=True))
 
     proposal = parsed.proposals[0] if parsed.proposals else None
-    return proposal, issues, run_result.duration_s
+    return proposal, issues, run_result.duration_s, (
+        CliUsage(cli="codex", usage=run_result.usage)
+        if run_result.usage is not None
+        else None
+    )
 
 
 async def _run_one_candidate(
@@ -405,17 +425,17 @@ async def _run_one_candidate(
     claude_runner: _ClaudeRunner,
     codex_runner: _CodexRunner,
     semaphore: asyncio.Semaphore,
-) -> tuple[str, list[AgentProposal], list[StepIssue], dict[str, float]]:
+) -> tuple[str, list[AgentProposal], list[StepIssue], dict[str, float], list[CliUsage]]:
     """Run Claude then Codex for one candidate. Returns the new proposal list,
     aggregated issues, and per-pass durations."""
     async with semaphore:
-        claude_proposal, claude_issues, claude_duration = await _run_claude_pass(
+        claude_proposal, claude_issues, claude_duration, claude_usage = await _run_claude_pass(
             candidate=candidate,
             input=input,
             config=config,
             runner=claude_runner,
         )
-        codex_proposal, codex_issues, codex_duration = await _run_codex_pass(
+        codex_proposal, codex_issues, codex_duration, codex_usage = await _run_codex_pass(
             candidate=candidate,
             input=input,
             config=config,
@@ -434,6 +454,7 @@ async def _run_one_candidate(
         _CLAUDE_PASS: claude_duration,
         _CODEX_PASS: codex_duration,
     }
+    usages = [u for u in (claude_usage, codex_usage) if u is not None]
     _log.debug(
         "[%s] agent_proposals: candidate %s done in %.1fs — %d proposals",
         input.candidates.module_qualified_name,
@@ -441,7 +462,7 @@ async def _run_one_candidate(
         claude_duration + codex_duration,
         len(proposals),
     )
-    return candidate.id, proposals, issues, durations
+    return candidate.id, proposals, issues, durations, usages
 
 
 def _convert_proposal(ap: AgentProposal, prop_id: str) -> Proposal:
@@ -520,14 +541,18 @@ async def _run_async(
         for c in scheduled
     ]
 
-    candidate_results: dict[str, tuple[list[AgentProposal], list[StepIssue], dict[str, float]]] = {}
+    candidate_results: dict[
+        str,
+        tuple[list[AgentProposal], list[StepIssue], dict[str, float], list[CliUsage]],
+    ] = {}
     if tasks:
         gathered = await asyncio.gather(*tasks)
-        for cand_id, proposals, issues, durations in gathered:
-            candidate_results[cand_id] = (proposals, issues, durations)
+        for cand_id, proposals, issues, durations, usages in gathered:
+            candidate_results[cand_id] = (proposals, issues, durations, usages)
 
     aggregated_issues: list[StepIssue] = []
     per_candidate_durations_s: dict[str, dict[str, float]] = {}
+    usages_by_candidate: dict[str, list[CliUsage]] = {}
 
     # Deterministic post-gather rebuild: mint `prop-<segment>-NNNN` ids from the
     # module session's proposal counter (decision D3), continuing past step 4's
@@ -544,9 +569,11 @@ async def _run_async(
     rebuilt: list[Candidate] = []
     for c in all_candidates:
         if c.id in candidate_results:
-            _, issues, durations = candidate_results[c.id]
+            _, issues, durations, usages = candidate_results[c.id]
             aggregated_issues.extend(issues)
             per_candidate_durations_s[c.id] = durations
+            if usages:
+                usages_by_candidate[c.id] = usages
         new_proposals = new_by_id[c.id]
         ids = mint_proposal_ids(next_id, len(new_proposals), segment=segment)
         next_id += len(new_proposals)
@@ -564,6 +591,7 @@ async def _run_async(
         output=output,
         per_candidate_durations_s=per_candidate_durations_s,
         total_duration_s=total_duration_s,
+        usages_by_candidate=usages_by_candidate,
     )
 
 

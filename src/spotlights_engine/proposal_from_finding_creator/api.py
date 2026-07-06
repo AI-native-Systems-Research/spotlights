@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from spotlights_engine.costing.usage import CliUsage
 from spotlights_engine.proposal_from_finding_creator.agent_schema import (
     build_per_pair_schema_text,
 )
@@ -92,6 +93,7 @@ class ProposalFromFindingCreatorResult(BaseModel):
     # manager hands this to step 5 so its proposal ids never collide with step
     # 4's. Defaults to 1 for standalone callers that don't track id blocks.
     next_proposal_id: int = 1
+    usages_by_pair: dict[str, CliUsage] = Field(default_factory=dict)
 
 
 class _PairRunner(Protocol):
@@ -222,7 +224,14 @@ async def _run_one_pair(
     config: ProposalFromFindingConfig,
     runner: _PairRunner,
     semaphore: asyncio.Semaphore,
-) -> tuple[str, list[DeepResearchProposal], list[StepIssue], float]:
+) -> tuple[
+    str,
+    list[DeepResearchProposal],
+    list[StepIssue],
+    float,
+    CliUsage | None,
+]:
+    # Usage is optional: a runner can fail before a CLI process is spawned.
     schema_text = build_per_pair_schema_text(
         finding_id=finding.finding_id,
         created_by=config.created_by,
@@ -262,6 +271,7 @@ async def _run_one_pair(
                     )
                 ],
                 duration,
+                None,
             )
 
     _persist_pair_debug(config=config, pair_key=pair_key, run_result=run_result)
@@ -277,7 +287,11 @@ async def _run_one_pair(
                 recoverable=True,
             )
         )
-        return pair_key, proposals, issues, run_result.duration_s
+        return pair_key, proposals, issues, run_result.duration_s, (
+            CliUsage(cli="claude", usage=run_result.usage)
+            if run_result.usage is not None
+            else None
+        )
 
     parsed = parse_pair_payload(
         run_result.structured_output,
@@ -297,7 +311,11 @@ async def _run_one_pair(
         len(proposals),
     )
 
-    return pair_key, proposals, issues, run_result.duration_s
+    return pair_key, proposals, issues, run_result.duration_s, (
+        CliUsage(cli="claude", usage=run_result.usage)
+        if run_result.usage is not None
+        else None
+    )
 
 
 def _convert_proposal(drp: DeepResearchProposal, prop_id: str) -> Proposal:
@@ -382,11 +400,13 @@ async def _run_async(
         for (c, f, key) in pairs
     ]
 
-    pair_results: dict[str, tuple[list[DeepResearchProposal], list[StepIssue], float]] = {}
+    pair_results: dict[
+        str, tuple[list[DeepResearchProposal], list[StepIssue], float, CliUsage | None]
+    ] = {}
     if tasks:
         gathered = await asyncio.gather(*tasks)
-        for pair_key, proposals, issues, duration in gathered:
-            pair_results[pair_key] = (proposals, issues, duration)
+        for pair_key, proposals, issues, duration, usage in gathered:
+            pair_results[pair_key] = (proposals, issues, duration, usage)
 
     # Assemble per-candidate proposal lists in input-finding order, restricted
     # to pairs that were actually scheduled (debug truncation drops the tail).
@@ -395,14 +415,17 @@ async def _run_async(
     }
     aggregated_issues: list[StepIssue] = []
     per_pair_durations_s: dict[str, float] = {}
+    usages_by_pair: dict[str, CliUsage] = {}
 
     for c, _f, key in pairs:
         if key not in pair_results:
             continue
-        proposals, issues, duration = pair_results[key]
+        proposals, issues, duration, usage = pair_results[key]
         per_candidate_proposals[c.id].extend(proposals)
         aggregated_issues.extend(issues)
         per_pair_durations_s[key] = duration
+        if usage is not None:
+            usages_by_pair[key] = usage
 
     # Deterministic post-gather rebuild: mint `prop-<segment>-NNNN` ids from the
     # module session's proposal counter (decision D3) in candidate order, so
@@ -431,6 +454,7 @@ async def _run_async(
         per_pair_durations_s=per_pair_durations_s,
         total_duration_s=total_duration_s,
         next_proposal_id=next_id,
+        usages_by_pair=usages_by_pair,
     )
 
 

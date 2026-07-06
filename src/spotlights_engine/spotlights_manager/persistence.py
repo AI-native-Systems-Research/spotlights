@@ -24,6 +24,7 @@ from spotlights_engine.candidate_discovery.api import (
     DiscoveryConfig,
     IterationTelemetry,
 )
+from spotlights_engine.costing.records import UsageRecord, UsageStep
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
 from spotlights_engine.modules_extractor.agent import ExtractionInvocation
 from spotlights_engine.proposal_from_finding_creator import (
@@ -132,6 +133,12 @@ class ManagerPaths:
         return self.root / "manifest.json"
 
     @property
+    def run_manifest_path(self) -> Path:
+        """The public per-run manifest (provenance + usage + cost) — distinct
+        from the internal resume `manifest.json`."""
+        return self.root / "run_manifest.json"
+
+    @property
     def project_tree_path(self) -> Path:
         return self.root / "project_tree.json"
 
@@ -196,6 +203,28 @@ class ModulePaths:
     @property
     def agent_proposals_last_message_dir(self) -> Path:
         return self.dir / "agent_proposals.last_messages"
+
+    # Per-step usage-record directories. One atomically-written JSON file per
+    # CLI invocation, named from the idempotency key (`s<k>.i<NNNN>.<cli>.json`).
+
+    @property
+    def candidate_discovery_usage_dir(self) -> Path:
+        return self.dir / "candidate_discovery.usage"
+
+    @property
+    def deep_research_usage_dir(self) -> Path:
+        return self.dir / "module_deep_research.usage"
+
+    @property
+    def proposal_from_finding_usage_dir(self) -> Path:
+        return self.dir / "proposal_from_finding_creator.usage"
+
+    @property
+    def agent_proposals_usage_dir(self) -> Path:
+        return self.dir / "agent_proposals.usage"
+
+    def usage_dir(self, step: UsageStep) -> Path:
+        return self.dir / f"{step}.usage"
 
 
 @dataclass
@@ -318,12 +347,22 @@ def write_manifest(paths: ManagerPaths, manifest: dict[str, Any]) -> None:
     _atomic_write_json(paths.manifest_path, manifest)
 
 
+def write_run_manifest(paths: ManagerPaths, manifest: Any) -> None:
+    payload = (
+        manifest.model_dump(mode="json")
+        if hasattr(manifest, "model_dump")
+        else manifest
+    )
+    _atomic_write_json(paths.run_manifest_path, payload)
+
+
 def init_manifest(
     paths: ManagerPaths,
     *,
     input_fingerprint: dict[str, Any],
     config_fingerprint: dict[str, Any],
     context: SpotlightContext,
+    provenance: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     now = _now_iso()
     manifest: dict[str, Any] = {
@@ -336,6 +375,9 @@ def init_manifest(
         "context": context.model_dump(mode="json"),
         "extractor": {"completed": False, "duration_s": None},
         "modules": {},
+        # Pinned once at first run; resume reads it back, never recomputes it,
+        # so a resume from a different working tree can't rewrite provenance.
+        "provenance": dict(provenance or {}),
     }
     paths.root.mkdir(parents=True, exist_ok=True)
     paths.modules_root.mkdir(parents=True, exist_ok=True)
@@ -491,22 +533,111 @@ def write_deep_research(
     _atomic_write_json(module_paths.deep_research_path, payload)
 
 
-def clear_discovery_artifacts(module_paths: ModulePaths) -> None:
+# ---------------------------------------------------------------------------
+# Usage records (see costing.records)
+# ---------------------------------------------------------------------------
+
+
+def write_usage_record(module_paths: ModulePaths, record: UsageRecord) -> Path:
+    """Atomically persist one per-invocation usage record.
+
+    The filename encodes the idempotency key, so rewriting the same
+    invocation (after a session-scoped clear on resume) replaces rather than
+    duplicates it.
+    """
+    path = module_paths.usage_dir(record.step) / record.filename
+    _atomic_write_text(path, record.model_dump_json(indent=2) + "\n")
+    return path
+
+
+def read_usage_records(
+    module_paths: ModulePaths, step: UsageStep | None = None
+) -> tuple[list[UsageRecord], list[str]]:
+    """Read this module's usage records from disk, tolerating partial writes.
+
+    Returns `(records, notes)`: `*.tmp` leftovers from interrupted atomic
+    writes and unparseable files are skipped and reported as notes instead of
+    failing the aggregation.
+    """
+    steps: tuple[UsageStep, ...] = (
+        (step,)
+        if step is not None
+        else (
+            "candidate_discovery",
+            "module_deep_research",
+            "proposal_from_finding_creator",
+            "agent_proposals",
+        )
+    )
+    records: list[UsageRecord] = []
+    notes: list[str] = []
+    for s in steps:
+        usage_dir = module_paths.usage_dir(s)
+        if not usage_dir.is_dir():
+            continue
+        for path in sorted(usage_dir.iterdir()):
+            if path.name.endswith(".tmp"):
+                notes.append(f"ignored partial usage file: {path.name}")
+                continue
+            if path.suffix != ".json":
+                continue
+            try:
+                records.append(
+                    UsageRecord.model_validate_json(
+                        path.read_text(encoding="utf-8")
+                    )
+                )
+            except (OSError, ValueError) as exc:
+                notes.append(f"ignored unreadable usage file {path.name}: {exc}")
+    return records, notes
+
+
+def clear_usage_records(
+    module_paths: ModulePaths,
+    step: UsageStep,
+    session_index: int | None = None,
+) -> None:
+    """Drop a step's usage records so a re-run can't double count.
+
+    Clearing is session-scoped when `session_index` is given: only files
+    carrying that session's `s<k>.` prefix are removed, because records from
+    earlier sessions must survive (the manifest sums across sessions to
+    reflect the run's real spend). `None` clears the whole step directory.
+    """
+    usage_dir = module_paths.usage_dir(step)
+    if not usage_dir.is_dir():
+        return
+    if session_index is None:
+        shutil.rmtree(usage_dir)
+        return
+    prefix = f"s{session_index}."
+    for path in usage_dir.iterdir():
+        if path.name.startswith(prefix):
+            path.unlink()
+
+
+def clear_discovery_artifacts(
+    module_paths: ModulePaths, *, session_index: int | None = None
+) -> None:
     """Remove everything step 2 produced so the per-step guard is happy."""
     if module_paths.discovery_run_dir.exists():
         shutil.rmtree(module_paths.discovery_run_dir)
     for p in (module_paths.candidates_path, module_paths.discovery_telemetry_path):
         if p.exists():
             p.unlink()
+    clear_usage_records(module_paths, "candidate_discovery", session_index)
 
 
-def clear_deep_research_artifacts(module_paths: ModulePaths) -> None:
+def clear_deep_research_artifacts(
+    module_paths: ModulePaths, *, session_index: int | None = None
+) -> None:
     for p in (
         module_paths.deep_research_path,
         module_paths.deep_research_last_message_path,
     ):
         if p.exists():
             p.unlink()
+    clear_usage_records(module_paths, "module_deep_research", session_index)
 
 
 def write_proposal_from_finding(
@@ -523,11 +654,14 @@ def write_proposal_from_finding(
     _atomic_write_json(module_paths.proposal_from_finding_path, payload)
 
 
-def clear_proposal_from_finding_artifacts(module_paths: ModulePaths) -> None:
+def clear_proposal_from_finding_artifacts(
+    module_paths: ModulePaths, *, session_index: int | None = None
+) -> None:
     if module_paths.proposal_from_finding_last_message_dir.exists():
         shutil.rmtree(module_paths.proposal_from_finding_last_message_dir)
     if module_paths.proposal_from_finding_path.exists():
         module_paths.proposal_from_finding_path.unlink()
+    clear_usage_records(module_paths, "proposal_from_finding_creator", session_index)
 
 
 def write_agent_proposals(
@@ -547,11 +681,14 @@ def write_agent_proposals(
     _atomic_write_json(module_paths.agent_proposals_path, payload)
 
 
-def clear_agent_proposals_artifacts(module_paths: ModulePaths) -> None:
+def clear_agent_proposals_artifacts(
+    module_paths: ModulePaths, *, session_index: int | None = None
+) -> None:
     if module_paths.agent_proposals_last_message_dir.exists():
         shutil.rmtree(module_paths.agent_proposals_last_message_dir)
     if module_paths.agent_proposals_path.exists():
         module_paths.agent_proposals_path.unlink()
+    clear_usage_records(module_paths, "agent_proposals", session_index)
 
 
 def write_extractor_outputs(
@@ -608,11 +745,13 @@ __all__ = [
     "clear_discovery_artifacts",
     "clear_extractor_artifacts",
     "clear_proposal_from_finding_artifacts",
+    "clear_usage_records",
     "default_agent_proposals_hash",
     "init_manifest",
     "read_extractor_outputs",
     "read_manifest",
     "read_module_state",
+    "read_usage_records",
     "slug_for",
     "write_agent_proposals",
     "write_candidates",
@@ -622,4 +761,6 @@ __all__ = [
     "write_extractor_outputs",
     "write_manifest",
     "write_proposal_from_finding",
+    "write_run_manifest",
+    "write_usage_record",
 ]

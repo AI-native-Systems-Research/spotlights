@@ -1,0 +1,19 @@
+{
+  "_note": "Contracted per-token rates billed through the IBM LiteLLM proxy. Values are PLACEHOLDERS (0.0) until ops supplies the contract numbers — populating them is a data-only change. Never substitute CLI-reported list prices. Override the whole table via the SPOTLIGHTS_RATES_FILE env var to keep contract terms out of git.",
+  "anthropic:claude-opus-4-8": {
+    "input": 0.0,
+    "output": 0.0,
+    "cache_read": 0.0,
+    "cache_create": 0.0,
+    "unit": "per_token",
+    "note": "IBM LiteLLM contracted rate, effective YYYY-MM-DD (placeholder)"
+  },
+  "openai:gpt-5.5": {
+    "input": 0.0,
+    "output": 0.0,
+    "cache_read": 0.0,
+    "cache_create": 0.0,
+    "unit": "per_token",
+    "note": "IBM LiteLLM contracted rate, effective YYYY-MM-DD (placeholder)"
+  }
+}
