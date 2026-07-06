@@ -200,7 +200,7 @@ class ValidationResult(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-class ExecutionResult(BaseModel):
+class ValidationExecutionResult(BaseModel):
     change_ref: str
     compiled: bool
     ran: bool

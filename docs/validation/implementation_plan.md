@@ -10,9 +10,9 @@ This branch implements discovery as an **LLM-driven process using a template pro
 
 The following are already implemented and inform this plan:
 
-- **Schemas** (`src/spotlights_validation/schemas.py`): `TestHarnessMap`, `TestHarnessEntry`, `ValidationWorkloadMatrix`, `WorkloadEntry`, `ValidationPlan`, `ValidationPlanEntry`, and all result types.
-- **MVP examples** (`examples/kvoffload/`, `examples/kvoffload_extended/`): Manually-produced artifacts demonstrating the expected output shape, including entries discovered from GitHub issues/PRs.
-- **Runner** (`execution/runner.py`): Consumes the artifacts produced by discovery.
+- **Schemas** (`src/spotlights_engine/validation/schemas.py`): `TestHarnessMap`, `TestHarnessEntry`, `ValidationWorkloadMatrix`, `WorkloadEntry`, `ValidationPlan`, `ValidationPlanEntry`, and all result types.
+- **MVP examples** (`examples/validation/kvoffload/`, `examples/validation/kvoffload_extended/`): Manually-produced artifacts demonstrating the expected output shape, including entries discovered from GitHub issues/PRs.
+- **Runner** (`src/spotlights_engine/validation/execution/runner.py`): Consumes the artifacts produced by discovery.
 - **Public API contract** (`__init__.py`): `prepare()`, `start_validation()`, `get_validation_status()`.
 
 The goal of this implementation is to automate what the MVP examples do manually: produce `TestHarnessMap`, `ValidationWorkloadMatrix`, and `ValidationPlan` given a target repo and version.
@@ -21,23 +21,23 @@ The goal of this implementation is to automate what the MVP examples do manually
 
 ## 1. Discovery Prompt Template
 
-**File:** `src/spotlights_validation/discovery/prompt_template.py`
+**File:** `src/spotlights_engine/validation/discovery/prompt_template.py`
 
 The core of discovery is an LLM prompt that receives structured context about the target system and produces validation artifacts conforming to our schemas. This replaces a hardcoded scanner approach — the LLM reads the repo structure and available sources, then produces entries directly.
 
 ### Template placeholders
 
-| Placeholder | Source | Description |
-|---|---|---|
-| `{target_repo_url}` | CLI argument | GitHub URL of the target repository |
-| `{target_version}` | CLI argument or `git rev-parse HEAD` | Commit SHA, tag, or branch to validate against |
-| `{source_tree_summary}` | Built at runtime | Directory listing, CI configs, test directories, benchmark scripts |
-| `{component_vocabulary}` | From `ProjectTree` if available | Known components of the target system |
-| `{candidate_context}` | From Candidate object | The optimization candidate: target file, symbol, kind, anomaly_refs, and evolve_rationale. Used to focus discovery on the candidate's component and inform archive queries. |
-| `{change_context}` | Optional, from Change object | Affected components and code paths (for change-specific discovery) |
-| `{output_artifacts_path}` | CLI argument | Where to write the produced JSON artifacts |
-| `{existing_artifacts}` | Loaded from prior run if present | Base harness map and workload matrix to extend (not duplicate) |
-| `{github_discovery_results}` | From GitHub search step | Issues and PRs relevant to the discovery scope |
+| Placeholder | Source | Mandatory | Description |
+|---|---|---|---|
+| `{target_repo_url}` | CLI argument | Yes | GitHub URL of the target repository |
+| `{target_version}` | CLI argument or `git rev-parse HEAD` | No (default: latest version) | Commit SHA, tag, or branch to validate against |
+| `{source_tree_summary}` | Built at runtime | Yes (built at runtime) | Directory listing, CI configs, test directories, benchmark scripts |
+| `{component_vocabulary}` | From `ProjectTree` if available | No (built from signal_pipeline if not provided) | Known components of the target system |
+| `{candidate_context}` | From Candidate object | Yes | The optimization candidate: target file, symbol, kind, anomaly_refs, and evolve_rationale. Used to focus discovery on the candidate's component and inform archive queries. |
+| `{change_context}` | Optional, from Change object | No (default: None) | Affected components and code paths (for change-specific discovery) |
+| `{output_artifacts_path}` | CLI argument | Yes | Where to write the produced JSON artifacts |
+| `{existing_artifacts}` | Loaded from prior run if present | No (default: None) | Base harness map and workload matrix to extend (not duplicate) |
+| `{github_discovery_results}` | From GitHub search step | No (default: None) | Issues and PRs relevant to the discovery scope |
 
 ### Template structure
 
@@ -56,7 +56,7 @@ The LLM returns JSON matching the `TestHarnessMap` and `ValidationWorkloadMatrix
 
 ## 2. GitHub Discovery (Issues & PRs)
 
-**File:** `src/spotlights_validation/discovery/github_discovery.py`
+**File:** `src/spotlights_engine/validation/discovery/github_discovery.py`
 
 Searches GitHub for test cases, workloads, benchmarks, and regression signals relevant to the discovery scope. This extends the base discovery with entries that exist in the project's issue tracker but may not be obvious from the source tree alone.
 
@@ -99,7 +99,7 @@ async def discover_from_github(
 
 ## 3. Discovery Orchestrator
 
-**File:** `src/spotlights_validation/discovery/orchestrator.py`
+**File:** `src/spotlights_engine/validation/discovery/orchestrator.py`
 
 Coordinates the full discovery flow: source tree analysis, GitHub search, LLM-based artifact generation, and verification.
 
@@ -145,7 +145,7 @@ GitHub search and source tree scanning run in parallel (`asyncio.gather`). The L
 
 ## 4. Artifact Verification
 
-**File:** `src/spotlights_validation/discovery/verification.py`
+**File:** `src/spotlights_engine/validation/discovery/verification.py`
 
 After artifacts are generated (whether by LLM or manually), verify they are sound before use. This implements the approval process described in the design.
 
@@ -186,7 +186,7 @@ Entries that fail verification are flagged but not automatically removed — the
 
 ## 5. Validation Plan Creation
 
-**File:** `src/spotlights_validation/discovery/plan_builder.py`
+**File:** `src/spotlights_engine/validation/discovery/plan_builder.py`
 
 Takes verified discovery artifacts and produces a `ValidationPlan`. This step bridges discovery and execution.
 
@@ -214,17 +214,17 @@ When neither candidate component matching nor change context applies to an entry
 
 ---
 
-## 6. Caching Layer (via Bundle B Archive)
+## 6. Caching Layer (via Knowledge Archive)
 
-**File:** `src/spotlights_validation/discovery/cache.py`
+**File:** `src/spotlights_engine/validation/discovery/cache.py`
 
-Prevents re-running expensive discovery (especially LLM calls and GitHub API queries) when valid artifacts already exist for the same candidate at the same target version. The cache is designed against Bundle B's planned archive query interface, with a filesystem fallback until Bundle B is implemented.
+Prevents re-running expensive discovery (especially LLM calls and GitHub API queries) when valid artifacts already exist for the same candidate at the same target version. The cache is designed against Knowledge's planned archive query interface, with a filesystem fallback until Knowledge is implemented.
 
 ### Interface
 
 ```python
 class DiscoveryArchive(Protocol):
-    """Bundle B archive interface for discovery artifact retrieval."""
+    """Knowledge archive interface for discovery artifact retrieval."""
 
     async def query_discovery_artifacts(
         self,
@@ -247,7 +247,7 @@ class DiscoveryArchive(Protocol):
 
 
 class FilesystemDiscoveryArchive:
-    """Filesystem fallback implementing DiscoveryArchive until Bundle B lands."""
+    """Filesystem fallback implementing DiscoveryArchive until Knowledge lands."""
 
     def __init__(self, cache_dir: Path):
         self.cache_dir = cache_dir
@@ -268,9 +268,9 @@ class FilesystemDiscoveryArchive:
     ) -> None: ...
 ```
 
-### Cache key (mirrors Bundle B archive key structure)
+### Cache key (mirrors Knowledge archive key structure)
 
-The real Bundle B archive keys records on `(repo, Candidate.file, Candidate.symbol, Candidate.kind, target_version)` as the primary lookup, with `anomaly_refs` used as a signal-driven filter to narrow results. The filesystem fallback mirrors this structure:
+The real Knowledge archive keys records on `(repo, Candidate.file, Candidate.symbol, Candidate.kind, target_version)` as the primary lookup, with `anomaly_refs` used as a signal-driven filter to narrow results. The filesystem fallback mirrors this structure:
 
 ```
 {cache_dir}/{repo_name}/{target_version}/{file_path_normalized}/{symbol}/{kind}/
@@ -280,7 +280,7 @@ Where `repo_name` is derived from the target repository URL (e.g., `vllm-project
 
 Within a keyed directory, multiple discovery outputs may exist if different `anomaly_refs` or `evolve_rationale` produced them. On query:
 
-1. **Primary lookup** — Match on `(file, symbol, kind, target_version)`. This mirrors Bundle B's `query(query, mode="signal_driven")` semantics.
+1. **Primary lookup** — Match on `(file, symbol, kind, target_version)`. This mirrors Knowledge's `query(query, mode="signal_driven")` semantics.
 2. **Signal-driven filter** — Among matching entries, select the one whose `anomaly_refs` overlap with the query candidate's `anomaly_refs`. If no overlap exists, treat as cache miss.
 3. **Rationale check** — If `evolve_rationale` differs from the cached entry, treat as cache miss (different rationale may produce different search keywords and prioritization).
 
@@ -295,7 +295,7 @@ This means the filesystem fallback stores metadata alongside artifacts:
   verification_report.json
 ```
 
-When Bundle B is implemented, it replaces the filesystem walk with its native index — the query semantics (primary key + signal filter + rationale match) remain identical.
+When Knowledge is implemented, it replaces the filesystem walk with its native index — the query semantics (primary key + signal filter + rationale match) remain identical.
 
 ### Validity check on cache hit
 
@@ -311,13 +311,13 @@ Structural failure → cache miss (fall through to live discovery). Verification
 
 ## 7. CLI Integration
 
-**File:** `src/spotlights_validation/cli.py` (extend existing)
+**File:** `src/spotlights_engine/validation/cli.py` (extend existing)
 
 ### Generic API
 
 ```bash
 # Discovery command
-python -m spotlights_validation.cli discover \
+python -m spotlights_engine.validation.cli discover \
     --source-tree <PATH_TO_TARGET_REPO> \
     --target-version <COMMIT_SHA_OR_TAG> \
     --repo-url <GITHUB_REPO_URL> \
@@ -327,7 +327,7 @@ python -m spotlights_validation.cli discover \
     [--scope-keywords <COMMA_SEPARATED_KEYWORDS>]
 
 # Plan creation command
-python -m spotlights_validation.cli plan \
+python -m spotlights_engine.validation.cli plan \
     --harness-map <PATH_TO_HARNESS_MAP_JSON> \
     --workload-matrix <PATH_TO_WORKLOAD_MATRIX_JSON> \
     --candidate <PATH_TO_CANDIDATE_JSON> \
@@ -339,17 +339,17 @@ python -m spotlights_validation.cli plan \
 
 ```bash
 # Full automated discovery
-python -m spotlights_validation.cli discover \
+python -m spotlights_engine.validation.cli discover \
     --source-tree /path/to/target \
     --target-version v0.18.0 \
     --repo-url https://github.com/vllm-project/vllm \
-    --candidate artifacts/candidate.json \  # Candidate from Bundle C
+    --candidate artifacts/candidate.json \  # Candidate from Candidate Generation
     --out-dir artifacts/ \
     --include-github               # opt-in to GitHub issue/PR discovery
     --scope-keywords "kv offload,cpu offload,swap"  # narrows GitHub search
 
 # Plan creation from existing artifacts
-python -m spotlights_validation.cli plan \
+python -m spotlights_engine.validation.cli plan \
     --harness-map artifacts/harness_map.json \
     --workload-matrix artifacts/workload_matrix.json \
     --candidate artifacts/candidate.json \
@@ -371,7 +371,7 @@ async def prepare(
 ) -> PreparationRun:
 ```
 
-1. **Query Bundle B archive** — Call `archive.query_discovery_artifacts(candidate, target_version)`. Uses the full Candidate identity (file, symbol, kind, anomaly_refs, evolve_rationale) as the cache key. If no `archive` is provided, instantiate `FilesystemDiscoveryArchive` with the default cache dir.
+1. **Query Knowledge archive** — Call `archive.query_discovery_artifacts(candidate, target_version)`. Uses the full Candidate identity (file, symbol, kind, anomaly_refs, evolve_rationale) as the cache key. If no `archive` is provided, instantiate `FilesystemDiscoveryArchive` with the default cache dir.
 2. **Validate cached artifacts** — If the archive returns artifacts:
    - Structural check: deserialize into `TestHarnessMap` / `ValidationWorkloadMatrix`.
    - Semantic check: run `verify_artifacts()` against the current source tree.
