@@ -404,8 +404,19 @@ def _run_extractor_if_needed(
 
     tree, invocation = P.read_extractor_outputs(paths)
 
-    if completed and tree is not None and invocation is not None:
-        prev_dur = extractor_state.get("duration_s")
+    if tree is not None and invocation is not None:
+        if not completed:
+            # Crash-recovery window: the extractor payloads made it to disk
+            # before the manifest status did. Treat the sidecars as the source
+            # of truth and repair the manifest instead of re-running step 1.
+            manifest["extractor"] = {
+                "completed": True,
+                "duration_s": getattr(invocation, "duration_s", None),
+            }
+            P.write_manifest(paths, manifest)
+            _log.info("extractor: recovered cached outputs from disk")
+
+        prev_dur = manifest.get("extractor", {}).get("duration_s")
         if isinstance(prev_dur, (int, float)):
             _log.info("extractor: cached (%.1fs on previous run)", prev_dur)
         else:
@@ -477,7 +488,13 @@ def _plan_module(state: LoadedModuleState) -> _ModulePlan:
     """Resolve plan §5.4 onto a quad of booleans. The orchestrator runs
     step 3 if `redo_step3` OR step 2 just produced fresh candidates, runs
     step 4 if `redo_step4` OR step 3 just produced fresh research, and runs
-    step 5 if `redo_step5` OR any earlier step just produced fresh output."""
+    step 5 if `redo_step5` OR any earlier step just produced fresh output.
+
+    Payload sidecars are intentionally consulted alongside `status.json`.
+    The write protocol is payload-before-status; if the process crashes in
+    that narrow window, resume should continue from the sidecar that landed
+    instead of discarding completed work.
+    """
     cp = state.checkpoint
     started_at = cp.started_at if cp is not None else _now_iso()
 
@@ -500,30 +517,43 @@ def _plan_module(state: LoadedModuleState) -> _ModulePlan:
             return _plan(s3=True)
         if state.proposal_from_finding is None:
             return _plan(s4=True)
-        return _plan(s5=True)
+        if state.agent_proposals is None:
+            return _plan(s5=True)
+        return _plan()  # finalize-only
 
     if cp is None:
-        return _plan(s2=True)
-
-    # Legacy pre-step-5 terminal checkpoints: SUCCEEDED/DEGRADED whose
-    # `last_step` is step 4 and which never wrote agent_proposals.json. Treat
-    # as "step 5 owed" so old runs acquire step 5 without redoing 1-4. Must
-    # run before the generic terminal-status skip.
-    if (
-        cp.status in {"SUCCEEDED", "DEGRADED"}
-        and cp.last_step == "proposal_from_finding_creator"
-        and state.agent_proposals is None
-    ):
         return _ladder_to_first_missing()
 
-    if cp.status in {"SUCCEEDED", "DEGRADED", "SKIPPED"}:
-        return _plan(skip=True)
     if cp.status == "FAILED" and not cp.retryable:
         return _plan(skip=True)
 
+    if cp.status in {"SUCCEEDED", "DEGRADED"}:
+        if (
+            state.candidates is not None
+            and state.deep_research is not None
+            and state.proposal_from_finding is not None
+            and state.agent_proposals is not None
+        ):
+            return _plan(skip=True)
+        return _ladder_to_first_missing()
+
+    if cp.status == "SKIPPED":
+        if state.candidates is not None and not state.candidates.candidates:
+            return _plan(skip=True)
+        return _ladder_to_first_missing()
+
     if cp.status == "FAILED" and cp.retryable:
+        # A FAILED checkpoint is an explicit retry marker, not just a stale
+        # status lagging a sidecar write. Retry the failed step so stale
+        # payloads from an older attempt cannot be mistaken for success.
         if cp.failed_step == "agent_proposals":
-            return _ladder_to_first_missing()
+            if state.candidates is None:
+                return _plan(s2=True)
+            if state.deep_research is None:
+                return _plan(s3=True)
+            if state.proposal_from_finding is None:
+                return _plan(s4=True)
+            return _plan(s5=True)
         if cp.failed_step == "proposal_from_finding_creator":
             if state.candidates is None:
                 return _plan(s2=True)
@@ -534,45 +564,18 @@ def _plan_module(state: LoadedModuleState) -> _ModulePlan:
             if state.candidates is None:
                 return _plan(s2=True)
             return _plan(s3=True)
-        # Anything else (incl. unknown/None) -> redo step 2 from scratch.
         return _plan(s2=True)
 
-    if cp.status == "PENDING":
-        return _plan(s2=True)
+    if cp.status in {
+        "PENDING",
+        "DISCOVERED",
+        "DEEP_RESEARCHED",
+        "FINDING_PROPOSALS_CREATED",
+        "AGENT_PROPOSALS_CREATED",
+    }:
+        return _ladder_to_first_missing()
 
-    if cp.status == "DISCOVERED":
-        if state.candidates is None:
-            return _plan(s2=True)
-        return _plan(s3=True)
-
-    if cp.status == "DEEP_RESEARCHED":
-        if state.candidates is None:
-            return _plan(s2=True)
-        if state.deep_research is None:
-            return _plan(s3=True)
-        return _plan(s4=True)
-
-    if cp.status == "FINDING_PROPOSALS_CREATED":
-        if state.candidates is None:
-            return _plan(s2=True)
-        if state.deep_research is None:
-            return _plan(s3=True)
-        if state.proposal_from_finding is None:
-            return _plan(s4=True)
-        return _plan(s5=True)
-
-    if cp.status == "AGENT_PROPOSALS_CREATED":
-        if state.candidates is None:
-            return _plan(s2=True)
-        if state.deep_research is None:
-            return _plan(s3=True)
-        if state.proposal_from_finding is None:
-            return _plan(s4=True)
-        if state.agent_proposals is None:
-            return _plan(s5=True)
-        return _plan()  # finalize-only
-
-    return _plan(s2=True)
+    return _ladder_to_first_missing()
 
 
 def _plan_requires_step_execution(plan: _ModulePlan) -> bool:
