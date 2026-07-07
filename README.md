@@ -340,20 +340,20 @@ Rate files are JSON keyed by `"provider:model"`:
 ```json
 {
   "anthropic:claude-opus-4-8": {
-    "input": 0.000005,
-    "output": 0.000025,
-    "cache_read": 0.0000005,
-    "cache_create": 0.00000625,
+    "input": 0.0000038,
+    "output": 0.000019,
+    "cache_read": 0.00000038,
+    "cache_create": 0.00000475,
     "unit": "per_token",
-    "note": "Public Anthropic API rate as of 2026-07-06: Claude Opus 4.8 $5/MTok input, $25/MTok output, $0.50/MTok cache read, $6.25/MTok 5m cache write. Override for contracted LiteLLM or 1h cache writes."
+    "note": "LiteLLM (bedrock) rate as of 2026-07-07: Claude Opus 4.8 $3.80/MTok input, $19/MTok output, $0.38/MTok cache read, $4.75/MTok cache write. Override for a different contract or 1h cache writes ($10/MTok)."
   },
   "openai:gpt-5.5": {
-    "input": 0.000005,
-    "output": 0.00003,
+    "input": 0.0000025,
+    "output": 0.000015,
     "cache_read": 0.0000005,
     "cache_create": 0.0,
     "unit": "per_token",
-    "note": "Reported OpenAI API rate as of 2026-07-06: GPT-5.5 $5/MTok input, $30/MTok output. Cached input set to $0.50/MTok (10% of input); Codex has no cache-create bucket. Override for contracted LiteLLM."
+    "note": "LiteLLM (azure) rate as of 2026-07-07: GPT-5.5 $2.50/MTok input, $15/MTok output, $0.50/MTok cache read; Codex has no cache-create bucket. Override for a different contract."
   }
 }
 ```
