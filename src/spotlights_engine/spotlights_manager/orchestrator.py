@@ -1842,11 +1842,6 @@ async def _run_async(
     )
     P.write_manifest(paths, manifest)
 
-    renderer_result, manager_issues = _render_results(
-        artifacts_dir=paths.artifacts_dir,
-        output_folder=config.output_folder,
-    )
-
     counts = {"SUCCEEDED": 0, "DEGRADED": 0, "FAILED": 0, "SKIPPED": 0}
     for run_record in module_runs.values():
         counts[run_record.status] = counts.get(run_record.status, 0) + 1
@@ -1869,16 +1864,17 @@ async def _run_async(
         cost_str,
     )
 
-    report = _build_report(
-        tree=tree,
-        context=input.context,
-        module_runs=module_runs,
-        manager_issues=manager_issues,
-        total_cost=total_cost,
-        manifest=manifest,
-    )
-    candidates_path = (
-        str(renderer_result.index_path) if renderer_result is not None else ""
+    # Build and persist the public run manifest *before* rendering, so the
+    # renderer sees the current run's manifest (not a missing file or a stale
+    # one from a previous resume) and surfaces it in index.md. Use the intended
+    # renderer output path for `candidates_path`: on success it equals
+    # `renderer_result.index_path`; on renderer failure it still records where
+    # the shipped results were meant to land. `num_candidates` is summed
+    # directly from `module_runs` rather than waiting for `report.candidates`.
+    num_candidates = sum(
+        len(run_record.candidates.candidates)
+        for run_record in module_runs.values()
+        if run_record.candidates is not None
     )
     public_manifest = build_run_manifest(
         run_id=_run_id_from_manifest(manifest),
@@ -1890,12 +1886,26 @@ async def _run_async(
         cost=cost_summary,
         wall_clock_s=time.monotonic() - run_start,
         accumulated_duration_s=accumulated,
-        candidates_path=candidates_path,
-        num_candidates=len(report.candidates),
+        candidates_path=str(config.output_folder / "index.md"),
+        num_candidates=num_candidates,
         module_status=counts,
         notes=usage_notes + ["Gemini usage/cost excluded by design"],
     )
     P.write_run_manifest(paths, public_manifest)
+
+    renderer_result, manager_issues = _render_results(
+        artifacts_dir=paths.artifacts_dir,
+        output_folder=config.output_folder,
+    )
+
+    report = _build_report(
+        tree=tree,
+        context=input.context,
+        module_runs=module_runs,
+        manager_issues=manager_issues,
+        total_cost=total_cost,
+        manifest=manifest,
+    )
     _copy_public_manifest_to_output(
         paths=paths, output_folder=config.output_folder
     )

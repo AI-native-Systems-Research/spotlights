@@ -16,6 +16,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from spotlights_engine.costing.manifest import RunManifest
 from spotlights_engine.results_renderer.aggregator import (
     IndexRow,
     ModulePageView,
@@ -80,6 +81,7 @@ def emit(
         repository=loaded.project_tree.repository,
         manifest=loaded.manifest,
         context=loaded.context,
+        run_manifest=loaded.run_manifest,
         rows=rows,
         warnings=warnings,
     )
@@ -139,6 +141,7 @@ def _render_index(
     repository: Repository,
     manifest: dict[str, Any],
     context: SpotlightContext | None,
+    run_manifest: RunManifest | None,
     rows: list[IndexRow],
     warnings: list[str],
 ) -> str:
@@ -217,6 +220,8 @@ def _render_index(
             )
     lines.append("")
 
+    lines.extend(_render_run_manifest(run_manifest))
+
     if warnings:
         lines.append("## Renderer warnings")
         lines.append("")
@@ -225,6 +230,97 @@ def _render_index(
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _sha_cell(sha: str) -> str:
+    """A real commit SHA in backticks; a missing one as an italic placeholder
+    (outside code formatting so it reads as absent, not as a literal string)."""
+    return f"`{sha}`" if sha else "_(unknown)_"
+
+
+def _render_run_manifest(rm: RunManifest | None) -> list[str]:
+    """The `## Run manifest` section: provenance, cost/usage, timing, notes.
+
+    Every value is read straight off the persisted `RunManifest`; nothing is
+    recomputed here, so the page and the JSON always agree. A `None` manifest
+    (pre-upgrade or unreadable run) still renders the heading with a placeholder
+    so the section is discoverable.
+    """
+    lines: list[str] = ["## Run manifest", ""]
+    if rm is None:
+        lines.append("_(run manifest unavailable for this run)_")
+        lines.append("")
+        return lines
+
+    repo_url = rm.target.repo_url or "_(unknown)_"
+    lines.append(f"- **Run id:** `{rm.run_id}`")
+    lines.append(f"- **Date:** {rm.date}")
+    lines.append(f"- **Target repo:** {repo_url}")
+    lines.append(f"- **Target commit:** {_sha_cell(rm.target.commit_sha)}")
+    lines.append(
+        f"- **Spotlights commit:** {_sha_cell(rm.spotlights.commit_sha)}"
+    )
+    lines.append(f"- **Pipeline:** {rm.spotlights.pipeline}")
+    lines.append(f"- **Candidates:** {rm.outputs.num_candidates}")
+    status = rm.outputs.module_status
+    lines.append(
+        "- **Module status:** "
+        + ", ".join(
+            f"{name}: {status.get(name, 0)}"
+            for name in ("SUCCEEDED", "DEGRADED", "FAILED", "SKIPPED")
+        )
+    )
+    lines.append("")
+
+    lines.append("### Cost & usage")
+    lines.append("")
+    lines.append(
+        f"- **Total cost (USD):** ${rm.cost.amount_usd:.4f}  "
+        f"_(source: {rm.cost.source})_"
+    )
+    lines.append(f"- **Total tokens:** {rm.total_tokens}")
+    lines.append(f"- **Wall clock (s):** {rm.timing.wall_clock_s:.1f}")
+    lines.append(
+        f"- **Accumulated duration (s):** "
+        f"{rm.timing.accumulated_duration_s:.1f}"
+    )
+    lines.append(f"- **API time (s):** {rm.timing.api_time_s:.1f}")
+    lines.append("")
+
+    if not rm.models_used:
+        lines.append("_(no model usage captured)_")
+        lines.append("")
+    else:
+        lines.append(
+            "| Model | Provider | Role | Input | Output | Cache read | "
+            "Cache create |"
+        )
+        lines.append("|---|---|---|---:|---:|---:|---:|")
+        for m in rm.models_used:
+            lines.append(
+                f"| {_escape_table_cell(m.model)} "
+                f"| {_escape_table_cell(m.provider)} "
+                f"| {_escape_table_cell(m.role)} "
+                f"| {m.usage.input} "
+                f"| {m.usage.output} "
+                f"| {m.usage.cache_read} "
+                f"| {m.usage.cache_create} |"
+            )
+        lines.append("")
+
+    lines.append("### Notes")
+    lines.append("")
+    note_parts = [
+        part for part in (rm.cost.rate_note, rm.notes) if part
+    ]
+    if note_parts:
+        for part in note_parts:
+            lines.append(f"- {part}")
+    else:
+        lines.append("_(none)_")
+    lines.append("")
+
+    return lines
 
 
 # ---------------------------------------------------------------------------

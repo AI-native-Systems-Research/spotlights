@@ -13,8 +13,11 @@ from spotlights_engine.results_renderer.api import (
     render,
 )
 from spotlights_engine.results_renderer.errors import RendererSetupError
-
-from tests.unit.results_renderer._fixtures import make_full_run
+from tests.unit.results_renderer._fixtures import (
+    make_full_run,
+    make_run_manifest,
+    write_run_manifest,
+)
 
 
 def test_render_writes_index_and_module_pages(tmp_path: Path) -> None:
@@ -103,6 +106,124 @@ def test_module_page_contents(tmp_path: Path) -> None:
     kernels_page = (output / "modules" / "kernels.md").read_text()
     assert "## Issues" in kernels_page
     assert "rate limited briefly" in kernels_page
+
+
+def test_run_manifest_section_rendered(tmp_path: Path) -> None:
+    artifacts = tmp_path / "artifacts"
+    output = tmp_path / "output"
+    artifacts.mkdir()
+    paths, _ = make_full_run(artifacts)
+    write_run_manifest(
+        paths,
+        make_run_manifest(
+            notes="unpriced models excluded from cost: gemini-2.5-pro"
+        ),
+    )
+
+    result = render(RendererInput(artifacts_dir=artifacts, output_folder=output))
+    text = result.index_path.read_text()
+
+    assert "## Run manifest" in text
+    assert "- **Run id:** `run-abc123`" in text
+    assert "https://github.com/acme/demo" in text
+    assert "`deadbeef`" in text  # target commit
+    assert "`cafef00d`" in text  # spotlights commit
+    assert "- **Candidates:** 4" in text
+    assert "SUCCEEDED: 1, DEGRADED: 1, FAILED: 0, SKIPPED: 0" in text
+
+    # Cost & usage: 4-decimal cost, tokens, both model rows.
+    assert "$0.1234" in text
+    assert "**Total tokens:** 4650" in text
+    assert "| claude-opus-4-8 | anthropic | deep_research | 1000 | 2000 | 300 | 50 |" in text
+    assert "| gpt-5-codex | openai | agent_proposals | 500 | 800 | 0 | 0 |" in text
+
+    # Notes travel with the number.
+    assert "### Notes" in text
+    assert "unpriced models excluded from cost: gemini-2.5-pro" in text
+
+    # Section sits before Renderer warnings (none here, so just after Modules).
+    assert text.index("## Modules") < text.index("## Run manifest")
+
+
+def test_run_manifest_timing_fields_distinct(tmp_path: Path) -> None:
+    """Resume-after-crash: wall_clock and accumulated differ; both must show."""
+    artifacts = tmp_path / "artifacts"
+    output = tmp_path / "output"
+    artifacts.mkdir()
+    paths, _ = make_full_run(artifacts)
+    write_run_manifest(
+        paths, make_run_manifest(wall_clock_s=12.0, accumulated_duration_s=340.0)
+    )
+
+    text = render(
+        RendererInput(artifacts_dir=artifacts, output_folder=output)
+    ).index_path.read_text()
+
+    assert "- **Wall clock (s):** 12.0" in text
+    assert "- **Accumulated duration (s):** 340.0" in text
+
+
+def test_run_manifest_missing_shows_placeholder_no_warning(tmp_path: Path) -> None:
+    artifacts = tmp_path / "artifacts"
+    output = tmp_path / "output"
+    artifacts.mkdir()
+    make_full_run(artifacts)  # no run_manifest.json written
+
+    result = render(RendererInput(artifacts_dir=artifacts, output_folder=output))
+    text = result.index_path.read_text()
+
+    assert "## Run manifest" in text
+    assert "_(run manifest unavailable for this run)_" in text
+    assert not any("run_manifest" in w for w in result.warnings)
+
+
+def test_run_manifest_malformed_records_warning(tmp_path: Path) -> None:
+    artifacts = tmp_path / "artifacts"
+    output = tmp_path / "output"
+    artifacts.mkdir()
+    paths, _ = make_full_run(artifacts)
+    paths.run_manifest_path.write_text("{not valid json", encoding="utf-8")
+
+    result = render(RendererInput(artifacts_dir=artifacts, output_folder=output))
+    text = result.index_path.read_text()
+
+    assert "_(run manifest unavailable for this run)_" in text
+    assert any("run_manifest.json did not validate" in w for w in result.warnings)
+
+
+def test_run_manifest_no_models_placeholder(tmp_path: Path) -> None:
+    artifacts = tmp_path / "artifacts"
+    output = tmp_path / "output"
+    artifacts.mkdir()
+    paths, _ = make_full_run(artifacts)
+    write_run_manifest(paths, make_run_manifest(with_models=False))
+
+    text = render(
+        RendererInput(artifacts_dir=artifacts, output_folder=output)
+    ).index_path.read_text()
+
+    assert "_(no model usage captured)_" in text
+
+
+def test_run_manifest_rate_note_and_notes_both_shown(tmp_path: Path) -> None:
+    artifacts = tmp_path / "artifacts"
+    output = tmp_path / "output"
+    artifacts.mkdir()
+    paths, _ = make_full_run(artifacts)
+    write_run_manifest(
+        paths,
+        make_run_manifest(
+            rate_note="partial pricing: 1 of 2 models priced",
+            notes="Gemini usage/cost excluded by design",
+        ),
+    )
+
+    text = render(
+        RendererInput(artifacts_dir=artifacts, output_folder=output)
+    ).index_path.read_text()
+
+    assert "partial pricing: 1 of 2 models priced" in text
+    assert "Gemini usage/cost excluded by design" in text
 
 
 def test_overwrite_false_on_nonempty_raises(tmp_path: Path) -> None:
