@@ -56,7 +56,7 @@ Two layers of evidence back a WORKS verdict:
      search returned fresh data, so this proves the tool returned usable
      results rather than the model hallucinating. A proven invocation whose
      answer omits the ground truth is reported SUSPECT (disable with
-     --no-ground-truth). Grounding applies to the codex, opencode and
+     --no-ground-truth). Grounding applies to the claude, codex, opencode and
      antigravity probes.
 
 Usage:
@@ -198,13 +198,25 @@ def _prompt(project: str) -> str:
     return _PROMPT_TEMPLATE.format(project=project, sentinel=SENTINEL)
 
 
-def probe_claude(project: str, *, claude_bin: str = "claude") -> ProbeResult:
+def probe_claude(
+    project: str,
+    *,
+    claude_bin: str = "claude",
+    expected_version: str | None = None,
+) -> ProbeResult:
     """Invoke `claude -p` with WebSearch allowed and inspect the event stream.
 
     Uses streaming/verbose JSON so tool-use blocks are visible; compact
     `--output-format json` may expose only the final result + metadata, not the
     `server_tool_use` / `web_search` blocks we need to see.
-    """
+
+    When ``expected_version`` (independent PyPI ground truth) is supplied, WORKS
+    additionally requires that exact version to appear in the answer — proof the
+    hosted search returned *live data the model used*, not just that the tool
+    fired. A proven invocation whose answer omits the ground truth is reported
+    SUSPECT (the gateway may have accepted the call but returned nothing, leaving
+    the model to answer from memory). This mirrors the codex/opencode/antigravity
+    probes."""
     prompt = _prompt(project)
     cmd = [
         claude_bin,
@@ -247,8 +259,21 @@ def probe_claude(project: str, *, claude_bin: str = "claude") -> ProbeResult:
     sentinel_seen = SENTINEL in transcript
 
     if tool_used and not sentinel_seen:
+        if expected_version is None:
+            return ProbeResult(
+                "claude", "WORKS", "web_search / server_tool_use block present in stream"
+            )
+        if expected_version in transcript:
+            return ProbeResult(
+                "claude",
+                "WORKS",
+                f"web_search block present and answer cites live version {expected_version}",
+            )
         return ProbeResult(
-            "claude", "WORKS", "web_search / server_tool_use block present in stream"
+            "claude",
+            "SUSPECT",
+            f"web_search block present but answer omits ground-truth version "
+            f"{expected_version} — search may have returned nothing",
         )
     if sentinel_seen:
         return ProbeResult(
@@ -882,7 +907,9 @@ def main(argv: list[str] | None = None) -> int:
     results: list[ProbeResult] = []
     if args.only in (None, "claude"):
         print("[claude] probing WebSearch …")
-        results.append(probe_claude(args.project))
+        results.append(
+            probe_claude(args.project, expected_version=expected_version)
+        )
     if args.only in (None, "codex"):
         print("[codex] probing --search …")
         results.append(
