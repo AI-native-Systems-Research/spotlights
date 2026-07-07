@@ -55,7 +55,7 @@ def load_rates(path: Path | None = None) -> dict[str, ModelRate]:
     """Load the rate table keyed by `"provider:model"`.
 
     Precedence: explicit `path` > `SPOTLIGHTS_RATES_FILE` env var > the
-    checked-in placeholder table. Keys starting with `_` are comments.
+    checked-in public default table. Keys starting with `_` are comments.
     """
     if path is None:
         env_path = os.environ.get(RATES_ENV_VAR)

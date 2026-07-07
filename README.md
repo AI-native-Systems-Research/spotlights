@@ -297,6 +297,7 @@ spotlights-out/
       <symbol-slug>__<candidate-id>.md   # full per-candidate write-up + proposals
 artifacts/
   spotlights_manager/               # checkpoints, raw transcripts (resumable)
+    run_manifest.json               # provenance, token usage, and rate-table cost
 ```
 
 `--include` accepts one or more slash-form leaf qualified names. Repeat the flag or pass several values after a single flag:
@@ -309,6 +310,55 @@ spotlights-engine --include vllm/v1/kv_offload --include vllm/v1/attention/paged
 ### Example output
 
 A sample run on this subset is checked in under `examples/vllm_subset/`: browse the rendered `index.md` and per-module pages under `modules/`, or inspect the raw `result.json`.
+
+### Run manifest and rate-table cost
+
+Each completed manager run writes a public run manifest to:
+
+```text
+<artifacts-dir>/spotlights_manager/run_manifest.json
+<output-folder>/run_manifest.json
+```
+
+The manifest records the target repo URL and commit, the Spotlights engine commit, the objective, grouped per-model token usage, wall/API timing, output counts, and cost. Usage is captured from the Claude and Codex CLI streams as durable per-invocation records under each module's artifacts directory, then aggregated from disk when the run finishes or resumes.
+
+Cost is computed from token counts and a rate table. The engine never uses CLI-reported `total_cost_usd` for billing, because those values can reflect provider list price rather than your LiteLLM contract. The checked-in table at `src/spotlights_engine/costing/rates.json` contains public default rates for the current Claude/Codex models. Point `SPOTLIGHTS_RATES_FILE` at your contracted LiteLLM table before running if your billing differs:
+
+```bash
+export SPOTLIGHTS_RATES_FILE="$HOME/.config/spotlights/rates.json"
+
+spotlights-engine \
+  --repo ../vllm \
+  --include vllm/v1/kv_offload \
+  --objective "reduce the median TTFT and median TPOT (Time Per Output Token)" \
+  --output-folder ./spotlights-out \
+  --artifacts-dir ./artifacts
+```
+
+Rate files are JSON keyed by `"provider:model"`:
+
+```json
+{
+  "anthropic:claude-opus-4-8": {
+    "input": 0.000005,
+    "output": 0.000025,
+    "cache_read": 0.0000005,
+    "cache_create": 0.00000625,
+    "unit": "per_token",
+    "note": "Public Anthropic API rate as of 2026-07-06: Claude Opus 4.8 $5/MTok input, $25/MTok output, $0.50/MTok cache read, $6.25/MTok 5m cache write. Override for contracted LiteLLM or 1h cache writes."
+  },
+  "openai:gpt-5.5": {
+    "input": 0.000005,
+    "output": 0.00003,
+    "cache_read": 0.0000005,
+    "cache_create": 0.0,
+    "unit": "per_token",
+    "note": "Reported OpenAI API rate as of 2026-07-06: GPT-5.5 $5/MTok input, $30/MTok output. Cached input set to $0.50/MTok (10% of input); Codex has no cache-create bucket. Override for contracted LiteLLM."
+  }
+}
+```
+
+If a model is missing from the table, Spotlights still writes the manifest and prices the models it can. The manifest's `cost.rate_note` and `notes` fields list any unpriced models so partial cost is visible.
 
 ## Telemetry-driven discovery (preview)
 

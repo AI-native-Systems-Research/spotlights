@@ -1,19 +1,19 @@
 {
-  "_note": "Contracted per-token rates billed through the IBM LiteLLM proxy. Values are PLACEHOLDERS (0.0) until ops supplies the contract numbers — populating them is a data-only change. Never substitute CLI-reported list prices. Override the whole table via the SPOTLIGHTS_RATES_FILE env var to keep contract terms out of git.",
+  "_note": "Default per-token public API rates for the in-scope Claude/Codex models. Override the whole table via SPOTLIGHTS_RATES_FILE when billing through a LiteLLM proxy or a private contract. Never substitute CLI-reported total_cost_usd.",
   "anthropic:claude-opus-4-8": {
-    "input": 0.0,
-    "output": 0.0,
-    "cache_read": 0.0,
-    "cache_create": 0.0,
+    "input": 0.000005,
+    "output": 0.000025,
+    "cache_read": 0.0000005,
+    "cache_create": 0.00000625,
     "unit": "per_token",
-    "note": "IBM LiteLLM contracted rate, effective YYYY-MM-DD (placeholder)"
+    "note": "Public Anthropic API rate as of 2026-07-06: Claude Opus 4.8 $5/MTok input, $25/MTok output, $0.50/MTok cache read, $6.25/MTok 5m cache write. Override for contracted LiteLLM or 1h cache writes."
   },
   "openai:gpt-5.5": {
-    "input": 0.0,
-    "output": 0.0,
-    "cache_read": 0.0,
+    "input": 0.000005,
+    "output": 0.00003,
+    "cache_read": 0.0000005,
     "cache_create": 0.0,
     "unit": "per_token",
-    "note": "IBM LiteLLM contracted rate, effective YYYY-MM-DD (placeholder)"
+    "note": "Reported OpenAI API rate as of 2026-07-06: GPT-5.5 $5/MTok input, $30/MTok output. Cached input set to $0.50/MTok (10% of input); Codex has no cache-create bucket. Override for contracted LiteLLM."
   }
 }
