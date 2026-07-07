@@ -155,6 +155,7 @@ def test_run_manifest_groups_models_and_totals_tokens() -> None:
         records=records,
         cost=summary,
         wall_clock_s=12.0,
+        accumulated_duration_s=99.5,
         candidates_path="/tmp/out/index.md",
         num_candidates=4,
         module_status={"SUCCEEDED": 1},
@@ -163,6 +164,28 @@ def test_run_manifest_groups_models_and_totals_tokens() -> None:
 
     assert manifest.total_tokens == 35
     assert manifest.timing.api_time_s == 3.25
+    assert manifest.timing.wall_clock_s == 12.0
+    assert manifest.timing.accumulated_duration_s == 99.5
     assert manifest.models_used[0].usage.input == 17
     assert manifest.models_used[0].usage.output == 13
     assert manifest.cost.amount_usd == 35.0
+
+
+def test_run_manifest_accumulated_duration_defaults_to_zero() -> None:
+    summary = compute_cost([], {})
+    manifest = build_run_manifest(
+        run_id="run-1",
+        date="2026-07-06T00:00:00Z",
+        objective="find spots",
+        provenance={},
+        config_fingerprint={},
+        records=[],
+        cost=summary,
+        wall_clock_s=1.0,
+        candidates_path="/tmp/out/index.md",
+        num_candidates=0,
+        module_status={},
+        notes=[],
+    )
+
+    assert manifest.timing.accumulated_duration_s == 0.0

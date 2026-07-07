@@ -57,6 +57,7 @@ class RunManifestTiming(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     wall_clock_s: float = 0.0
+    accumulated_duration_s: float = 0.0
     api_time_s: float = 0.0
 
 
@@ -110,6 +111,7 @@ def build_run_manifest(
     records: list[UsageRecord],
     cost: CostSummary,
     wall_clock_s: float,
+    accumulated_duration_s: float = 0.0,
     candidates_path: str,
     num_candidates: int,
     module_status: dict[str, int],
@@ -150,6 +152,7 @@ def build_run_manifest(
         ),
         timing=RunManifestTiming(
             wall_clock_s=wall_clock_s,
+            accumulated_duration_s=accumulated_duration_s,
             api_time_s=sum(record.api_time_s or 0.0 for record in records),
         ),
         outputs=RunManifestOutputs(

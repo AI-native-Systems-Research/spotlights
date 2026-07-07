@@ -1626,6 +1626,38 @@ def _read_all_usage_records(
     return records, notes
 
 
+def _accumulated_duration_s(
+    manifest: dict[str, Any],
+    per_module_telemetry: dict[str, ModuleTelemetry],
+) -> float:
+    """Sum the durably-persisted per-step durations for completed work.
+
+    Unlike `wall_clock_s` (which resets on every process start and so only
+    measures the resuming leg after a crash), this reconstructs cumulative
+    completed-step time-on-task from the on-disk sidecars re-read on resume.
+    Each `None` term (step never ran / skipped) counts as 0.0. With
+    `max_parallel_sessions > 1` the sum can exceed real elapsed time — that is
+    intentional; see design/accumulated_duration.md.
+    """
+
+    def _f(x: object) -> float:
+        if isinstance(x, (int, float)) and not isinstance(x, bool):
+            return float(x)
+        return 0.0
+
+    extractor = manifest.get("extractor")
+    extractor_duration = (
+        extractor.get("duration_s") if isinstance(extractor, dict) else None
+    )
+    total = _f(extractor_duration)
+    for tel in per_module_telemetry.values():
+        total += _f(tel.discovery_total_duration_s)
+        total += _f(tel.deep_research_duration_s)
+        total += _f(tel.proposal_from_finding_duration_s)
+        total += _f(tel.agent_proposals_duration_s)
+    return total
+
+
 def _copy_public_manifest_to_output(
     *, paths: ManagerPaths, output_folder: Path
 ) -> None:
@@ -1824,14 +1856,16 @@ async def _run_async(
     cost_summary = compute_cost(usage_records, load_rates())
     total_cost = cost_summary.amount_usd
     cost_str = f", rate-table cost ${total_cost:.2f}" if total_cost else ""
+    accumulated = _accumulated_duration_s(manifest, per_module_telemetry)
     _log.info(
         "run complete: %d succeeded / %d degraded / %d failed / %d skipped "
-        "in %.1fs%s",
+        "in %.1fs (accumulated completed-step time %.1fs)%s",
         counts["SUCCEEDED"],
         counts["DEGRADED"],
         counts["FAILED"],
         counts["SKIPPED"],
         time.monotonic() - run_start,
+        accumulated,
         cost_str,
     )
 
@@ -1855,6 +1889,7 @@ async def _run_async(
         records=usage_records,
         cost=cost_summary,
         wall_clock_s=time.monotonic() - run_start,
+        accumulated_duration_s=accumulated,
         candidates_path=candidates_path,
         num_candidates=len(report.candidates),
         module_status=counts,
