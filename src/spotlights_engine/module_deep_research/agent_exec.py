@@ -8,6 +8,8 @@ from typing import Protocol
 
 from pydantic import BaseModel, ConfigDict
 
+from spotlights_engine.costing.usage import AgentUsage
+
 WINDOWS_SUBPROCESS_NEEDS_SHIM_RESOLUTION = os.name == "nt"
 
 
@@ -21,6 +23,9 @@ class AgentExecResult(BaseModel):
     stdout: str
     stderr: str
     final_message: str | None = None
+    # Token usage parsed from the CLI output while the raw stream is still
+    # available; None when the runner emitted no parseable usage (e.g. gemini).
+    usage: AgentUsage | None = None
 
     @property
     def ok(self) -> bool:

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from spotlights_engine.schemas.pipeline import SpotlightReport
 from spotlights_engine.spotlights_manager import (
     ModuleFilter,
     SpotlightsManagerConfig,
@@ -13,8 +14,6 @@ from spotlights_engine.spotlights_manager import (
     run_with_telemetry,
 )
 from spotlights_engine.spotlights_manager import orchestrator as orch
-from spotlights_engine.schemas.pipeline import SpotlightReport
-
 from tests.unit.spotlights_manager._fakes import (
     make_discovery_result,
     make_extractor_result,
@@ -83,6 +82,30 @@ def test_manager_renders_index_md(
     assert (output / "index.md").exists()
     assert (output / "modules" / "v1_kv_offload.md").exists()
     assert result.manager_issues == []
+
+
+def test_manager_index_includes_run_manifest_section(
+    monkeypatch, repo: Path, artifacts: Path, output: Path
+) -> None:
+    """Guards the orchestrator sequencing change: the public manifest is
+    written before the renderer runs, so the current run's manifest section
+    appears in the produced index.md."""
+    _patch_pipeline(monkeypatch)
+
+    cfg = SpotlightsManagerConfig(
+        artifacts_dir=artifacts,
+        output_folder=output,
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
+    )
+    run_with_telemetry(make_input(repo), config=cfg)
+
+    text = (output / "index.md").read_text()
+    assert "## Run manifest" in text
+    # Placeholder must NOT appear — the manifest was available at render time.
+    assert "_(run manifest unavailable for this run)_" not in text
+    assert "### Cost & usage" in text
+    # The public JSON is also copied next to index.md.
+    assert (output / "run_manifest.json").exists()
 
 
 def test_run_returns_spotlight_report(

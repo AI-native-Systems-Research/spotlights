@@ -16,9 +16,11 @@ from spotlights_engine.spotlights_manager import (
 from spotlights_engine.spotlights_manager import orchestrator as orch
 from spotlights_engine.spotlights_manager import persistence as P
 from tests.unit.spotlights_manager._fakes import (
+    make_agent_proposals_result,
     make_discovery_result,
     make_extractor_result,
     make_input,
+    make_proposal_from_finding_result,
     make_research_output,
     make_tree,
     patch_agent_proposals,
@@ -40,7 +42,15 @@ def artifacts(tmp_path: Path) -> Path:
     return a
 
 
-def _wire_step_doubles(monkeypatch, *, tree, discover_calls, research_calls) -> None:
+def _wire_step_doubles(
+    monkeypatch,
+    *,
+    tree,
+    discover_calls,
+    research_calls,
+    proposal_calls: list[str] | None = None,
+    agent_calls: list[str] | None = None,
+) -> None:
     monkeypatch.setattr(
         orch,
         "extract_with_telemetry",
@@ -57,8 +67,57 @@ def _wire_step_doubles(monkeypatch, *, tree, discover_calls, research_calls) -> 
 
     monkeypatch.setattr(orch, "discover", _discover)
     monkeypatch.setattr(orch, "research_module", _research)
-    patch_proposal_from_finding(monkeypatch, orch)
-    patch_agent_proposals(monkeypatch, orch)
+    if proposal_calls is None:
+        patch_proposal_from_finding(monkeypatch, orch)
+    else:
+
+        def _step4(
+            inp,
+            *,
+            config,
+            runner=None,
+            candidate_states=None,
+            proposal_id_start=1,
+            segment=None,
+        ):
+            qn = inp.candidates.module_qualified_name
+            proposal_calls.append(qn)
+            return make_proposal_from_finding_result(
+                qn,
+                n_candidates=len(inp.candidates.candidates),
+            )
+
+        monkeypatch.setattr(orch, "create_proposals_with_telemetry", _step4)
+
+    if agent_calls is None:
+        patch_agent_proposals(monkeypatch, orch)
+    else:
+
+        def _step5(
+            inp,
+            *,
+            config,
+            claude_runner=None,
+            codex_runner=None,
+            candidate_states=None,
+            proposal_id_start=1,
+            segment=None,
+        ):
+            qn = inp.candidates.module_qualified_name
+            agent_calls.append(qn)
+            return make_agent_proposals_result(inp.candidates)
+
+        monkeypatch.setattr(orch, "create_agent_proposals_with_telemetry", _step5)
+
+
+def _load_checkpoint(mp: P.ModulePaths) -> P.ModuleCheckpoint:
+    return P.ModuleCheckpoint.model_validate_json(
+        mp.status_path.read_text(encoding="utf-8")
+    )
+
+
+def _write_checkpoint(mp: P.ModulePaths, cp: P.ModuleCheckpoint, **updates) -> None:
+    P.write_checkpoint(mp, cp.model_copy(update=updates))
 
 
 def test_resume_skips_completed_module(monkeypatch, repo: Path, artifacts: Path) -> None:
@@ -87,6 +146,229 @@ def test_resume_skips_completed_module(monkeypatch, repo: Path, artifacts: Path)
     run_with_telemetry(make_input(repo), config=cfg)
     assert discover_calls == []
     assert research_calls == []
+
+
+def test_resume_uses_extractor_sidecars_when_manifest_not_completed(
+    monkeypatch, repo: Path, artifacts: Path
+) -> None:
+    tree = make_tree()
+    discover_calls: list[str] = []
+    research_calls: list[str] = []
+    _wire_step_doubles(
+        monkeypatch,
+        tree=tree,
+        discover_calls=discover_calls,
+        research_calls=research_calls,
+    )
+
+    cfg = SpotlightsManagerConfig(
+        artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
+    )
+    run_with_telemetry(make_input(repo), config=cfg)
+
+    paths = P.ManagerPaths(artifacts)
+    manifest = P.read_manifest(paths)
+    assert manifest is not None
+    manifest["extractor"] = {"completed": False, "duration_s": None}
+    P.write_manifest(paths, manifest)
+
+    def _fail_extractor(inp, *, config=None):  # pragma: no cover - asserted not called
+        raise AssertionError("extractor should resume from sidecars")
+
+    monkeypatch.setattr(orch, "extract_with_telemetry", _fail_extractor)
+    discover_calls.clear()
+    research_calls.clear()
+    run_with_telemetry(make_input(repo), config=cfg)
+
+    repaired = P.read_manifest(paths)
+    assert repaired is not None
+    assert repaired["extractor"]["completed"] is True
+    assert discover_calls == []
+    assert research_calls == []
+
+
+def test_resume_continues_from_candidates_sidecar_when_checkpoint_pending(
+    monkeypatch, repo: Path, artifacts: Path
+) -> None:
+    tree = make_tree()
+    discover_calls: list[str] = []
+    research_calls: list[str] = []
+    _wire_step_doubles(
+        monkeypatch,
+        tree=tree,
+        discover_calls=discover_calls,
+        research_calls=research_calls,
+    )
+
+    cfg = SpotlightsManagerConfig(
+        artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
+    )
+    run_with_telemetry(make_input(repo), config=cfg)
+
+    paths = P.ManagerPaths(artifacts)
+    mp = paths.for_module("v1/kv_offload")
+    P.clear_deep_research_artifacts(mp)
+    P.clear_proposal_from_finding_artifacts(mp)
+    P.clear_agent_proposals_artifacts(mp)
+    _write_checkpoint(
+        mp,
+        _load_checkpoint(mp),
+        status="PENDING",
+        last_step=None,
+        issues=[],
+    )
+
+    discover_calls.clear()
+    research_calls.clear()
+    result = run_with_telemetry(make_input(repo), config=cfg)
+
+    assert discover_calls == []
+    assert research_calls == ["v1/kv_offload"]
+    assert result.module_runs["v1/kv_offload"].status == "SUCCEEDED"
+
+
+def test_resume_continues_from_research_sidecar_when_checkpoint_discovered(
+    monkeypatch, repo: Path, artifacts: Path
+) -> None:
+    tree = make_tree()
+    discover_calls: list[str] = []
+    research_calls: list[str] = []
+    proposal_calls: list[str] = []
+    _wire_step_doubles(
+        monkeypatch,
+        tree=tree,
+        discover_calls=discover_calls,
+        research_calls=research_calls,
+        proposal_calls=proposal_calls,
+    )
+
+    cfg = SpotlightsManagerConfig(
+        artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
+    )
+    run_with_telemetry(make_input(repo), config=cfg)
+
+    paths = P.ManagerPaths(artifacts)
+    mp = paths.for_module("v1/kv_offload")
+    P.clear_proposal_from_finding_artifacts(mp)
+    P.clear_agent_proposals_artifacts(mp)
+    _write_checkpoint(
+        mp,
+        _load_checkpoint(mp),
+        status="DISCOVERED",
+        last_step="candidate_discovery",
+        issues=[],
+    )
+
+    discover_calls.clear()
+    research_calls.clear()
+    proposal_calls.clear()
+    result = run_with_telemetry(make_input(repo), config=cfg)
+
+    assert discover_calls == []
+    assert research_calls == []
+    assert proposal_calls == ["v1/kv_offload"]
+    assert result.module_runs["v1/kv_offload"].status == "SUCCEEDED"
+
+
+def test_resume_continues_from_proposal_sidecar_when_checkpoint_deep_researched(
+    monkeypatch, repo: Path, artifacts: Path
+) -> None:
+    tree = make_tree()
+    discover_calls: list[str] = []
+    research_calls: list[str] = []
+    proposal_calls: list[str] = []
+    agent_calls: list[str] = []
+    _wire_step_doubles(
+        monkeypatch,
+        tree=tree,
+        discover_calls=discover_calls,
+        research_calls=research_calls,
+        proposal_calls=proposal_calls,
+        agent_calls=agent_calls,
+    )
+
+    cfg = SpotlightsManagerConfig(
+        artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
+    )
+    run_with_telemetry(make_input(repo), config=cfg)
+
+    paths = P.ManagerPaths(artifacts)
+    mp = paths.for_module("v1/kv_offload")
+    P.clear_agent_proposals_artifacts(mp)
+    _write_checkpoint(
+        mp,
+        _load_checkpoint(mp),
+        status="DEEP_RESEARCHED",
+        last_step="module_deep_research",
+        issues=[],
+    )
+
+    discover_calls.clear()
+    research_calls.clear()
+    proposal_calls.clear()
+    agent_calls.clear()
+    result = run_with_telemetry(make_input(repo), config=cfg)
+
+    assert discover_calls == []
+    assert research_calls == []
+    assert proposal_calls == []
+    assert agent_calls == ["v1/kv_offload"]
+    assert result.module_runs["v1/kv_offload"].status == "SUCCEEDED"
+
+
+def test_resume_finalizes_from_agent_sidecar_when_checkpoint_finding_proposals_created(
+    monkeypatch, repo: Path, artifacts: Path
+) -> None:
+    tree = make_tree()
+    discover_calls: list[str] = []
+    research_calls: list[str] = []
+    proposal_calls: list[str] = []
+    agent_calls: list[str] = []
+    _wire_step_doubles(
+        monkeypatch,
+        tree=tree,
+        discover_calls=discover_calls,
+        research_calls=research_calls,
+        proposal_calls=proposal_calls,
+        agent_calls=agent_calls,
+    )
+
+    cfg = SpotlightsManagerConfig(
+        artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
+    )
+    run_with_telemetry(make_input(repo), config=cfg)
+
+    paths = P.ManagerPaths(artifacts)
+    mp = paths.for_module("v1/kv_offload")
+    _write_checkpoint(
+        mp,
+        _load_checkpoint(mp),
+        status="FINDING_PROPOSALS_CREATED",
+        last_step="proposal_from_finding_creator",
+        issues=[],
+    )
+
+    discover_calls.clear()
+    research_calls.clear()
+    proposal_calls.clear()
+    agent_calls.clear()
+    result = run_with_telemetry(make_input(repo), config=cfg)
+
+    assert discover_calls == []
+    assert research_calls == []
+    assert proposal_calls == []
+    assert agent_calls == []
+    assert result.module_runs["v1/kv_offload"].status == "SUCCEEDED"
 
 
 def test_resume_reruns_only_step3_when_research_artifact_missing(

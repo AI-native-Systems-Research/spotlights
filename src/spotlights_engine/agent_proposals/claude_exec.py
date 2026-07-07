@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from spotlights_engine.agent_proposals.errors import AgentProposalsSetupError
-
+from spotlights_engine.costing.usage import AgentUsage, claude_usage_from_stream
 
 _DROP_EXACT = frozenset(
     {
@@ -57,6 +57,7 @@ class CandidateAgentRunResult:
     error: str | None = None
     stdout: bytes = b""
     stderr: bytes = b""
+    usage: AgentUsage | None = None
 
 
 def ensure_claude_available() -> None:
@@ -109,14 +110,17 @@ def run_candidate_claude(
         )
     except subprocess.TimeoutExpired as exc:
         duration = time.monotonic() - start
+        stdout = exc.stdout or b""
         return CandidateAgentRunResult(
             candidate_id=candidate_id,
             duration_s=duration,
             error=f"claude timed out after {duration:.1f}s",
-            stdout=exc.stdout or b"",
+            stdout=stdout,
             stderr=exc.stderr or b"",
+            usage=claude_usage_from_stream(stdout),
         )
     duration = time.monotonic() - start
+    usage = claude_usage_from_stream(completed.stdout or b"")
 
     if completed.returncode != 0:
         stderr_tail = (completed.stderr or b"")[-500:].decode("utf-8", "replace")
@@ -126,6 +130,7 @@ def run_candidate_claude(
             error=f"claude exit={completed.returncode}: stderr={stderr_tail!r}",
             stdout=completed.stdout or b"",
             stderr=completed.stderr or b"",
+            usage=usage,
         )
 
     try:
@@ -137,6 +142,7 @@ def run_candidate_claude(
             error=str(exc),
             stdout=completed.stdout or b"",
             stderr=completed.stderr or b"",
+            usage=usage,
         )
 
     if result_event is None:
@@ -146,6 +152,7 @@ def run_candidate_claude(
             error="claude stream-json had no terminal result event",
             stdout=completed.stdout or b"",
             stderr=completed.stderr or b"",
+            usage=usage,
         )
 
     structured = result_event.get("structured_output")
@@ -154,6 +161,7 @@ def run_candidate_claude(
             candidate_id=candidate_id,
             duration_s=duration,
             structured_output=structured,
+            usage=usage,
         )
 
     # Fallback: older CLI versions may put the JSON-encoded payload on `result`.
@@ -168,12 +176,14 @@ def run_candidate_claude(
                 error=f"claude result text not JSON: {exc}",
                 stdout=completed.stdout or b"",
                 stderr=completed.stderr or b"",
+                usage=usage,
             )
         if isinstance(parsed, (dict, list)):
             return CandidateAgentRunResult(
                 candidate_id=candidate_id,
                 duration_s=duration,
                 structured_output=parsed,
+                usage=usage,
             )
 
     return CandidateAgentRunResult(
@@ -182,6 +192,7 @@ def run_candidate_claude(
         error="claude produced no structured_output and no usable fallback text",
         stdout=completed.stdout or b"",
         stderr=completed.stderr or b"",
+        usage=usage,
     )
 
 

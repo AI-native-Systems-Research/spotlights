@@ -11,6 +11,16 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from spotlights_engine.costing.manifest import (
+    ModelUsed,
+    RunManifest,
+    RunManifestCost,
+    RunManifestOutputs,
+    RunManifestSpotlights,
+    RunManifestTarget,
+    RunManifestTiming,
+    UsageTotals,
+)
 from spotlights_engine.modules_extractor.agent import ExtractionInvocation
 from spotlights_engine.schemas.candidate import Candidate, Candidates
 from spotlights_engine.schemas.common import SpotlightContext, StepIssue
@@ -220,6 +230,70 @@ def write_module(
         )
 
 
+def make_run_manifest(
+    *,
+    wall_clock_s: float = 12.0,
+    accumulated_duration_s: float = 340.0,
+    rate_note: str = "",
+    notes: str = "",
+    with_models: bool = True,
+) -> RunManifest:
+    """A representative public run manifest for renderer-section tests."""
+    models = (
+        [
+            ModelUsed(
+                model="claude-opus-4-8",
+                provider="anthropic",
+                role="deep_research",
+                usage=UsageTotals(
+                    input=1000, output=2000, cache_read=300, cache_create=50
+                ),
+            ),
+            ModelUsed(
+                model="gpt-5-codex",
+                provider="openai",
+                role="agent_proposals",
+                usage=UsageTotals(input=500, output=800),
+            ),
+        ]
+        if with_models
+        else []
+    )
+    return RunManifest(
+        run_id="run-abc123",
+        date="2026-05-23T12:00:00+00:00",
+        target=RunManifestTarget(
+            repo_url="https://github.com/acme/demo",
+            commit_sha="deadbeef",
+            objective="reduce latency",
+        ),
+        spotlights=RunManifestSpotlights(
+            commit_sha="cafef00d", pipeline="deep-research"
+        ),
+        models_used=models,
+        total_tokens=4650,
+        cost=RunManifestCost(
+            amount_usd=0.1234, source="contracted-rate-table", rate_note=rate_note
+        ),
+        timing=RunManifestTiming(
+            wall_clock_s=wall_clock_s,
+            accumulated_duration_s=accumulated_duration_s,
+            api_time_s=8.5,
+        ),
+        outputs=RunManifestOutputs(
+            candidates_path="output/index.md",
+            num_candidates=4,
+            module_status={"SUCCEEDED": 1, "DEGRADED": 1},
+        ),
+        notes=notes,
+    )
+
+
+def write_run_manifest(paths: ManagerPaths, manifest: RunManifest) -> None:
+    paths.root.mkdir(parents=True, exist_ok=True)
+    P.write_run_manifest(paths, manifest)
+
+
 def make_full_run(
     artifacts_dir: Path,
     *,
@@ -312,8 +386,10 @@ __all__ = [
     "make_deep_proposal",
     "make_finding",
     "make_full_run",
+    "make_run_manifest",
     "make_tree",
     "write_extractor_outputs",
     "write_manifest_with_modules",
     "write_module",
+    "write_run_manifest",
 ]

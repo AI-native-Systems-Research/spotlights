@@ -67,6 +67,11 @@ def _build_argparser() -> argparse.ArgumentParser:
         help=f"Path to the target repo (default: {_DEFAULT_REPO}).",
     )
     p.add_argument(
+        "--repo-url",
+        default=None,
+        help="Canonical target repo URL for the public run manifest.",
+    )
+    p.add_argument(
         "--include",
         action="append",
         default=None,
@@ -333,6 +338,8 @@ def _build_input(args: argparse.Namespace) -> SpotlightsManagerInput:
         "repo_path": args.repo,
         "context": SpotlightContext(**context_kwargs),
     }
+    if args.repo_url:
+        input_kwargs["repo_url"] = args.repo_url
     if args.max_findings_per_module is not None:
         input_kwargs["max_findings_per_module"] = args.max_findings_per_module
     input_kwargs["include_candidate_hotspots"] = args.include_candidate_hotspots

@@ -62,9 +62,14 @@ class IterationTelemetry(BaseModel):
     agent: Literal["claude_code", "codex"]
     session_id: str | None = None
     duration_s: float
+    # CLI-reported cost — audit only; billing uses the contracted rate table.
     cost_usd: float | None = None
     input_tokens: int | None = None
     output_tokens: int | None = None
+    cache_read_tokens: int | None = None
+    cache_create_tokens: int | None = None
+    model: str | None = None
+    api_time_s: float | None = None
     candidate_count: int
     schema_retries: int = 0
     dropped_outside_module: int = 0

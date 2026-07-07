@@ -32,7 +32,10 @@ from spotlights_engine.candidate_discovery import (
     DiscoveryValidationError,
     discover,
 )
-from spotlights_engine.module_deep_research import research_module
+from spotlights_engine.costing.manifest import build_run_manifest
+from spotlights_engine.costing.rates import compute_cost, load_rates
+from spotlights_engine.costing.records import UsageRecord
+from spotlights_engine.module_deep_research import research_module_with_telemetry
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
 from spotlights_engine.modules_extractor import (
     ExtractorConfig,
@@ -88,10 +91,15 @@ from spotlights_engine.spotlights_manager.pipeline_state import (
     CandidateStateMap,
     state_map_for,
 )
+from spotlights_engine.spotlights_manager.provenance import collect_provenance
 from spotlights_engine.utils.id_helpers import module_segment, slug_for
 from spotlights_engine.utils.schema_compat import proposals_from
 
 _log = logging.getLogger(__name__)
+
+# Keep the historical orchestrator monkeypatch surface while using the new
+# runtime-rich entrypoint by default.
+research_module = research_module_with_telemetry
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +164,7 @@ def _build_report(
         run_id=_run_id_from_manifest(manifest),
         started_at=manifest.get("created_at") or _now_iso(),
         finished_at=_now_iso(),
-        cost_usd=total_cost or None,
+        cost_usd=total_cost,
     )
 
     return SpotlightReport(
@@ -224,9 +232,17 @@ def _build_deep_research_options(
     `output_last_message`. Never mutates the shared object."""
     base = cfg.deep_research
     if base is None:
-        return CodexExecOptions(cwd=repo_path, output_last_message=last_message_path)
+        return CodexExecOptions(
+            cwd=repo_path,
+            output_last_message=last_message_path,
+            json_events=True,
+        )
     return base.model_copy(
-        update={"cwd": repo_path, "output_last_message": last_message_path}
+        update={
+            "cwd": repo_path,
+            "output_last_message": last_message_path,
+            "json_events": True,
+        }
     )
 
 
@@ -286,6 +302,97 @@ def _now_checkpoint(
     )
 
 
+def _record_from_usage(
+    *,
+    step: str,
+    qn: str,
+    session_index: int,
+    invocation_index: int,
+    invocation_id: str,
+    cli: str,
+    role: str,
+    usage: Any,
+    fallback_model: str | None = None,
+    fallback_api_time_s: float | None = None,
+) -> UsageRecord:
+    return UsageRecord.from_usage(
+        usage,
+        step=step,  # type: ignore[arg-type]
+        module_qualified_name=qn,
+        session_index=session_index,
+        invocation_index=invocation_index,
+        invocation_id=invocation_id,
+        cli=cli,  # type: ignore[arg-type]
+        role=role,
+        fallback_model=fallback_model,
+        fallback_api_time_s=fallback_api_time_s,
+    )
+
+
+def _write_discovery_usage_records(
+    *,
+    module_paths: ModulePaths,
+    qn: str,
+    session_index: int,
+    iterations: list[Any],
+) -> None:
+    from spotlights_engine.costing.usage import AgentUsage
+
+    for idx, iteration in enumerate(iterations):
+        if iteration.input_tokens is None and iteration.output_tokens is None:
+            continue
+        cli = "codex" if iteration.agent == "codex" else "claude"
+        usage = AgentUsage(
+            input=iteration.input_tokens or 0,
+            output=iteration.output_tokens or 0,
+            cache_read=iteration.cache_read_tokens or 0,
+            cache_create=iteration.cache_create_tokens or 0,
+            model=iteration.model,
+            api_time_s=iteration.api_time_s,
+            cli_reported_cost_usd=iteration.cost_usd,
+        )
+        P.write_usage_record(
+            module_paths,
+            _record_from_usage(
+                step="candidate_discovery",
+                qn=qn,
+                session_index=session_index,
+                invocation_index=idx,
+                invocation_id=f"iteration-{iteration.n}:{cli}",
+                cli=cli,
+                role="candidate_discovery",
+                usage=usage,
+                fallback_api_time_s=iteration.duration_s,
+            ),
+        )
+
+
+def _write_cli_usage_records(
+    *,
+    module_paths: ModulePaths,
+    qn: str,
+    session_index: int,
+    step: str,
+    role: str,
+    usages: list[tuple[str, str, Any, float | None]],
+) -> None:
+    for idx, (invocation_id, cli, usage, fallback_duration) in enumerate(usages):
+        P.write_usage_record(
+            module_paths,
+            _record_from_usage(
+                step=step,
+                qn=qn,
+                session_index=session_index,
+                invocation_index=idx,
+                invocation_id=invocation_id,
+                cli=cli,
+                role=role,
+                usage=usage,
+                fallback_api_time_s=fallback_duration,
+            ),
+        )
+
+
 # ---------------------------------------------------------------------------
 # Setup / resume
 # ---------------------------------------------------------------------------
@@ -314,6 +421,7 @@ def _validate_setup(input: SpotlightsManagerInput, paths: ManagerPaths) -> None:
 
 def _ensure_resume_compatible(
     paths: ManagerPaths,
+    input: SpotlightsManagerInput,
     input_fp: dict[str, Any],
     config_fp: dict[str, Any],
     *,
@@ -327,6 +435,10 @@ def _ensure_resume_compatible(
             input_fingerprint=input_fp,
             config_fingerprint=config_fp,
             context=context,
+            provenance=collect_provenance(
+                repo_path=input.repo_path,
+                repo_url=input.repo_url,
+            ),
         )
 
     if not resume:
@@ -404,8 +516,19 @@ def _run_extractor_if_needed(
 
     tree, invocation = P.read_extractor_outputs(paths)
 
-    if completed and tree is not None and invocation is not None:
-        prev_dur = extractor_state.get("duration_s")
+    if tree is not None and invocation is not None:
+        if not completed:
+            # Crash-recovery window: the extractor payloads made it to disk
+            # before the manifest status did. Treat the sidecars as the source
+            # of truth and repair the manifest instead of re-running step 1.
+            manifest["extractor"] = {
+                "completed": True,
+                "duration_s": getattr(invocation, "duration_s", None),
+            }
+            P.write_manifest(paths, manifest)
+            _log.info("extractor: recovered cached outputs from disk")
+
+        prev_dur = manifest.get("extractor", {}).get("duration_s")
         if isinstance(prev_dur, (int, float)):
             _log.info("extractor: cached (%.1fs on previous run)", prev_dur)
         else:
@@ -477,7 +600,13 @@ def _plan_module(state: LoadedModuleState) -> _ModulePlan:
     """Resolve plan §5.4 onto a quad of booleans. The orchestrator runs
     step 3 if `redo_step3` OR step 2 just produced fresh candidates, runs
     step 4 if `redo_step4` OR step 3 just produced fresh research, and runs
-    step 5 if `redo_step5` OR any earlier step just produced fresh output."""
+    step 5 if `redo_step5` OR any earlier step just produced fresh output.
+
+    Payload sidecars are intentionally consulted alongside `status.json`.
+    The write protocol is payload-before-status; if the process crashes in
+    that narrow window, resume should continue from the sidecar that landed
+    instead of discarding completed work.
+    """
     cp = state.checkpoint
     started_at = cp.started_at if cp is not None else _now_iso()
 
@@ -500,30 +629,43 @@ def _plan_module(state: LoadedModuleState) -> _ModulePlan:
             return _plan(s3=True)
         if state.proposal_from_finding is None:
             return _plan(s4=True)
-        return _plan(s5=True)
+        if state.agent_proposals is None:
+            return _plan(s5=True)
+        return _plan()  # finalize-only
 
     if cp is None:
-        return _plan(s2=True)
-
-    # Legacy pre-step-5 terminal checkpoints: SUCCEEDED/DEGRADED whose
-    # `last_step` is step 4 and which never wrote agent_proposals.json. Treat
-    # as "step 5 owed" so old runs acquire step 5 without redoing 1-4. Must
-    # run before the generic terminal-status skip.
-    if (
-        cp.status in {"SUCCEEDED", "DEGRADED"}
-        and cp.last_step == "proposal_from_finding_creator"
-        and state.agent_proposals is None
-    ):
         return _ladder_to_first_missing()
 
-    if cp.status in {"SUCCEEDED", "DEGRADED", "SKIPPED"}:
-        return _plan(skip=True)
     if cp.status == "FAILED" and not cp.retryable:
         return _plan(skip=True)
 
+    if cp.status in {"SUCCEEDED", "DEGRADED"}:
+        if (
+            state.candidates is not None
+            and state.deep_research is not None
+            and state.proposal_from_finding is not None
+            and state.agent_proposals is not None
+        ):
+            return _plan(skip=True)
+        return _ladder_to_first_missing()
+
+    if cp.status == "SKIPPED":
+        if state.candidates is not None and not state.candidates.candidates:
+            return _plan(skip=True)
+        return _ladder_to_first_missing()
+
     if cp.status == "FAILED" and cp.retryable:
+        # A FAILED checkpoint is an explicit retry marker, not just a stale
+        # status lagging a sidecar write. Retry the failed step so stale
+        # payloads from an older attempt cannot be mistaken for success.
         if cp.failed_step == "agent_proposals":
-            return _ladder_to_first_missing()
+            if state.candidates is None:
+                return _plan(s2=True)
+            if state.deep_research is None:
+                return _plan(s3=True)
+            if state.proposal_from_finding is None:
+                return _plan(s4=True)
+            return _plan(s5=True)
         if cp.failed_step == "proposal_from_finding_creator":
             if state.candidates is None:
                 return _plan(s2=True)
@@ -534,45 +676,18 @@ def _plan_module(state: LoadedModuleState) -> _ModulePlan:
             if state.candidates is None:
                 return _plan(s2=True)
             return _plan(s3=True)
-        # Anything else (incl. unknown/None) -> redo step 2 from scratch.
         return _plan(s2=True)
 
-    if cp.status == "PENDING":
-        return _plan(s2=True)
+    if cp.status in {
+        "PENDING",
+        "DISCOVERED",
+        "DEEP_RESEARCHED",
+        "FINDING_PROPOSALS_CREATED",
+        "AGENT_PROPOSALS_CREATED",
+    }:
+        return _ladder_to_first_missing()
 
-    if cp.status == "DISCOVERED":
-        if state.candidates is None:
-            return _plan(s2=True)
-        return _plan(s3=True)
-
-    if cp.status == "DEEP_RESEARCHED":
-        if state.candidates is None:
-            return _plan(s2=True)
-        if state.deep_research is None:
-            return _plan(s3=True)
-        return _plan(s4=True)
-
-    if cp.status == "FINDING_PROPOSALS_CREATED":
-        if state.candidates is None:
-            return _plan(s2=True)
-        if state.deep_research is None:
-            return _plan(s3=True)
-        if state.proposal_from_finding is None:
-            return _plan(s4=True)
-        return _plan(s5=True)
-
-    if cp.status == "AGENT_PROPOSALS_CREATED":
-        if state.candidates is None:
-            return _plan(s2=True)
-        if state.deep_research is None:
-            return _plan(s3=True)
-        if state.proposal_from_finding is None:
-            return _plan(s4=True)
-        if state.agent_proposals is None:
-            return _plan(s5=True)
-        return _plan()  # finalize-only
-
-    return _plan(s2=True)
+    return _ladder_to_first_missing()
 
 
 def _plan_requires_step_execution(plan: _ModulePlan) -> bool:
@@ -622,7 +737,7 @@ async def _do_step3(
     module_paths: ModulePaths,
     segment: str,
     candidates: Candidates,
-) -> tuple[ModuleDeepResearchOutput, float]:
+) -> tuple[ModuleDeepResearchOutput, float, list[Any]]:
     """`segment` is the module id segment (D3): deep research renumbers and
     prefixes each finding id to `find-<segment>-NNNN` before returning, so the
     findings are already globally-prefixed (no manager-side rebase).
@@ -642,11 +757,13 @@ async def _do_step3(
         cfg, mgr_input.repo_path, module_paths.deep_research_last_message_path
     )
     start = time.monotonic()
-    output = await asyncio.to_thread(
+    result = await asyncio.to_thread(
         lambda: research_module(research_input, options, segment=segment)
     )
     duration = time.monotonic() - start
-    return output, duration
+    if hasattr(result, "output") and hasattr(result, "usages"):
+        return result.output, duration, list(result.usages)
+    return result, duration, []
 
 
 def _synthetic_step4_output_for_zero_findings(
@@ -676,7 +793,12 @@ async def _do_step4(
     candidate_states: CandidateStateMap,
     proposal_id_start: int,
     segment: str,
-) -> tuple[ProposalFromFindingCreatorOutput, float, dict[str, float]]:
+) -> tuple[
+    ProposalFromFindingCreatorOutput,
+    float,
+    dict[str, float],
+    dict[str, Any],
+]:
     """Returns (output, total_duration_s, per_pair_durations_s)."""
     pf_input = ProposalFromFindingCreatorInput(
         candidates=candidates,
@@ -699,6 +821,7 @@ async def _do_step4(
         result.output,
         result.total_duration_s,
         dict(result.per_pair_durations_s),
+        dict(result.usages_by_pair),
     )
 
 
@@ -712,7 +835,12 @@ async def _do_step5(
     candidate_states: CandidateStateMap,
     proposal_id_start: int,
     segment: str,
-) -> tuple[AgentProposalsOutput, float, dict[str, dict[str, float]]]:
+) -> tuple[
+    AgentProposalsOutput,
+    float,
+    dict[str, dict[str, float]],
+    dict[str, list[Any]],
+]:
     """Returns (output, total_duration_s, per_candidate_durations_s)."""
     ap_input = AgentProposalsInput(
         project_tree=tree,
@@ -738,6 +866,7 @@ async def _do_step5(
             cand_id: dict(durations)
             for cand_id, durations in result.per_candidate_durations_s.items()
         },
+        {cand_id: list(usages) for cand_id, usages in result.usages_by_candidate.items()},
     )
 
 
@@ -862,10 +991,18 @@ async def _run_module(
         # ------------------------- step 2 -----------------------------------
         candidates: Candidates | None = state.candidates
         if plan.redo_step2:
-            P.clear_discovery_artifacts(module_paths)
-            P.clear_deep_research_artifacts(module_paths)
-            P.clear_proposal_from_finding_artifacts(module_paths)
-            P.clear_agent_proposals_artifacts(module_paths)
+            P.clear_discovery_artifacts(
+                module_paths, session_index=session_index
+            )
+            P.clear_deep_research_artifacts(
+                module_paths, session_index=session_index
+            )
+            P.clear_proposal_from_finding_artifacts(
+                module_paths, session_index=session_index
+            )
+            P.clear_agent_proposals_artifacts(
+                module_paths, session_index=session_index
+            )
             cp = _now_checkpoint(
                 qn=qn,
                 status="PENDING",
@@ -930,6 +1067,12 @@ async def _run_module(
             # and iterations are globally-unique by construction — no rebase.
             P.write_candidates(module_paths, candidates)
             P.write_discovery_telemetry(module_paths, iters, dur, cost)
+            _write_discovery_usage_records(
+                module_paths=module_paths,
+                qn=qn,
+                session_index=session_index,
+                iterations=iters,
+            )
             cost_str = f" ${cost:.2f}" if cost is not None else ""
             _log.info(
                 "[%s] discovery: complete in %.1fs — %d candidates%s",
@@ -990,14 +1133,20 @@ async def _run_module(
         # ------------------------- step 3 -----------------------------------
         run_step3 = plan.redo_step2 or plan.redo_step3 or state.deep_research is None
         if plan.redo_step3:
-            P.clear_deep_research_artifacts(module_paths)
-            P.clear_proposal_from_finding_artifacts(module_paths)
-            P.clear_agent_proposals_artifacts(module_paths)
+            P.clear_deep_research_artifacts(
+                module_paths, session_index=session_index
+            )
+            P.clear_proposal_from_finding_artifacts(
+                module_paths, session_index=session_index
+            )
+            P.clear_agent_proposals_artifacts(
+                module_paths, session_index=session_index
+            )
 
         if run_step3:
             _log.info("[%s] deep_research: start", qn)
             try:
-                research_output, dr_duration = await _do_step3(
+                research_output, dr_duration, dr_usages = await _do_step3(
                     qn=qn,
                     tree=tree,
                     mgr_input=mgr_input,
@@ -1056,6 +1205,22 @@ async def _run_module(
                     "[%s] deep_research: %s: %s", qn, iss.severity, iss.message
                 )
             P.write_deep_research(module_paths, research_output, dr_duration)
+            _write_cli_usage_records(
+                module_paths=module_paths,
+                qn=qn,
+                session_index=session_index,
+                step="module_deep_research",
+                role="deep_research",
+                usages=[
+                    (
+                        f"deep-research:{u.cli}",
+                        u.cli,
+                        u.usage,
+                        dr_duration,
+                    )
+                    for u in dr_usages
+                ],
+            )
             cp = _now_checkpoint(
                 qn=qn,
                 status="DEEP_RESEARCHED",
@@ -1077,8 +1242,12 @@ async def _run_module(
             or state.proposal_from_finding is None
         )
         if plan.redo_step4 and not (plan.redo_step2 or plan.redo_step3):
-            P.clear_proposal_from_finding_artifacts(module_paths)
-            P.clear_agent_proposals_artifacts(module_paths)
+            P.clear_proposal_from_finding_artifacts(
+                module_paths, session_index=session_index
+            )
+            P.clear_agent_proposals_artifacts(
+                module_paths, session_index=session_index
+            )
 
         proposal_output: ProposalFromFindingCreatorOutput | None = None
 
@@ -1109,7 +1278,7 @@ async def _run_module(
                     n_pairs,
                 )
                 try:
-                    proposal_output, pf_duration, per_pair = await _do_step4(
+                    proposal_output, pf_duration, per_pair, pf_usages = await _do_step4(
                         candidates=candidates,
                         findings=research_output.findings,
                         mgr_input=mgr_input,
@@ -1193,6 +1362,22 @@ async def _run_module(
                     duration_s=pf_duration,
                     per_pair_durations_s=per_pair,
                 )
+                _write_cli_usage_records(
+                    module_paths=module_paths,
+                    qn=qn,
+                    session_index=session_index,
+                    step="proposal_from_finding_creator",
+                    role="proposal_from_finding_creator",
+                    usages=[
+                        (
+                            f"{pair_key}:{usage.cli}",
+                            usage.cli,
+                            usage.usage,
+                            per_pair.get(pair_key),
+                        )
+                        for pair_key, usage in pf_usages.items()
+                    ],
+                )
 
             cp = _now_checkpoint(
                 qn=qn,
@@ -1218,7 +1403,9 @@ async def _run_module(
         if plan.redo_step5 and not (
             plan.redo_step2 or plan.redo_step3 or plan.redo_step4
         ):
-            P.clear_agent_proposals_artifacts(module_paths)
+            P.clear_agent_proposals_artifacts(
+                module_paths, session_index=session_index
+            )
 
         agent_output: AgentProposalsOutput | None = None
         if run_step5:
@@ -1235,7 +1422,7 @@ async def _run_module(
                 for c in proposal_output.candidates.candidates
             )
             try:
-                agent_output, ap_duration, per_cand = await _do_step5(
+                agent_output, ap_duration, per_cand, ap_usages = await _do_step5(
                     candidates=proposal_output.candidates,
                     tree=tree,
                     mgr_input=mgr_input,
@@ -1318,6 +1505,23 @@ async def _run_module(
                 agent_output,
                 duration_s=ap_duration,
                 per_candidate_durations_s=per_cand,
+            )
+            _write_cli_usage_records(
+                module_paths=module_paths,
+                qn=qn,
+                session_index=session_index,
+                step="agent_proposals",
+                role="agent_proposals",
+                usages=[
+                    (
+                        f"{candidate_id}:{usage.cli}",
+                        usage.cli,
+                        usage.usage,
+                        per_cand.get(candidate_id, {}).get(usage.cli),
+                    )
+                    for candidate_id, usages in ap_usages.items()
+                    for usage in usages
+                ],
             )
             cp = _now_checkpoint(
                 qn=qn,
@@ -1410,6 +1614,63 @@ async def _update_module_in_manifest(
         P.write_manifest(paths, manifest)
 
 
+def _read_all_usage_records(
+    paths: ManagerPaths, qns: list[str]
+) -> tuple[list[UsageRecord], list[str]]:
+    records: list[UsageRecord] = []
+    notes: list[str] = []
+    for qn in qns:
+        module_records, module_notes = P.read_usage_records(paths.for_module(qn))
+        records.extend(module_records)
+        notes.extend(f"{qn}: {note}" for note in module_notes)
+    return records, notes
+
+
+def _accumulated_duration_s(
+    manifest: dict[str, Any],
+    per_module_telemetry: dict[str, ModuleTelemetry],
+) -> float:
+    """Sum the durably-persisted per-step durations for completed work.
+
+    Unlike `wall_clock_s` (which resets on every process start and so only
+    measures the resuming leg after a crash), this reconstructs cumulative
+    completed-step time-on-task from the on-disk sidecars re-read on resume.
+    Each `None` term (step never ran / skipped) counts as 0.0. With
+    `max_parallel_sessions > 1` the sum can exceed real elapsed time — that is
+    intentional; see design/accumulated_duration.md.
+    """
+
+    def _f(x: object) -> float:
+        if isinstance(x, (int, float)) and not isinstance(x, bool):
+            return float(x)
+        return 0.0
+
+    extractor = manifest.get("extractor")
+    extractor_duration = (
+        extractor.get("duration_s") if isinstance(extractor, dict) else None
+    )
+    total = _f(extractor_duration)
+    for tel in per_module_telemetry.values():
+        total += _f(tel.discovery_total_duration_s)
+        total += _f(tel.deep_research_duration_s)
+        total += _f(tel.proposal_from_finding_duration_s)
+        total += _f(tel.agent_proposals_duration_s)
+    return total
+
+
+def _copy_public_manifest_to_output(
+    *, paths: ManagerPaths, output_folder: Path
+) -> None:
+    if not paths.run_manifest_path.exists():
+        return
+    output_folder.mkdir(parents=True, exist_ok=True)
+    target = output_folder / "run_manifest.json"
+    target.write_text(
+        paths.run_manifest_path.read_text(encoding="utf-8"),
+        encoding="utf-8",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Top-level
 # ---------------------------------------------------------------------------
@@ -1457,7 +1718,12 @@ async def _run_async(
         agent_proposals_cfg=config.agent_proposals,
     )
     manifest = _ensure_resume_compatible(
-        paths, input_fp, config_fp, resume=config.resume, context=input.context
+        paths,
+        input,
+        input_fp,
+        config_fp,
+        resume=config.resume,
+        context=input.context,
     )
 
     # Step 1.
@@ -1576,28 +1842,60 @@ async def _run_async(
     )
     P.write_manifest(paths, manifest)
 
-    renderer_result, manager_issues = _render_results(
-        artifacts_dir=paths.artifacts_dir,
-        output_folder=config.output_folder,
-    )
-
     counts = {"SUCCEEDED": 0, "DEGRADED": 0, "FAILED": 0, "SKIPPED": 0}
     for run_record in module_runs.values():
         counts[run_record.status] = counts.get(run_record.status, 0) + 1
-    total_cost = sum(
-        t.discovery_total_cost_usd or 0.0
-        for t in per_module_telemetry.values()
-    )
-    cost_str = f", discovery cost ${total_cost:.2f}" if total_cost else ""
+    usage_records, usage_notes = _read_all_usage_records(paths, ordered_qns)
+    if not usage_records:
+        usage_notes.append("no usage records found; run may predate usage capture")
+    cost_summary = compute_cost(usage_records, load_rates())
+    total_cost = cost_summary.amount_usd
+    cost_str = f", rate-table cost ${total_cost:.2f}" if total_cost else ""
+    accumulated = _accumulated_duration_s(manifest, per_module_telemetry)
     _log.info(
         "run complete: %d succeeded / %d degraded / %d failed / %d skipped "
-        "in %.1fs%s",
+        "in %.1fs (accumulated completed-step time %.1fs)%s",
         counts["SUCCEEDED"],
         counts["DEGRADED"],
         counts["FAILED"],
         counts["SKIPPED"],
         time.monotonic() - run_start,
+        accumulated,
         cost_str,
+    )
+
+    # Build and persist the public run manifest *before* rendering, so the
+    # renderer sees the current run's manifest (not a missing file or a stale
+    # one from a previous resume) and surfaces it in index.md. Use the intended
+    # renderer output path for `candidates_path`: on success it equals
+    # `renderer_result.index_path`; on renderer failure it still records where
+    # the shipped results were meant to land. `num_candidates` is summed
+    # directly from `module_runs` rather than waiting for `report.candidates`.
+    num_candidates = sum(
+        len(run_record.candidates.candidates)
+        for run_record in module_runs.values()
+        if run_record.candidates is not None
+    )
+    public_manifest = build_run_manifest(
+        run_id=_run_id_from_manifest(manifest),
+        date=str(manifest.get("created_at") or ""),
+        objective=input.context.objective,
+        provenance=dict(manifest.get("provenance") or {}),
+        config_fingerprint=dict(manifest.get("config_fingerprint") or {}),
+        records=usage_records,
+        cost=cost_summary,
+        wall_clock_s=time.monotonic() - run_start,
+        accumulated_duration_s=accumulated,
+        candidates_path=str(config.output_folder / "index.md"),
+        num_candidates=num_candidates,
+        module_status=counts,
+        notes=usage_notes + ["Gemini usage/cost excluded by design"],
+    )
+    P.write_run_manifest(paths, public_manifest)
+
+    renderer_result, manager_issues = _render_results(
+        artifacts_dir=paths.artifacts_dir,
+        output_folder=config.output_folder,
     )
 
     report = _build_report(
@@ -1607,6 +1905,9 @@ async def _run_async(
         manager_issues=manager_issues,
         total_cost=total_cost,
         manifest=manifest,
+    )
+    _copy_public_manifest_to_output(
+        paths=paths, output_folder=config.output_folder
     )
 
     return SpotlightsManagerResult(

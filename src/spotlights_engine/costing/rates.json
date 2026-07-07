@@ -1,0 +1,19 @@
+{
+  "_note": "Default per-token public API rates for the in-scope Claude/Codex models. Override the whole table via SPOTLIGHTS_RATES_FILE when billing through a LiteLLM proxy or a private contract. Never substitute CLI-reported total_cost_usd.",
+  "anthropic:aws/claude-opus-4-8": {
+    "input": 0.0000038,
+    "output": 0.000019,
+    "cache_read": 0.00000038,
+    "cache_create": 0.00000475,
+    "unit": "per_token",
+    "note": "LiteLLM (bedrock) rate as of 2026-07-07: Claude Opus 4.8 $3.80/MTok input, $19/MTok output, $0.38/MTok cache read, $4.75/MTok cache write. Keyed by the CLI-reported model id (bedrock 'aws/' prefix). Override for a different contract or 1h cache writes ($10/MTok)."
+  },
+  "openai:codex": {
+    "input": 0.0000025,
+    "output": 0.000015,
+    "cache_read": 0.0000005,
+    "cache_create": 0.0,
+    "unit": "per_token",
+    "note": "LiteLLM (azure) rate as of 2026-07-07: GPT-5.5 $2.50/MTok input, $15/MTok output, $0.50/MTok cache read; Codex has no cache-create bucket. Keyed by the CLI family (codex stream reports no resolvable model id). Override for a different contract."
+  }
+}

@@ -11,7 +11,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from spotlights_engine.costing.manifest import RunManifest
 from spotlights_engine.modules_extractor.agent import ExtractionInvocation
+from spotlights_engine.results_renderer.errors import (
+    RendererLoadError,
+    RendererSetupError,
+)
 from spotlights_engine.schemas.common import SpotlightContext
 from spotlights_engine.schemas.project import ProjectTree
 from spotlights_engine.spotlights_manager.persistence import (
@@ -21,11 +26,6 @@ from spotlights_engine.spotlights_manager.persistence import (
     read_manifest,
     read_module_state,
     slug_for,
-)
-
-from spotlights_engine.results_renderer.errors import (
-    RendererLoadError,
-    RendererSetupError,
 )
 
 
@@ -39,6 +39,7 @@ class LoadedRun:
     extractor_invocation: ExtractionInvocation
     context: SpotlightContext | None
     modules: dict[str, LoadedModuleState]
+    run_manifest: RunManifest | None = None
     warnings: list[str] = field(default_factory=list)
 
 
@@ -74,6 +75,8 @@ def load_run(artifacts_dir: Path) -> LoadedRun:
 
     context = _read_context(manifest, warnings)
 
+    run_manifest = _read_run_manifest(paths, warnings)
+
     module_qns = _resolve_module_qns(manifest, paths, warnings)
 
     modules: dict[str, LoadedModuleState] = {}
@@ -106,6 +109,7 @@ def load_run(artifacts_dir: Path) -> LoadedRun:
         extractor_invocation=invocation,
         context=context,
         modules=modules,
+        run_manifest=run_manifest,
         warnings=warnings,
     )
 
@@ -119,6 +123,30 @@ def _read_manifest_or_raise(paths: ManagerPaths) -> dict[str, Any]:
         raise RendererLoadError(
             f"manifest is not valid JSON: {paths.manifest_path}: {exc}"
         ) from exc
+
+
+def _read_run_manifest(
+    paths: ManagerPaths, warnings: list[str]
+) -> RunManifest | None:
+    """Read the public `run_manifest.json` (provenance + usage + cost).
+
+    Returns `None` with no warning if the file is absent (a legitimately
+    old/pre-upgrade run). If present but unparseable or schema-invalid, append
+    a renderer warning and return `None` — mirrors how `_read_context`
+    degrades, so a bad manifest never fails the render.
+    """
+    if not paths.run_manifest_path.exists():
+        return None
+    try:
+        return RunManifest.model_validate_json(
+            paths.run_manifest_path.read_text(encoding="utf-8")
+        )
+    except Exception as exc:  # noqa: BLE001
+        warnings.append(
+            f"run_manifest.json did not validate as RunManifest: "
+            f"{type(exc).__name__}: {exc}"
+        )
+        return None
 
 
 def _read_context(
