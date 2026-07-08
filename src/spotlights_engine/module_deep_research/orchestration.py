@@ -8,6 +8,7 @@ import re
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 from spotlights_engine.module_deep_research.agent_exec import AgentExecResult, ModuleResearchRunner
@@ -15,6 +16,7 @@ from spotlights_engine.module_deep_research.claude_exec import ClaudeExecClient,
 from spotlights_engine.module_deep_research.codex_exec import CodexExecClient, CodexExecOptions
 from spotlights_engine.module_deep_research.validation import (
     AgentModuleDeepResearchOutput,
+    apply_source_cutoff,
     normalize_module_deep_research_output,
     parse_agent_output,
 )
@@ -201,6 +203,7 @@ def merge_outcomes(
     *,
     max_findings_per_module: int,
     segment: str,
+    source_cutoff_date: date | None = None,
 ) -> ModuleDeepResearchOutput:
     """Merge agent outputs into the stable module deep-research contract.
 
@@ -213,7 +216,12 @@ def merge_outcomes(
     (`agent=outcome.agent_name`). Unlike findings they are **not** deduped —
     identical query strings from two agents are meaningful signal — and their
     order is preserved (outcomes in fixed `futures` order, queries in the
-    agent's emitted order) so run-to-run markdown diffs are stable."""
+    agent's emitted order) so run-to-run markdown diffs are stable.
+
+    When `source_cutoff_date` is provided, any finding whose self-reported
+    `publication_date` is missing, unparseable, or on/after the cutoff is
+    dropped between dedup and renumber. A single summary `StepIssue` records
+    what was filtered. When None, the filter is a strict no-op."""
     findings = []
     issues: list[StepIssue] = []
     search_logs: list[SearchQueryLog] = []
@@ -260,6 +268,9 @@ def merge_outcomes(
                     ],
                 )
             )
+
+    findings, cutoff_issues = apply_source_cutoff(findings, source_cutoff_date)
+    issues.extend(cutoff_issues)
 
     merged = AgentModuleDeepResearchOutput(findings=findings, issues=issues)
     merged_findings_cap = max_findings_per_module * len(outcomes)

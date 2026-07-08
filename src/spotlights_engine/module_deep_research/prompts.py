@@ -67,6 +67,35 @@ def _format_module(module: Module, module_qualified_name: str) -> str:
     )
 
 
+def _format_source_cutoff_block(request: ModuleDeepResearchInput) -> str:
+    """Render the optional source-date restriction block.
+
+    Empty string when no cutoff is set, preserving the historical prompt
+    byte-for-byte (decision: unset cutoff is a no-op everywhere). When a
+    cutoff is set, this block both (a) instructs the agent to drop sources
+    that postdate the cutoff and (b) requires every finding to carry a
+    `publication_date` so the engine can verify the constraint downstream.
+    """
+    cutoff = request.source_cutoff_date
+    if cutoff is None:
+        return ""
+    cutoff_str = cutoff.isoformat()
+    return f"""
+Source-date restriction:
+- Cite only sources first published or released strictly before {cutoff_str}.
+- Drop any source whose canonical publication or release date is on or
+  after {cutoff_str}, even if it would otherwise be relevant. Do not
+  substitute a reissue, mirror, or fork's later date for an earlier
+  original publication date — use the earliest verifiable date for the
+  underlying source.
+- For every finding you emit, populate the `publication_date` field with
+  the source's publication or release date, formatted YYYY-MM-DD when the
+  day is known or YYYY-MM (interpreted as the first of the month) when only
+  month-resolution is available. Findings without a `publication_date` will
+  be rejected downstream.
+"""
+
+
 def render_module_deep_research_prompt(
     request: ModuleDeepResearchInput,
     module: Module,
@@ -87,6 +116,7 @@ def render_module_deep_research_prompt(
             "sources that address them; they are hints, not a strict scope.\n"
             f"{_format_candidates(request.candidates)}\n"
         )
+    source_cutoff_block = _format_source_cutoff_block(request)
     return f"""You are running the Spotlights module_deep_research pipeline step.
 Do not modify files. Do not ask questions.
 
@@ -208,7 +238,7 @@ Source quality:
 - Do not invent titles, URLs, benchmark results, or local code behavior.
 - If web/source retrieval is unavailable or too incomplete, return empty
   findings with a recoverable StepIssue instead of unsourced suggestions.
-
+{source_cutoff_block}
 ModuleDeepResearchOutput JSON schema:
 {schema_json}
 """.strip()

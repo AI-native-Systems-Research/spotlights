@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import date
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
@@ -32,7 +33,13 @@ _AGENT_OUTPUT_KEYS = frozenset({"findings", "issues", "search_queries"})
 class AgentFinding(BaseModel):
     """Wire shape the deep-research agents emit: a `Finding` with a **bare**
     local `find-NNNN` id. The id is advisory only — it is overwritten by the
-    deterministic renumber+prefix in `normalize_module_deep_research_output`."""
+    deterministic renumber+prefix in `normalize_module_deep_research_output`.
+
+    `publication_date` is optional in general; the DR prompt instructs the
+    agent to populate it (as YYYY-MM-DD or YYYY-MM, with YYYY-MM-01 implied
+    when only month resolution is available) only when a source-date cutoff
+    is in effect — otherwise it stays None and downstream code ignores it.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -42,6 +49,7 @@ class AgentFinding(BaseModel):
     source_type: FindingSourceType
     technique_summary: str = Field(min_length=1)
     supporting_evidence: str = ""
+    publication_date: str | None = None
 
 
 class AgentSearchResult(BaseModel):
@@ -174,6 +182,66 @@ def _looks_like_cli_envelope(payload: Any) -> bool:
     return len(_CLI_ENVELOPE_MARKERS.intersection(payload)) >= 3
 
 
+_PUBDATE_FULL = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
+_PUBDATE_MONTH = re.compile(r"^(\d{4})-(\d{2})$")
+
+
+def _parse_publication_date(raw: str) -> date:
+    """Parse YYYY-MM-DD or YYYY-MM (treated as the first of the month)."""
+    if match := _PUBDATE_FULL.match(raw.strip()):
+        return date(int(match[1]), int(match[2]), int(match[3]))
+    if match := _PUBDATE_MONTH.match(raw.strip()):
+        return date(int(match[1]), int(match[2]), 1)
+    raise ValueError(
+        f"expected YYYY-MM-DD or YYYY-MM, got {raw!r}"
+    )
+
+
+def apply_source_cutoff(
+    findings: list[AgentFinding], cutoff: date | None
+) -> tuple[list[AgentFinding], list[StepIssue]]:
+    """Drop findings whose self-reported `publication_date` is on or after
+    `cutoff`. No-op when `cutoff` is None — keeps the legacy behavior for
+    runs that never set the field. Returns (surviving findings, issues
+    summarizing what was dropped and why)."""
+    if cutoff is None:
+        return findings, []
+
+    kept: list[AgentFinding] = []
+    dropped: list[tuple[AgentFinding, str]] = []
+    for finding in findings:
+        raw = finding.publication_date
+        if raw is None or not raw.strip():
+            dropped.append(
+                (finding, "missing publication_date (required by source-date restriction)")
+            )
+            continue
+        try:
+            published_on = _parse_publication_date(raw)
+        except ValueError as exc:
+            dropped.append((finding, f"unparseable publication_date: {exc}"))
+            continue
+        if published_on >= cutoff:
+            dropped.append(
+                (finding, f"published {published_on.isoformat()} >= cutoff {cutoff.isoformat()}")
+            )
+            continue
+        kept.append(finding)
+
+    if not dropped:
+        return kept, []
+
+    sample = "; ".join(
+        f"{finding.title!r} ({reason})" for finding, reason in dropped[:5]
+    )
+    more = f"; +{len(dropped) - 5} more" if len(dropped) > 5 else ""
+    message = (
+        f"source-date filter (cutoff {cutoff.isoformat()}) dropped "
+        f"{len(dropped)} finding(s): {sample}{more}"
+    )
+    return kept, [_issue(message)]
+
+
 def _renumber_findings(
     findings: list[AgentFinding], max_findings: int, *, segment: str
 ) -> list[Finding]:
@@ -189,6 +257,7 @@ def _renumber_findings(
             source_type=finding.source_type,
             technique_summary=finding.technique_summary,
             supporting_evidence=finding.supporting_evidence,
+            publication_date=finding.publication_date,
         )
         for idx, finding in enumerate(findings[:max_findings], start=1)
     ]
@@ -288,6 +357,7 @@ __all__ = [
     "AgentModuleDeepResearchOutput",
     "AgentSearchQuery",
     "AgentSearchResult",
+    "apply_source_cutoff",
     "normalize_module_deep_research_output",
     "parse_agent_output",
     "parse_module_deep_research_output",

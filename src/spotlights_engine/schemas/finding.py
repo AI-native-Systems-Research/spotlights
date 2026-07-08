@@ -34,6 +34,7 @@ class Finding(BaseModel):
     source_type: FindingSourceType
     technique_summary: str = Field(min_length=1)
     supporting_evidence: str = ""
+    publication_date: str | None = None
 
 
 __all__ = [

@@ -15,6 +15,7 @@ import dataclasses
 import json
 import logging
 import sys
+from datetime import date
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -149,6 +150,19 @@ def _build_argparser() -> argparse.ArgumentParser:
         help=(
             "Cap on findings produced by step 3 per module. "
             "Default: SpotlightsManagerInput default (30)."
+        ),
+    )
+    p.add_argument(
+        "--dr-source-cutoff-date",
+        type=_parse_iso_date,
+        default=None,
+        metavar="YYYY-MM-DD",
+        help=(
+            "Restrict deep-research findings to sources first published "
+            "strictly before this date. When set, the DR prompt requires "
+            "every finding to carry a publication_date and the engine "
+            "drops findings that postdate the cutoff (with a summary issue "
+            "recording what was filtered). Default: no cutoff."
         ),
     )
     review = p.add_mutually_exclusive_group()
@@ -358,6 +372,16 @@ def _flatten_include(raw: list[list[str]] | None) -> list[str]:
     return flat
 
 
+def _parse_iso_date(raw: str) -> date:
+    """argparse type for YYYY-MM-DD dates with a clear error message."""
+    try:
+        return date.fromisoformat(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            f"expected YYYY-MM-DD, got {raw!r}: {exc}"
+        ) from exc
+
+
 def _build_input(args: argparse.Namespace) -> SpotlightsManagerInput:
     context_kwargs = {
         "objective": args.objective,
@@ -373,6 +397,8 @@ def _build_input(args: argparse.Namespace) -> SpotlightsManagerInput:
         input_kwargs["max_findings_per_module"] = args.max_findings_per_module
     input_kwargs["include_candidate_hotspots"] = args.include_candidate_hotspots
     input_kwargs["enable_claude_search"] = args.enable_claude_search
+    if getattr(args, "dr_source_cutoff_date", None) is not None:
+        input_kwargs["dr_source_cutoff_date"] = args.dr_source_cutoff_date
     return SpotlightsManagerInput(**input_kwargs)
 
 

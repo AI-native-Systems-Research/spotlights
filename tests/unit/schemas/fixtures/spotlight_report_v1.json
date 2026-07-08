@@ -85,7 +85,8 @@
       "url": "https://example.com/papers/parallel-hot-path",
       "source_type": "paper",
       "technique_summary": "Workloads dominated by an embarrassingly parallel hot path benefit from pool-based concurrency.",
-      "supporting_evidence": ""
+      "supporting_evidence": "",
+      "publication_date": null
     }
   ],
   "anomalies": [
