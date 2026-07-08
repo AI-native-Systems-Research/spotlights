@@ -753,6 +753,7 @@ async def _do_step3(
         candidates=list(candidates.candidates),
         include_candidate_hotspots=mgr_input.include_candidate_hotspots,
         runner_artifacts_dir=module_paths.deep_research_runners_dir,
+        source_cutoff_date=mgr_input.dr_source_cutoff_date,
     )
     options = _build_deep_research_options(
         cfg, mgr_input.repo_path, module_paths.deep_research_last_message_path

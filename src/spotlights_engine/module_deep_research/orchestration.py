@@ -8,6 +8,7 @@ import re
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import date
 from pathlib import Path
 
 from spotlights_engine.module_deep_research.agent_exec import AgentExecResult, ModuleResearchRunner
@@ -16,6 +17,7 @@ from spotlights_engine.module_deep_research.codex_exec import CodexExecClient, C
 from spotlights_engine.module_deep_research.gemini_exec import GeminiExecClient, GeminiExecOptions
 from spotlights_engine.module_deep_research.validation import (
     AgentModuleDeepResearchOutput,
+    apply_source_cutoff,
     normalize_module_deep_research_output,
     parse_agent_output,
 )
@@ -195,13 +197,19 @@ def merge_outcomes(
     *,
     max_findings_per_module: int,
     segment: str,
+    source_cutoff_date: date | None = None,
 ) -> ModuleDeepResearchOutput:
     """Merge agent outputs into the stable module deep-research contract.
 
     Per-runner outputs are parsed into the lenient wire shape (bare ids), then
     deduped and merged; the single promotion to persisted `Finding`s — capping,
     renumbering, and prefixing each id to `find-<segment>-NNNN` (D3) — happens
-    once here via `normalize_module_deep_research_output`."""
+    once here via `normalize_module_deep_research_output`.
+
+    When `source_cutoff_date` is provided, any finding whose self-reported
+    `publication_date` is missing, unparseable, or on/after the cutoff is
+    dropped between dedup and renumber. A single summary `StepIssue` records
+    what was filtered. When None, the filter is a strict no-op."""
     findings = []
     issues: list[StepIssue] = []
     seen: set[str] = set()
@@ -232,6 +240,9 @@ def merge_outcomes(
                 continue
             seen.update(keys)
             findings.append(finding)
+
+    findings, cutoff_issues = apply_source_cutoff(findings, source_cutoff_date)
+    issues.extend(cutoff_issues)
 
     merged = AgentModuleDeepResearchOutput(findings=findings, issues=issues)
     merged_findings_cap = max_findings_per_module * len(outcomes)

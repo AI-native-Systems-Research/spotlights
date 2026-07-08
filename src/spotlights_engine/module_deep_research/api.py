@@ -109,6 +109,7 @@ def research_module_with_telemetry(
             outcomes,
             max_findings_per_module=request.max_findings_per_module,
             segment=seg,
+            source_cutoff_date=request.source_cutoff_date,
         ),
         usages=usages,
     )

@@ -10,6 +10,7 @@ another with typed payloads.
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
@@ -65,6 +66,16 @@ class ModuleDeepResearchInput(BaseModel):
     # toward the symbols the discovery step already flagged as worth evolving.
     candidates: list[Candidate] = Field(default_factory=list)
     include_candidate_hotspots: bool = True
+
+    # When set, restricts findings to sources first published or released
+    # strictly before this date. Enforced in two ways: (a) the DR prompt
+    # instructs the agent to honor the cutoff and populate `publication_date`
+    # on every finding, and (b) the merge step drops any finding whose
+    # self-reported `publication_date` falls on or after the cutoff. When
+    # None (the default), the DR step behaves identically to runs that never
+    # knew about the field. Useful for historical baselining and "would the
+    # agent derive X without seeing later-published solutions" tests.
+    source_cutoff_date: date | None = None
 
     # Directory into which per-runner raw stdout / stderr / final-message /
     # summary files are written, one set per CLI runner. When `None` (the
@@ -148,7 +159,13 @@ class ModuleRun(BaseModel):
 
 
 class SpotlightsManagerInput(BaseModel):
-    """Input contract for the top-level `SpotlightsManager`."""
+    """Input contract for the top-level `SpotlightsManager`.
+
+    `dr_source_cutoff_date` is threaded through to every per-module
+    `ModuleDeepResearchInput.source_cutoff_date`; see that field's docstring
+    for semantics. Unset (None) means no cutoff, which is the historical
+    behavior.
+    """
 
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
@@ -158,6 +175,7 @@ class SpotlightsManagerInput(BaseModel):
     max_findings_per_module: int = Field(default=30, ge=0)
     include_candidate_hotspots: bool = True
     continue_on_module_failure: bool = True
+    dr_source_cutoff_date: date | None = None
 
 
 class RunInfo(BaseModel):
