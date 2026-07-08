@@ -237,6 +237,7 @@ def make_run_manifest(
     rate_note: str = "",
     notes: str = "",
     with_models: bool = True,
+    external_cost: RunManifestCost | None = None,
 ) -> RunManifest:
     """A representative public run manifest for renderer-section tests."""
     models = (
@@ -275,6 +276,7 @@ def make_run_manifest(
         cost=RunManifestCost(
             amount_usd=0.1234, source="contracted-rate-table", rate_note=rate_note
         ),
+        external_cost=external_cost,
         timing=RunManifestTiming(
             wall_clock_s=wall_clock_s,
             accumulated_duration_s=accumulated_duration_s,

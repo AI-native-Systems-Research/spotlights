@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from spotlights_engine.costing.manifest import RunManifestCost
 from spotlights_engine.results_renderer.api import (
     RendererConfig,
     RendererInput,
@@ -224,6 +225,51 @@ def test_run_manifest_rate_note_and_notes_both_shown(tmp_path: Path) -> None:
 
     assert "partial pricing: 1 of 2 models priced" in text
     assert "Gemini usage/cost excluded by design" in text
+
+
+def test_run_manifest_external_cost_rendered(tmp_path: Path) -> None:
+    artifacts = tmp_path / "artifacts"
+    output = tmp_path / "output"
+    artifacts.mkdir()
+    paths, _ = make_full_run(artifacts)
+    write_run_manifest(
+        paths,
+        make_run_manifest(
+            external_cost=RunManifestCost(
+                amount_usd=0.5678,
+                source="public-api-rate-table",
+                rate_note="external: rates applied: anthropic:aws/claude-opus-4-8",
+            )
+        ),
+    )
+
+    text = render(
+        RendererInput(artifacts_dir=artifacts, output_folder=output)
+    ).index_path.read_text()
+
+    # Both the contracted and external cost lines appear.
+    assert "**Total cost (USD):** $0.1234" in text
+    assert "**External cost (USD):** $0.5678" in text
+    assert "_(source: public-api-rate-table)_" in text
+    # External rate note surfaces in Notes.
+    assert "external: rates applied: anthropic:aws/claude-opus-4-8" in text
+    # JSON/page agreement: rendered value matches the persisted manifest.
+    assert "0.5678" in paths.run_manifest_path.read_text()
+
+
+def test_run_manifest_external_cost_omitted_when_none(tmp_path: Path) -> None:
+    artifacts = tmp_path / "artifacts"
+    output = tmp_path / "output"
+    artifacts.mkdir()
+    paths, _ = make_full_run(artifacts)
+    write_run_manifest(paths, make_run_manifest())  # external_cost defaults None
+
+    text = render(
+        RendererInput(artifacts_dir=artifacts, output_folder=output)
+    ).index_path.read_text()
+
+    assert "**Total cost (USD):**" in text
+    assert "**External cost (USD):**" not in text
 
 
 def test_overwrite_false_on_nonempty_raises(tmp_path: Path) -> None:

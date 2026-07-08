@@ -33,7 +33,11 @@ from spotlights_engine.candidate_discovery import (
     discover,
 )
 from spotlights_engine.costing.manifest import build_run_manifest
-from spotlights_engine.costing.rates import compute_cost, load_rates
+from spotlights_engine.costing.rates import (
+    compute_cost,
+    load_external_rates,
+    load_rates,
+)
 from spotlights_engine.costing.records import UsageRecord
 from spotlights_engine.module_deep_research import research_module_with_telemetry
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
@@ -1849,6 +1853,11 @@ async def _run_async(
     if not usage_records:
         usage_notes.append("no usage records found; run may predate usage capture")
     cost_summary = compute_cost(usage_records, load_rates())
+    external_cost_summary = compute_cost(
+        usage_records,
+        load_external_rates(),
+        source="public-api-rate-table",
+    )
     total_cost = cost_summary.amount_usd
     cost_str = f", rate-table cost ${total_cost:.2f}" if total_cost else ""
     accumulated = _accumulated_duration_s(manifest, per_module_telemetry)
@@ -1884,6 +1893,7 @@ async def _run_async(
         config_fingerprint=dict(manifest.get("config_fingerprint") or {}),
         records=usage_records,
         cost=cost_summary,
+        external_cost=external_cost_summary,
         wall_clock_s=time.monotonic() - run_start,
         accumulated_duration_s=accumulated,
         candidates_path=str(config.output_folder / "index.md"),

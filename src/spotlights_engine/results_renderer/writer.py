@@ -278,6 +278,11 @@ def _render_run_manifest(rm: RunManifest | None) -> list[str]:
         f"- **Total cost (USD):** ${rm.cost.amount_usd:.4f}  "
         f"_(source: {rm.cost.source})_"
     )
+    if rm.external_cost is not None:
+        lines.append(
+            f"- **External cost (USD):** ${rm.external_cost.amount_usd:.4f}  "
+            f"_(source: {rm.external_cost.source})_"
+        )
     lines.append(f"- **Total tokens:** {rm.total_tokens}")
     lines.append(f"- **Wall clock (s):** {rm.timing.wall_clock_s:.1f}")
     lines.append(
@@ -310,8 +315,13 @@ def _render_run_manifest(rm: RunManifest | None) -> list[str]:
 
     lines.append("### Notes")
     lines.append("")
+    external_rate_note = (
+        rm.external_cost.rate_note if rm.external_cost is not None else ""
+    )
     note_parts = [
-        part for part in (rm.cost.rate_note, rm.notes) if part
+        part
+        for part in (rm.cost.rate_note, external_rate_note, rm.notes)
+        if part
     ]
     if note_parts:
         for part in note_parts:

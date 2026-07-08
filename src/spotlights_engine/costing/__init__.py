@@ -20,10 +20,12 @@ from spotlights_engine.costing.manifest import (
     build_run_manifest,
 )
 from spotlights_engine.costing.rates import (
+    EXTERNAL_RATES_ENV_VAR,
     RATES_ENV_VAR,
     CostSummary,
     ModelRate,
     compute_cost,
+    load_external_rates,
     load_rates,
 )
 from spotlights_engine.costing.records import (
@@ -40,6 +42,7 @@ from spotlights_engine.costing.usage import (
 )
 
 __all__ = [
+    "EXTERNAL_RATES_ENV_VAR",
     "PROVIDER_FOR_CLI",
     "RATES_ENV_VAR",
     "AgentUsage",
@@ -57,5 +60,6 @@ __all__ = [
     "claude_usage_from_stream",
     "codex_usage_from_stream",
     "compute_cost",
+    "load_external_rates",
     "load_rates",
 ]
