@@ -75,7 +75,7 @@ def select_runners(
     return (
         CodexExecClient(codex_options or CodexExecOptions(cwd=repo_path)),
         ClaudeExecClient(ClaudeExecOptions(cwd=repo_path)),
-        GeminiExecClient(GeminiExecOptions(cwd=repo_path)),
+        GeminiExecClient(GeminiExecOptions(cwd=repo_path, skip_trust=True)),
     )
 
 

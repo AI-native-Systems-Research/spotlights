@@ -36,7 +36,7 @@ class ClaudeExecOptions(BaseModel):
     model: str | None = None
     permission_mode: str = "acceptEdits"
     allowed_tools: Sequence[str] = CLAUDE_RESEARCH_TOOLS
-    max_turns: int = 16
+    max_turns: int = 40
     timeout_seconds: int | None = None
     extra_args: Sequence[str] = Field(default_factory=tuple)
     env: Mapping[str, str] | None = None
