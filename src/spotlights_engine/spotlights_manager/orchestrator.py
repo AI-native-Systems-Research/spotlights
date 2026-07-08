@@ -757,6 +757,7 @@ async def _do_step3(
         candidates=list(candidates.candidates),
         include_candidate_hotspots=mgr_input.include_candidate_hotspots,
         enable_claude_search=mgr_input.enable_claude_search,
+        runner_artifacts_dir=module_paths.deep_research_runners_dir,
     )
     options = _build_deep_research_options(
         cfg, mgr_input.repo_path, module_paths.deep_research_last_message_path

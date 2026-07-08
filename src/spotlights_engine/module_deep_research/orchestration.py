@@ -91,8 +91,19 @@ def run_runners(
     runners: Sequence[ModuleResearchRunner],
     check: bool,
     module_qualified_name: str | None = None,
+    artifacts_dir: Path | None = None,
 ) -> list[RunnerOutcome]:
-    """Run research agents concurrently and capture recoverable runner failures."""
+    """Run research agents concurrently and capture recoverable runner failures.
+
+    When ``artifacts_dir`` is provided, each runner's raw stdout, raw stderr,
+    and final message are persisted to flat files in that directory after the
+    runner returns (success or failure). This is critical for diagnosing
+    failure modes that don't surface in the merged ``module_deep_research.json``
+    — for example, the claude wrapper's "CLI envelope without unwrapped
+    content" error, where the only way to see what claude actually returned is
+    to read its raw stdout. When ``artifacts_dir`` is None, no files are
+    written (preserves the historical behavior for standalone DR callers).
+    """
     if not runners:
         return [
             RunnerOutcome(
@@ -110,6 +121,9 @@ def run_runners(
         ", ".join(agent_names),
     )
 
+    if artifacts_dir is not None:
+        artifacts_dir.mkdir(parents=True, exist_ok=True)
+
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(runners)) as executor:
         futures = [
             executor.submit(
@@ -121,7 +135,65 @@ def run_runners(
             )
             for runner in runners
         ]
-        return [future.result() for future in futures]
+        outcomes = [future.result() for future in futures]
+
+    if artifacts_dir is not None:
+        for outcome in outcomes:
+            _write_runner_artifacts(artifacts_dir, outcome)
+
+    return outcomes
+
+
+def _write_runner_artifacts(directory: Path, outcome: RunnerOutcome) -> None:
+    """Dump one runner's raw stdout/stderr/last-message to disk.
+
+    Files are flat-named (``<agent>.raw_stdout.log`` etc.) so multiple runners
+    share the directory without subdirectory bookkeeping. Best-effort: any
+    write failure is logged but never raised, since artifact persistence must
+    not turn a recoverable runner failure into a fatal one.
+    """
+    agent = outcome.agent_name
+    try:
+        if outcome.error is not None and outcome.result is None:
+            (directory / f"{agent}.runner_error.txt").write_text(
+                outcome.error, encoding="utf-8"
+            )
+            return
+        result = outcome.result
+        if result is None:
+            return
+        (directory / f"{agent}.raw_stdout.log").write_text(
+            result.stdout or "", encoding="utf-8"
+        )
+        (directory / f"{agent}.raw_stderr.log").write_text(
+            result.stderr or "", encoding="utf-8"
+        )
+        if result.final_message is not None:
+            (directory / f"{agent}.last_message.txt").write_text(
+                result.final_message, encoding="utf-8"
+            )
+        (directory / f"{agent}.summary.json").write_text(
+            _runner_summary_json(outcome), encoding="utf-8"
+        )
+    except OSError as exc:
+        _log.warning(
+            "deep_research: failed to persist artifacts for %s: %s", agent, exc
+        )
+
+
+def _runner_summary_json(outcome: RunnerOutcome) -> str:
+    """Tiny structured summary written alongside the raw logs."""
+    import json
+
+    summary: dict[str, object] = {"agent_name": outcome.agent_name}
+    if outcome.result is not None:
+        summary["returncode"] = outcome.result.returncode
+        summary["stdout_chars"] = len(outcome.result.stdout or "")
+        summary["stderr_chars"] = len(outcome.result.stderr or "")
+        summary["has_final_message"] = outcome.result.final_message is not None
+    if outcome.error is not None:
+        summary["execution_error"] = outcome.error
+    return json.dumps(summary, indent=2, sort_keys=True) + "\n"
 
 
 def merge_outcomes(
