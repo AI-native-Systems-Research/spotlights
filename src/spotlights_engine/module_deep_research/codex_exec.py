@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import sys
 import tempfile
 import threading
+import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import IO
@@ -18,6 +20,33 @@ from spotlights_engine.module_deep_research.agent_exec import (
     AgentExecResult,
     resolve_cli_executable,
 )
+
+_log = logging.getLogger(__name__)
+
+
+_RATE_LIMIT_PATTERNS = (
+    "exceeded rate limit",
+    "rate limit exceeded",
+    "stream disconnected before completion",
+    "rate-limited",
+    "ratelimitexceeded",
+    "http 429",
+    "(429)",
+)
+
+
+def _looks_rate_limited(stdout: str, stderr: str) -> bool:
+    """Heuristic: does the codex CLI output look like a gateway rate-limit eviction?
+
+    The Azure LiteLLM gateway can terminate the SSE stream mid-response with
+    strings like "Your requests to <model> have exceeded rate limit." or
+    "stream disconnected before completion". The codex CLI exits non-zero
+    with no clean error path, so the only way to detect this is to match the
+    rate-limit substring in its captured output.
+    """
+    combined = (stdout or "") + "\n" + (stderr or "")
+    haystack = combined.lower()
+    return any(pattern in haystack for pattern in _RATE_LIMIT_PATTERNS)
 
 
 class CodexExecOptions(BaseModel):
@@ -40,6 +69,8 @@ class CodexExecOptions(BaseModel):
     extra_args: Sequence[str] = Field(default_factory=tuple)
     env: Mapping[str, str] | None = None
     stream_logs: bool = False
+    rate_limit_retries: int = Field(default=3, ge=0)
+    rate_limit_backoff_seconds: float = Field(default=120.0, ge=0.0)
 
 
 class CodexExecResult(AgentExecResult):
@@ -104,7 +135,40 @@ class CodexExecClient:
         return cmd, output_last_message
 
     def run(self, prompt: str, *, check: bool = True) -> CodexExecResult:
-        """Run `codex exec` with `prompt` on stdin, streaming output live."""
+        """Run `codex exec` with `prompt` on stdin, streaming output live.
+
+        Retries on rate-limit eviction (LiteLLM/Azure terminating the SSE
+        stream when the per-minute / per-hour quota is hit). See
+        ``CodexExecOptions.rate_limit_retries`` / ``rate_limit_backoff_seconds``
+        for the policy; retries use exponential backoff. Non-rate-limit
+        non-zero exits are returned without retry.
+        """
+        result = self._run_once(prompt)
+        attempts_remaining = max(0, self.options.rate_limit_retries)
+        attempt = 0
+        while (
+            attempts_remaining > 0
+            and result.returncode != 0
+            and _looks_rate_limited(result.stdout, result.stderr)
+        ):
+            attempt += 1
+            wait = self.options.rate_limit_backoff_seconds * (2 ** (attempt - 1))
+            _log.warning(
+                "codex hit a rate limit (attempt %d); sleeping %.0fs before retry",
+                attempt,
+                wait,
+            )
+            time.sleep(wait)
+            result = self._run_once(prompt)
+            attempts_remaining -= 1
+
+        if check:
+            result.raise_for_status()
+        return result
+
+    def _run_once(self, prompt: str) -> CodexExecResult:
+        """One non-retried codex invocation. Factored out of ``run`` so the
+        retry wrapper above can call it without recursion."""
         cmd, last_path = self.build_command("-")
         env = os.environ.copy()
         if self.options.env:
@@ -181,8 +245,6 @@ class CodexExecClient:
         )
         if result.usage is not None and result.usage.model is None and self.options.model:
             result.usage = result.usage.model_copy(update={"model": self.options.model})
-        if check:
-            result.raise_for_status()
         return result
 
 
