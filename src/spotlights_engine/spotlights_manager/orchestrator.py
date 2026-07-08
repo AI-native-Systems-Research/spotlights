@@ -752,6 +752,7 @@ async def _do_step3(
         max_findings_per_module=mgr_input.max_findings_per_module,
         candidates=list(candidates.candidates),
         include_candidate_hotspots=mgr_input.include_candidate_hotspots,
+        runner_artifacts_dir=module_paths.deep_research_runners_dir,
     )
     options = _build_deep_research_options(
         cfg, mgr_input.repo_path, module_paths.deep_research_last_message_path

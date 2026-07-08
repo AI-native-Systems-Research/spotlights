@@ -94,6 +94,7 @@ def research_module_with_telemetry(
         runners=active_runners,
         check=check,
         module_qualified_name=request.module_qualified_name,
+        artifacts_dir=request.runner_artifacts_dir,
     )
     usages: list[CliUsage] = []
     for outcome in outcomes:

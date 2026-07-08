@@ -189,6 +189,16 @@ class ModulePaths:
         return self.dir / "module_deep_research.last_message.md"
 
     @property
+    def deep_research_runners_dir(self) -> Path:
+        """Directory holding per-runner raw stdout/stderr/last_message for the
+        deep-research step. Populated only when the DR API is invoked with an
+        ``artifacts_dir`` (the manager always supplies one); standalone DR
+        callers can skip it. Flat naming: ``<runner>.raw_stdout.log``,
+        ``<runner>.raw_stderr.log``, ``<runner>.last_message.txt``,
+        ``<runner>.summary.json``."""
+        return self.dir / "module_deep_research.runners"
+
+    @property
     def proposal_from_finding_path(self) -> Path:
         return self.dir / "proposal_from_finding_creator.json"
 

@@ -66,6 +66,14 @@ class ModuleDeepResearchInput(BaseModel):
     candidates: list[Candidate] = Field(default_factory=list)
     include_candidate_hotspots: bool = True
 
+    # Directory into which per-runner raw stdout / stderr / final-message /
+    # summary files are written, one set per CLI runner. When `None` (the
+    # default), no per-runner artifacts are written — preserves the historical
+    # behavior for standalone DR callers. The manager always supplies one so
+    # runner failures (empty envelope, transport errors, quota timeouts) can
+    # be diagnosed after the fact.
+    runner_artifacts_dir: Path | None = None
+
 
 class ModuleDeepResearchOutput(BaseModel):
     """Output contract for step 3 (`module_deep_research`)."""
