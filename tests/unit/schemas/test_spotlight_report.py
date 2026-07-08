@@ -23,7 +23,7 @@ from spotlights_engine.schemas.pipeline import RunInfo, SpotlightReport
 from spotlights_engine.schemas.project import Module, ProjectTree, Repository
 from spotlights_engine.schemas.proposal import Proposal, ProposalSource
 
-FIXTURE = Path(__file__).parent / "fixtures" / "spotlight_report_v1.json"
+FIXTURE = Path(__file__).parent / "fixtures" / "spotlight_report_v2.json"
 
 
 def _span(**overrides) -> CodeSpan:
@@ -79,7 +79,7 @@ def _ctx() -> SpotlightContext:
 
 
 def _run() -> RunInfo:
-    return RunInfo(pipeline="deep_research", run_id="r1", started_at="2026-06-18T00:00:00Z")
+    return RunInfo(pipelines=["deep_research"], run_id="r1", started_at="2026-06-18T00:00:00Z")
 
 
 # extra="forbid" rejection ----------------------------------------------------
@@ -116,7 +116,7 @@ def _run() -> RunInfo:
         ),
         (
             RunInfo,
-            {"pipeline": "signal", "run_id": "r", "started_at": "t", "extra": "x"},
+            {"pipelines": ["telemetry"], "run_id": "r", "started_at": "t", "extra": "x"},
         ),
         (
             SpotlightReport,
@@ -205,26 +205,64 @@ def test_proposal_source_rejects_non_member() -> None:
         _proposal(source="github_signal")
 
 
-@pytest.mark.parametrize("value", ["deep_research", "signal"])
-def test_run_info_pipeline_accepts_each_member(value) -> None:
-    assert RunInfo(pipeline=value, run_id="r", started_at="t").pipeline == value
+@pytest.mark.parametrize("value", ["deep_research", "telemetry"])
+def test_run_info_pipelines_accepts_each_member(value) -> None:
+    assert RunInfo(pipelines=[value], run_id="r", started_at="t").pipelines == [value]
 
 
-def test_run_info_pipeline_rejects_non_member() -> None:
+def test_run_info_pipelines_accepts_multiple_contributors() -> None:
+    info = RunInfo(
+        pipelines=["deep_research", "telemetry"], run_id="r", started_at="t"
+    )
+    assert info.pipelines == ["deep_research", "telemetry"]
+
+
+def test_run_info_pipelines_rejects_non_member() -> None:
     with pytest.raises(ValidationError):
-        RunInfo(pipeline="unified", run_id="r", started_at="t")
+        RunInfo(pipelines=["github_signal"], run_id="r", started_at="t")
 
 
-def test_schema_version_accepts_one() -> None:
+def test_run_info_pipelines_rejects_empty_list() -> None:
+    """`pipelines` carries every contributor — an empty list would mean
+    a report with no producer, which is meaningless."""
+    with pytest.raises(ValidationError):
+        RunInfo(pipelines=[], run_id="r", started_at="t")
+
+
+def test_run_info_legacy_singular_field_rejected() -> None:
+    """Pre-v2 reports used `pipeline: Literal[...]` (scalar). The v2 schema
+    renames + retypes to `pipelines: list[...]`; `extra="forbid"` makes the
+    old key explicit-fail rather than silent-drop."""
+    with pytest.raises(ValidationError):
+        RunInfo.model_validate(
+            {"pipeline": "deep_research", "run_id": "r", "started_at": "t"}
+        )
+
+
+def test_schema_version_accepts_two() -> None:
     rep = SpotlightReport.model_validate(json.loads(FIXTURE.read_text()))
-    assert rep.schema_version == "1"
+    assert rep.schema_version == "2"
 
 
 def test_schema_version_rejects_other_values() -> None:
     payload = json.loads(FIXTURE.read_text())
-    payload["schema_version"] = "2"
+    payload["schema_version"] = "1"
     with pytest.raises(ValidationError):
         SpotlightReport.model_validate(payload)
+    payload["schema_version"] = "3"
+    with pytest.raises(ValidationError):
+        SpotlightReport.model_validate(payload)
+
+
+def test_v1_fixture_no_longer_validates() -> None:
+    """Hard cutover: pre-v2 reports fail to load. The v1 fixture stays
+    on disk as historical evidence; consumers that need to read it must
+    be aware the schema has moved on."""
+    v1_payload = json.loads(
+        (Path(__file__).parent / "fixtures" / "spotlight_report_v1.json").read_text()
+    )
+    with pytest.raises(ValidationError):
+        SpotlightReport.model_validate(v1_payload)
 
 
 # module_qualified_name nullability ------------------------------------------

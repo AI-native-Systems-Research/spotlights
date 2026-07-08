@@ -153,11 +153,19 @@ class SpotlightsManagerInput(BaseModel):
 
 
 class RunInfo(BaseModel):
-    """Info about the run that produced a `SpotlightReport`."""
+    """Info about the run that produced a `SpotlightReport`.
+
+    `pipelines` lists every contributor whose candidates / findings /
+    anomalies / proposals appear in this report. A single-contributor run
+    produces a one-element list (e.g. `["telemetry"]`); a run that merges
+    multiple pipelines produces a list with all of them
+    (e.g. `["deep_research", "telemetry"]`). Adding a new pipeline kind
+    widens the inner Literal — no special "unified" / "multi" sentinel.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    pipeline: Literal["deep_research", "signal"]
+    pipelines: list[Literal["deep_research", "telemetry"]] = Field(min_length=1)
 
     run_id: str = Field(min_length=1)
     started_at: str
@@ -170,7 +178,7 @@ class SpotlightReport(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["2"] = "2"
 
     project_tree: ProjectTree
     context: SpotlightContext

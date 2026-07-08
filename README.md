@@ -38,7 +38,7 @@ The module map is a shared coordinate system: every signal source projects onto 
 |---|---|---|
 | **Code structure** | Static analysis builds the module tree that grounds every candidate in a specific code region. | **Live** |
 | **Research literature** | A deep-research engine retrieves findings from the web, arXiv, blogs, and docs, and derives evidence-backed proposals for each candidate. | **Live** |
-| **Runtime telemetry** | OpenTelemetry traces, logs, and profiles surface bottlenecks visible only under load, not in the source. Wired through the [`signal-pipeline`](#telemetry-driven-discovery-preview) flow. | **Live (preview)** |
+| **Runtime telemetry** | OpenTelemetry traces, logs, and profiles surface bottlenecks visible only under load, not in the source. Wired through the [`spotlights-engine telemetry`](#telemetry-driven-discovery-preview) flow. | **Live (preview)** |
 | **Repository history** | Issues, pull requests, and commit history capture known limitations, past reasoning, and undocumented benchmarks that never reach code comments. | In development |
 | **Technique-driven discovery** | Start from a paper or technique and search the codebase for where it could apply — the inverse of starting from a bottleneck. | Exploring |
 | *…and more* | *The list isn't closed — if you have a signal source in mind, propose one via [Contributing](#contributing).* | *Open* |
@@ -362,19 +362,49 @@ If a model is missing from the table, Spotlights still writes the manifest and p
 
 ## Telemetry-driven discovery (preview)
 
-A second entry point. Given a captured workload's OpenTelemetry traces and the subject repo, the `signal-pipeline` CLI runs five stages — signal extraction, ProjectTree extraction, candidate generation, change generation, execution — to produce evidence-backed code changes with rationales and applied diffs. A canonical run on a vLLM/LRU OTel capture takes ~10 min and ~$2 in API costs and yields a handful of candidates anchored to the captured anomalies.
+A second entry point. Given a captured workload's OpenTelemetry traces and the subject repo, the telemetry pipeline runs five stages — signal extraction, ProjectTree extraction, candidate generation, change generation, execution — to produce evidence-backed code changes with rationales and applied diffs. A canonical run on a vLLM/LRU OTel capture takes ~10 min and ~$2 in API costs and yields a handful of candidates anchored to the captured anomalies.
 
 ```bash
-signal-pipeline \
-    --output-folder ./spotlights-out \
-    --artifacts-dir ./artifacts \
+spotlights-engine telemetry \
     --repo ../vllm \
-    --telemetry-from <path-to-otel-capture-or-signals.json>
+    --telemetry-from <path-to-otel-capture-or-signals.json> \
+    --artifacts-dir ./artifacts \
+    --output-folder ./spotlights-out
 ```
 
 `--telemetry-from` accepts either a directory of raw OTel files or a pre-cooked `01_signals.json`. For stage-by-stage details, prompt iteration, the artifacts-dir layout, the `--inject` workflow for hand-edited intermediates, model selection, and troubleshooting, see [`src/spotlights_engine/signal_pipeline/README.md`](src/spotlights_engine/signal_pipeline/README.md). Architecture and contracts live in [`docs/signal-based/`](docs/signal-based/).
 
+The standalone `signal-pipeline` console script is still available and exposes the lower-level stage controls (`--from-stage` / `--to-stage` / `--inject`) — useful for stage-replay debugging and the opt-in stage 05 (execution).
+
 **Status:** MVP. Knowledge retrieval and archive are deferred per the design doc.
+
+## Run multiple pipelines together
+
+`spotlights-engine --pipelines deep-research,telemetry` runs the listed pipelines from one command, extracts the `ProjectTree` exactly once, and emits a single merged `SpotlightReport` whose `run.pipelines` lists every contributor. Pipelines run concurrently against the same subject — wall-clock matches the longest contributor, and the second extraction is saved.
+
+```bash
+spotlights-engine \
+  --pipelines deep-research,telemetry \
+  --repo ../vllm \
+  --include vllm/v1/kv_offload \
+  --objective "reduce hot-path latency on common workloads" \
+  --telemetry-from <path-to-otel-capture-or-signals.json> \
+  --artifacts-dir ./artifacts \
+  --output-folder ./spotlights-out
+```
+
+Each unified run lands at `<artifacts-dir>/<run-id>/` with:
+
+```
+spotlight_report.json   # merged report (the canonical output)
+manifest.json
+_extractor/             # the one-shot ProjectTree extraction
+telemetry/              # telemetry pipeline run dir (incl. its own report)
+deep_research/          # deep-research pipeline run dir (incl. its own report)
+summary.json
+```
+
+Telemetry stage 05 (subject-mutating execution) is locked off whenever the unified runner invokes it, because it would collide with deep-research's repo fingerprinting. Run the standalone `signal-pipeline --to-stage 05` on a clean checkout when you want to apply changes.
 
 ## Validation
 

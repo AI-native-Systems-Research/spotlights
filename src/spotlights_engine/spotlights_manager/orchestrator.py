@@ -160,7 +160,7 @@ def _build_report(
     issues.extend(manager_issues)
 
     run_info = RunInfo(
-        pipeline="deep_research",
+        pipelines=["deep_research"],
         run_id=_run_id_from_manifest(manifest),
         started_at=manifest.get("created_at") or _now_iso(),
         finished_at=_now_iso(),

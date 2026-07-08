@@ -1017,6 +1017,10 @@ def run_pipeline(
     # artifacts (signals + project_tree + candidates); a partial run that
     # ended before stage 04 still produces a valid report with empty
     # `proposals` lists. Errors here are recorded but never abort the run.
+    # `input.context` is the optional caller-supplied SpotlightContext: when
+    # set (e.g. by the unified runner) it pins the report's objective /
+    # workload_hints / validation_plan; when None (today's signal-pipeline
+    # CLI default) emit_spotlight_report falls back to _default_context.
     try:
         cost_total = _aggregate_run_cost(status)
         emit_spotlight_report(
@@ -1025,6 +1029,7 @@ def run_pipeline(
             started_at=run_started_at,
             finished_at=_now_iso(),
             cost_usd=cost_total,
+            context=input.context,
         )
     except Exception as exc:  # noqa: BLE001
         aggregate_issues.append(f"spotlight_report emission failed: {exc}")

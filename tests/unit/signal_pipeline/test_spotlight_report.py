@@ -118,7 +118,7 @@ def _change(candidate_id: str, *, mech: str = "swap A for B") -> Change:
 
 def _run_info() -> RunInfo:
     return RunInfo(
-        pipeline="signal",
+        pipelines=["telemetry"],
         run_id="run-xyz",
         started_at="2026-06-19T00:00:00+00:00",
         finished_at="2026-06-19T00:01:00+00:00",
@@ -160,8 +160,8 @@ def test_resolve_module_returns_none_when_no_match() -> None:
 
 
 def test_build_assigns_global_cand_and_prop_ids() -> None:
-    """Two drafts + two changes produce cand-signal-0001/cand-signal-0002 and
-    prop-signal-0001/prop-signal-0002 in deterministic walk order."""
+    """Two drafts + two changes produce cand-telemetry-0001/cand-telemetry-0002 and
+    prop-telemetry-0001/prop-telemetry-0002 in deterministic walk order."""
     drafts = [_draft(id_="cand-0001"), _draft(id_="cand-0002", file="src/inference/foo.py")]
     changes = {"cand-0001": _change("cand-0001"), "cand-0002": _change("cand-0002")}
     report = build_spotlight_report(
@@ -172,9 +172,9 @@ def test_build_assigns_global_cand_and_prop_ids() -> None:
         context=_context(),
         run_info=_run_info(),
     )
-    assert [c.id for c in report.candidates] == ["cand-signal-0001", "cand-signal-0002"]
+    assert [c.id for c in report.candidates] == ["cand-telemetry-0001", "cand-telemetry-0002"]
     proposal_ids = [p.id for c in report.candidates for p in c.proposals]
-    assert proposal_ids == ["prop-signal-0001", "prop-signal-0002"]
+    assert proposal_ids == ["prop-telemetry-0001", "prop-telemetry-0002"]
 
 
 def test_build_skips_proposal_when_change_missing() -> None:
@@ -209,7 +209,7 @@ def test_build_origin_is_telemetry_anomaly() -> None:
 
 def test_build_proposal_source_is_telemetry_anomaly_with_ref_ids() -> None:
     """Proposals carry `source="telemetry_anomaly"` and `anomaly_ref_ids`
-    remapped to the renumbered `anom-signal-NNNN` ids minted at the
+    remapped to the renumbered `anom-telemetry-NNNN` ids minted at the
     report-build boundary (spec §10). `finding_ref_id` and `author`
     stay None."""
     drafts = [_draft(anomaly_refs=["anom-1"])]
@@ -224,7 +224,7 @@ def test_build_proposal_source_is_telemetry_anomaly_with_ref_ids() -> None:
     )
     p = report.candidates[0].proposals[0]
     assert p.source == "telemetry_anomaly"
-    assert p.anomaly_ref_ids == ["anom-signal-0001"]
+    assert p.anomaly_ref_ids == ["anom-telemetry-0001"]
     assert p.finding_ref_id is None
     assert p.author is None
 
@@ -306,7 +306,7 @@ def test_build_anomalies_translate_into_closed_shape() -> None:
     assert len(report.anomalies) == 1
     a = report.anomalies[0]
     # Upstream `anom-1` is renumbered to the segmented form at the boundary.
-    assert a.anomaly_id == "anom-signal-0001"
+    assert a.anomaly_id == "anom-telemetry-0001"
     assert a.type == "latency"
     assert a.confidence == 0.6
     assert a.magnitude == "19x p50"
@@ -395,7 +395,7 @@ def test_build_run_pipeline_is_signal() -> None:
         context=_context(),
         run_info=_run_info(),
     )
-    assert report.run.pipeline == "signal"
+    assert report.run.pipelines == ["telemetry"]
 
 
 def test_build_proposal_drops_change_type_from_unified_shape() -> None:
@@ -476,10 +476,10 @@ def test_emit_writes_spotlight_report_json(tmp_path: Path) -> None:
     target = layout.root / "spotlight_report.json"
     assert target.exists()
     parsed = SpotlightReport.model_validate_json(target.read_text(encoding="utf-8"))
-    assert parsed.run.pipeline == "signal"
+    assert parsed.run.pipelines == ["telemetry"]
     assert parsed.run.run_id == "run-xyz"
     assert len(parsed.candidates) == 1
-    assert parsed.candidates[0].proposals[0].anomaly_ref_ids == ["anom-signal-0001"]
+    assert parsed.candidates[0].proposals[0].anomaly_ref_ids == ["anom-telemetry-0001"]
 
 
 def test_emit_returns_none_when_signals_missing(tmp_path: Path) -> None:

@@ -5,7 +5,11 @@ overview).
 
 Entry points:
 - `run_pipeline(...)` — programmatic
-- `signal-pipeline` — CLI (registered in pyproject)
+- `spotlights-engine telemetry` — top-level CLI (recommended; goes through
+  the unified runner, emits a `SpotlightReport` whose `run.pipelines`
+  lists the contributors)
+- `signal-pipeline` — standalone CLI (lower-level controls:
+  `--from-stage` / `--to-stage` / `--inject`, plus opt-in stage 05)
 
 Public surface kept small. Stage implementations live in
 `spotlights_engine.signal_pipeline.stages.*` and are *not* re-exported here

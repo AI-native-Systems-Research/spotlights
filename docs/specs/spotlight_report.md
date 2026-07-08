@@ -100,9 +100,9 @@
       segmentation since DR runs per-module by construction; this also
       gives parallel-module uniqueness without a global counter and
       keeps resume/persistence directory layout aligned with the id.
-    - **Signal pipeline** — uses the fixed string `signal` for every
-      candidate / proposal / anomaly (e.g. `cand-signal-0001`,
-      `prop-signal-0001`, `anom-signal-0001`). Signal-pipeline
+    - **Telemetry pipeline** — uses the fixed string `telemetry` for
+      every candidate / proposal / anomaly (e.g. `cand-telemetry-0001`,
+      `prop-telemetry-0001`, `anom-telemetry-0001`). Telemetry-pipeline
       candidates don't have a natural per-module segmentation
       (`module_qualified_name` is optional and resolved post-hoc), so a
       fixed segment keeps the schema valid without inventing one.
@@ -309,10 +309,14 @@ class RunInfo(BaseModel):
     """Info about the run that produced this report."""
     model_config = ConfigDict(extra="forbid")
 
-    pipeline: Literal["deep_research", "signal"]
-    # ↑ which pipeline produced the report. Future "unified" value
-    #   is deferred until pipelines actually unify; widening this
-    #   Literal is a schema-version bump per §4.8.
+    pipelines: list[Literal["deep_research", "telemetry"]] = Field(min_length=1)
+    # ↑ which pipelines contributed candidates / findings / anomalies /
+    #   proposals to this report.  Single-pipeline run → one-element list
+    #   (e.g. `["telemetry"]`); multi-pipeline run via the unified runner
+    #   → all contributors (e.g. `["deep_research", "telemetry"]`).
+    #   No `"unified"` sentinel — the list itself names the contributors.
+    #   Adding a new pipeline kind widens the inner Literal (schema-version
+    #   bump per §4.8).
 
     run_id: str = Field(min_length=1)
     started_at: str                       # ISO-8601
@@ -329,7 +333,7 @@ class SpotlightReport(BaseModel):
     """
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["1"] = "1"
+    schema_version: Literal["2"] = "2"
 
     # inputs echoed back, for self-describing audit/repro
     project_tree: ProjectTree
@@ -451,7 +455,7 @@ Renumber + flatten + reshape:
 6. Issues from each `module_run.issues` are concatenated into top-level
    `SpotlightReport.issues`.
 
-`RunInfo.pipeline = "deep_research"`. The adapter populates
+`RunInfo.pipelines = ["deep_research"]`. The adapter populates
 `run_id`, `started_at`, `finished_at` (when available), and
 `cost_usd` (sum of pipeline-side cost envelopes).
 
@@ -503,7 +507,7 @@ Output: a `SpotlightReport`.
    ```
 7. Stage-level issues map to top-level `SpotlightReport.issues`.
 
-`RunInfo.pipeline = "signal"`.
+`RunInfo.pipelines = ["telemetry"]`.
 
 The adapter writes `runs/<id>/spotlight_report.json`.
 
@@ -543,7 +547,7 @@ candidates take the head of the global numbering (`cand-0001`,
 
 ```json
 {
-  "schema_version": "1",
+  "schema_version": "2",
   "project_tree": { "...": "echoed unchanged" },
   "context": {
     "objective": "reduce the media TTFT and median TPOT (Time Per Output Token)",
@@ -709,7 +713,7 @@ candidates take the head of the global numbering (`cand-0001`,
   ],
   "anomalies": [],
   "run": {
-    "pipeline": "deep_research",
+    "pipelines": ["deep_research"],
     "run_id": "vllm_subset_2026-06-14",
     "started_at": "2026-06-14T...",
     "finished_at": "2026-06-14T...",
@@ -729,8 +733,8 @@ and pointed consumers at the legacy `SpotlightsResult` artifact;
 that decision was reversed because the legacy artifacts go away
 under unification, so the ref-ids would dangle.
 
-A signal-pipeline `SpotlightReport` against the same vllm tree would
-have identical *shape* — only with `run.pipeline = "signal"`,
+A telemetry-pipeline `SpotlightReport` against the same vllm tree would
+have identical *shape* — only with `run.pipelines = ["telemetry"]`,
 candidate `origin = "telemetry_anomaly"`, `anomaly_ref_ids` populated
 on each proposal joining to the top-level `anomalies` list,
 `finding_ref_id` always None, `findings: []`, and `proposals` of
@@ -850,15 +854,25 @@ real module names.
 
 ### 4.6 Where the `SpotlightReport` is written
 
-- DR adapter writes `<artifacts_dir>/spotlight_report.json` next to
-  the existing `result.json`.
-- Signal adapter writes `runs/<id>/spotlight_report.json` next to
-  the existing artifacts.
+- **Telemetry pipeline (standalone `signal-pipeline`)** auto-emits
+  `<run-dir>/spotlight_report.json` from `emit_spotlight_report` at
+  the end of the runner.
+- **Deep-research (standalone, no-verb `spotlights-engine`)** builds the
+  report in-memory through `SpotlightsManagerResult.report` and **does
+  not persist it** to its artifacts dir today (consumers go through the
+  `SpotlightsManagerResult` envelope; `output_folder/result.json`
+  carries the wrapper, not the bare report).
+- **Unified runner (`spotlights-engine telemetry` / `spotlights-engine
+  --pipelines ...`)** writes `<unified-run-dir>/spotlight_report.json`
+  (the canonical merged report, `RunInfo.pipelines` listing every
+  contributor) plus, for symmetry,
+  `<unified-run-dir>/deep_research/spotlight_report.json` and
+  `<unified-run-dir>/telemetry/spotlight_report.json`.
 
-Both adapters can also be exposed as standalone CLI subcommands
-(`spotlights-engine report <result.json>`,
-`signal-pipeline report <run-dir>`) for re-converting historical
-artifacts without re-running the pipeline.
+Standalone re-conversion CLIs
+(`spotlights-engine report <result.json>`, `signal-pipeline report
+<run-dir>`) are still on the table for re-emitting historical
+artifacts without re-running the pipeline; not yet implemented.
 
 ### 4.7 DR diagnostic envelopes — dropped from report
 
@@ -876,7 +890,7 @@ today (separate JSON files next to the legacy `result.json`).
 
 ### 4.8 Schema versioning
 
-`schema_version: Literal["1"] = "1"` is a single envelope version
+`schema_version: Literal["2"] = "2"` is a single envelope version
 covering the whole report. Bump on breaking changes; per-field
 versioning is overkill.
 
@@ -886,13 +900,31 @@ decides if their change is breaking.
 - *Additive* (new optional field with a default) — no bump.
 - *Breaking* (rename/remove a field, change a type, change a field's
   meaning, **widen a `Literal` like `CandidateOrigin`,
-  `ProposalSource`, `RunInfo.pipeline`, or `CodeKind`**) — bump
-  `Literal["1"]` to `Literal["1", "2"]` for reads; default new
-  writes to `"2"`; update both adapters.
+  `ProposalSource`, `RunInfo.pipelines` (inner Literal), or `CodeKind`**) — bump
+  `schema_version` to the next integer-as-string. The historical
+  fixture file is kept on disk as evidence the previous shape existed
+  but is no longer parseable by the current `SpotlightReport`
+  (hard cutover; aligns with `SpotlightsManager.SCHEMA_VERSION`
+  resume policy).
+
+**Version history:**
+
+- `"1"` — initial schema, landed in PR #22 (2026-06-18).
+- `"2"` — bumped alongside the unified runner work in
+  `unification/unified-runner` (2026-06-28). Two breaking changes
+  to `RunInfo`:
+  - Scalar `pipeline: Literal["deep_research", "signal"]` → list-typed
+    `pipelines: list[Literal["deep_research", "telemetry"]]`. Single
+    runs produce a one-element list; multi-runs (via the unified
+    runner) produce the union — no `"unified"` / `"multi"` sentinel.
+  - The telemetry pipeline's Literal value flipped from `"signal"` to
+    `"telemetry"` to match the user-facing CLI verb. Id segments
+    (`cand-<segment>-NNNN` etc.) flipped to match (§10).
 
 Enforced by code review and a frozen-fixture test in
-`tests/unit/schemas/`. There's no automation that detects breaking
-changes from a diff; it's a discipline call.
+`tests/unit/schemas/` (one fixture per version round-trips; older
+fixtures are kept as historical evidence and asserted to FAIL
+validation under the current schema).
 
 ### 4.9 Naming — `SpotlightReport` and the `Code*` family
 
@@ -1120,7 +1152,7 @@ and its tests so the pipeline produces a `SpotlightReport` directly.
      `SpotlightReport` is built.
 3. **Build SpotlightReport at the runner's output.** Where
    `run_pipeline` finishes, assemble a `SpotlightReport` with
-   `RunInfo.pipeline = "signal"`, walk parsed signals + candidates +
+   `RunInfo.pipelines = ["telemetry"]`, walk parsed signals + candidates +
    stage-04 changes, populate proposals with
    `source = "telemetry_anomaly"`, `anomaly_ref_ids` from upstream
    anomaly ids, and the structured fields from the stage-04 `Change`.

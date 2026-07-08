@@ -11,7 +11,7 @@ This module is the boundary translation: it walks the parsed
 
 - `Anomaly` records (closed shape, `anomaly_id` / `type` / `description` /
   `confidence` / `evidence_pointer` / `magnitude` / `estimated_severity`,
-  with the upstream descriptive id renumbered to `anom-signal-NNNN` per
+  with the upstream descriptive id renumbered to `anom-telemetry-NNNN` per
   spec §10).
 - `Candidate` records, one per draft, wrapping the draft's flat location
   fields into a single `CodeLocation` containing one `CodeSpan`. `origin`
@@ -24,8 +24,9 @@ This module is the boundary translation: it walks the parsed
 
 IDs are renumbered globally in deterministic walk order: candidates take
 the order they appear in the stage 03 artifact; proposals follow each
-candidate. ID prefixes are `cand-signal-NNNN` / `prop-signal-NNNN`
-(4-digit zero-padded; `signal` is the fixed pipeline segment per #28).
+candidate. ID prefixes are `cand-telemetry-NNNN` / `prop-telemetry-NNNN`
+(4-digit zero-padded; `telemetry` is the fixed pipeline segment — was
+`signal` before the unified-runner interface rename).
 
 The legacy `Change.change_type` field is intentionally NOT carried into
 the unified report (per spec section 4.10 -- one-pipeline + domain-locked
@@ -60,9 +61,13 @@ from spotlights_engine.signal_pipeline.schemas import (
 __all__ = ["build_spotlight_report", "emit_spotlight_report"]
 
 
-# Fixed pipeline segment for the unified id pattern (`<type>-signal-NNNN`),
-# per the resolution in #28.
-_SEGMENT = "signal"
+# Fixed pipeline segment for the unified id pattern (`<type>-telemetry-NNNN`).
+# Originally `"signal"` (per the resolution in #28); flipped to `"telemetry"`
+# in the unified-runner PR to align with the user-facing CLI verb + schema
+# Literal value. The variable name `_SEGMENT` is kept intentionally (internal
+# code still talks about "the signal pipeline's segment"); only its value
+# crosses into the output report's id strings.
+_SEGMENT = "telemetry"
 
 
 # ---- Module assignment ------------------------------------------------------
@@ -144,7 +149,7 @@ def _anomaly_from_lite(lite: AnomalyLite, *, new_id: str) -> Anomaly:
     (see `runs/max1-smoke/01_signals.json` for the real shape), defaulting
     to empty strings for the optional text fields.
 
-    `new_id` is the renumbered `anom-signal-NNNN` id minted at the
+    `new_id` is the renumbered `anom-telemetry-NNNN` id minted at the
     report-build boundary; the upstream descriptive id from `lite` is
     discarded so the unified `Anomaly.anomaly_id` pattern (spec §10)
     is honored without leaking pipeline-internal naming.
@@ -250,12 +255,12 @@ def build_spotlight_report(
 
     Walk order is deterministic: drafts iterate in the order they appear
     in stage 03's artifact; each draft's stage-04 `Change` (if present)
-    becomes its single proposal. Both ID streams (`cand-signal-NNNN`,
-    `prop-signal-NNNN`) are renumbered globally so the report can be
+    becomes its single proposal. Both ID streams (`cand-telemetry-NNNN`,
+    `prop-telemetry-NNNN`) are renumbered globally so the report can be
     flat-iterated without cross-module collisions.
     """
     # Renumber upstream anomaly ids (e.g. `A1-queue-dominated-latency`) to
-    # the unified `anom-signal-NNNN` shape per spec §10. `anomaly_id_remap`
+    # the unified `anom-telemetry-NNNN` shape per spec §10. `anomaly_id_remap`
     # is then used to translate each draft's `anomaly_refs` so proposals'
     # `anomaly_ref_ids` continue to join cleanly to the renumbered anomalies.
     anomaly_id_remap: dict[str, str] = {
@@ -364,12 +369,21 @@ _DEFAULT_SIGNAL_OBJECTIVE = "Address performance issues surfaced by telemetry si
 
 
 def _default_context(signals: Signals) -> SpotlightContext:
-    """Synthesize a `SpotlightContext` for signal runs.
+    """Fallback `SpotlightContext` when the caller didn't supply one.
 
-    Signal pipeline has no caller-supplied objective today; the unified
-    schema requires one (`SpotlightContext.objective: str` with
-    `min_length=1`). Use a fixed general objective for now — future runs
-    will supply real ones (e.g. "Reduce TTFT", "Improve median TPOT").
+    Used by `emit_spotlight_report(layout, ..., context=None)` and by
+    `run_pipeline` when `SignalPipelineInput.context is None` (today's
+    `signal-pipeline` CLI default — the standalone CLI doesn't expose
+    `--objective` and never sets the field). Programmatic callers
+    (notably the unified runner) thread an explicit
+    `SpotlightContext` so signal- and DR-side reports agree on
+    `objective` for clean merging — when they do, this fallback is
+    not used.
+
+    The unified `SpotlightReport` schema requires
+    `SpotlightContext.objective` to be a (possibly empty) string;
+    using a stable, descriptive default here keeps the standalone
+    signal output self-describing.
     """
     return SpotlightContext(
         objective=_DEFAULT_SIGNAL_OBJECTIVE,
@@ -406,7 +420,7 @@ def emit_spotlight_report(
     changes = _load_changes(layout)
 
     run_info = RunInfo(
-        pipeline="signal",
+        pipelines=["telemetry"],
         run_id=run_id,
         started_at=started_at,
         finished_at=finished_at,
