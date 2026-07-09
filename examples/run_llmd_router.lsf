@@ -1,16 +1,16 @@
 #!/bin/bash
-#BSUB -J spotlights-vllm-subset
+#BSUB -J spotlights-llmd-router
 #BSUB -q normal
 #BSUB -n 8
 #BSUB -R "span[hosts=1]"
-#BSUB -o output/spotlights_vllm_full.%J.stdout
-#BSUB -e output/spotlights_vllm_full.%J.stderr
+#BSUB -o output/spotlights_llmd_router.%J.stdout
+#BSUB -e output/spotlights_llmd_router.%J.stderr
 
 set -euo pipefail
 
 PROJECT_DIR=/u/ophirazu/projects/spotlights
-TARGET_REPO=/u/ophirazu/projects/vllm
-OUTPUT_DIR="$PROJECT_DIR/output/vllm_lsf"
+TARGET_REPO=/u/ophirazu/projects/llm-d-router
+OUTPUT_DIR="$PROJECT_DIR/output/llmd_router_lsf"
 ARTIFACTS_DIR="$OUTPUT_DIR/artifacts"
 
 cd "$PROJECT_DIR"
@@ -51,7 +51,7 @@ mkdir -p "$ARTIFACTS_DIR"
 
 spotlights-engine \
   --repo "$TARGET_REPO" \
-  --repo-url https://github.com/vllm-project/vllm \
+  --repo-url https://github.com/llm-d/llm-d-router \
   --objective "reduce the media TTFT and median TPOT (Time Per Output Token)" \
   --hint "multi-turn agentic workload" \
   --max-parallel 5 \
