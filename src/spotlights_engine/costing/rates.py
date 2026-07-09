@@ -21,8 +21,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from spotlights_engine.costing.records import UsageRecord
 
 RATES_ENV_VAR = "SPOTLIGHTS_RATES_FILE"
+EXTERNAL_RATES_ENV_VAR = "SPOTLIGHTS_EXTERNAL_RATES_FILE"
 
 _BUNDLED_RATES_PATH = Path(__file__).parent / "rates.json"
+_BUNDLED_EXTERNAL_RATES_PATH = Path(__file__).parent / "external_rates.json"
 
 
 class ModelRate(BaseModel):
@@ -44,28 +46,50 @@ class CostSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     amount_usd: float = 0.0
-    source: Literal["contracted-rate-table", "litellm-proxy-log"] = (
-        "contracted-rate-table"
-    )
+    source: Literal[
+        "contracted-rate-table", "litellm-proxy-log", "public-api-rate-table"
+    ] = "contracted-rate-table"
     rate_note: str = ""
     unpriced_models: list[str] = Field(default_factory=list)
 
 
-def load_rates(path: Path | None = None) -> dict[str, ModelRate]:
-    """Load the rate table keyed by `"provider:model"`.
+def _load_rates_from(
+    path: Path | None, env_var: str, bundled: Path
+) -> dict[str, ModelRate]:
+    """Load a rate table keyed by `"provider:model"`.
 
-    Precedence: explicit `path` > `SPOTLIGHTS_RATES_FILE` env var > the
-    checked-in public default table. Keys starting with `_` are comments.
+    Precedence: explicit `path` > `env_var` env var > the `bundled` default
+    table. Keys starting with `_` are comments.
     """
     if path is None:
-        env_path = os.environ.get(RATES_ENV_VAR)
-        path = Path(env_path) if env_path else _BUNDLED_RATES_PATH
+        env_path = os.environ.get(env_var)
+        path = Path(env_path) if env_path else bundled
     payload = json.loads(path.read_text(encoding="utf-8"))
     return {
         key: ModelRate.model_validate(value)
         for key, value in payload.items()
         if not key.startswith("_")
     }
+
+
+def load_rates(path: Path | None = None) -> dict[str, ModelRate]:
+    """Load the contracted (LiteLLM-proxy) rate table keyed by `"provider:model"`.
+
+    Precedence: explicit `path` > `SPOTLIGHTS_RATES_FILE` env var > the
+    checked-in contracted default table. Keys starting with `_` are comments.
+    """
+    return _load_rates_from(path, RATES_ENV_VAR, _BUNDLED_RATES_PATH)
+
+
+def load_external_rates(path: Path | None = None) -> dict[str, ModelRate]:
+    """Load the external (public list-price) rate table keyed by `"provider:model"`.
+
+    Precedence: explicit `path` > `SPOTLIGHTS_EXTERNAL_RATES_FILE` env var > the
+    checked-in external default table. Keys starting with `_` are comments.
+    """
+    return _load_rates_from(
+        path, EXTERNAL_RATES_ENV_VAR, _BUNDLED_EXTERNAL_RATES_PATH
+    )
 
 
 def _rate_key(record: UsageRecord) -> tuple[str, bool]:
@@ -76,7 +100,11 @@ def _rate_key(record: UsageRecord) -> tuple[str, bool]:
 
 
 def compute_cost(
-    records: Iterable[UsageRecord], rates: dict[str, ModelRate]
+    records: Iterable[UsageRecord],
+    rates: dict[str, ModelRate],
+    source: Literal[
+        "contracted-rate-table", "litellm-proxy-log", "public-api-rate-table"
+    ] = "contracted-rate-table",
 ) -> CostSummary:
     total = 0.0
     applied: dict[str, ModelRate] = {}
@@ -120,16 +148,18 @@ def compute_cost(
 
     return CostSummary(
         amount_usd=total,
-        source="contracted-rate-table",
+        source=source,
         rate_note="; ".join(note_parts),
         unpriced_models=sorted(unpriced),
     )
 
 
 __all__ = [
+    "EXTERNAL_RATES_ENV_VAR",
     "RATES_ENV_VAR",
     "CostSummary",
     "ModelRate",
     "compute_cost",
+    "load_external_rates",
     "load_rates",
 ]

@@ -1,0 +1,19 @@
+{
+  "_note": "Public/direct API list-price per-token rates (NOT via LiteLLM). Computed as a second 'external' cost alongside the contracted rates in rates.json. Default OpenAI rates are standard GPT-5.5 API prices; override via SPOTLIGHTS_EXTERNAL_RATES_FILE for long-context, regional, or future price changes. Never substitute CLI-reported total_cost_usd.",
+  "anthropic:aws/claude-opus-4-8": {
+    "input": 0.000005,
+    "output": 0.000025,
+    "cache_read": 0.0000005,
+    "cache_create": 0.00000625,
+    "unit": "per_token",
+    "note": "Public Anthropic API list price: Claude Opus 4.8 $5.00/MTok input, $25.00/MTok output, $0.50/MTok cache read (~0.1x), $6.25/MTok 5m cache write (1.25x). Keyed by the CLI-reported model id (the bedrock 'aws/' prefix is what the CLI emits even for direct billing comparison). Override for 1h cache writes."
+  },
+  "openai:codex": {
+    "input": 0.000005,
+    "output": 0.00003,
+    "cache_read": 0.0000005,
+    "cache_create": 0.0,
+    "unit": "per_token",
+    "note": "Public OpenAI API list price for standard GPT-5.5: $5.00/MTok input, $30.00/MTok output, $0.50/MTok cached input; no cache-create bucket. GPT-5.5 long-context (>272K input tokens) and some regional endpoints have different rates, so override via SPOTLIGHTS_EXTERNAL_RATES_FILE if those apply. Keyed by the CLI family because Codex streams may omit a resolvable model id."
+  }
+}

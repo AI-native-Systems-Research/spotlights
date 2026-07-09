@@ -79,6 +79,7 @@ class RunManifest(BaseModel):
     models_used: list[ModelUsed] = Field(default_factory=list)
     total_tokens: int = 0
     cost: RunManifestCost
+    external_cost: RunManifestCost | None = None
     timing: RunManifestTiming
     outputs: RunManifestOutputs
     notes: str = ""
@@ -110,6 +111,7 @@ def build_run_manifest(
     config_fingerprint: dict[str, Any],
     records: list[UsageRecord],
     cost: CostSummary,
+    external_cost: CostSummary | None = None,
     wall_clock_s: float,
     accumulated_duration_s: float = 0.0,
     candidates_path: str,
@@ -122,6 +124,11 @@ def build_run_manifest(
         note_parts.append(
             "unpriced models excluded from cost: "
             + ", ".join(cost.unpriced_models)
+        )
+    if external_cost is not None and external_cost.unpriced_models:
+        note_parts.append(
+            "external: unpriced models excluded from cost: "
+            + ", ".join(external_cost.unpriced_models)
         )
     if not provenance.get("target_commit_sha"):
         note_parts.append("target commit unavailable")
@@ -149,6 +156,15 @@ def build_run_manifest(
             amount_usd=cost.amount_usd,
             source=cost.source,
             rate_note=cost.rate_note,
+        ),
+        external_cost=(
+            RunManifestCost(
+                amount_usd=external_cost.amount_usd,
+                source=external_cost.source,
+                rate_note=external_cost.rate_note,
+            )
+            if external_cost is not None
+            else None
         ),
         timing=RunManifestTiming(
             wall_clock_s=wall_clock_s,
