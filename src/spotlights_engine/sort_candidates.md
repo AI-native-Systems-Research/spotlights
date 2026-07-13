@@ -9,8 +9,12 @@ report of the sorted candidates with scores.
 - `RESULT_JSON` — path to the run's `result.json`
   (default: `output/llmd_router_lsf/result.json`).
 - `OUTPUT_MD` — path to write the ranked markdown report
-  (default: `output/llmd_router_lsf/sorted_candidates.md`).
-- `TOP_N` — how many candidates to render in full detail (default: `all`).
+  (default: `output/llmd_router_lsf/sorted/sorted_candidates.md`).
+- `OUTPUT_JSON` — path to write the machine-readable ranked JSON
+  (default: `output/llmd_router_lsf/sorted/sorted_candidates.json`).
+- `TOP_N` — how many candidates to render in full detail in the markdown
+  (default: `all`). Does **not** affect the JSON, which always contains every
+  ranked candidate.
 
 The candidates live under `report.candidates` — a list of ~100 objects. Each
 candidate has: `id`, `module_qualified_name`, `origin`, `locations[]`
@@ -96,8 +100,13 @@ proposals a `finding_ref_id`).
 
 ## Output — how it is saved
 
-Write **one markdown file** to `OUTPUT_MD`. Do not mutate `result.json`; this
-is a read-only view over it.
+Write **two files** — a human-readable markdown report to `OUTPUT_MD` and a
+machine-readable JSON to `OUTPUT_JSON`. Both are derived from the same repaired
+ranked list, so their order and scores are identical. Create the parent
+directory (e.g. `output/llmd_router_lsf/sorted/`) if it does not exist. Do not
+mutate `result.json`; these are read-only views over it.
+
+### Markdown (`OUTPUT_MD`)
 
 Structure:
 
@@ -144,6 +153,61 @@ Rules for the markdown:
   round ran, and how many candidates (if any) were placed by repair rather than
   the judge — so the ranking is honest about which positions came from the
   model.
+
+### JSON (`OUTPUT_JSON`)
+
+Write the full ranked list as a single JSON object. It contains **every**
+candidate exactly once, in ranked order, and is the machine-readable companion
+to the markdown (`TOP_N` does not truncate it). Shape:
+
+```json
+{
+  "source_md": "<OUTPUT_MD, repo-relative>",
+  "source_result": "<RESULT_JSON, repo-relative>",
+  "run_id": "<report.run_id>",
+  "objective": "<report.context.objective>",
+  "method": "listwise sub-agent judge",
+  "total_ranked": 100,
+  "candidates": [
+    {
+      "rank": 1,
+      "id": "cand-…",
+      "module_qualified_name": "pkg/…",
+      "symbol": "<primary symbol>",
+      "impact": "high",
+      "score": 95,
+      "rationale": "<judge rank_rationale, truncated to ~200 chars>",
+      "locations": [
+        {
+          "file": "path/to/file.go",
+          "spans": [
+            { "line_start": 46, "line_end": 103,
+              "symbol": "…", "kind": "config_block" }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+Rules for the JSON:
+
+- `candidates` is ordered by `rank` (1-based, ascending) and matches the
+  markdown summary table row-for-row.
+- `score` is the judge's 0–100 score, or `null` for pre-score-fallback rows
+  (same rule as the markdown `—`).
+- `method` is `"listwise sub-agent judge"` normally, or
+  `"pre-score fallback"` when step 5's fallback was used.
+- `symbol` is the candidate's primary symbol (the first span's `symbol`, or the
+  candidate-level symbol when present).
+- `locations` is copied verbatim from the candidate in `result.json` (file +
+  spans with `line_start`/`line_end`/`symbol`/`kind`).
+- `source_md`, `source_result`, and `run_id` let a reader tie the JSON back to
+  the markdown report and the originating run.
+- Emit the JSON as UTF-8, pretty-printed (2-space indent), and do **not**
+  truncate the candidate list — every ranked candidate appears here even when
+  `TOP_N` limits the markdown details.
 
 ## Notes
 

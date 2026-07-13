@@ -262,7 +262,8 @@ def test_claude_command_shape_uses_litellm_safe_research_tools(tmp_path: Path) -
     allowed_tools = cmd[cmd.index("--allowedTools") + 1]
     assert "WebFetch" in tools
     assert "WebFetch" in allowed_tools
-    assert "WebSearch" not in tools
+    assert "WebSearch" in tools
+    assert "WebSearch" in allowed_tools
     assert "Edit" not in tools
 
 
