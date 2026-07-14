@@ -1899,7 +1899,7 @@ async def _run_async(
         candidates_path=str(config.output_folder / "index.md"),
         num_candidates=num_candidates,
         module_status=counts,
-        notes=usage_notes + ["Gemini usage/cost excluded by design"],
+        notes=usage_notes,
     )
     P.write_run_manifest(paths, public_manifest)
 

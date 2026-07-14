@@ -4,8 +4,8 @@ This package is dependency-free within the engine (only pydantic) so every
 step package and the manager can import it without cycles.
 
 - `usage`: the `AgentUsage` capture shape plus tolerant parsers for the
-  Claude (`stream-json` / `--output-format json`) and Codex (`--json`) CLI
-  output formats.
+  Claude (`stream-json` / `--output-format json`), Codex (`--json`), and
+  OpenCode (`--format json`) CLI output formats.
 - `records`: the durable per-invocation `UsageRecord` written next to each
   step's output; the run manifest is a pure aggregation over these.
 - `rates`: the `(provider, model)` -> per-token contracted rate table and
@@ -39,6 +39,7 @@ from spotlights_engine.costing.usage import (
     claude_usage_from_payload,
     claude_usage_from_stream,
     codex_usage_from_stream,
+    opencode_usage_from_stream,
 )
 
 __all__ = [
@@ -62,4 +63,5 @@ __all__ = [
     "compute_cost",
     "load_external_rates",
     "load_rates",
+    "opencode_usage_from_stream",
 ]

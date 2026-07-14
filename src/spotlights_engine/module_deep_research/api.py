@@ -54,6 +54,8 @@ def _cli_for_agent(agent_name: str) -> str | None:
         return "claude"
     if "codex" in name:
         return "codex"
+    if "opencode" in name:
+        return "opencode"
     return None
 
 

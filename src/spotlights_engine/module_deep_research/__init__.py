@@ -12,7 +12,10 @@ from spotlights_engine.module_deep_research.codex_exec import (
     CodexExecOptions,
     CodexExecResult,
 )
-from spotlights_engine.module_deep_research.gemini_exec import GeminiExecClient, GeminiExecOptions
+from spotlights_engine.module_deep_research.opencode_exec import (
+    OpenCodeExecClient,
+    OpenCodeExecOptions,
+)
 from spotlights_engine.module_deep_research.prompts import render_module_deep_research_prompt
 from spotlights_engine.module_deep_research.validation import parse_module_deep_research_output
 
@@ -23,10 +26,10 @@ __all__ = [
     "CodexExecClient",
     "CodexExecOptions",
     "CodexExecResult",
-    "GeminiExecClient",
-    "GeminiExecOptions",
     "ModuleDeepResearchResult",
     "ModuleResearchRunner",
+    "OpenCodeExecClient",
+    "OpenCodeExecOptions",
     "parse_module_deep_research_output",
     "render_module_deep_research_prompt",
     "research_module",

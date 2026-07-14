@@ -13,7 +13,10 @@ from pathlib import Path
 from spotlights_engine.module_deep_research.agent_exec import AgentExecResult, ModuleResearchRunner
 from spotlights_engine.module_deep_research.claude_exec import ClaudeExecClient, ClaudeExecOptions
 from spotlights_engine.module_deep_research.codex_exec import CodexExecClient, CodexExecOptions
-from spotlights_engine.module_deep_research.gemini_exec import GeminiExecClient, GeminiExecOptions
+from spotlights_engine.module_deep_research.opencode_exec import (
+    OpenCodeExecClient,
+    OpenCodeExecOptions,
+)
 from spotlights_engine.module_deep_research.validation import (
     AgentModuleDeepResearchOutput,
     normalize_module_deep_research_output,
@@ -64,7 +67,7 @@ def select_runners(
     runner: ModuleResearchRunner | None,
     runners: Sequence[ModuleResearchRunner] | None,
 ) -> tuple[ModuleResearchRunner, ...]:
-    """Resolve caller-provided runners or create the default Codex/Claude/Gemini set."""
+    """Resolve caller-provided runners or create the default Codex/Claude/OpenCode set."""
     if runner is not None and runners is not None:
         raise ValueError("pass either runner or runners, not both")
     if runner is not None:
@@ -75,7 +78,7 @@ def select_runners(
     return (
         CodexExecClient(codex_options or CodexExecOptions(cwd=repo_path)),
         ClaudeExecClient(ClaudeExecOptions(cwd=repo_path)),
-        GeminiExecClient(GeminiExecOptions(cwd=repo_path)),
+        OpenCodeExecClient(OpenCodeExecOptions(cwd=repo_path)),
     )
 
 

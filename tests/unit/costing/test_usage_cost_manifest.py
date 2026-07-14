@@ -17,6 +17,7 @@ from spotlights_engine.costing.usage import (
     claude_usage_from_payload,
     claude_usage_from_stream,
     codex_usage_from_stream,
+    opencode_usage_from_stream,
 )
 
 
@@ -69,6 +70,69 @@ def test_codex_usage_keeps_latest_cumulative_payload_and_splits_cached_input() -
     assert usage.cache_read == 50
     assert usage.cache_create == 0
     assert usage.model == "gpt-5.5"
+
+
+def test_opencode_usage_parses_step_finish_tokens_and_cost() -> None:
+    stream = "\n".join(
+        [
+            json.dumps({"type": "text", "part": {"type": "text", "text": "OK"}}),
+            json.dumps(
+                {
+                    "type": "step_finish",
+                    "part": {
+                        "type": "step-finish",
+                        "tokens": {"input": 1, "output": 1},
+                        "cost": 9.99,
+                    },
+                }
+            ),
+            json.dumps(
+                {
+                    "type": "step_finish",
+                    "part": {
+                        "type": "step-finish",
+                        "tokens": {
+                            "input": 100,
+                            "output": 20,
+                            "reasoning": 5,
+                            "cache": {"read": 7, "write": 3},
+                        },
+                        "cost": "0.42",
+                        "model": "litellm/gemini-2.5-pro",
+                    },
+                }
+            ),
+        ]
+    )
+
+    usage = opencode_usage_from_stream(stream)
+
+    assert usage is not None
+    assert usage.input == 100
+    assert usage.output == 25
+    assert usage.cache_read == 7
+    assert usage.cache_create == 3
+    assert usage.model == "litellm/gemini-2.5-pro"
+    assert usage.cli_reported_cost_usd == pytest.approx(0.42)
+
+
+def test_opencode_usage_record_uses_litellm_provider_and_unpriced_note() -> None:
+    record = UsageRecord.from_usage(
+        AgentUsage(input=100, output=20, model="litellm/gemini-2.5-pro"),
+        step="module_deep_research",
+        module_qualified_name="pkg/a",
+        session_index=1,
+        invocation_index=0,
+        invocation_id="i0",
+        cli="opencode",
+        role="deep_research",
+    )
+
+    summary = compute_cost([record], {})
+
+    assert record.provider == "litellm"
+    assert summary.unpriced_models == ["litellm:litellm/gemini-2.5-pro"]
+    assert "PARTIAL cost" in summary.rate_note
 
 
 def test_compute_cost_uses_rates_and_reports_missing_models() -> None:

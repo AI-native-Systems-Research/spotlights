@@ -53,10 +53,10 @@ Contributions to any of these are welcome — see [Contributing](#contributing).
 - [uv](https://docs.astral.sh/uv/)
 - The `claude` CLI on PATH, with auth configured via its own login state or supported environment variables. Used by the modules extractor, candidate discovery, and the Claude executors for steps 4 and 5.
 - The `codex` CLI on PATH, with auth configured via its own login state or supported environment variables. Used by `module_deep_research` and the Codex executors for steps 2 and 5.
-- The `gemini` CLI on PATH, with API-key or gateway auth configured. Used by `module_deep_research` alongside Codex and Claude when available.
+- The `opencode` CLI on PATH, configured with a LiteLLM gateway provider. Used by `module_deep_research` alongside Codex and Claude when available.
 - A target repo on disk (the quickstart below uses vLLM).
 
-The module deep-research step fans out to Codex, Claude, and Gemini by default,
+The module deep-research step fans out to Codex, Claude, and OpenCode by default,
 then treats individual runner failures as recoverable so one flaky provider does
 not fail the whole step. Install, authenticate, and verify all three CLIs for
 best coverage.
@@ -110,21 +110,25 @@ codex           # first run: pick "Sign in with ChatGPT"
 codex --version
 ```
 
-### Install the `gemini` CLI
+### Install the `opencode` CLI
 
-Install Gemini CLI with npm and verify it from a fresh shell:
-
-```bash
-npm install -g @google/gemini-cli
-which gemini && gemini --version
-```
-
-For direct Google API-key auth:
+Install [OpenCode](https://opencode.ai) and verify it from a fresh shell:
 
 ```bash
-export GEMINI_API_KEY="<your-gemini-api-key>"
-gemini --prompt "Reply with exactly: OK" --output-format json
+# macOS — Homebrew
+brew install sst/tap/opencode
+
+# Any platform — install script
+curl -fsSL https://opencode.ai/install | bash
+
+# Any platform with npm
+npm install -g opencode-ai
+
+opencode --version
 ```
+
+OpenCode has no default model provider; the research runner drives it through a
+LiteLLM gateway, so complete the configuration below before running.
 
 ### Optional: route the CLIs through a LiteLLM proxy
 
@@ -160,72 +164,71 @@ env_key = "LITELLM_API_KEY"
 wire_api = "responses"
 ```
 
-**`gemini` CLI** — use the proxy root (not `/v1`) and keep the key in `~/.gemini/.env` so headless subprocesses load it consistently.
+**`opencode` CLI** — OpenCode reads global config from `~/.config/opencode/opencode.json`. Define an OpenAI-compatible `litellm` provider and pick a default model.
 
-```bash
-mkdir -p ~/.gemini
-cat > ~/.gemini/.env <<'EOF'
-LITELLM_API_KEY=<your-litellm-virtual-key>
-GEMINI_API_KEY=<your-litellm-virtual-key>
-GOOGLE_GEMINI_BASE_URL=https://your-litellm-host.example.com
-GEMINI_API_KEY_AUTH_MECHANISM=bearer
-GEMINI_CLI_TRUST_WORKSPACE=true
-EOF
-```
-
-Then pin Gemini CLI to API-key auth and remap the internal web-tool aliases to a public model name from your LiteLLM gateway. Gemini CLI implements `google_web_search` and `web_fetch` through the helper aliases `web-search`, `web-fetch`, and `web-fetch-fallback`; remap those aliases directly so they do not fall back to unqualified model names such as `gemini-3-flash-preview`.
-
-```bash
-cat > ~/.gemini/settings.json <<'JSON'
+```json
 {
-  "model": { "name": "gcp/gemini-3.1-pro-preview" },
-  "modelConfigs": {
-    "customAliases": {
-      "web-search": {
-        "extends": "base",
-        "modelConfig": {
-          "model": "gcp/gemini-3.1-pro-preview",
-          "generateContentConfig": { "tools": [ { "googleSearch": {} } ] }
-        }
+  "$schema": "https://opencode.ai/config.json",
+  "provider": {
+    "litellm": {
+      "npm": "@ai-sdk/openai-compatible",
+      "name": "LiteLLM (IBM ETE gateway)",
+      "options": {
+        "baseURL": "https://your-litellm-host.example.com/v1",
+        "apiKey": "<your-litellm-virtual-key>"
       },
-      "web-fetch": {
-        "extends": "base",
-        "modelConfig": {
-          "model": "gcp/gemini-3.1-pro-preview",
-          "generateContentConfig": { "tools": [ { "urlContext": {} } ] }
-        }
-      },
-      "web-fetch-fallback": {
-        "extends": "base",
-        "modelConfig": { "model": "gcp/gemini-3.1-pro-preview" }
+      "models": {
+        "gemini-2.5-pro": { "name": "Gemini 2.5 Pro" }
       }
     }
   },
-  "advanced": { "ignoreLocalEnv": true },
-  "security": { "auth": { "selectedType": "gemini-api-key" } }
+  "model": "litellm/gemini-2.5-pro"
 }
-JSON
-
-gemini --prompt "Use google_web_search once for Gemini CLI docs, then reply OK." --output-format json --approval-mode yolo
 ```
 
 Notes:
 
-- `GOOGLE_GEMINI_BASE_URL` is the LiteLLM proxy root; do not append `/v1`.
-- `advanced.ignoreLocalEnv` prevents a repo-level `.env` from shadowing the Gemini credentials above.
-- If your LiteLLM deployment uses different public model names, replace `gcp/gemini-3.1-pro-preview` with a public model that supports `googleSearch` and `urlContext`.
-- `GeminiExecOptions.litellm_proxy(...)` writes an equivalent temporary settings file for managed Python runs when `settings_path` is not supplied.
+- `baseURL` **includes** `/v1` (OpenAI-compatible), unlike the old Gemini `GOOGLE_GEMINI_BASE_URL` which used the bare proxy root.
+- The `apiKey` can be inlined (as above) or referenced via env expansion (`"{env:LITELLM_API_KEY}"`) so the key stays out of the file.
+- Add more `models` entries for any other gateway model you want to select with `--model litellm/<id>`.
 
-For LiteLLM-backed live research from Python, use
-`GeminiExecOptions.litellm_proxy(...)` with the proxy root, bearer auth, and your
-gateway model IDs. Plain `GeminiExecOptions()` keeps native Gemini CLI
-auth/model/proxy behavior. Do not cap real module deep-research runs with short
-smoke-test timeouts; the subprocess wrappers default to no timeout, and explicit
-timeouts for live research should be long enough for web/literature retrieval
-(15+ minutes is a reasonable floor).
+Verify the provider and a live call from a fresh shell:
+
+```bash
+which opencode && opencode --version
+opencode models litellm                       # lists configured gateway models
+printf 'Reply with exactly: OK' | opencode run --format json --model litellm/gemini-2.5-pro
+```
+
+The last command should stream NDJSON ending in a `step_finish` event; the `text`
+part contains `OK`. If it hangs or errors, check the `baseURL`/`apiKey` in
+`opencode.json` and that the model id matches a `litellm` provider entry.
+
+**Web research tooling — a custom `research` agent is required.** Module deep
+research needs the runner to **search** for and **fetch** web/literature sources.
+The built-in `plan` agent has `webfetch` but **no `websearch`** (it cannot
+discover sources by searching); `build` has both web tools but broad
+write/bash permissions. So the runner defaults to a custom read-only `research`
+agent with `webfetch` **and** `websearch` enabled and no `bash`/`edit`/`write`:
+
+```bash
+opencode agent create \
+  --path ~/.config/opencode/agent \
+  --description "research" \
+  --mode primary \
+  --permissions read,grep,glob,webfetch,websearch \
+  --model litellm/gemini-2.5-pro
+```
+
+Confirm with `opencode agent list` that the generated agent is named `research`
+and reports only those five permissions before making it the default. Point the
+runner at it via `OpenCodeExecOptions(agent="research")` (the default). Do not cap
+real module deep-research runs with short smoke-test timeouts; the subprocess
+wrappers default to no timeout, and explicit timeouts for live research should be
+long enough for web/literature retrieval (15+ minutes is a reasonable floor).
 
 Swap the host and model IDs for your LiteLLM deployment. After editing config or
-environment, re-run `claude --version` / `codex --version` / `gemini --version`
+environment, re-run `claude --version` / `codex --version` / `opencode --version`
 from a fresh shell.
 
 ### Verify all CLIs from a fresh shell
@@ -233,12 +236,12 @@ from a fresh shell.
 Open a new terminal (so any PATH changes from the installers are picked up) and confirm all binaries resolve and report a version:
 
 ```bash
-which claude && claude --version
-which codex  && codex  --version
-which gemini && gemini --version
+which claude   && claude   --version
+which codex    && codex    --version
+which opencode && opencode --version
 ```
 
-If any command is not found, re-open your terminal so shell PATH updates from the installers are picked up. The native `claude` installer drops its binary at `~/.local/bin/claude`; the `codex` and `gemini` binary locations depend on the install method (for example, Homebrew vs npm vs native installer) — check the installer's final output if a binary still is not on PATH.
+If any command is not found, re-open your terminal so shell PATH updates from the installers are picked up. The native `claude` installer drops its binary at `~/.local/bin/claude`; the `codex` and `opencode` binary locations depend on the install method (for example, Homebrew vs npm vs native installer) — check the installer's final output if a binary still is not on PATH.
 
 ### Install the engine
 
