@@ -24,6 +24,7 @@ from spotlights_engine.schemas.common import (
 )
 from spotlights_engine.schemas.finding import Finding
 from spotlights_engine.schemas.project import ProjectTree
+from spotlights_engine.schemas.search import SearchQueryLog
 
 
 class ModulesExtractorInput(BaseModel):
@@ -74,6 +75,10 @@ class ModuleDeepResearchOutput(BaseModel):
 
     findings: list[Finding] = Field(default_factory=list)
     issues: list[StepIssue] = Field(default_factory=list)
+    # Advisory search-query log, one entry per query each runner reported,
+    # tagged with the issuing agent. Defaults to [] so older sidecars without
+    # it still validate on resume.
+    search_queries: list[SearchQueryLog] = Field(default_factory=list)
 
 
 class ProposalFromFindingCreatorInput(BaseModel):

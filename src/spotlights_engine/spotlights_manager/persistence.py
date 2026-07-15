@@ -26,6 +26,7 @@ from spotlights_engine.candidate_discovery.api import (
 )
 from spotlights_engine.costing.records import UsageRecord, UsageStep
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
+from spotlights_engine.module_deep_research.search_log import render_search_log_markdown
 from spotlights_engine.modules_extractor.agent import ExtractionInvocation
 from spotlights_engine.proposal_from_finding_creator import (
     ProposalFromFindingConfig,
@@ -187,6 +188,10 @@ class ModulePaths:
     @property
     def deep_research_last_message_path(self) -> Path:
         return self.dir / "module_deep_research.last_message.md"
+
+    @property
+    def deep_research_search_log_path(self) -> Path:
+        return self.dir / "module_deep_research.search_log.md"
 
     @property
     def proposal_from_finding_path(self) -> Path:
@@ -533,6 +538,24 @@ def write_deep_research(
     _atomic_write_json(module_paths.deep_research_path, payload)
 
 
+def write_deep_research_search_log(
+    module_paths: ModulePaths,
+    output: ModuleDeepResearchOutput,
+    qn: str,
+) -> None:
+    """Render and persist the human-diffable search-query log markdown.
+
+    `qn` (the module qualified name) is threaded in for the document header
+    because `ModulePaths` stores only `dir` and `ModuleDeepResearchOutput` has
+    no module-name field. Idempotent: safe to call on both the fresh-run and
+    resume/skip paths."""
+    module_paths.dir.mkdir(parents=True, exist_ok=True)
+    _atomic_write_text(
+        module_paths.deep_research_search_log_path,
+        render_search_log_markdown(output, qn=qn),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Usage records (see costing.records)
 # ---------------------------------------------------------------------------
@@ -634,6 +657,7 @@ def clear_deep_research_artifacts(
     for p in (
         module_paths.deep_research_path,
         module_paths.deep_research_last_message_path,
+        module_paths.deep_research_search_log_path,
     ):
         if p.exists():
             p.unlink()
@@ -757,6 +781,7 @@ __all__ = [
     "write_candidates",
     "write_checkpoint",
     "write_deep_research",
+    "write_deep_research_search_log",
     "write_discovery_telemetry",
     "write_extractor_outputs",
     "write_manifest",

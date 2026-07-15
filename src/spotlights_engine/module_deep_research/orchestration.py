@@ -25,6 +25,7 @@ from spotlights_engine.module_deep_research.validation import (
 from spotlights_engine.schemas.common import StepIssue
 from spotlights_engine.schemas.pipeline import ModuleDeepResearchOutput
 from spotlights_engine.schemas.project import Module, ProjectTree
+from spotlights_engine.schemas.search import SearchQueryLog, SearchResult
 
 _log = logging.getLogger(__name__)
 
@@ -132,9 +133,16 @@ def merge_outcomes(
     Per-runner outputs are parsed into the lenient wire shape (bare ids), then
     deduped and merged; the single promotion to persisted `Finding`s — capping,
     renumbering, and prefixing each id to `find-<segment>-NNNN` (D3) — happens
-    once here via `normalize_module_deep_research_output`."""
+    once here via `normalize_module_deep_research_output`.
+
+    Search queries are also collected and tagged with the issuing runner
+    (`agent=outcome.agent_name`). Unlike findings they are **not** deduped —
+    identical query strings from two agents are meaningful signal — and their
+    order is preserved (outcomes in fixed `futures` order, queries in the
+    agent's emitted order) so run-to-run markdown diffs are stable."""
     findings = []
     issues: list[StepIssue] = []
+    search_logs: list[SearchQueryLog] = []
     seen: set[str] = set()
 
     for outcome in outcomes:
@@ -164,12 +172,28 @@ def merge_outcomes(
             seen.update(keys)
             findings.append(finding)
 
+        for query in output.search_queries:
+            search_logs.append(
+                SearchQueryLog(
+                    agent=outcome.agent_name,
+                    query=query.query,
+                    tool=query.tool,
+                    results=[
+                        SearchResult(
+                            title=r.title, url=r.url, snippet=r.snippet
+                        )
+                        for r in query.results
+                    ],
+                )
+            )
+
     merged = AgentModuleDeepResearchOutput(findings=findings, issues=issues)
     merged_findings_cap = max_findings_per_module * len(outcomes)
     return normalize_module_deep_research_output(
         merged,
         max_findings_per_module=merged_findings_cap,
         segment=segment,
+        search_queries=search_logs,
     )
 
 

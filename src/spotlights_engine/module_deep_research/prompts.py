@@ -157,6 +157,21 @@ Output rules:
   source is not quotable (for example, a video without a transcript), and
   in that case still give a precise pointer.
 
+Search transparency:
+- Record every web/literature search query you issued in search_queries, in
+  the order you issued them - including queries that produced no kept finding.
+  This is required for debugging run-to-run variance.
+- For each query, list the top results the search returned as
+  {{title, url, snippet}}. snippet is a short (<=1 sentence) excerpt or the
+  result's own description. If a query returned nothing, emit an empty results
+  list - do not omit the query.
+- tool is the tool you used (e.g. web_search, web_fetch); best-effort, leave
+  "" if unsure.
+- Do not invent queries or results. Report only searches you actually ran.
+- Cap the reported results at ~5 per query (top results) to bound output size.
+- Note: this relies on your honest self-report. Capture intent-level queries
+  reliably; exhaustive fidelity to the raw tool-call stream is not required.
+
 Module relevance gate:
 - Keep a finding only when it passes all of these checks:
   1. It is about an owned responsibility of the target module, not just the

@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from spotlights_engine.schemas.common import StepIssue
 from spotlights_engine.schemas.finding import Finding, FindingSourceType
 from spotlights_engine.schemas.pipeline import ModuleDeepResearchOutput
+from spotlights_engine.schemas.search import SearchQueryLog, SearchResult
 from spotlights_engine.utils.id_helpers import slug_for
 
 _JSON_FENCE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE)
@@ -42,6 +43,34 @@ class AgentFinding(BaseModel):
     supporting_evidence: str = ""
 
 
+class AgentSearchResult(BaseModel):
+    """Wire shape for one result a search query returned.
+
+    Lenient by design (`extra="ignore"`, no `min_length`): the search log is
+    advisory, so a stray extra field must not fail the whole payload and
+    discard the runner's real findings — see the strictness rule in the debug
+    design doc."""
+
+    model_config = ConfigDict(extra="ignore")  # tolerate extra result fields
+
+    title: str = ""
+    url: str = ""
+    snippet: str = ""  # short excerpt / description returned by the search
+
+
+class AgentSearchQuery(BaseModel):
+    """Wire shape for one search query an agent reports having issued.
+
+    Lenient by design (`extra="ignore"`, no `min_length`) — an empty query
+    must not fail the payload."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    query: str = ""  # NO min_length — empty must not fail the payload
+    tool: str = ""  # e.g. "web_search", "web_fetch" — optional, best-effort
+    results: list[AgentSearchResult] = Field(default_factory=list)
+
+
 class AgentModuleDeepResearchOutput(BaseModel):
     """Agent-facing wire output: `AgentFinding`s plus issues. Promoted to the
     persisted `ModuleDeepResearchOutput` (real `Finding`s with prefixed ids) by
@@ -51,6 +80,7 @@ class AgentModuleDeepResearchOutput(BaseModel):
 
     findings: list[AgentFinding] = Field(default_factory=list)
     issues: list[StepIssue] = Field(default_factory=list)
+    search_queries: list[AgentSearchQuery] = Field(default_factory=list)
 
 
 def _issue(message: str, *, recoverable: bool = True) -> StepIssue:
@@ -119,14 +149,21 @@ def normalize_module_deep_research_output(
     *,
     max_findings_per_module: int,
     segment: str,
+    search_queries: list[SearchQueryLog] | None = None,
 ) -> ModuleDeepResearchOutput:
     """Cap findings and assign deterministic module-prefixed finding IDs in
-    output order, promoting the wire output to the persisted contract."""
+    output order, promoting the wire output to the persisted contract.
+
+    `search_queries` is a passthrough: the wire model has no `agent` field (the
+    agent label lives only on `RunnerOutcome.agent_name`), so the caller tags
+    each query with its runner and forwards the already-built persisted
+    `SearchQueryLog`s here verbatim."""
     return ModuleDeepResearchOutput(
         findings=_renumber_findings(
             output.findings, max_findings_per_module, segment=segment
         ),
         issues=list(output.issues),
+        search_queries=list(search_queries or []),
     )
 
 
@@ -172,16 +209,35 @@ def parse_module_deep_research_output(
     when omitted (standalone use); the manager always supplies the real one.
     """
     seg = segment if segment is not None else slug_for("module")
+    parsed = parse_agent_output(text)
+    # Promote the wire queries to persisted `SearchQueryLog`s tagged with a
+    # synthetic agent label — this standalone path corresponds to a single
+    # response, so there is no per-runner name to attach.
+    search_queries = [
+        SearchQueryLog(
+            agent="agent",
+            query=q.query,
+            tool=q.tool,
+            results=[
+                SearchResult(title=r.title, url=r.url, snippet=r.snippet)
+                for r in q.results
+            ],
+        )
+        for q in parsed.search_queries
+    ]
     return normalize_module_deep_research_output(
-        parse_agent_output(text),
+        parsed,
         max_findings_per_module=max_findings_per_module,
         segment=seg,
+        search_queries=search_queries,
     )
 
 
 __all__ = [
     "AgentFinding",
     "AgentModuleDeepResearchOutput",
+    "AgentSearchQuery",
+    "AgentSearchResult",
     "normalize_module_deep_research_output",
     "parse_agent_output",
     "parse_module_deep_research_output",

@@ -1209,6 +1209,7 @@ async def _run_module(
                     "[%s] deep_research: %s: %s", qn, iss.severity, iss.message
                 )
             P.write_deep_research(module_paths, research_output, dr_duration)
+            P.write_deep_research_search_log(module_paths, research_output, qn)
             _write_cli_usage_records(
                 module_paths=module_paths,
                 qn=qn,
@@ -1237,6 +1238,10 @@ async def _run_module(
         else:
             assert state.deep_research is not None
             research_output = state.deep_research
+            # Resume/skip path: the loaded JSON may carry search_queries but no
+            # markdown was written this run. Write it idempotently so the
+            # human-diffable log always sits next to the JSON.
+            P.write_deep_research_search_log(module_paths, research_output, qn)
 
         # ------------------------- step 4 -----------------------------------
         run_step4 = (
