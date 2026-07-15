@@ -137,6 +137,10 @@ Workflow:
 Output rules:
 - Return a single bare JSON object matching the ModuleDeepResearchOutput schema
   below. Do not wrap it in Markdown and do not include explanatory prose.
+- Your FINAL message must be exactly that JSON object and nothing else - it is
+  parsed by machine, not read by a human. Emitting only tool-call/step events
+  with no final JSON text is a failure: even when you found nothing, still emit
+  the JSON object (empty `findings`, with a StepIssue explaining why).
 - Include at most {request.max_findings_per_module} findings.
 - Use finding IDs find-0001, find-0002, ... ordered by expected relevance to
   the module and the caller objective. Most relevant first.
