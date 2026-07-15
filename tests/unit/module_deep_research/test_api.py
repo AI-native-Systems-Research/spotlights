@@ -238,12 +238,12 @@ def test_research_module_treats_finding_cap_as_per_runner() -> None:
     assert [finding.title for finding in output.findings] == ["A", "B", "C"]
 
 
-def test_claude_default_max_turns_is_16() -> None:
+def test_claude_default_max_turns_is_40() -> None:
     from spotlights_engine.module_deep_research.claude_exec import ClaudeExecClient
 
     cmd = ClaudeExecClient().build_command()
 
-    assert cmd[cmd.index("--max-turns") + 1] == "16"
+    assert cmd[cmd.index("--max-turns") + 1] == "40"
 
 
 def test_claude_command_shape_uses_litellm_safe_research_tools(tmp_path: Path) -> None:
@@ -281,7 +281,7 @@ def test_opencode_default_command_uses_research_agent_and_does_not_expose_prompt
 
     assert cmd[:4] == ["opencode", "run", "--format", "json"]
     assert cmd[cmd.index("--agent") + 1] == "research"
-    assert cmd[cmd.index("--model") + 1] == "litellm/gemini-2.5-pro"
+    assert cmd[cmd.index("--model") + 1] == "litellm/gcp/gemini-3.1-pro-preview"
     assert "research prompt" not in cmd
 
 
@@ -333,7 +333,40 @@ def test_opencode_run_parses_final_message_and_usage(monkeypatch, tmp_path: Path
     assert result.usage.cache_read == 0
     assert result.usage.cache_create == 0
     # Stream reports no model id, so the configured default is copied on.
-    assert result.usage.model == "litellm/gemini-2.5-pro"
+    assert result.usage.model == "litellm/gcp/gemini-3.1-pro-preview"
+
+
+def test_opencode_final_message_picks_findings_over_preamble(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """OpenCode can emit its reasoning as a standalone JSON `text` part before
+    the payload part. Concatenating both yields `{preamble}{findings}` — two
+    top-level objects — which made downstream `json.loads` raise
+    `Extra data: line 2 column 1`. The final message must be just the payload."""
+    from spotlights_engine.module_deep_research import opencode_exec
+    from spotlights_engine.module_deep_research.opencode_exec import (
+        OpenCodeExecClient,
+        OpenCodeExecOptions,
+    )
+
+    preamble = json.dumps({"plan": "summarize before emitting", "pad": "x" * 300})
+    payload = json.dumps({"findings": [{"finding_id": "find-0001"}]})
+    stream = "\n".join(
+        [
+            json.dumps({"type": "text", "part": {"type": "text", "text": preamble}}),
+            json.dumps({"type": "text", "part": {"type": "text", "text": payload}}),
+        ]
+    )
+
+    def fake_run(args, **kwargs):
+        return subprocess.CompletedProcess(args, 0, stdout=stream, stderr="")
+
+    monkeypatch.setattr(opencode_exec.subprocess, "run", fake_run)
+
+    result = OpenCodeExecClient(OpenCodeExecOptions(cwd=tmp_path)).run("prompt")
+
+    # Single decodable object — no `Extra data` when parsed downstream.
+    assert json.loads(result.final_message) == {"findings": [{"finding_id": "find-0001"}]}
 
 
 def test_cli_resolution_preserves_posix_command_shape(monkeypatch) -> None:

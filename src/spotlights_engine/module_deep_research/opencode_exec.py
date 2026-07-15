@@ -18,7 +18,7 @@ from spotlights_engine.module_deep_research.agent_exec import (
 
 # Explicit so telemetry/rate keys are deterministic even when OpenCode's event
 # stream does not report a model id (see opencode_usage_from_stream).
-DEFAULT_OPENCODE_MODEL = "litellm/gemini-2.5-pro"
+DEFAULT_OPENCODE_MODEL = "litellm/gcp/gemini-3.1-pro-preview"
 # Custom read-only research agent (webfetch + websearch, no bash/edit/write).
 # See the README's "Web research tooling" section for how to create it.
 DEFAULT_OPENCODE_AGENT = "research"
@@ -104,10 +104,16 @@ def _usage(stdout: str, *, fallback_model: str | None) -> AgentUsage | None:
 
 
 def _final_message(stdout: str) -> str | None:
-    """Concatenate the `text` parts from OpenCode's NDJSON event stream.
+    """Return the payload text from OpenCode's NDJSON event stream.
 
-    Falls back to the raw stdout when the stream is unparseable so the block's
-    existing `parse_agent_output` still sees the `find-NNNN` payload.
+    OpenCode emits the agent's turn as one or more `text` parts: it can send its
+    reasoning/preamble as a separate part from the JSON payload, and each part
+    can itself be a standalone JSON object. Blindly concatenating every part then
+    yields `{preamble}{findings}` — two top-level objects — which makes a single
+    `json.loads` downstream raise `Extra data: line 2 column 1`. So when exactly
+    one part decodes to a JSON object carrying `findings`, return just that part;
+    otherwise fall back to concatenating all parts (and then to raw stdout) so the
+    block's `parse_agent_output` still sees the `find-NNNN` payload.
     """
     text = stdout.strip()
     if not text:
@@ -128,10 +134,41 @@ def _final_message(stdout: str) -> str | None:
         if isinstance(part, dict) and isinstance(part.get("text"), str):
             chunks.append(part["text"])
 
+    payload = _payload_chunk(chunks)
+    if payload is not None:
+        return payload
+
     joined = "".join(chunks)
     if joined.strip():
         return joined
     return text
+
+
+def _payload_chunk(chunks: Sequence[str]) -> str | None:
+    """Return the single chunk that decodes to a JSON object with `findings`.
+
+    Returns `None` when zero or more than one chunk qualifies, leaving the
+    caller to fall back to concatenation (the ambiguous case is better handled
+    by the downstream `_extract_json_object`, which sees the full text)."""
+    matches = [
+        chunk
+        for chunk in chunks
+        if _is_findings_object(chunk)
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
+def _is_findings_object(chunk: str) -> bool:
+    stripped = chunk.strip()
+    if not stripped:
+        return False
+    try:
+        obj = json.loads(stripped)
+    except json.JSONDecodeError:
+        return False
+    return isinstance(obj, dict) and "findings" in obj
 
 
 __all__ = [

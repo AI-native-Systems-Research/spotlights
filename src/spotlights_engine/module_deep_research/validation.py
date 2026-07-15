@@ -26,6 +26,7 @@ from spotlights_engine.schemas.search import SearchQueryLog, SearchResult
 from spotlights_engine.utils.id_helpers import slug_for
 
 _JSON_FENCE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE)
+_AGENT_OUTPUT_KEYS = frozenset({"findings", "issues", "search_queries"})
 
 
 class AgentFinding(BaseModel):
@@ -92,19 +93,68 @@ def _issue(message: str, *, recoverable: bool = True) -> StepIssue:
     )
 
 
+def _iter_json_objects(text: str):
+    """Yield every top-level JSON object decodable from `text`, in order.
+
+    Uses `JSONDecoder.raw_decode` to consume one value at a time, skipping the
+    whitespace/prose between values. OpenCode concatenates the `text` parts of a
+    multi-object NDJSON stream (see `opencode_exec`), so the payload can arrive as
+    `{small preamble}\\n{real findings}` — the whole blob both starts with `{` and
+    ends with `}`, which made a single `json.loads` raise `Extra data`. Iterating
+    lets the caller pick the object that is actually the payload."""
+    decoder = json.JSONDecoder()
+    idx = 0
+    n = len(text)
+    while idx < n:
+        next_brace = text.find("{", idx)
+        if next_brace == -1:
+            return
+        try:
+            obj, end = decoder.raw_decode(text, next_brace)
+        except json.JSONDecodeError:
+            # Not a valid object at this brace; advance past it and retry.
+            idx = next_brace + 1
+            continue
+        yield obj
+        idx = end
+
+
+def _select_json_object(text: str, *, fallback_to_first: bool = True) -> str | None:
+    first: str | None = None
+    first_output_like: str | None = None
+    for obj in _iter_json_objects(text):
+        if not isinstance(obj, dict):
+            continue
+        candidate = json.dumps(obj)
+        if first is None:
+            first = candidate
+        if "findings" in obj:
+            return candidate
+        if first_output_like is None and _AGENT_OUTPUT_KEYS.intersection(obj):
+            first_output_like = candidate
+    if first_output_like is not None:
+        return first_output_like
+    if fallback_to_first:
+        return first
+    return None
+
+
 def _extract_json_object(text: str) -> str:
-    stripped = text.strip()
-    if stripped.startswith("{") and stripped.endswith("}"):
-        return stripped
+    """Return the JSON string that best matches the agent's expected payload.
 
-    fenced = _JSON_FENCE.search(text)
-    if fenced:
-        return fenced.group(1).strip()
+    Prefers a fenced ```json block that looks like an agent output, then the
+    first decodable object carrying a `findings` key (the real payload even when
+    a smaller preamble object precedes it in a concatenated stream), then another
+    output-shaped object such as issue-only output, then the first decodable
+    object as a compatibility fallback."""
+    for fenced in _JSON_FENCE.finditer(text):
+        selected = _select_json_object(fenced.group(1).strip(), fallback_to_first=False)
+        if selected is not None:
+            return selected
 
-    start = text.find("{")
-    end = text.rfind("}")
-    if start != -1 and end > start:
-        return text[start : end + 1]
+    selected = _select_json_object(text)
+    if selected is not None:
+        return selected
 
     raise ValueError("no JSON object found in module_deep_research response")
 

@@ -178,11 +178,11 @@ wire_api = "responses"
         "apiKey": "<your-litellm-virtual-key>"
       },
       "models": {
-        "gemini-2.5-pro": { "name": "Gemini 2.5 Pro" }
+        "gcp/gemini-3.1-pro-preview": { "name": "Gemini 3.1 Pro" }
       }
     }
   },
-  "model": "litellm/gemini-2.5-pro"
+  "model": "litellm/gcp/gemini-3.1-pro-preview"
 }
 ```
 
@@ -197,7 +197,7 @@ Verify the provider and a live call from a fresh shell:
 ```bash
 which opencode && opencode --version
 opencode models litellm                       # lists configured gateway models
-printf 'Reply with exactly: OK' | opencode run --format json --model litellm/gemini-2.5-pro
+printf 'Reply with exactly: OK' | opencode run --format json --model litellm/gcp/gemini-3.1-pro-preview
 ```
 
 The last command should stream NDJSON ending in a `step_finish` event; the `text`
@@ -217,7 +217,7 @@ opencode agent create \
   --description "research" \
   --mode primary \
   --permissions read,grep,glob,webfetch,websearch \
-  --model litellm/gemini-2.5-pro
+  --model litellm/gcp/gemini-3.1-pro-preview
 ```
 
 Confirm with `opencode agent list` that the generated agent is named `research`
