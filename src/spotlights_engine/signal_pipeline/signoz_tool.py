@@ -94,6 +94,19 @@ class SignozClient:
     # the agent's SQL is appended and references only the three aliases. Absorbs
     # per-signal run_id placement, the metrics fingerprint join, and the
     # self-telemetry (run_id='') exclusion — see design §4.1.
+    #
+    # NB: the `SELECT *` in the spans/logs CTEs is intentional and safe — do not
+    # "fix" it to an explicit scalar column list. It must stay `*` so the
+    # Map columns (`attributes_number`, `attributes_string`, `resources_string`)
+    # are available for by-key access in the agent's SQL
+    # (e.g. `attributes_number['gen_ai.latency.e2e']`) — the core of the
+    # analysis. It does NOT trigger the "HTTP 500: JSON Scan value must be
+    # clickhouse.JSON…" error: ClickHouse prunes columns the outer query never
+    # references, so a Map column is only serialized to the SigNoz API when the
+    # agent's *outer* query projects it (a whole-map / `SELECT *` in the final
+    # result). That outer-projection case is what the prompt forbids; the inner
+    # CTE `SELECT *` is pruned away for scalar queries. (Verified live: scalar
+    # queries over `spans` return rows through this template.)
     _SCOPED_CTE_TEMPLATE = (
         "WITH\n"
         "  spans AS (SELECT * FROM signoz_traces.signoz_index_v3\n"

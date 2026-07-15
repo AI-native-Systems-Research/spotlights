@@ -76,10 +76,12 @@ Query these three names as if they were tables:
 **Two hard rules for spans/logs — the alternative fails, so this saves turns:**
 
 - **Never `SELECT *` on `spans` or `logs`.** They carry `Map`-typed columns
-  (`attributes_*`, `resources_string`); `SELECT *` pulls a whole map into the
-  result and the SigNoz API rejects it with **HTTP 500**
-  (`"JSON Scan value must be clickhouse.JSON…"`). Always select **scalars**.
-  (`SELECT * FROM metric_samples` is fine — that table has no map columns.)
+  (`attributes_*`, `resources_string`); when a whole map column lands in your
+  query's **output**, the SigNoz API can't serialize it and returns
+  **HTTP 500** (`"JSON Scan value must be clickhouse.JSON…"`). So don't project
+  a map column (or `*`) in your final `SELECT` — select **scalars** (indexing a
+  map by key, `attributes_number['…']`, yields a scalar and is fine).
+  (`SELECT * FROM metric_samples` is also fine — that table has no map columns.)
 - **Read maps by key**, e.g. `attributes_number['gen_ai.latency.e2e']` (→ a
   number). To *discover* which keys a map holds (without `SELECT *`), use
   `mapKeys`:
