@@ -57,34 +57,55 @@ Rules — read them once, they save turns:
 
 A run carries **three signal types — traces (`spans`), metrics
 (`metric_samples`), and logs (`logs`)** — and you should draw on **all
-three**; none is optional. Their exact contents vary run to run (different
-metric families, span attributes, or log fields may be present or absent),
-so don't assume a fixed shape — inventory each in Phase 1 and inspect with
-`SELECT * … LIMIT 1` when unsure. Each carries something the others don't:
-traces have per-request latency/token structure, metrics have the GPU/cache/
-scheduler time-series, and **logs carry the run args, the vLLM version
-banner, and any warnings/errors** — so always mine `logs.body` and
-`severity_text`, not just spans and metrics.
+three**; none is optional. Their exact contents vary system to system and run
+to run (different span names, attributes, metric families, or log fields may
+be present or absent), so **don't assume any field exists — discover it first**
+(Phase 1). Each carries something the others don't: traces have per-request
+structure, metrics have the resource/utilisation time-series, and **logs carry
+the launch args, the version banner, and any warnings/errors** — so always mine
+`logs.body` and `severity_text`, not just spans and metrics.
 
 Query these three names as if they were tables:
 
-| Alias | One row per | Key columns |
+| Alias | One row per | Stable columns (OTel/SigNoz, system-agnostic) |
 |---|---|---|
-| `spans` | span (traces) | `name` (span name), `durationNano` (**ns**), `attributes_number['…']`, `attributes_string['…']`, `timestamp` |
+| `spans` | span (traces) | `name` (span name), `duration_nano` (**ns**), `timestamp`, and the maps `attributes_number` / `attributes_string` / `resources_string` |
 | `logs` | log record | `body`, `severity_text`, `timestamp`, `trace_id`, `span_id` |
 | `metric_samples` | metric data point | `metric_name`, `unix_milli`, `value` |
 
-Attribute maps are indexed by key, e.g.
-`attributes_number['gen_ai.latency.e2e']`. **If you're unsure of a column
-name, inspect first** — `SELECT * FROM spans LIMIT 1` shows the shape
-before you aggregate.
+**Two hard rules for spans/logs — the alternative fails, so this saves turns:**
+
+- **Never `SELECT *` on `spans` or `logs`.** They carry `Map`-typed columns
+  (`attributes_*`, `resources_string`); `SELECT *` pulls a whole map into the
+  result and the SigNoz API rejects it with **HTTP 500**
+  (`"JSON Scan value must be clickhouse.JSON…"`). Always select **scalars**.
+  (`SELECT * FROM metric_samples` is fine — that table has no map columns.)
+- **Read maps by key**, e.g. `attributes_number['gen_ai.latency.e2e']` (→ a
+  number). To *discover* which keys a map holds (without `SELECT *`), use
+  `mapKeys`:
+  ```
+  SELECT DISTINCT arrayJoin(mapKeys(attributes_number)) AS k FROM spans
+  WHERE name = '<span name>' ORDER BY k
+  ```
+  (same for `attributes_string`, `resources_string`). Confirm a key appears
+  here **before** you query it.
+
+For span duration use `duration_nano`. (Some ALIAS columns — e.g.
+`durationNano` — do not survive the tool's run-scoping and error as "unknown
+identifier"; `duration_nano` is the one that works.)
 
 ### Units (easy to get wrong)
 
 - `gen_ai.latency.*` attributes are in **SECONDS**.
-- `durationNano` (span duration) is in **NANOSECONDS**.
+- `duration_nano` (span duration) is in **NANOSECONDS**.
 
-### Stable span names (aggregate on these)
+### Example — an LLM-serving system (vLLM)
+
+What a vLLM run *typically* exposes. Treat this as an **illustration of one
+system**, not a contract: confirm each span name / attribute / metric via
+discovery (Phase 1) before using it, and for a different system analyze
+whatever discovery reveals instead. For a vLLM run you'll usually find these
+span names (aggregate on them):
 
 - `llm_request` — vLLM's per-request summary span; carries the latency /
   token breakdown below.
@@ -189,7 +210,7 @@ FROM metric_samples WHERE metric_name LIKE 'DCGM_FI_PROF_%'
 GROUP BY metric_name ORDER BY metric_name
 ```
 
-Log warnings / errors (verify the column with `SELECT * FROM logs LIMIT 1`):
+Log warnings / errors:
 
 ```
 SELECT severity_text, count() AS n FROM logs
@@ -267,21 +288,29 @@ grounded-vs-guessed, not high-vs-low confidence.
 
 ## Process — inventory first, then analyze
 
-**Phase 1 — inventory (before any analysis).** Map what *this* run actually
-contains; don't assume it matches another run:
-- span names + counts: `SELECT name, count() … GROUP BY name`;
+**Phase 1 — discover the schema (before any analysis).** Don't assume field
+names; find out what *this* system and run actually expose:
+- **what system is this**: read the identifying resource attributes —
+  `SELECT DISTINCT arrayJoin(mapKeys(resources_string)) FROM spans` to see which
+  exist, then e.g. `SELECT DISTINCT resources_string['service.name'],
+  resources_string['model'] FROM spans` — record them in `workload`;
+- span/op names + counts: `SELECT name, count() … GROUP BY name`;
+- **attribute keys** each span type emits (never `SELECT *`):
+  `SELECT DISTINCT arrayJoin(mapKeys(attributes_number)) FROM spans WHERE name='…'`
+  (and `attributes_string`);
 - every metric present: `SELECT DISTINCT metric_name FROM metric_samples`,
-  then group them into families (`vllm:*` / `DCGM_FI_*` / `system.*` /
-  `http_*`) so you can see which families exist this run;
-- log severities present: `SELECT DISTINCT severity_text FROM logs`;
-- if unsure of a column, `SELECT * FROM <alias> LIMIT 1`.
+  then group into families by prefix so you see which exist this run;
+- log severities present: `SELECT DISTINCT severity_text FROM logs`.
+
+Confirm a name / attribute / metric shows up in discovery **before** you query it.
 
 **Phase 2 — analyze every source you found.** Work through the whole
 inventory; do not leave a present span type, metric family, or log severity
 unexamined. Summarize metrics **per family** (don't query all ~200 metrics
 one by one — that burns the turn budget). Compute latency quantiles, the
-phase breakdown, token distributions, the `vllm:*` scheduler/cache state, the
-DCGM/GPU picture, and log errors / run args.
+phase breakdown, token distributions, and whatever families discovery found
+(for an LLM server that's the scheduler/cache state and the GPU/DCGM picture),
+plus log errors / launch args.
 
 **Phase 3 — compose** the three output sections from what you found.
 

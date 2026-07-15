@@ -1,14 +1,7 @@
 """Stage 01 — signal extraction (Bundle A).
 
-Branches, in order of dispatch:
-
-0. **SigNoz (live telemetry)** — `--signoz` (optionally `--run-id <id>`).
-   Resolves the run (explicit id, else latest of `list_runs()` with a loud
-   warning when several exist), then spawns one `claude -p` agent that reads
-   the run from SigNoz via the `signoz-sql` tool (read-only ClickHouse SQL).
-   No telemetry directory — `cwd` is the scratch log dir. Iteration surface
-   is `prompts/signal_extraction_signoz.md`. Mutually exclusive with
-   `--telemetry-from` (enforced at the CLI).
+This module owns the **file/JSON telemetry source** plus the stage entry
+point (`run`, `SPEC`). Three file-based branches, in order of preference:
 
 1. **Pre-cooked Signals JSON** — `--telemetry-from <file.json>` or a
    directory containing `01_signals.json` (alternates: `signals.json`,
@@ -26,6 +19,11 @@ Branches, in order of dispatch:
 3. **Synthetic fallback** — `telemetry_from is None`. Placeholder so the
    runner state-machine tests don't need a fixture. Goes away when
    `spotlight-observability` ships its real Bundle A.
+
+A separate **SigNoz/SQL source** lives in `s01_signal_extraction_signoz`;
+`run` dispatches there when `ctx.signal_input.signoz` is set (mutually
+exclusive with `--telemetry-from`, enforced at the CLI). The shared stage
+contract (error type, output schema, budgets) lives in `_s01_signal_common`.
 
 The output schema is the minimal contract: `{workload, traces,
 anomalies}` with `workload.workload_id` required. The lite Pydantic
@@ -46,8 +44,13 @@ from spotlights_engine.signal_pipeline.schemas import (
     TraceSummaryLite,
     WorkloadProfileLite,
 )
+from spotlights_engine.signal_pipeline.stages._s01_signal_common import (
+    MAX_TURNS,
+    OUTPUT_JSON_SCHEMA,
+    TIMEOUT_S,
+    SignalExtractionError,
+)
 from spotlights_engine.signal_pipeline.stages._types import StageContext, StageSpec
-
 
 # Filename candidates the pre-cooked-JSON branch will try, in order.
 _DIR_CANDIDATES = ("01_signals.json", "signals.json", "signal.json")
@@ -60,50 +63,6 @@ _OTEL_DISCRIMINATOR = "traces.jsonl"
 _PROMPT_TEMPLATE_PATH = (
     Path(__file__).parent.parent / "prompts" / "signal_extraction.md"
 )
-_PROMPT_SIGNOZ_TEMPLATE_PATH = (
-    Path(__file__).parent.parent / "prompts" / "signal_extraction_signoz.md"
-)
-
-# How many of the *other* runs to name in the multi-run auto-select warning
-# before truncating (the full list could be long).
-_MAX_OTHERS_LISTED = 10
-
-# Project root (…/spotlights). This stage lives at
-# src/spotlights_engine/signal_pipeline/stages/, so parents[4] is the root.
-# The SigNoz agent runs with this as `cwd` so headless `claude -p` discovers
-# the project's `.claude/` settings/credentials — it keys auth off the cwd
-# and does not walk up the tree. (The file path uses the telemetry dir as
-# cwd; the SigNoz path has no telemetry dir, so it would otherwise default to
-# the generated log dir, where no `.claude/` exists.)
-_PROJECT_ROOT = Path(__file__).resolve().parents[4]
-
-# Minimal output schema. Top-level keys required, plus `workload_id` —
-# everything else is the agent's call. `additionalProperties` is
-# *unspecified* so the agent can surface richer fields without violating
-# the constraint.
-_OUTPUT_JSON_SCHEMA = {
-    "type": "object",
-    "required": ["workload", "traces", "anomalies"],
-    "properties": {
-        "workload": {
-            "type": "object",
-            "required": ["workload_id"],
-            "properties": {
-                "workload_id": {"type": "string", "minLength": 1},
-            },
-        },
-        "traces": {"type": "array", "items": {"type": "object"}},
-        "anomalies": {"type": "array", "items": {"type": "object"}},
-    },
-}
-
-# Generous budget — agent may iterate to grep, jq, sample, then summarize.
-# Wall-clock is the binding limit in practice: with a large (~76MB)
-# metrics.jsonl, repeated full-file Python/jq passes plus model latency
-# can blow past 30min before the agent reaches the summarize step. 60min
-# gives headroom; turns (60) are rarely the limiter.
-_MAX_TURNS = 60
-_TIMEOUT_S = 3600
 
 
 def parse_artifact(raw: Any) -> Signals:
@@ -162,15 +121,15 @@ def _extract_signals_via_claude(
     prompt = _PROMPT_TEMPLATE_PATH.read_text(encoding="utf-8").format(
         target_dir=str(target_dir),
     )
-    schema_text = json.dumps(_OUTPUT_JSON_SCHEMA)
+    schema_text = json.dumps(OUTPUT_JSON_SCHEMA)
 
     result = run_claude(
         prompt=prompt,
         log_dir=log_dir,
         json_schema=schema_text,
         cwd=target_dir,
-        max_turns=_MAX_TURNS,
-        timeout_s=_TIMEOUT_S,
+        max_turns=MAX_TURNS,
+        timeout_s=TIMEOUT_S,
         permission_mode="plan",  # read-only; agent never edits the dir
         allowed_tools=("Read", "Bash"),
         on_event=on_event,
@@ -185,92 +144,6 @@ def _extract_signals_via_claude(
     # The lite schemas use `extra="allow"`, so any bonus fields the agent
     # surfaced (vllm-specific metrics, richer anomaly metadata, etc.)
     # round-trip through `01_signals.json` and reach Bundle C unchanged.
-    return Signals.model_validate(result.structured_output)
-
-
-class SignalExtractionError(RuntimeError):
-    pass
-
-
-def _warn_multiple_runs(chosen: str, runs: list[str], on_event=None) -> None:
-    """Loud, non-blocking banner when `--signoz` auto-selects among several
-    runs. Goes to the live progress stream; `max(runs)` is the latest because
-    the `YYYYMMDDTHHMMSSZ` id sorts chronologically."""
-    if on_event is None:
-        return
-    others = [r for r in runs if r != chosen]
-    shown = others[:_MAX_OTHERS_LISTED]
-    lines = [
-        "=" * 72,
-        f"SigNoz: {len(runs)} runs found — auto-selected the LATEST:",
-        f"    {chosen}",
-        f"Not analyzed ({len(others)} other run(s)):",
-        *(f"    {r}" for r in shown),
-    ]
-    if len(others) > len(shown):
-        lines.append(f"    … and {len(others) - len(shown)} more")
-    lines += [
-        "To analyze a specific run instead, pass:  --signoz --run-id <id>",
-        "=" * 72,
-    ]
-    on_event("\n".join(lines))
-
-
-def _resolve_signoz_run(run_id: str | None, on_event=None) -> str:
-    """Resolve the concrete run to analyze. Explicit `run_id` wins; otherwise
-    auto-select the latest run and warn loudly if more than one exists.
-
-    Run selection is canonical/tool-owned — `SignozClient` is lazy-imported
-    here, mirroring the `run_claude` import in `_extract_signals_via_claude`."""
-    if run_id:
-        return run_id
-    from spotlights_engine.signal_pipeline.signoz_tool import SignozClient
-
-    runs = SignozClient.from_env().list_runs()
-    if not runs:
-        raise SignalExtractionError("--signoz: no runs found in SigNoz")
-    chosen = max(runs)
-    if len(runs) > 1:
-        _warn_multiple_runs(chosen, runs, on_event)
-    return chosen
-
-
-def _extract_signals_via_signoz(
-    run_id: str, log_dir: Path, on_event=None, model: str | None = None
-) -> Signals:
-    """SigNoz-extraction branch. Test-monkeypatch seam.
-
-    Mirrors `_extract_signals_via_claude`: one `claude -p` session, `Read` +
-    `Bash`, `permission_mode="plan"`, the same `{workload, traces, anomalies}`
-    schema. The agent reaches the run only through `signoz-sql` (run-scoping is
-    canonical), so there is no telemetry dir — `cwd` is the project root so
-    `claude -p` resolves the project's `.claude/` auth (it keys off cwd; see
-    `_PROJECT_ROOT`). The *prompt* is the iteration surface, as on the file path."""
-    from spotlights_engine.signal_pipeline.claude_subprocess import run_claude
-
-    prompt = _PROMPT_SIGNOZ_TEMPLATE_PATH.read_text(encoding="utf-8").format(
-        run_id=run_id,
-    )
-    schema_text = json.dumps(_OUTPUT_JSON_SCHEMA)
-
-    result = run_claude(
-        prompt=prompt,
-        log_dir=log_dir,
-        json_schema=schema_text,
-        cwd=_PROJECT_ROOT,
-        max_turns=_MAX_TURNS,
-        timeout_s=_TIMEOUT_S,
-        permission_mode="plan",  # read-only; SELECT-only SQL via signoz-sql
-        allowed_tools=("Read", "Bash"),
-        on_event=on_event,
-        model=model,
-    )
-    if result.error is not None or result.structured_output is None:
-        raise SignalExtractionError(
-            f"stage 01 (signoz extraction, run {run_id}) failed after "
-            f"{result.duration_s:.1f}s: {result.error}"
-        )
-
     return Signals.model_validate(result.structured_output)
 
 
@@ -303,11 +176,16 @@ def _synthetic_signals() -> Signals:
 
 
 def run(ctx: StageContext) -> Signals:
+    # SigNoz source is a separate module; dispatch by flag. Lazy import keeps
+    # the two extraction paths decoupled and avoids importing signoz_tool
+    # unless the SigNoz path is actually taken.
     if ctx.signal_input.signoz:
-        run_id = _resolve_signoz_run(ctx.signal_input.run_id, ctx.on_event)
-        return _extract_signals_via_signoz(
-            run_id, ctx.log_dir, ctx.on_event, ctx.model
+        from spotlights_engine.signal_pipeline.stages import (
+            s01_signal_extraction_signoz,
         )
+
+        return s01_signal_extraction_signoz.extract(ctx)
+
     target = ctx.signal_input.telemetry_from
     if target is None:
         return _synthetic_signals()
