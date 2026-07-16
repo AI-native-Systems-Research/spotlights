@@ -23,12 +23,11 @@ UsageStep = Literal[
     "agent_proposals",
 ]
 
-UsageCli = Literal["claude", "codex", "opencode"]
+UsageCli = Literal["claude", "codex"]
 
 PROVIDER_FOR_CLI: dict[str, str] = {
     "claude": "anthropic",
     "codex": "openai",
-    "opencode": "litellm",
 }
 
 

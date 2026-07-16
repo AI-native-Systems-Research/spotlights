@@ -258,3 +258,19 @@ def test_config_fingerprint_treats_none_as_effective_defaults() -> None:
         agent_proposals_cfg=AgentProposalsConfig(),
     )
     assert base == explicit
+
+
+def test_input_fingerprint_changes_with_enable_claude_search() -> None:
+    context = SpotlightContext(objective="reduce latency")
+    kwargs = dict(
+        repo_path=Path("/tmp/example-repo"),
+        context=context,
+        max_findings_per_module=30,
+        continue_on_module_failure=True,
+    )
+    off = P.build_input_fingerprint(**kwargs, enable_claude_search=False)
+    on = P.build_input_fingerprint(**kwargs, enable_claude_search=True)
+
+    assert off["enable_claude_search"] is False
+    assert on["enable_claude_search"] is True
+    assert off != on

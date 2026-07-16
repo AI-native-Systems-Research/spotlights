@@ -9,9 +9,6 @@ cost formula (`Σ bucket * rate`) never double-charges:
   (OpenAI convention), so `codex_usage_from_stream` normalizes at capture
   time: `cache_read = cached_input_tokens`, `input -= cached_input_tokens`,
   `cache_create = 0` (Codex has no cache-write charge class).
-- OpenCode reports disjoint buckets on `step_finish`; `reasoning` is folded
-  into `output` because the durable usage schema has no separate reasoning
-  bucket.
 
 Parsers are best-effort: a stream that carries no recognizable usage payload
 yields `None` (the caller notes the degraded capture) rather than raising.
@@ -203,55 +200,10 @@ def codex_usage_from_stream(stdout: bytes | str) -> AgentUsage | None:
     )
 
 
-def opencode_usage_from_stream(stdout: bytes | str) -> AgentUsage | None:
-    """Extract usage from an `opencode run --format json` NDJSON stream.
-
-    Usage lives on the `step_finish` event under `part`: `part.tokens`
-    (`total`/`input`/`output`/`reasoning`/`cache.read`/`cache.write`) and
-    `part.cost`. OpenCode's buckets are disjoint (`input` excludes cache reads,
-    `reasoning` is a separate bucket), so map them straight across, folding
-    `tokens.reasoning` into `output` since `AgentUsage` has no reasoning bucket.
-    If multiple `step_finish` events appear, the latest complete payload wins.
-    """
-    tokens_payload: dict | None = None
-    model: str | None = None
-    cost: float | None = None
-
-    for obj in _iter_json_lines(stdout):
-        part = obj.get("part")
-        if not isinstance(part, dict):
-            continue
-        tokens = part.get("tokens")
-        if isinstance(tokens, dict) and "input" in tokens:
-            tokens_payload = tokens
-            cost = _as_float(part.get("cost"))
-        found_model = part.get("model") or obj.get("model")
-        if isinstance(found_model, str) and found_model:
-            model = found_model
-
-    if tokens_payload is None:
-        return None
-
-    cache = tokens_payload.get("cache")
-    cache = cache if isinstance(cache, dict) else {}
-    output = _as_nonneg_int(tokens_payload.get("output")) + _as_nonneg_int(
-        tokens_payload.get("reasoning")
-    )
-    return AgentUsage(
-        input=_as_nonneg_int(tokens_payload.get("input")),
-        output=output,
-        cache_read=_as_nonneg_int(cache.get("read")),
-        cache_create=_as_nonneg_int(cache.get("write")),
-        model=model,
-        cli_reported_cost_usd=cost,
-    )
-
-
 __all__ = [
     "AgentUsage",
     "CliUsage",
     "claude_usage_from_payload",
     "claude_usage_from_stream",
     "codex_usage_from_stream",
-    "opencode_usage_from_stream",
 ]

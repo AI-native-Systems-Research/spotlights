@@ -67,6 +67,10 @@ class ModuleDeepResearchInput(BaseModel):
     candidates: list[Candidate] = Field(default_factory=list)
     include_candidate_hotspots: bool = True
 
+    # Controls the default step-3 runner fan-out. False (default) → Codex only;
+    # True → Codex + Claude.
+    enable_claude_search: bool = False
+
 
 class ModuleDeepResearchOutput(BaseModel):
     """Output contract for step 3 (`module_deep_research`)."""
@@ -154,6 +158,7 @@ class SpotlightsManagerInput(BaseModel):
     context: SpotlightContext
     max_findings_per_module: int = Field(default=30, ge=0)
     include_candidate_hotspots: bool = True
+    enable_claude_search: bool = False
     continue_on_module_failure: bool = True
 
 

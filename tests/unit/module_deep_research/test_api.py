@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
-import subprocess
 from pathlib import Path
 
 from spotlights_engine.module_deep_research.api import research_module, resolve_target_module
-from spotlights_engine.module_deep_research.codex_exec import CodexExecResult
+from spotlights_engine.module_deep_research.claude_exec import ClaudeExecClient
+from spotlights_engine.module_deep_research.codex_exec import CodexExecClient, CodexExecResult
+from spotlights_engine.module_deep_research.orchestration import select_runners
 from spotlights_engine.schemas.common import SpotlightContext
 from spotlights_engine.schemas.pipeline import ModuleDeepResearchInput
 from spotlights_engine.schemas.project import Module, ProjectTree, Repository
@@ -170,18 +170,18 @@ class NamedFakeRunner(FakeRunner):
         self.name = name
 
 
-def test_research_module_runs_codex_claude_opencode_and_dedups_outputs() -> None:
+def test_research_module_runs_multiple_runners_and_dedups_outputs() -> None:
     codex = NamedFakeRunner("codex", _payload("PagedAttention", "https://arxiv.org/abs/2309.06180"))
     claude = NamedFakeRunner(
         "claude", _payload("PagedAttention", "https://arxiv.org/pdf/2309.06180v2.pdf")
     )
-    opencode = NamedFakeRunner(
-        "opencode", _payload("vAttention", "https://arxiv.org/abs/2405.04437")
+    extra = NamedFakeRunner(
+        "extra", _payload("vAttention", "https://arxiv.org/abs/2405.04437")
     )
 
-    output = research_module(_request(), runners=[codex, claude, opencode])
+    output = research_module(_request(), runners=[codex, claude, extra])
 
-    assert [len(r.prompts) for r in (codex, claude, opencode)] == [1, 1, 1]
+    assert [len(r.prompts) for r in (codex, claude, extra)] == [1, 1, 1]
     assert [finding.finding_id for finding in output.findings] == [
         "find-inference_attention-0001",
         "find-inference_attention-0002",
@@ -192,7 +192,7 @@ def test_research_module_runs_codex_claude_opencode_and_dedups_outputs() -> None
 
 def test_research_module_dedups_exact_title_matches_with_different_urls() -> None:
     first = NamedFakeRunner("codex", _payload("Cache eviction", "https://example.com/paper-a"))
-    second = NamedFakeRunner("opencode", _payload("Cache eviction", "https://example.com/paper-b"))
+    second = NamedFakeRunner("claude", _payload("Cache eviction", "https://example.com/paper-b"))
 
     output = research_module(_request(), runners=[first, second])
 
@@ -212,7 +212,7 @@ def test_research_module_parallel_runner_pool() -> None:
     runners = [
         BarrierRunner("codex", _payload("A", "https://example.com/a")),
         BarrierRunner("claude", _payload("B", "https://example.com/b")),
-        BarrierRunner("opencode", _payload("C", "https://example.com/c")),
+        BarrierRunner("extra", _payload("C", "https://example.com/c")),
     ]
 
     output = research_module(_request(), runners=runners)
@@ -225,7 +225,7 @@ def test_research_module_treats_finding_cap_as_per_runner() -> None:
     runners = [
         NamedFakeRunner("codex", _payload("A", "https://example.com/a")),
         NamedFakeRunner("claude", _payload("B", "https://example.com/b")),
-        NamedFakeRunner("opencode", _payload("C", "https://example.com/c")),
+        NamedFakeRunner("extra", _payload("C", "https://example.com/c")),
     ]
 
     output = research_module(_request_with_cap(1), runners=runners)
@@ -269,106 +269,6 @@ def test_claude_command_shape_uses_litellm_safe_research_tools(tmp_path: Path) -
     assert "Edit" not in tools
 
 
-def test_opencode_default_command_uses_research_agent_and_does_not_expose_prompt(
-    tmp_path: Path,
-) -> None:
-    from spotlights_engine.module_deep_research.opencode_exec import (
-        OpenCodeExecClient,
-        OpenCodeExecOptions,
-    )
-
-    cmd = OpenCodeExecClient(OpenCodeExecOptions(cwd=tmp_path)).build_command()
-
-    assert cmd[:4] == ["opencode", "run", "--format", "json"]
-    assert cmd[cmd.index("--agent") + 1] == "research"
-    assert cmd[cmd.index("--model") + 1] == "litellm/gcp/gemini-3.1-pro-preview"
-    assert "research prompt" not in cmd
-
-
-def test_opencode_run_parses_final_message_and_usage(monkeypatch, tmp_path: Path) -> None:
-    from spotlights_engine.module_deep_research import opencode_exec
-    from spotlights_engine.module_deep_research.opencode_exec import (
-        OpenCodeExecClient,
-        OpenCodeExecOptions,
-    )
-
-    stream = "\n".join(
-        [
-            json.dumps({"type": "step_start", "part": {"type": "step-start"}}),
-            json.dumps({"type": "text", "part": {"type": "text", "text": "OK"}}),
-            json.dumps(
-                {
-                    "type": "step_finish",
-                    "part": {
-                        "type": "step-finish",
-                        "reason": "stop",
-                        "tokens": {
-                            "total": 7809,
-                            "input": 7790,
-                            "output": 1,
-                            "reasoning": 18,
-                            "cache": {"write": 0, "read": 0},
-                        },
-                        "cost": 0,
-                    },
-                }
-            ),
-        ]
-    )
-
-    def fake_run(args, **kwargs):
-        assert "prompt" not in args
-        assert kwargs.get("input") == "research prompt"
-        return subprocess.CompletedProcess(args, 0, stdout=stream, stderr="")
-
-    monkeypatch.setattr(opencode_exec.subprocess, "run", fake_run)
-
-    result = OpenCodeExecClient(OpenCodeExecOptions(cwd=tmp_path)).run("research prompt")
-
-    assert result.final_message == "OK"
-    assert result.usage is not None
-    assert result.usage.input == 7790
-    # reasoning (18) folds into output (1).
-    assert result.usage.output == 19
-    assert result.usage.cache_read == 0
-    assert result.usage.cache_create == 0
-    # Stream reports no model id, so the configured default is copied on.
-    assert result.usage.model == "litellm/gcp/gemini-3.1-pro-preview"
-
-
-def test_opencode_final_message_picks_findings_over_preamble(
-    monkeypatch, tmp_path: Path
-) -> None:
-    """OpenCode can emit its reasoning as a standalone JSON `text` part before
-    the payload part. Concatenating both yields `{preamble}{findings}` — two
-    top-level objects — which made downstream `json.loads` raise
-    `Extra data: line 2 column 1`. The final message must be just the payload."""
-    from spotlights_engine.module_deep_research import opencode_exec
-    from spotlights_engine.module_deep_research.opencode_exec import (
-        OpenCodeExecClient,
-        OpenCodeExecOptions,
-    )
-
-    preamble = json.dumps({"plan": "summarize before emitting", "pad": "x" * 300})
-    payload = json.dumps({"findings": [{"finding_id": "find-0001"}]})
-    stream = "\n".join(
-        [
-            json.dumps({"type": "text", "part": {"type": "text", "text": preamble}}),
-            json.dumps({"type": "text", "part": {"type": "text", "text": payload}}),
-        ]
-    )
-
-    def fake_run(args, **kwargs):
-        return subprocess.CompletedProcess(args, 0, stdout=stream, stderr="")
-
-    monkeypatch.setattr(opencode_exec.subprocess, "run", fake_run)
-
-    result = OpenCodeExecClient(OpenCodeExecOptions(cwd=tmp_path)).run("prompt")
-
-    # Single decodable object — no `Extra data` when parsed downstream.
-    assert json.loads(result.final_message) == {"findings": [{"finding_id": "find-0001"}]}
-
-
 def test_cli_resolution_preserves_posix_command_shape(monkeypatch) -> None:
     from spotlights_engine.module_deep_research import agent_exec
 
@@ -381,7 +281,6 @@ def test_cli_resolution_uses_windows_cmd_shims(monkeypatch) -> None:
     from spotlights_engine.module_deep_research import agent_exec
     from spotlights_engine.module_deep_research.claude_exec import ClaudeExecClient
     from spotlights_engine.module_deep_research.codex_exec import CodexExecClient, CodexExecOptions
-    from spotlights_engine.module_deep_research.opencode_exec import OpenCodeExecClient
 
     def fake_which(executable: str) -> str:
         return f"C:/Users/example/AppData/Roaming/npm/{executable}.CMD"
@@ -393,6 +292,31 @@ def test_cli_resolution_uses_windows_cmd_shims(monkeypatch) -> None:
         "C:/Users/example/AppData/Roaming/npm/claude.CMD"
     )
     assert ClaudeExecClient().build_command()[0].endswith("/claude.CMD")
-    assert OpenCodeExecClient().build_command()[0].endswith("/opencode.CMD")
     codex_cmd, _ = CodexExecClient(CodexExecOptions(output_last_message="last.md")).build_command()
     assert codex_cmd[0].endswith("/codex.CMD")
+
+
+def test_select_runners_default_is_codex_only(tmp_path: Path) -> None:
+    runners = select_runners(
+        repo_path=tmp_path,
+        codex_options=None,
+        runner=None,
+        runners=None,
+    )
+
+    assert len(runners) == 1
+    assert isinstance(runners[0], CodexExecClient)
+
+
+def test_select_runners_enable_claude_search_adds_claude(tmp_path: Path) -> None:
+    runners = select_runners(
+        repo_path=tmp_path,
+        codex_options=None,
+        runner=None,
+        runners=None,
+        enable_claude_search=True,
+    )
+
+    assert len(runners) == 2
+    assert isinstance(runners[0], CodexExecClient)
+    assert isinstance(runners[1], ClaudeExecClient)

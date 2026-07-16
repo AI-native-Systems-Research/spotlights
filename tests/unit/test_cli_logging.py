@@ -122,6 +122,20 @@ def test_negative_review_iterations_rejected() -> None:
         cli._build_config(args)
 
 
+def test_enable_claude_search_defaults_off() -> None:
+    args = cli._build_argparser().parse_args(["--repo", "."])
+
+    assert args.enable_claude_search is False
+    assert cli._build_input(args).enable_claude_search is False
+
+
+def test_enable_claude_search_flag_turns_on() -> None:
+    args = cli._build_argparser().parse_args(["--repo", ".", "--enable-claude-search"])
+
+    assert args.enable_claude_search is True
+    assert cli._build_input(args).enable_claude_search is True
+
+
 def test_main_preserves_summary_stdout_contract(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

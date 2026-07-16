@@ -32,7 +32,7 @@ class SearchQueryLog(BaseModel):
 
     model_config = ConfigDict(extra="ignore")
 
-    agent: str = ""  # "codex" | "claude" | "opencode"; NO min_length
+    agent: str = ""  # "codex" | "claude"; NO min_length
     query: str = ""  # NO min_length — empty must not fail the payload
     tool: str = ""
     results: list[SearchResult] = Field(default_factory=list)

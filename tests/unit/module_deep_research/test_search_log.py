@@ -73,7 +73,7 @@ def test_render_notes_crashed_runner_with_no_queries() -> None:
             StepIssue(
                 step="module_deep_research",
                 severity="error",
-                message="module_deep_research opencode execution failed: boom",
+                message="module_deep_research claude execution failed: boom",
                 recoverable=True,
             )
         ],
@@ -82,5 +82,5 @@ def test_render_notes_crashed_runner_with_no_queries() -> None:
     md = render_search_log_markdown(output, qn="mod")
 
     assert "_1 queries across 2 agents._" in md
-    assert "## Agent: opencode" in md
+    assert "## Agent: claude" in md
     assert "_(runner failed — no queries captured)_" in md

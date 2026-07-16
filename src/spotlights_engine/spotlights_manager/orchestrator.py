@@ -756,6 +756,7 @@ async def _do_step3(
         max_findings_per_module=mgr_input.max_findings_per_module,
         candidates=list(candidates.candidates),
         include_candidate_hotspots=mgr_input.include_candidate_hotspots,
+        enable_claude_search=mgr_input.enable_claude_search,
     )
     options = _build_deep_research_options(
         cfg, mgr_input.repo_path, module_paths.deep_research_last_message_path
@@ -1717,6 +1718,7 @@ async def _run_async(
         max_findings_per_module=input.max_findings_per_module,
         continue_on_module_failure=input.continue_on_module_failure,
         include_candidate_hotspots=input.include_candidate_hotspots,
+        enable_claude_search=input.enable_claude_search,
     )
     config_fp = P.build_config_fingerprint(
         module_filter=config.module_filter,

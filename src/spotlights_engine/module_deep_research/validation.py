@@ -97,8 +97,8 @@ def _iter_json_objects(text: str):
     """Yield every top-level JSON object decodable from `text`, in order.
 
     Uses `JSONDecoder.raw_decode` to consume one value at a time, skipping the
-    whitespace/prose between values. OpenCode concatenates the `text` parts of a
-    multi-object NDJSON stream (see `opencode_exec`), so the payload can arrive as
+    whitespace/prose between values. Some runners concatenate the `text` parts of
+    a multi-object NDJSON stream, so the payload can arrive as
     `{small preamble}\\n{real findings}` — the whole blob both starts with `{` and
     ends with `}`, which made a single `json.loads` raise `Extra data`. Iterating
     lets the caller pick the object that is actually the payload."""

@@ -286,6 +286,7 @@ def build_input_fingerprint(
     max_findings_per_module: int,
     continue_on_module_failure: bool,
     include_candidate_hotspots: bool = True,
+    enable_claude_search: bool = False,
 ) -> dict[str, Any]:
     return {
         "repo_path": str(repo_path),
@@ -293,6 +294,7 @@ def build_input_fingerprint(
         "max_findings_per_module": max_findings_per_module,
         "continue_on_module_failure": continue_on_module_failure,
         "include_candidate_hotspots": include_candidate_hotspots,
+        "enable_claude_search": enable_claude_search,
     }
 
 

@@ -54,8 +54,6 @@ def _cli_for_agent(agent_name: str) -> str | None:
         return "claude"
     if "codex" in name:
         return "codex"
-    if "opencode" in name:
-        return "opencode"
     return None
 
 
@@ -90,6 +88,7 @@ def research_module_with_telemetry(
         codex_options=codex_options,
         runner=runner,
         runners=runners,
+        enable_claude_search=request.enable_claude_search,
     )
     outcomes = run_runners(
         prompt=prompt,

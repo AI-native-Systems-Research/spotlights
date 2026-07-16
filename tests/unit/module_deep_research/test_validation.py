@@ -75,11 +75,10 @@ def test_parse_invalid_response_returns_recoverable_issue() -> None:
 
 
 def test_parse_picks_findings_object_after_leading_preamble() -> None:
-    """OpenCode concatenates a multi-object NDJSON stream into `{...}\\n{...}`;
+    """Some runners concatenate a multi-object NDJSON stream into `{...}\\n{...}`;
     the payload both starts with `{` and ends with `}`, which used to make
-    `json.loads` raise `Extra data` (the observed opencode failure). The parser
-    now scans the objects and picks the one carrying `findings`, even when a
-    smaller preamble object precedes it."""
+    `json.loads` raise `Extra data`. The parser now scans the objects and picks
+    the one carrying `findings`, even when a smaller preamble object precedes it."""
     preamble = json.dumps({"status": "thinking"})
     payload = _payload_with_one_finding()
     text = f"{preamble}\n{json.dumps(payload)}"
