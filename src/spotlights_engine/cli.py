@@ -182,6 +182,16 @@ def _build_argparser() -> argparse.ArgumentParser:
     )
 
     p.add_argument(
+        "--enable-claude-search",
+        dest="enable_claude_search",
+        action="store_true",
+        help=(
+            "Also run the Claude runner in step 3 (module_deep_research). "
+            "Default: off — step 3 runs Codex only."
+        ),
+    )
+
+    p.add_argument(
         "--no-resume",
         dest="resume",
         action="store_false",
@@ -343,6 +353,7 @@ def _build_input(args: argparse.Namespace) -> SpotlightsManagerInput:
     if args.max_findings_per_module is not None:
         input_kwargs["max_findings_per_module"] = args.max_findings_per_module
     input_kwargs["include_candidate_hotspots"] = args.include_candidate_hotspots
+    input_kwargs["enable_claude_search"] = args.enable_claude_search
     return SpotlightsManagerInput(**input_kwargs)
 
 

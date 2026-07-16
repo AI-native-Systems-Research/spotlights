@@ -25,7 +25,10 @@ UsageStep = Literal[
 
 UsageCli = Literal["claude", "codex"]
 
-PROVIDER_FOR_CLI: dict[str, str] = {"claude": "anthropic", "codex": "openai"}
+PROVIDER_FOR_CLI: dict[str, str] = {
+    "claude": "anthropic",
+    "codex": "openai",
+}
 
 
 class UsageRecord(BaseModel):
@@ -39,7 +42,7 @@ class UsageRecord(BaseModel):
     invocation_index: int = Field(ge=0)
     # Human-debuggable id (e.g. "cand-x__find-y:claude"); not the primary key.
     invocation_id: str = ""
-    provider: Literal["anthropic", "openai"]
+    provider: Literal["anthropic", "openai", "litellm"]
     cli: UsageCli
     # Resolved model id when the CLI reported one; None means unresolved (the
     # aggregation falls back to the CLI family and notes it).

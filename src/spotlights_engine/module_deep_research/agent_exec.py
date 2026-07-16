@@ -24,7 +24,8 @@ class AgentExecResult(BaseModel):
     stderr: str
     final_message: str | None = None
     # Token usage parsed from the CLI output while the raw stream is still
-    # available; None when the runner emitted no parseable usage (e.g. gemini).
+    # available; None when the runner emitted no parseable usage (e.g. a
+    # timeout before any usage event was written).
     usage: AgentUsage | None = None
 
     @property
@@ -41,7 +42,7 @@ class AgentExecResult(BaseModel):
 
 
 class ModuleResearchRunner(Protocol):
-    """Minimal interface shared by Codex, Claude, Gemini, and test fakes."""
+    """Minimal interface shared by Codex, Claude, and test fakes."""
 
     name: str
 

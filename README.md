@@ -53,13 +53,15 @@ Contributions to any of these are welcome — see [Contributing](#contributing).
 - [uv](https://docs.astral.sh/uv/)
 - The `claude` CLI on PATH, with auth configured via its own login state or supported environment variables. Used by the modules extractor, candidate discovery, and the Claude executors for steps 4 and 5.
 - The `codex` CLI on PATH, with auth configured via its own login state or supported environment variables. Used by `module_deep_research` and the Codex executors for steps 2 and 5.
-- The `gemini` CLI on PATH, with API-key or gateway auth configured. Used by `module_deep_research` alongside Codex and Claude when available.
 - A target repo on disk (the quickstart below uses vLLM).
 
-The module deep-research step fans out to Codex, Claude, and Gemini by default,
-then treats individual runner failures as recoverable so one flaky provider does
-not fail the whole step. Install, authenticate, and verify all three CLIs for
-best coverage.
+The module deep-research step runs Codex only by default. Pass
+`--enable-claude-search` to also fan out to the Claude runner; individual runner
+failures are treated as recoverable so one flaky provider does not fail the whole
+step. Enable this when running the `claude` CLI directly against Anthropic — its
+`WebSearch` tool works well there. Leave it off when routing through a LiteLLM
+server, where `WebSearch` currently does not work reliably, so Claude adds little
+to the deep search. Install, authenticate, and verify the CLIs you plan to use.
 
 ### Install the `claude` CLI
 
@@ -110,22 +112,6 @@ codex           # first run: pick "Sign in with ChatGPT"
 codex --version
 ```
 
-### Install the `gemini` CLI
-
-Install Gemini CLI with npm and verify it from a fresh shell:
-
-```bash
-npm install -g @google/gemini-cli
-which gemini && gemini --version
-```
-
-For direct Google API-key auth:
-
-```bash
-export GEMINI_API_KEY="<your-gemini-api-key>"
-gemini --prompt "Reply with exactly: OK" --output-format json
-```
-
 ### Optional: route the CLIs through a LiteLLM proxy
 
 Use this when Anthropic, OpenAI, or Google models are exposed through an OpenAI-compatible LiteLLM gateway.
@@ -160,85 +146,19 @@ env_key = "LITELLM_API_KEY"
 wire_api = "responses"
 ```
 
-**`gemini` CLI** — use the proxy root (not `/v1`) and keep the key in `~/.gemini/.env` so headless subprocesses load it consistently.
-
-```bash
-mkdir -p ~/.gemini
-cat > ~/.gemini/.env <<'EOF'
-LITELLM_API_KEY=<your-litellm-virtual-key>
-GEMINI_API_KEY=<your-litellm-virtual-key>
-GOOGLE_GEMINI_BASE_URL=https://your-litellm-host.example.com
-GEMINI_API_KEY_AUTH_MECHANISM=bearer
-GEMINI_CLI_TRUST_WORKSPACE=true
-EOF
-```
-
-Then pin Gemini CLI to API-key auth and remap the internal web-tool aliases to a public model name from your LiteLLM gateway. Gemini CLI implements `google_web_search` and `web_fetch` through the helper aliases `web-search`, `web-fetch`, and `web-fetch-fallback`; remap those aliases directly so they do not fall back to unqualified model names such as `gemini-3-flash-preview`.
-
-```bash
-cat > ~/.gemini/settings.json <<'JSON'
-{
-  "model": { "name": "gcp/gemini-3.1-pro-preview" },
-  "modelConfigs": {
-    "customAliases": {
-      "web-search": {
-        "extends": "base",
-        "modelConfig": {
-          "model": "gcp/gemini-3.1-pro-preview",
-          "generateContentConfig": { "tools": [ { "googleSearch": {} } ] }
-        }
-      },
-      "web-fetch": {
-        "extends": "base",
-        "modelConfig": {
-          "model": "gcp/gemini-3.1-pro-preview",
-          "generateContentConfig": { "tools": [ { "urlContext": {} } ] }
-        }
-      },
-      "web-fetch-fallback": {
-        "extends": "base",
-        "modelConfig": { "model": "gcp/gemini-3.1-pro-preview" }
-      }
-    }
-  },
-  "advanced": { "ignoreLocalEnv": true },
-  "security": { "auth": { "selectedType": "gemini-api-key" } }
-}
-JSON
-
-gemini --prompt "Use google_web_search once for Gemini CLI docs, then reply OK." --output-format json --approval-mode yolo
-```
-
-Notes:
-
-- `GOOGLE_GEMINI_BASE_URL` is the LiteLLM proxy root; do not append `/v1`.
-- `advanced.ignoreLocalEnv` prevents a repo-level `.env` from shadowing the Gemini credentials above.
-- If your LiteLLM deployment uses different public model names, replace `gcp/gemini-3.1-pro-preview` with a public model that supports `googleSearch` and `urlContext`.
-- `GeminiExecOptions.litellm_proxy(...)` writes an equivalent temporary settings file for managed Python runs when `settings_path` is not supplied.
-
-For LiteLLM-backed live research from Python, use
-`GeminiExecOptions.litellm_proxy(...)` with the proxy root, bearer auth, and your
-gateway model IDs. Plain `GeminiExecOptions()` keeps native Gemini CLI
-auth/model/proxy behavior. Do not cap real module deep-research runs with short
-smoke-test timeouts; the subprocess wrappers default to no timeout, and explicit
-timeouts for live research should be long enough for web/literature retrieval
-(15+ minutes is a reasonable floor).
-
 Swap the host and model IDs for your LiteLLM deployment. After editing config or
-environment, re-run `claude --version` / `codex --version` / `gemini --version`
-from a fresh shell.
+environment, re-run `claude --version` / `codex --version` from a fresh shell.
 
 ### Verify all CLIs from a fresh shell
 
 Open a new terminal (so any PATH changes from the installers are picked up) and confirm all binaries resolve and report a version:
 
 ```bash
-which claude && claude --version
-which codex  && codex  --version
-which gemini && gemini --version
+which claude   && claude   --version
+which codex    && codex    --version
 ```
 
-If any command is not found, re-open your terminal so shell PATH updates from the installers are picked up. The native `claude` installer drops its binary at `~/.local/bin/claude`; the `codex` and `gemini` binary locations depend on the install method (for example, Homebrew vs npm vs native installer) — check the installer's final output if a binary still is not on PATH.
+If any command is not found, re-open your terminal so shell PATH updates from the installers are picked up. The native `claude` installer drops its binary at `~/.local/bin/claude`; the `codex` binary location depends on the install method (for example, Homebrew vs npm vs native installer) — check the installer's final output if a binary still is not on PATH.
 
 ### Install the engine
 
@@ -464,6 +384,7 @@ All flags are optional once `--repo` and the agent CLIs are available.
 | `--max-parallel-pairs` | `5` | Within-step parallelism for step 4. |
 | `--max-parallel-candidates` | `5` | Within-step parallelism for step 5. |
 | `--max-findings-per-module` | `30` | Cap on findings produced by step 3 per module. |
+| `--enable-claude-search` | off | Also run the Claude runner in step 3 (default: Codex only). Enable when using the `claude` CLI directly against Anthropic (its `WebSearch` works); leave off behind a LiteLLM server, where `WebSearch` is currently unreliable. |
 
 Agent authentication is handled by the underlying `claude` and `codex` CLIs; no engine config file is required for the happy path.
 

@@ -91,6 +91,10 @@ def test_prompt_is_built_from_repository_module_and_context() -> None:
     assert "Source quality" in prompt
     assert str(repo_path) in prompt
     assert "Repository working directory" in prompt
+    # Search-transparency rules + the schema dump now includes search_queries.
+    assert "Search transparency" in prompt
+    assert "Record every web/literature search query you issued" in prompt
+    assert "search_queries" in prompt
 
 
 def _base_request(**overrides: object) -> ModuleDeepResearchInput:

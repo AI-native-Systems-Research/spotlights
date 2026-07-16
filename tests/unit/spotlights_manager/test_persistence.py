@@ -82,6 +82,55 @@ def test_candidates_and_deep_research_round_trip(tmp_path: Path) -> None:
     assert state.deep_research_duration_s == 4.2
 
 
+def test_read_module_state_loads_old_sidecar_without_search_queries(
+    tmp_path: Path,
+) -> None:
+    """Resume back-compat: an old `module_deep_research.json` written before
+    `search_queries` existed still loads, defaulting the field to []."""
+    paths = ManagerPaths(tmp_path)
+    mp = paths.for_module("v1/kv_offload")
+    mp.dir.mkdir(parents=True)
+
+    # Emulate a pre-feature sidecar: output payload has no search_queries key.
+    legacy = {
+        "output": {"findings": [], "issues": []},
+        "duration_s": 1.0,
+    }
+    mp.deep_research_path.write_text(json.dumps(legacy), encoding="utf-8")
+
+    state = P.read_module_state(mp)
+    assert state.deep_research is not None
+    assert state.deep_research.search_queries == []
+
+
+def test_write_deep_research_search_log_renders_markdown(tmp_path: Path) -> None:
+    from spotlights_engine.schemas.search import SearchQueryLog, SearchResult
+
+    paths = ManagerPaths(tmp_path)
+    mp = paths.for_module("v1/kv_offload")
+    mp.dir.mkdir(parents=True)
+
+    output = make_research_output(n_findings=0)
+    output = output.model_copy(
+        update={
+            "search_queries": [
+                SearchQueryLog(
+                    agent="codex",
+                    query="paged kv cache",
+                    tool="web_search",
+                    results=[SearchResult(title="vLLM", url="https://x", snippet="s")],
+                )
+            ]
+        }
+    )
+    P.write_deep_research_search_log(mp, output, "v1/kv_offload")
+
+    md = mp.deep_research_search_log_path.read_text(encoding="utf-8")
+    assert "# Deep-research search log — v1/kv_offload" in md
+    assert "## Agent: codex" in md
+    assert "### 1. `paged kv cache`  (tool: web_search)" in md
+
+
 def test_proposal_from_finding_round_trip(tmp_path: Path) -> None:
     from spotlights_engine.schemas.candidate import Candidates
     from spotlights_engine.schemas.pipeline import (
@@ -156,6 +205,7 @@ def test_clear_helpers_remove_artifacts(tmp_path: Path) -> None:
     P.write_candidates(mp, make_candidates("v1/kv_offload"))
     P.write_deep_research(mp, make_research_output(), duration_s=1.0)
     mp.deep_research_last_message_path.write_text("hello", encoding="utf-8")
+    P.write_deep_research_search_log(mp, make_research_output(), "v1/kv_offload")
 
     P.clear_discovery_artifacts(mp)
     assert not mp.discovery_run_dir.exists()
@@ -164,6 +214,7 @@ def test_clear_helpers_remove_artifacts(tmp_path: Path) -> None:
     P.clear_deep_research_artifacts(mp)
     assert not mp.deep_research_path.exists()
     assert not mp.deep_research_last_message_path.exists()
+    assert not mp.deep_research_search_log_path.exists()
 
 
 def test_init_manifest_creates_tree(tmp_path: Path) -> None:
@@ -207,3 +258,19 @@ def test_config_fingerprint_treats_none_as_effective_defaults() -> None:
         agent_proposals_cfg=AgentProposalsConfig(),
     )
     assert base == explicit
+
+
+def test_input_fingerprint_changes_with_enable_claude_search() -> None:
+    context = SpotlightContext(objective="reduce latency")
+    kwargs = dict(
+        repo_path=Path("/tmp/example-repo"),
+        context=context,
+        max_findings_per_module=30,
+        continue_on_module_failure=True,
+    )
+    off = P.build_input_fingerprint(**kwargs, enable_claude_search=False)
+    on = P.build_input_fingerprint(**kwargs, enable_claude_search=True)
+
+    assert off["enable_claude_search"] is False
+    assert on["enable_claude_search"] is True
+    assert off != on

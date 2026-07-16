@@ -88,6 +88,7 @@ def research_module_with_telemetry(
         codex_options=codex_options,
         runner=runner,
         runners=runners,
+        enable_claude_search=request.enable_claude_search,
     )
     outcomes = run_runners(
         prompt=prompt,

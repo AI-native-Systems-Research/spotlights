@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import json
-import subprocess
 from pathlib import Path
 
 from spotlights_engine.module_deep_research.api import research_module, resolve_target_module
-from spotlights_engine.module_deep_research.codex_exec import CodexExecResult
+from spotlights_engine.module_deep_research.claude_exec import ClaudeExecClient
+from spotlights_engine.module_deep_research.codex_exec import CodexExecClient, CodexExecResult
+from spotlights_engine.module_deep_research.orchestration import select_runners
 from spotlights_engine.schemas.common import SpotlightContext
 from spotlights_engine.schemas.pipeline import ModuleDeepResearchInput
 from spotlights_engine.schemas.project import Module, ProjectTree, Repository
@@ -170,16 +170,18 @@ class NamedFakeRunner(FakeRunner):
         self.name = name
 
 
-def test_research_module_runs_codex_claude_gemini_and_dedups_outputs() -> None:
+def test_research_module_runs_multiple_runners_and_dedups_outputs() -> None:
     codex = NamedFakeRunner("codex", _payload("PagedAttention", "https://arxiv.org/abs/2309.06180"))
     claude = NamedFakeRunner(
         "claude", _payload("PagedAttention", "https://arxiv.org/pdf/2309.06180v2.pdf")
     )
-    gemini = NamedFakeRunner("gemini", _payload("vAttention", "https://arxiv.org/abs/2405.04437"))
+    extra = NamedFakeRunner(
+        "extra", _payload("vAttention", "https://arxiv.org/abs/2405.04437")
+    )
 
-    output = research_module(_request(), runners=[codex, claude, gemini])
+    output = research_module(_request(), runners=[codex, claude, extra])
 
-    assert [len(r.prompts) for r in (codex, claude, gemini)] == [1, 1, 1]
+    assert [len(r.prompts) for r in (codex, claude, extra)] == [1, 1, 1]
     assert [finding.finding_id for finding in output.findings] == [
         "find-inference_attention-0001",
         "find-inference_attention-0002",
@@ -190,7 +192,7 @@ def test_research_module_runs_codex_claude_gemini_and_dedups_outputs() -> None:
 
 def test_research_module_dedups_exact_title_matches_with_different_urls() -> None:
     first = NamedFakeRunner("codex", _payload("Cache eviction", "https://example.com/paper-a"))
-    second = NamedFakeRunner("gemini", _payload("Cache eviction", "https://example.com/paper-b"))
+    second = NamedFakeRunner("claude", _payload("Cache eviction", "https://example.com/paper-b"))
 
     output = research_module(_request(), runners=[first, second])
 
@@ -210,7 +212,7 @@ def test_research_module_parallel_runner_pool() -> None:
     runners = [
         BarrierRunner("codex", _payload("A", "https://example.com/a")),
         BarrierRunner("claude", _payload("B", "https://example.com/b")),
-        BarrierRunner("gemini", _payload("C", "https://example.com/c")),
+        BarrierRunner("extra", _payload("C", "https://example.com/c")),
     ]
 
     output = research_module(_request(), runners=runners)
@@ -223,7 +225,7 @@ def test_research_module_treats_finding_cap_as_per_runner() -> None:
     runners = [
         NamedFakeRunner("codex", _payload("A", "https://example.com/a")),
         NamedFakeRunner("claude", _payload("B", "https://example.com/b")),
-        NamedFakeRunner("gemini", _payload("C", "https://example.com/c")),
+        NamedFakeRunner("extra", _payload("C", "https://example.com/c")),
     ]
 
     output = research_module(_request_with_cap(1), runners=runners)
@@ -236,12 +238,12 @@ def test_research_module_treats_finding_cap_as_per_runner() -> None:
     assert [finding.title for finding in output.findings] == ["A", "B", "C"]
 
 
-def test_claude_default_max_turns_is_16() -> None:
+def test_claude_default_max_turns_is_40() -> None:
     from spotlights_engine.module_deep_research.claude_exec import ClaudeExecClient
 
     cmd = ClaudeExecClient().build_command()
 
-    assert cmd[cmd.index("--max-turns") + 1] == "16"
+    assert cmd[cmd.index("--max-turns") + 1] == "40"
 
 
 def test_claude_command_shape_uses_litellm_safe_research_tools(tmp_path: Path) -> None:
@@ -267,121 +269,6 @@ def test_claude_command_shape_uses_litellm_safe_research_tools(tmp_path: Path) -
     assert "Edit" not in tools
 
 
-def test_gemini_default_command_is_read_only_and_does_not_expose_prompt(tmp_path: Path) -> None:
-    from spotlights_engine.module_deep_research.gemini_exec import (
-        GeminiExecClient,
-        GeminiExecOptions,
-    )
-
-    cmd = GeminiExecClient(GeminiExecOptions(cwd=tmp_path)).build_command()
-
-    assert cmd[:3] == ["gemini", "--prompt", ""]
-    assert "research prompt" not in cmd
-    assert cmd[cmd.index("--output-format") + 1] == "json"
-    assert cmd[cmd.index("--approval-mode") + 1] == "plan"
-    assert "--skip-trust" not in cmd
-    assert "--model" not in cmd
-
-
-def test_gemini_litellm_proxy_command_uses_explicit_network_config(tmp_path: Path) -> None:
-    from spotlights_engine.module_deep_research.gemini_exec import (
-        GeminiExecClient,
-        GeminiExecOptions,
-    )
-
-    cmd = GeminiExecClient(
-        GeminiExecOptions.litellm_proxy(cwd=tmp_path, base_url="https://litellm.example.com")
-    ).build_command()
-
-    assert cmd[cmd.index("--approval-mode") + 1] == "yolo"
-    assert "--skip-trust" in cmd
-    assert cmd[cmd.index("--model") + 1] == "gcp/gemini-3.1-pro-preview"
-
-
-def test_gemini_env_maps_litellm_key_to_gemini_proxy(tmp_path: Path) -> None:
-    from spotlights_engine.module_deep_research.gemini_exec import (
-        GeminiExecClient,
-        GeminiExecOptions,
-    )
-
-    settings_path = tmp_path / "gemini-settings.json"
-    client = GeminiExecClient(
-        GeminiExecOptions.litellm_proxy(
-            cwd=tmp_path,
-            base_url="https://litellm.example.com",
-            settings_path=settings_path,
-            env={"LITELLM_API_KEY": "test-key"},
-        )
-    )
-
-    env = client.build_env()
-
-    assert env["GEMINI_API_KEY"] == "test-key"
-    assert env["GOOGLE_GEMINI_BASE_URL"] == "https://litellm.example.com"
-    assert env["GEMINI_API_KEY_AUTH_MECHANISM"] == "bearer"
-    assert env["GEMINI_CLI_SYSTEM_SETTINGS_PATH"] == str(settings_path)
-
-
-def test_gemini_litellm_settings_route_internal_web_tools() -> None:
-    from spotlights_engine.module_deep_research.gemini_exec import litellm_settings_payload
-
-    payload = litellm_settings_payload(
-        model="gcp/gemini-3.1-pro-preview",
-        web_utility_model="gcp/gemini-3.1-pro-preview",
-    )
-
-    aliases = payload["modelConfigs"]["customAliases"]
-    assert aliases["web-search"]["modelConfig"]["model"] == "gcp/gemini-3.1-pro-preview"
-    assert aliases["web-search"]["modelConfig"]["generateContentConfig"]["tools"] == [
-        {"googleSearch": {}}
-    ]
-    assert aliases["web-fetch"]["modelConfig"]["model"] == "gcp/gemini-3.1-pro-preview"
-    assert aliases["web-fetch"]["modelConfig"]["generateContentConfig"]["tools"] == [
-        {"urlContext": {}}
-    ]
-    assert aliases["web-fetch-fallback"]["modelConfig"]["model"] == ("gcp/gemini-3.1-pro-preview")
-
-
-def test_gemini_litellm_proxy_run_uses_managed_web_tool_settings(
-    monkeypatch, tmp_path: Path
-) -> None:
-    from spotlights_engine.module_deep_research import gemini_exec
-    from spotlights_engine.module_deep_research.gemini_exec import (
-        GeminiExecClient,
-        GeminiExecOptions,
-    )
-
-    captured: dict[str, object] = {}
-
-    def fake_run(args, **kwargs):
-        settings_path = Path(kwargs["env"]["GEMINI_CLI_SYSTEM_SETTINGS_PATH"])
-        captured["settings_path"] = settings_path
-        captured["settings"] = json.loads(settings_path.read_text(encoding="utf-8"))
-        return subprocess.CompletedProcess(
-            args,
-            0,
-            stdout='{"response": "ok"}',
-            stderr="",
-        )
-
-    monkeypatch.setattr(gemini_exec.subprocess, "run", fake_run)
-
-    result = GeminiExecClient(
-        GeminiExecOptions.litellm_proxy(
-            cwd=tmp_path,
-            base_url="https://litellm.example.com",
-            env={"LITELLM_API_KEY": "test-key"},
-        )
-    ).run("prompt")
-
-    assert result.final_message == "ok"
-    settings_path = captured["settings_path"]
-    assert isinstance(settings_path, Path)
-    assert not settings_path.exists()
-    aliases = captured["settings"]["modelConfigs"]["customAliases"]  # type: ignore[index]
-    assert aliases["web-search"]["modelConfig"]["model"] == "gcp/gemini-3.1-pro-preview"
-
-
 def test_cli_resolution_preserves_posix_command_shape(monkeypatch) -> None:
     from spotlights_engine.module_deep_research import agent_exec
 
@@ -394,7 +281,6 @@ def test_cli_resolution_uses_windows_cmd_shims(monkeypatch) -> None:
     from spotlights_engine.module_deep_research import agent_exec
     from spotlights_engine.module_deep_research.claude_exec import ClaudeExecClient
     from spotlights_engine.module_deep_research.codex_exec import CodexExecClient, CodexExecOptions
-    from spotlights_engine.module_deep_research.gemini_exec import GeminiExecClient
 
     def fake_which(executable: str) -> str:
         return f"C:/Users/example/AppData/Roaming/npm/{executable}.CMD"
@@ -406,6 +292,31 @@ def test_cli_resolution_uses_windows_cmd_shims(monkeypatch) -> None:
         "C:/Users/example/AppData/Roaming/npm/claude.CMD"
     )
     assert ClaudeExecClient().build_command()[0].endswith("/claude.CMD")
-    assert GeminiExecClient().build_command()[0].endswith("/gemini.CMD")
     codex_cmd, _ = CodexExecClient(CodexExecOptions(output_last_message="last.md")).build_command()
     assert codex_cmd[0].endswith("/codex.CMD")
+
+
+def test_select_runners_default_is_codex_only(tmp_path: Path) -> None:
+    runners = select_runners(
+        repo_path=tmp_path,
+        codex_options=None,
+        runner=None,
+        runners=None,
+    )
+
+    assert len(runners) == 1
+    assert isinstance(runners[0], CodexExecClient)
+
+
+def test_select_runners_enable_claude_search_adds_claude(tmp_path: Path) -> None:
+    runners = select_runners(
+        repo_path=tmp_path,
+        codex_options=None,
+        runner=None,
+        runners=None,
+        enable_claude_search=True,
+    )
+
+    assert len(runners) == 2
+    assert isinstance(runners[0], CodexExecClient)
+    assert isinstance(runners[1], ClaudeExecClient)

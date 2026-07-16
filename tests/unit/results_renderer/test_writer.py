@@ -117,7 +117,7 @@ def test_run_manifest_section_rendered(tmp_path: Path) -> None:
     write_run_manifest(
         paths,
         make_run_manifest(
-            notes="unpriced models excluded from cost: gemini-2.5-pro"
+            notes="unpriced models excluded from cost: litellm:litellm/gemma-open"
         ),
     )
 
@@ -140,7 +140,7 @@ def test_run_manifest_section_rendered(tmp_path: Path) -> None:
 
     # Notes travel with the number.
     assert "### Notes" in text
-    assert "unpriced models excluded from cost: gemini-2.5-pro" in text
+    assert "unpriced models excluded from cost: litellm:litellm/gemma-open" in text
 
     # Section sits before Renderer warnings (none here, so just after Modules).
     assert text.index("## Modules") < text.index("## Run manifest")
@@ -215,7 +215,7 @@ def test_run_manifest_rate_note_and_notes_both_shown(tmp_path: Path) -> None:
         paths,
         make_run_manifest(
             rate_note="partial pricing: 1 of 2 models priced",
-            notes="Gemini usage/cost excluded by design",
+            notes="degraded usage capture for one runner",
         ),
     )
 
@@ -224,7 +224,7 @@ def test_run_manifest_rate_note_and_notes_both_shown(tmp_path: Path) -> None:
     ).index_path.read_text()
 
     assert "partial pricing: 1 of 2 models priced" in text
-    assert "Gemini usage/cost excluded by design" in text
+    assert "degraded usage capture for one runner" in text
 
 
 def test_run_manifest_external_cost_rendered(tmp_path: Path) -> None:
