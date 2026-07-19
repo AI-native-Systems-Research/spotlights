@@ -1,17 +1,68 @@
-# Prompt: Sort Spotlights candidates by estimated impact
+# Sort Spotlights candidates by estimated impact
 
 Give this prompt to an agent to rank the candidates in a Spotlights
 `result.json` by their **estimated impact** and emit a human-readable markdown
 report of the sorted candidates with scores.
 
-## Inputs
+**UX rule**: Whenever a question has predefined choices, use the `AskUserQuestion` tool to present them as selectable options (not inline text). This gives the user a clean dropdown-style experience.
+
+Count your concrete predefined options before building the question:
+
+- **≥2 concrete options** → rely on the built-in "Other" fallback and do NOT add a "Custom path" / "Custom N" option (avoids a duplicate "Custom" + "Other" chip).
+- **<2 concrete options** → add an explicit "Custom path" / "Custom N" option so the call meets `AskUserQuestion`'s ≥2-options minimum. The built-in "Other" is still there for free-text; the explicit option is only there to satisfy the schema.
+
+Either way, if the user picks "Other" (or the explicit Custom option), handle the free-text conversationally.
+
+## Step 0 — Confirm Inputs
+
+Ask the three questions below in this exact order, each as a **separate `AskUserQuestion` call** — do NOT batch them into one call. The built-in "Other" fallback only lets the user type a free-text answer when the question is asked on its own; batching several questions together disables free-text entry per question and forces awkward duplicate "Custom" options. Order: **(1) `RESULT_JSON`, then (2) `OUTPUT_DIR`, then (3) `TOP_N`.** `TOP_N` in particular must always be last, because it only makes sense once the input and output locations are settled.
+
+**Resolve `RESULT_JSON`:**
+
+Present the available choices with a dedicated `AskUserQuestion` call. Build the option list dynamically so the user sees every concrete path that's on offer — the built-in "Other" fallback covers custom paths, so do not add an explicit Custom option yourself:
+
+1. If the user supplied a path in the prompt, include it as an option (label it clearly with the path, e.g. `Use path from prompt: <path>`).
+2. If `./spotlights-out/result.json` exists, include it as an option (e.g. `Use default: ./spotlights-out/result.json`).
+3. If any other `result.json` exists under a sibling `spotlights-out*/` directory in the CWD, include each as an option (e.g. `./spotlights-my-out/result.json`).
+
+If the user picks "Other", they will type the path in free text. Reject non-existent files and re-ask (re-present the same options). If fewer than 2 concrete options are available, add an explicit `Custom path` option only as a schema filler to meet the ≥2-options minimum — do not add it when you already have 2+ concrete paths.
+
+**Resolve `OUTPUT_DIR`:**
+
+Ask for the output folder with its own `AskUserQuestion` call (separate from the input question — the built-in "Other" fallback needs a solo question to render its free-text input). Offer these two concrete options; the built-in "Other" fallback handles a custom path via free text, so do NOT add an explicit "Custom path" option (it renders as an unfillable chip alongside "Other").
+
+- `<parent-of-RESULT_JSON>` — default (write the output files next to `result.json`)
+- `<parent-of-RESULT_JSON>/sorted/` — sibling `sorted/` subdirectory
+
+If the user picks "Other", they will type the path in free text.
+
+Then derive:
+
+- `OUTPUT_MD` = `<OUTPUT_DIR>/sorted_candidates.md`
+- `OUTPUT_JSON` = `<OUTPUT_DIR>/sorted_candidates.json`
+
+**Ask for `TOP_N`** with its own `AskUserQuestion` call (defaults to All). Only include the concrete options; the built-in "Other" fallback handles a custom integer via free text:
+- All · Top 10 · Top 25
+
+`TOP_N` only affects the markdown details section; the JSON always contains every ranked candidate.
+
+**Echo the resolved values before starting:**
+
+```
+RESULT_JSON:  <path>
+OUTPUT_MD:    <path>
+OUTPUT_JSON:  <path>
+TOP_N:        <all | N>
+```
+
+## Inputs (summary)
 
 - `RESULT_JSON` — path to the run's `result.json`
-  (default: `output/llmd_router_lsf/result.json`).
+  (default: `./spotlights-out/result.json`, or `<parent-of-supplied-result-json>/result.json` when a path is provided).
 - `OUTPUT_MD` — path to write the ranked markdown report
-  (default: `output/llmd_router_lsf/sorted/sorted_candidates.md`).
+  (default: `<result-json-parent>/sorted_candidates.md`).
 - `OUTPUT_JSON` — path to write the machine-readable ranked JSON
-  (default: `output/llmd_router_lsf/sorted/sorted_candidates.json`).
+  (default: `<result-json-parent>/sorted_candidates.json`).
 - `TOP_N` — how many candidates to render in full detail in the markdown
   (default: `all`). Does **not** affect the JSON, which always contains every
   ranked candidate.
@@ -25,6 +76,8 @@ candidate has: `id`, `module_qualified_name`, `origin`, `locations[]`
 proposals a `finding_ref_id`).
 
 ## Task
+
+**Precondition:** Step 0 above is complete and `RESULT_JSON`, `OUTPUT_MD`, `OUTPUT_JSON`, and `TOP_N` are all confirmed. Do not start this section until then.
 
 1. **Load** `report.candidates` from `RESULT_JSON`.
 
@@ -102,9 +155,9 @@ proposals a `finding_ref_id`).
 
 Write **two files** — a human-readable markdown report to `OUTPUT_MD` and a
 machine-readable JSON to `OUTPUT_JSON`. Both are derived from the same repaired
-ranked list, so their order and scores are identical. Create the parent
-directory (e.g. `output/llmd_router_lsf/sorted/`) if it does not exist. Do not
-mutate `result.json`; these are read-only views over it.
+ranked list, so their order and scores are identical. Create the output
+directory if it does not exist. Do not mutate `result.json`; these are
+read-only views over it.
 
 ### Markdown (`OUTPUT_MD`)
 
