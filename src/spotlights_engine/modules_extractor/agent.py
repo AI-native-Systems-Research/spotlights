@@ -177,6 +177,8 @@ def run_extraction(
 
         if artifacts_dir is not None:
             _write_streams(artifacts_dir, result.stdout, result.stderr, attempt=attempt)
+        from spotlights_engine._backlog import dump as _bldump
+        _bldump("modules_extractor", argv, result.returncode, result.stdout.decode("utf-8", "replace"), result.stderr.decode("utf-8", "replace"))
 
         if result.returncode != 0:
             stderr_tail = result.stderr[-500:].decode("utf-8", "replace")

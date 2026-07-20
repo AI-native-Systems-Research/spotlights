@@ -27,6 +27,10 @@ class AgentExecResult(BaseModel):
     # available; None when the runner emitted no parseable usage (e.g. gemini).
     usage: AgentUsage | None = None
 
+    def model_post_init(self, __context) -> None:
+        from spotlights_engine._backlog import dump as _bldump
+        _bldump("module_deep_research", self.command, self.returncode, self.stdout, self.stderr)
+
     @property
     def ok(self) -> bool:
         return self.returncode == 0

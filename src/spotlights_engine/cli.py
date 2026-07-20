@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 import json
+import os
 import logging
 import sys
 from pathlib import Path
@@ -373,6 +374,7 @@ def _build_config(args: argparse.Namespace) -> SpotlightsManagerConfig:
         discovery_cfg = DiscoveryConfig(num_review_iterations=args.review_iterations)
 
     include = _flatten_include(args.include)
+    os.environ.setdefault("SPOTLIGHTS_BACKLOG_DIR", str(args.artifacts_dir / "spotlights_manager" / "backlogs"))
     return SpotlightsManagerConfig(
         artifacts_dir=args.artifacts_dir,
         output_folder=args.output_folder,

@@ -120,6 +120,8 @@ def run_candidate_claude(
             usage=claude_usage_from_stream(stdout),
         )
     duration = time.monotonic() - start
+    from spotlights_engine._backlog import dump as _bldump
+    _bldump("agent_proposals", argv, completed.returncode, (completed.stdout or b"").decode("utf-8", "replace"), (completed.stderr or b"").decode("utf-8", "replace"))
     usage = claude_usage_from_stream(completed.stdout or b"")
 
     if completed.returncode != 0:

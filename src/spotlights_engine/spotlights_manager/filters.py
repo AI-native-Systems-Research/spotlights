@@ -86,12 +86,6 @@ def apply_filter(
             # Finer-grained than any module: fall back to nearest ancestor.
             ancestor = _nearest_ancestor(name, available)
             if ancestor is not None:
-                _log.warning(
-                    "ModuleFilter.include: %r matches no module; "
-                    "using nearest ancestor module %r instead",
-                    name,
-                    ancestor,
-                )
                 matches = [ancestor]
             else:
                 unknown.append(name)
@@ -101,7 +95,7 @@ def apply_filter(
                 seen.add(qn)
                 selected.append(qn)
     if unknown:
-        _log.warning(
+        _log.debug(
             "ModuleFilter.include: ignoring %d entr%s that match no module: %r; "
             "available modules: %r",
             len(unknown),

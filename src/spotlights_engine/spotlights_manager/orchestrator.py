@@ -13,6 +13,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -756,6 +757,7 @@ async def _do_step3(
     options = _build_deep_research_options(
         cfg, mgr_input.repo_path, module_paths.deep_research_last_message_path
     )
+    os.environ.setdefault("SPOTLIGHTS_BACKLOG_DIR", str(module_paths.dir.parent.parent / "backlogs"))
     start = time.monotonic()
     result = await asyncio.to_thread(
         lambda: research_module(research_input, options, segment=segment)

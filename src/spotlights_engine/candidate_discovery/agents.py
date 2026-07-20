@@ -133,6 +133,8 @@ class AgentRunner(ABC):
             ) from exc
 
         _append_streams(stdout_path, stderr_path, completed.stdout, completed.stderr, is_retry)
+        from spotlights_engine._backlog import dump as _bldump
+        _bldump("candidate_discovery", argv, completed.returncode, (completed.stdout or b"").decode("utf-8", "replace"), (completed.stderr or b"").decode("utf-8", "replace"))
 
         if completed.returncode != 0:
             stdout_tail = (completed.stdout or b"")[-500:].decode("utf-8", "replace")

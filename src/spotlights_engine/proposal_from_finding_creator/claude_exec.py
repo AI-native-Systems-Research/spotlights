@@ -122,6 +122,8 @@ def run_pair(
             usage=claude_usage_from_stream(stdout),
         )
     duration = time.monotonic() - start
+    from spotlights_engine._backlog import dump as _bldump
+    _bldump("proposal_from_finding_creator", argv, completed.returncode, (completed.stdout or b"").decode("utf-8", "replace"), (completed.stderr or b"").decode("utf-8", "replace"))
     usage = claude_usage_from_stream(completed.stdout or b"")
 
     if completed.returncode != 0:

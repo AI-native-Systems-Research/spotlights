@@ -52,16 +52,20 @@ class ClaudeExecClient:
 
     def build_command(self) -> list[str]:
         opt = self.options
+        from spotlights_engine._backlog import enabled as _bl_enabled
+        stream = _bl_enabled()
         cmd = [
             resolve_cli_executable(opt.claude_bin),
             "-p",
             "--output-format",
-            "json",
+            "stream-json" if stream else "json",
             "--permission-mode",
             opt.permission_mode,
             "--max-turns",
             str(opt.max_turns),
         ]
+        if stream:
+            cmd += ["--verbose", "--include-partial-messages"]
         if opt.model:
             cmd += ["--model", opt.model]
         if opt.allowed_tools:
@@ -108,9 +112,21 @@ def _parse_payload(stdout: str) -> dict | None:
         return None
     try:
         payload = json.loads(text)
+        return payload if isinstance(payload, dict) else None
     except json.JSONDecodeError:
-        return None
-    return payload if isinstance(payload, dict) else None
+        pass
+    # stream-json: JSONL — pick the terminal event with type=result.
+    for line in reversed(text.splitlines()):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            p = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(p, dict) and p.get("type") == "result":
+            return p
+    return None
 
 
 def _usage(payload: dict | None, *, fallback_model: str | None) -> AgentUsage | None:
@@ -127,13 +143,9 @@ def _final_message(stdout: str, payload: dict | None = None) -> str | None:
     if not text:
         return None
     if payload is None:
-        try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError:
+        payload = _parse_payload(text)
+        if payload is None:
             return text
-        if not isinstance(parsed, dict):
-            return text
-        payload = parsed
 
     structured = payload.get("structured_output")
     if isinstance(structured, (dict, list)):

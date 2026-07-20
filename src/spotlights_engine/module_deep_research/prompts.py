@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 
 from spotlights_engine.module_deep_research.validation import (
     AgentModuleDeepResearchOutput,
@@ -87,7 +88,7 @@ def render_module_deep_research_prompt(
             "sources that address them; they are hints, not a strict scope.\n"
             f"{_format_candidates(request.candidates)}\n"
         )
-    return f"""You are running the Spotlights module_deep_research pipeline step.
+    prompt = f"""You are running the Spotlights module_deep_research pipeline step.
 Do not modify files. Do not ask questions.
 
 Goal:
@@ -193,6 +194,10 @@ Source quality:
 ModuleDeepResearchOutput JSON schema:
 {schema_json}
 """.strip()
+    extra = os.environ.get("SPOTLIGHTS_SEARCH_CONSTRAINTS", "").strip()
+    if extra:
+        prompt += "\n\n## Search constraints (HARD)\n" + extra + "\n"
+    return prompt
 
 
 __all__ = ["render_module_deep_research_prompt"]
