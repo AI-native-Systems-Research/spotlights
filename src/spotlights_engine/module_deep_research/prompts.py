@@ -138,6 +138,10 @@ Workflow:
 Output rules:
 - Return a single bare JSON object matching the ModuleDeepResearchOutput schema
   below. Do not wrap it in Markdown and do not include explanatory prose.
+- Your FINAL message must be exactly that JSON object and nothing else - it is
+  parsed by machine, not read by a human. Emitting only tool-call/step events
+  with no final JSON text is a failure: even when you found nothing, still emit
+  the JSON object (empty `findings`, with a StepIssue explaining why).
 - Include at most {request.max_findings_per_module} findings.
 - Use finding IDs find-0001, find-0002, ... ordered by expected relevance to
   the module and the caller objective. Most relevant first.
@@ -157,6 +161,21 @@ Output rules:
   algorithm number, timestamp, or commit/line). Paraphrase only when the
   source is not quotable (for example, a video without a transcript), and
   in that case still give a precise pointer.
+
+Search transparency:
+- Record every web/literature search query you issued in search_queries, in
+  the order you issued them - including queries that produced no kept finding.
+  This is required for debugging run-to-run variance.
+- For each query, list the top results the search returned as
+  {{title, url, snippet}}. snippet is a short (<=1 sentence) excerpt or the
+  result's own description. If a query returned nothing, emit an empty results
+  list - do not omit the query.
+- tool is the tool you used (e.g. web_search, web_fetch); best-effort, leave
+  "" if unsure.
+- Do not invent queries or results. Report only searches you actually ran.
+- Cap the reported results at ~5 per query (top results) to bound output size.
+- Note: this relies on your honest self-report. Capture intent-level queries
+  reliably; exhaustive fidelity to the raw tool-call stream is not required.
 
 Module relevance gate:
 - Keep a finding only when it passes all of these checks:

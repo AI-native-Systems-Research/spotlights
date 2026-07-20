@@ -24,6 +24,7 @@ from spotlights_engine.schemas.common import (
 )
 from spotlights_engine.schemas.finding import Finding
 from spotlights_engine.schemas.project import ProjectTree
+from spotlights_engine.schemas.search import SearchQueryLog
 
 
 class ModulesExtractorInput(BaseModel):
@@ -66,6 +67,10 @@ class ModuleDeepResearchInput(BaseModel):
     candidates: list[Candidate] = Field(default_factory=list)
     include_candidate_hotspots: bool = True
 
+    # Controls the default step-3 runner fan-out. False (default) → Codex only;
+    # True → Codex + Claude.
+    enable_claude_search: bool = False
+
 
 class ModuleDeepResearchOutput(BaseModel):
     """Output contract for step 3 (`module_deep_research`)."""
@@ -74,6 +79,10 @@ class ModuleDeepResearchOutput(BaseModel):
 
     findings: list[Finding] = Field(default_factory=list)
     issues: list[StepIssue] = Field(default_factory=list)
+    # Advisory search-query log, one entry per query each runner reported,
+    # tagged with the issuing agent. Defaults to [] so older sidecars without
+    # it still validate on resume.
+    search_queries: list[SearchQueryLog] = Field(default_factory=list)
 
 
 class ProposalFromFindingCreatorInput(BaseModel):
@@ -149,6 +158,7 @@ class SpotlightsManagerInput(BaseModel):
     context: SpotlightContext
     max_findings_per_module: int = Field(default=30, ge=0)
     include_candidate_hotspots: bool = True
+    enable_claude_search: bool = False
     continue_on_module_failure: bool = True
 
 

@@ -39,7 +39,7 @@ class File(BaseModel):
     role: str
 
 class Module(BaseModel):
-    name: str               # ^[a-z][a-z0-9_]*$
+    name: str               # ^[a-z][a-z0-9_]*$; == normalized basename of path
     path: str               # repo-relative
     description: str = ""
     depends_on: list[str] = []
@@ -49,6 +49,9 @@ class Module(BaseModel):
 class Repository(BaseModel):
     name: str
     summary: str
+    source_root: str = ""   # repo-relative dir the package(s) live under;
+                            # "" = repo root. Qualified name = path relative
+                            # to source_root (see below).
     external_dependencies: list[str] = []
 
 class ProjectModules(BaseModel):
@@ -188,14 +191,22 @@ SpotlightContext(
 )
 ```
 
-A **module qualified name** is the dot-joined chain of `Module.name` values from
-a top-level entry in `ProjectModules.modules` down through nested `submodules` to
-the target module. It uniquely identifies a module within a `ProjectModules`
-(`Module.name` alone is only locally unique among siblings).
+A **module qualified name** is the module's `path` taken relative to
+`Repository.source_root`, joined with `/` (slash-form), with each segment
+normalized to `^[a-z][a-z0-9_]*$`. It uniquely identifies a module within a `ProjectModules`.
+By construction its last segment equals the target `Module.name`, and within
+the emitted tree the qualified name of a child equals its parent's qualified
+name plus the child's name (child paths are validated to nest under their
+parent). The runtime tree class is `ProjectTree` in
+[schemas/project.py](../../src/spotlights_engine/schemas/project.py); its
+`_validate_paths_and_qns` validator enforces these invariants and rejects
+normalization collisions.
 
-For example, given a tree with a top-level module `inference` that contains a
-submodule `attention` with a submodule `paged_kv`, the qualified name of the
-deepest module is `inference.attention.paged_kv`.
+For example, in a src-layout repo with `source_root = "src"`, a module at
+`src/spotlights_engine/modules_extractor/agent` has qualified name
+`spotlights_engine/modules_extractor/agent`. In a root-layout repo with
+`source_root = ""`, a module at `vllm/attention` has qualified name
+`vllm/attention`.
 
 The canonical way to address a module across this pipeline is the pair
 `(ProjectModules, module_qualified_name)`: the tree carries the module data,
@@ -341,6 +352,17 @@ The codex agent driving the survey runs with its working directory set to
 `repo_path`, so it can open target-module and adjacent files directly via
 their repo-relative paths when grounding findings in current code.
 
+**Paper filter (optional).** When `paper_filter` is set, the merged/deduped
+findings are collapsed to **at most one** finding — the one matching that paper.
+Matching reuses the same normalized key space as dedup (`select_paper_finding`):
+first by normalized URL (arxiv `abs`/`pdf`/versioned ids compare equal), then by
+title when a `title` is supplied and the URLs differ. The filter runs per module
+before renumber/prefix, so the survivor renumbers cleanly to `find-<segment>-0001`
+and downstream steps naturally focus on that paper. A no-match yields empty
+findings plus a recoverable `StepIssue`. The prompt is **unchanged** — agents
+still do a blind survey; the filter is applied to their output. `run-on-pr`
+drives this to focus the paper-citation axis on a specific known paper.
+
 **Input**
 
 ```python
@@ -350,6 +372,7 @@ class ModuleDeepResearchInput(BaseModel):
     context: SpotlightContext
     repo_path: Path
     max_findings_per_module: int = 10
+    paper_filter: PaperFilter | None = None  # ≤1 finding matching this paper
 ```
 
 **Output**

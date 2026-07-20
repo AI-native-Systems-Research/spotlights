@@ -22,9 +22,11 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from spotlights_engine.schemas.common import StepIssue
 from spotlights_engine.schemas.finding import Finding, FindingSourceType
 from spotlights_engine.schemas.pipeline import ModuleDeepResearchOutput
+from spotlights_engine.schemas.search import SearchQueryLog, SearchResult
 from spotlights_engine.utils.id_helpers import slug_for
 
 _JSON_FENCE = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL | re.IGNORECASE)
+_AGENT_OUTPUT_KEYS = frozenset({"findings", "issues", "search_queries"})
 
 
 class AgentFinding(BaseModel):
@@ -42,6 +44,34 @@ class AgentFinding(BaseModel):
     supporting_evidence: str = ""
 
 
+class AgentSearchResult(BaseModel):
+    """Wire shape for one result a search query returned.
+
+    Lenient by design (`extra="ignore"`, no `min_length`): the search log is
+    advisory, so a stray extra field must not fail the whole payload and
+    discard the runner's real findings — see the strictness rule in the debug
+    design doc."""
+
+    model_config = ConfigDict(extra="ignore")  # tolerate extra result fields
+
+    title: str = ""
+    url: str = ""
+    snippet: str = ""  # short excerpt / description returned by the search
+
+
+class AgentSearchQuery(BaseModel):
+    """Wire shape for one search query an agent reports having issued.
+
+    Lenient by design (`extra="ignore"`, no `min_length`) — an empty query
+    must not fail the payload."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    query: str = ""  # NO min_length — empty must not fail the payload
+    tool: str = ""  # e.g. "web_search", "web_fetch" — optional, best-effort
+    results: list[AgentSearchResult] = Field(default_factory=list)
+
+
 class AgentModuleDeepResearchOutput(BaseModel):
     """Agent-facing wire output: `AgentFinding`s plus issues. Promoted to the
     persisted `ModuleDeepResearchOutput` (real `Finding`s with prefixed ids) by
@@ -51,6 +81,7 @@ class AgentModuleDeepResearchOutput(BaseModel):
 
     findings: list[AgentFinding] = Field(default_factory=list)
     issues: list[StepIssue] = Field(default_factory=list)
+    search_queries: list[AgentSearchQuery] = Field(default_factory=list)
 
 
 def _issue(message: str, *, recoverable: bool = True) -> StepIssue:
@@ -62,19 +93,68 @@ def _issue(message: str, *, recoverable: bool = True) -> StepIssue:
     )
 
 
+def _iter_json_objects(text: str):
+    """Yield every top-level JSON object decodable from `text`, in order.
+
+    Uses `JSONDecoder.raw_decode` to consume one value at a time, skipping the
+    whitespace/prose between values. Some runners concatenate the `text` parts of
+    a multi-object NDJSON stream, so the payload can arrive as
+    `{small preamble}\\n{real findings}` — the whole blob both starts with `{` and
+    ends with `}`, which made a single `json.loads` raise `Extra data`. Iterating
+    lets the caller pick the object that is actually the payload."""
+    decoder = json.JSONDecoder()
+    idx = 0
+    n = len(text)
+    while idx < n:
+        next_brace = text.find("{", idx)
+        if next_brace == -1:
+            return
+        try:
+            obj, end = decoder.raw_decode(text, next_brace)
+        except json.JSONDecodeError:
+            # Not a valid object at this brace; advance past it and retry.
+            idx = next_brace + 1
+            continue
+        yield obj
+        idx = end
+
+
+def _select_json_object(text: str, *, fallback_to_first: bool = True) -> str | None:
+    first: str | None = None
+    first_output_like: str | None = None
+    for obj in _iter_json_objects(text):
+        if not isinstance(obj, dict):
+            continue
+        candidate = json.dumps(obj)
+        if first is None:
+            first = candidate
+        if "findings" in obj:
+            return candidate
+        if first_output_like is None and _AGENT_OUTPUT_KEYS.intersection(obj):
+            first_output_like = candidate
+    if first_output_like is not None:
+        return first_output_like
+    if fallback_to_first:
+        return first
+    return None
+
+
 def _extract_json_object(text: str) -> str:
-    stripped = text.strip()
-    if stripped.startswith("{") and stripped.endswith("}"):
-        return stripped
+    """Return the JSON string that best matches the agent's expected payload.
 
-    fenced = _JSON_FENCE.search(text)
-    if fenced:
-        return fenced.group(1).strip()
+    Prefers a fenced ```json block that looks like an agent output, then the
+    first decodable object carrying a `findings` key (the real payload even when
+    a smaller preamble object precedes it in a concatenated stream), then another
+    output-shaped object such as issue-only output, then the first decodable
+    object as a compatibility fallback."""
+    for fenced in _JSON_FENCE.finditer(text):
+        selected = _select_json_object(fenced.group(1).strip(), fallback_to_first=False)
+        if selected is not None:
+            return selected
 
-    start = text.find("{")
-    end = text.rfind("}")
-    if start != -1 and end > start:
-        return text[start : end + 1]
+    selected = _select_json_object(text)
+    if selected is not None:
+        return selected
 
     raise ValueError("no JSON object found in module_deep_research response")
 
@@ -119,14 +199,21 @@ def normalize_module_deep_research_output(
     *,
     max_findings_per_module: int,
     segment: str,
+    search_queries: list[SearchQueryLog] | None = None,
 ) -> ModuleDeepResearchOutput:
     """Cap findings and assign deterministic module-prefixed finding IDs in
-    output order, promoting the wire output to the persisted contract."""
+    output order, promoting the wire output to the persisted contract.
+
+    `search_queries` is a passthrough: the wire model has no `agent` field (the
+    agent label lives only on `RunnerOutcome.agent_name`), so the caller tags
+    each query with its runner and forwards the already-built persisted
+    `SearchQueryLog`s here verbatim."""
     return ModuleDeepResearchOutput(
         findings=_renumber_findings(
             output.findings, max_findings_per_module, segment=segment
         ),
         issues=list(output.issues),
+        search_queries=list(search_queries or []),
     )
 
 
@@ -172,16 +259,35 @@ def parse_module_deep_research_output(
     when omitted (standalone use); the manager always supplies the real one.
     """
     seg = segment if segment is not None else slug_for("module")
+    parsed = parse_agent_output(text)
+    # Promote the wire queries to persisted `SearchQueryLog`s tagged with a
+    # synthetic agent label — this standalone path corresponds to a single
+    # response, so there is no per-runner name to attach.
+    search_queries = [
+        SearchQueryLog(
+            agent="agent",
+            query=q.query,
+            tool=q.tool,
+            results=[
+                SearchResult(title=r.title, url=r.url, snippet=r.snippet)
+                for r in q.results
+            ],
+        )
+        for q in parsed.search_queries
+    ]
     return normalize_module_deep_research_output(
-        parse_agent_output(text),
+        parsed,
         max_findings_per_module=max_findings_per_module,
         segment=seg,
+        search_queries=search_queries,
     )
 
 
 __all__ = [
     "AgentFinding",
     "AgentModuleDeepResearchOutput",
+    "AgentSearchQuery",
+    "AgentSearchResult",
     "normalize_module_deep_research_output",
     "parse_agent_output",
     "parse_module_deep_research_output",

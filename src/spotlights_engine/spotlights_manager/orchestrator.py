@@ -34,7 +34,11 @@ from spotlights_engine.candidate_discovery import (
     discover,
 )
 from spotlights_engine.costing.manifest import build_run_manifest
-from spotlights_engine.costing.rates import compute_cost, load_rates
+from spotlights_engine.costing.rates import (
+    compute_cost,
+    load_external_rates,
+    load_rates,
+)
 from spotlights_engine.costing.records import UsageRecord
 from spotlights_engine.module_deep_research import research_module_with_telemetry
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
@@ -753,6 +757,7 @@ async def _do_step3(
         max_findings_per_module=mgr_input.max_findings_per_module,
         candidates=list(candidates.candidates),
         include_candidate_hotspots=mgr_input.include_candidate_hotspots,
+        enable_claude_search=mgr_input.enable_claude_search,
     )
     options = _build_deep_research_options(
         cfg, mgr_input.repo_path, module_paths.deep_research_last_message_path
@@ -1207,6 +1212,7 @@ async def _run_module(
                     "[%s] deep_research: %s: %s", qn, iss.severity, iss.message
                 )
             P.write_deep_research(module_paths, research_output, dr_duration)
+            P.write_deep_research_search_log(module_paths, research_output, qn)
             _write_cli_usage_records(
                 module_paths=module_paths,
                 qn=qn,
@@ -1235,6 +1241,10 @@ async def _run_module(
         else:
             assert state.deep_research is not None
             research_output = state.deep_research
+            # Resume/skip path: the loaded JSON may carry search_queries but no
+            # markdown was written this run. Write it idempotently so the
+            # human-diffable log always sits next to the JSON.
+            P.write_deep_research_search_log(module_paths, research_output, qn)
 
         # ------------------------- step 4 -----------------------------------
         run_step4 = (
@@ -1710,6 +1720,7 @@ async def _run_async(
         max_findings_per_module=input.max_findings_per_module,
         continue_on_module_failure=input.continue_on_module_failure,
         include_candidate_hotspots=input.include_candidate_hotspots,
+        enable_claude_search=input.enable_claude_search,
     )
     config_fp = P.build_config_fingerprint(
         module_filter=config.module_filter,
@@ -1851,6 +1862,11 @@ async def _run_async(
     if not usage_records:
         usage_notes.append("no usage records found; run may predate usage capture")
     cost_summary = compute_cost(usage_records, load_rates())
+    external_cost_summary = compute_cost(
+        usage_records,
+        load_external_rates(),
+        source="public-api-rate-table",
+    )
     total_cost = cost_summary.amount_usd
     cost_str = f", rate-table cost ${total_cost:.2f}" if total_cost else ""
     accumulated = _accumulated_duration_s(manifest, per_module_telemetry)
@@ -1886,12 +1902,13 @@ async def _run_async(
         config_fingerprint=dict(manifest.get("config_fingerprint") or {}),
         records=usage_records,
         cost=cost_summary,
+        external_cost=external_cost_summary,
         wall_clock_s=time.monotonic() - run_start,
         accumulated_duration_s=accumulated,
         candidates_path=str(config.output_folder / "index.md"),
         num_candidates=num_candidates,
         module_status=counts,
-        notes=usage_notes + ["Gemini usage/cost excluded by design"],
+        notes=usage_notes,
     )
     P.write_run_manifest(paths, public_manifest)
 
