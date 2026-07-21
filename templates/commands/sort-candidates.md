@@ -174,7 +174,7 @@ Structure:
 
 | # | Candidate | Module | Symbol | Impact | Score | Rationale |
 |---|-----------|--------|--------|--------|-------|-----------|
-| 1 | `cand-…` | pkg/… | Foo.bar | high | 92 | one-line why it ranks here |
+| 1 | [`cand-…`](../modules/pkg/Foo__bar__cand-….md) | pkg/… | Foo.bar | high | 92 | one-line why it ranks here |
 | 2 | … | … | … | … | … | … |
 
 ## Candidate details
@@ -196,6 +196,21 @@ Rules for the markdown:
 - The **summary table** always lists every ranked candidate (all N rows), best
   first. `Score` shows the judge's 0–100 score, or `—` for pre-score-fallback
   rows. Keep the `Rationale` column to one line.
+- The **`Candidate` cell must be a clickable link** to that candidate's own
+  detail markdown file so the reader can jump straight to it. Each candidate has
+  a dedicated md file under `<parent-of-RESULT_JSON>/modules/<module-folder>/`,
+  named with the candidate `id` as the filename suffix, e.g.
+  `TwoQubitBasisDecomposer__call_inner_best_nbasis__cand-crates_synthesis-0004.md`.
+  Resolve the file for each candidate by globbing
+  `<parent-of-RESULT_JSON>/modules/**/*__<id>.md` (the `id` suffix is unique, so
+  exactly one file matches). Emit the cell as
+  ``[`<id>`](<path-relative-to-OUTPUT_DIR>)`` — e.g. when `OUTPUT_DIR` is
+  `<parent-of-RESULT_JSON>/sorted/`, the link is
+  ``[`cand-crates_synthesis-0004`](../modules/crates_synthesis/TwoQubitBasisDecomposer__call_inner_best_nbasis__cand-crates_synthesis-0004.md)``;
+  when `OUTPUT_DIR` is the parent of `result.json` itself, drop the leading
+  `../` (`modules/…`). If no md file matches an `id` (none should, but be
+  defensive), fall back to the plain `` `<id>` `` in backticks with no link and
+  note it in the Method note.
 - The **details section** renders the top `TOP_N` candidates in full (default
   all). If `TOP_N` is set and less than N, add a note that the remaining
   candidates appear in the summary table only.
