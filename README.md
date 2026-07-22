@@ -173,14 +173,16 @@ source .venv/bin/activate
 
 The engine ships Claude Code slash commands (currently `/spotlights-objective-setting` and `/spotlights-sort-candidates`) as bundled markdown templates. They are not active until you install them into a Claude Code commands directory — same model as [spec-kit](https://github.com/github/spec-kit). From the project you want to optimize:
 
+Install for this project:
+
 ```bash
-spotlights-engine init           # writes .claude/commands/spotlights-*.md
+spotlights-engine init
 ```
 
 Or install once, system-wide:
 
 ```bash
-spotlights-engine init --scope user   # writes ~/.claude/commands/spotlights-*.md
+spotlights-engine init --scope user 
 ```
 
 `init` records what it installed in `<scope-root>/.spotlights/manifest.json` (sha256 per file). Re-running `spotlights-engine init` is a no-op for existing files. To pick up new bundled versions after a package upgrade, use `--force` — files the user has edited (hash differs from the manifest) are preserved.
