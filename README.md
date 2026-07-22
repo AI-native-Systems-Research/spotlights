@@ -208,6 +208,9 @@ spotlights-engine \
   --artifacts-dir ./artifacts
 ```
 
+Note that the discovery step might take a long while (10 minutes or more). 
+If you see the line `discovery: start` in your terminal, be patient! 😊
+
 On disk:
 
 ```
