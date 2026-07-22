@@ -208,7 +208,7 @@ spotlights-engine \
   --artifacts-dir ./artifacts
 ```
 
-Note that the discovery step might take a long while (10 minutes or more). 
+Note that the discovery step might take a long while (30 minutes or more). 
 If you see the line `discovery: start` in your terminal, be patient! 😊
 
 On disk:
@@ -393,6 +393,10 @@ All flags are optional once `--repo` and the agent CLIs are available.
 | `--enable-claude-search` | off | Also run the Claude runner in step 3 (default: Codex only). Enable when using the `claude` CLI directly against Anthropic (its `WebSearch` works); leave off behind a LiteLLM server, where `WebSearch` is currently unreliable. |
 
 Agent authentication is handled by the underlying `claude` and `codex` CLIs; no engine config file is required for the happy path.
+
+## Troubleshooting
+
+Common issues — re-running the full cycle, cleaning prior run data, and saving runs under separate folders — are covered in [`docs/troubleshooting.md`](docs/troubleshooting.md).
 
 ## Where Spotlights fits
 
