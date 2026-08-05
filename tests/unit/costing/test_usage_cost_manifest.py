@@ -113,6 +113,39 @@ def test_compute_cost_uses_rates_and_reports_missing_models() -> None:
     assert "PARTIAL cost" in summary.rate_note
 
 
+def test_compute_cost_strips_context_window_tag_from_model_id() -> None:
+    """A "[1m]" context-variant id prices off its base model's rate row."""
+    records = [
+        UsageRecord.from_usage(
+            AgentUsage(input=100, output=10, model="aws/claude-opus-4-8[1m]"),
+            step="module_deep_research",
+            module_qualified_name="pkg/a",
+            session_index=1,
+            invocation_index=0,
+            invocation_id="i0",
+            cli="claude",
+            role="deep_research",
+        ),
+    ]
+
+    summary = compute_cost(
+        records,
+        {
+            "anthropic:aws/claude-opus-4-8": ModelRate(
+                input=0.01,
+                output=0.02,
+                cache_read=0.001,
+                cache_create=0.005,
+                note="test",
+            )
+        },
+    )
+
+    assert summary.amount_usd == pytest.approx(100 * 0.01 + 10 * 0.02)
+    assert summary.unpriced_models == []
+    assert "PARTIAL cost" not in summary.rate_note
+
+
 def test_run_manifest_groups_models_and_totals_tokens() -> None:
     records = [
         UsageRecord.from_usage(
