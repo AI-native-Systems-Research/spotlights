@@ -6,13 +6,16 @@ from spotlights_engine.proposal_from_finding_creator.validation import (
     parse_pair_payload,
 )
 
-
 _OK = {
     "title": "Use technique X",
     "detailed_description": "A detailed plan",
     "finding_id": "find-v1_kv_offload-0001",
     "proposal_rationale": "Because of Y",
     "created_by": "proposal_from_finding_creator",
+    "mechanism": "Apply X to the candidate path",
+    "required_changes": "Change the candidate region to use X",
+    "expected_effect": "Lower latency",
+    "evaluation_metric": "p95 latency against baseline",
 }
 
 

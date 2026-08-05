@@ -38,7 +38,9 @@ def test_happy_path_one_proposal_per_pair(repo: Path, artifacts: Path) -> None:
     inp = make_input(n_candidates=1, n_findings=1)
     runner = fake_runner_factory(
         payloads={
-            "cand-v1_kv_offload-0001__find-v1_kv_offload-0001": make_proposal_payload(finding_id="find-v1_kv_offload-0001")
+            "cand-v1_kv_offload-0001__find-v1_kv_offload-0001": (
+                make_proposal_payload(finding_id="find-v1_kv_offload-0001")
+            )
         }
     )
     cfg = ProposalFromFindingConfig(repo_path=repo, artifacts_dir=artifacts)
@@ -54,6 +56,10 @@ def test_happy_path_one_proposal_per_pair(repo: Path, artifacts: Path) -> None:
     assert p.description == "A detailed plan"
     assert p.rationale == "Because of Y"
     assert p.author == "proposal_from_finding_creator"
+    assert p.mechanism == "Apply technique X to the candidate's hot path"
+    assert p.required_changes == "Refactor the candidate region to use technique X"
+    assert p.expected_effect == "Lower latency under the target workload"
+    assert p.evaluation_metric == "p95 latency against the current implementation"
     assert result.output.issues == []
     assert "cand-v1_kv_offload-0001__find-v1_kv_offload-0001" in result.per_pair_durations_s
 
@@ -78,10 +84,18 @@ def test_multi_candidate_multi_finding_each_pair_runs(
     # not the old cross-product.
     runner = fake_runner_factory(
         payloads={
-            "cand-v1_kv_offload-0001__find-v1_kv_offload-0001": make_proposal_payload(finding_id="find-v1_kv_offload-0001"),
-            "cand-v1_kv_offload-0001__find-v1_kv_offload-0002": make_proposal_payload(finding_id="find-v1_kv_offload-0002"),
-            "cand-v1_kv_offload-0002__find-v1_kv_offload-0003": make_proposal_payload(finding_id="find-v1_kv_offload-0003"),
-            "cand-v1_kv_offload-0002__find-v1_kv_offload-0004": make_proposal_payload(finding_id="find-v1_kv_offload-0004"),
+            "cand-v1_kv_offload-0001__find-v1_kv_offload-0001": (
+                make_proposal_payload(finding_id="find-v1_kv_offload-0001")
+            ),
+            "cand-v1_kv_offload-0001__find-v1_kv_offload-0002": (
+                make_proposal_payload(finding_id="find-v1_kv_offload-0002")
+            ),
+            "cand-v1_kv_offload-0002__find-v1_kv_offload-0003": (
+                make_proposal_payload(finding_id="find-v1_kv_offload-0003")
+            ),
+            "cand-v1_kv_offload-0002__find-v1_kv_offload-0004": (
+                make_proposal_payload(finding_id="find-v1_kv_offload-0004")
+            ),
         }
     )
     cfg = ProposalFromFindingConfig(repo_path=repo, artifacts_dir=artifacts)
@@ -175,7 +189,9 @@ def test_per_pair_debug_files_written_on_success(
     inp = make_input(n_candidates=1, n_findings=1)
     runner = fake_runner_factory(
         payloads={
-            "cand-v1_kv_offload-0001__find-v1_kv_offload-0001": make_proposal_payload(finding_id="find-v1_kv_offload-0001")
+            "cand-v1_kv_offload-0001__find-v1_kv_offload-0001": (
+                make_proposal_payload(finding_id="find-v1_kv_offload-0001")
+            )
         }
     )
     cfg = ProposalFromFindingConfig(repo_path=repo, artifacts_dir=artifacts)

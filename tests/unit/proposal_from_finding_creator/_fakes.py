@@ -86,6 +86,10 @@ def make_proposal_payload(
     title: str = "Use technique X",
     detailed_description: str = "A detailed plan",
     proposal_rationale: str = "Because of Y",
+    mechanism: str = "Apply technique X to the candidate's hot path",
+    required_changes: str = "Refactor the candidate region to use technique X",
+    expected_effect: str = "Lower latency under the target workload",
+    evaluation_metric: str = "p95 latency against the current implementation",
 ) -> list[dict]:
     return [
         {
@@ -94,6 +98,10 @@ def make_proposal_payload(
             "finding_id": finding_id,
             "proposal_rationale": proposal_rationale,
             "created_by": created_by,
+            "mechanism": mechanism,
+            "required_changes": required_changes,
+            "expected_effect": expected_effect,
+            "evaluation_metric": evaluation_metric,
         }
     ]
 

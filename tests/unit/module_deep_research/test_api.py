@@ -427,12 +427,12 @@ def test_per_candidate_codex_last_message_paths_are_distinct(tmp_path: Path) -> 
     }
 
 
-def test_claude_default_max_turns_is_40() -> None:
+def test_claude_default_max_turns_is_80() -> None:
     from spotlights_engine.module_deep_research.claude_exec import ClaudeExecClient
 
     cmd = ClaudeExecClient().build_command()
 
-    assert cmd[cmd.index("--max-turns") + 1] == "40"
+    assert cmd[cmd.index("--max-turns") + 1] == "80"
 
 
 def test_claude_command_shape_uses_litellm_safe_research_tools(tmp_path: Path) -> None:

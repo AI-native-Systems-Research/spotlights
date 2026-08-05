@@ -10,7 +10,8 @@ from spotlights_engine.schemas.candidate import Candidate, Candidates
 from spotlights_engine.schemas.finding import Finding
 from spotlights_engine.schemas.pipeline import ModuleDeepResearchOutput, ModuleRun
 from spotlights_engine.schemas.project import Module, ProjectTree
-from spotlights_engine.schemas.proposals import AgentProposal, DeepResearchProposal
+from spotlights_engine.schemas.proposal import Proposal
+from spotlights_engine.utils.schema_compat import primary_file, primary_span, proposals_from
 
 if TYPE_CHECKING:
     from spotlights_engine.spotlights_manager.api import SpotlightsManagerResult
@@ -73,8 +74,16 @@ def record_from_finding(
             locator=f"module_deep_research:{module_qualified_name}:{finding.finding_id}",
             extractor="module_deep_research",
         ),
-        tags=[module_qualified_name, finding.source_type],
-        metadata={"module_qualified_name": module_qualified_name, "finding_id": finding.finding_id},
+        tags=[
+            module_qualified_name,
+            finding.source_type,
+            *([finding.candidate_id] if finding.candidate_id else []),
+        ],
+        metadata={
+            "module_qualified_name": module_qualified_name,
+            "finding_id": finding.finding_id,
+            "candidate_id": finding.candidate_id,
+        },
     )
 
 
@@ -161,11 +170,13 @@ def record_from_candidate(
     module_qualified_name: str,
 ) -> KnowledgeRecord:
     """Convert one discovered candidate into a queryable knowledge record."""
-    location = f"{candidate.file}:{candidate.line_start}-{candidate.line_end}"
+    span = primary_span(candidate)
+    file = primary_file(candidate)
+    location = f"{file}:{span.line_start}-{span.line_end}"
     text = "\n".join(
         [
             f"Candidate {candidate.id} for module {module_qualified_name}.",
-            f"Symbol: {candidate.symbol} ({candidate.kind}).",
+            f"Symbol: {span.symbol} ({span.kind}).",
             f"Location: {location}.",
             f"Description: {candidate.description}",
             f"Current approach: {candidate.current_approach}",
@@ -177,7 +188,7 @@ def record_from_candidate(
     return KnowledgeRecord(
         record_id=_safe_record_id(f"candidate:{module_qualified_name}:{candidate.id}"),
         source_type="candidate",
-        title=f"{module_qualified_name}: {candidate.symbol}",
+        title=f"{module_qualified_name}: {span.symbol}",
         text=text,
         source=SourceRef(
             source_id=_safe_record_id(f"candidate_discovery:{module_qualified_name}"),
@@ -190,18 +201,17 @@ def record_from_candidate(
         ),
         tags=[
             module_qualified_name,
-            candidate.kind,
-            candidate.state.lower(),
+            span.kind,
             candidate.estimated_impact,
         ],
         metadata={
             "module_qualified_name": module_qualified_name,
             "candidate_id": candidate.id,
-            "file": candidate.file,
-            "line_start": candidate.line_start,
-            "line_end": candidate.line_end,
-            "symbol": candidate.symbol,
-            "anomaly_refs": list(candidate.anomaly_refs),
+            "file": file,
+            "line_start": span.line_start,
+            "line_end": span.line_end,
+            "symbol": span.symbol,
+            "kind": span.kind,
         },
     )
 
@@ -213,7 +223,7 @@ def records_from_candidate_proposals(
 ) -> list[KnowledgeRecord]:
     """Convert proposals attached to one candidate into archive records."""
     records: list[KnowledgeRecord] = []
-    for proposal in candidate.deep_research_proposals:
+    for proposal in proposals_from(candidate, "research_finding"):
         records.append(
             record_from_deep_research_proposal(
                 proposal,
@@ -221,36 +231,46 @@ def records_from_candidate_proposals(
                 module_qualified_name=module_qualified_name,
             )
         )
-    for idx, agent_proposal in enumerate(candidate.agent_proposals, start=1):
+    for proposal in proposals_from(candidate, "agent_knowledge"):
         records.append(
             record_from_agent_proposal(
-                agent_proposal,
+                proposal,
                 candidate=candidate,
                 module_qualified_name=module_qualified_name,
-                proposal_index=idx,
             )
         )
     return records
 
 
 def record_from_deep_research_proposal(
-    proposal: DeepResearchProposal,
+    proposal: Proposal,
     *,
     candidate: Candidate,
     module_qualified_name: str,
 ) -> KnowledgeRecord:
     """Convert a research-backed proposal into an archive record."""
+    span = primary_span(candidate)
+    text_parts = [
+        proposal.description,
+        f"Rationale: {proposal.rationale}",
+        f"Candidate: {candidate.id} ({span.symbol}).",
+    ]
+    if proposal.finding_ref_id:
+        text_parts.append(f"Finding: {proposal.finding_ref_id}.")
+    for label, value in (
+        ("Mechanism", proposal.mechanism),
+        ("Required changes", proposal.required_changes),
+        ("Expected effect", proposal.expected_effect),
+        ("Evaluation metric", proposal.evaluation_metric),
+    ):
+        if value:
+            text_parts.append(f"{label}: {value}")
     text = "\n".join(
-        [
-            proposal.detailed_description,
-            f"Rationale: {proposal.proposal_rationale}",
-            f"Candidate: {candidate.id} ({candidate.symbol}).",
-            f"Finding: {proposal.finding_id}.",
-        ]
+        text_parts
     )
     return KnowledgeRecord(
         record_id=_safe_record_id(
-            f"proposal:{module_qualified_name}:{candidate.id}:deep:{proposal.finding_id}"
+            f"proposal:{module_qualified_name}:{candidate.id}:{proposal.id}"
         ),
         source_type="proposal",
         title=proposal.title,
@@ -263,39 +283,45 @@ def record_from_deep_research_proposal(
         provenance=Provenance(
             locator=(
                 "proposal_from_finding_creator:"
-                f"{module_qualified_name}:{candidate.id}:{proposal.finding_id}"
+                f"{module_qualified_name}:{candidate.id}:{proposal.id}"
             ),
             extractor="proposal_from_finding_creator",
         ),
-        tags=[module_qualified_name, candidate.id, candidate.kind, "deep-research-proposal"],
+        tags=[module_qualified_name, candidate.id, span.kind, "deep-research-proposal"],
         metadata={
             "module_qualified_name": module_qualified_name,
             "candidate_id": candidate.id,
-            "finding_id": proposal.finding_id,
-            "created_by": proposal.created_by,
+            "proposal_id": proposal.id,
+            "finding_id": proposal.finding_ref_id,
+            "created_by": proposal.author,
+            "source": proposal.source,
+            "mechanism": proposal.mechanism,
+            "required_changes": proposal.required_changes,
+            "expected_effect": proposal.expected_effect,
+            "evaluation_metric": proposal.evaluation_metric,
         },
     )
 
 
 def record_from_agent_proposal(
-    proposal: AgentProposal,
+    proposal: Proposal,
     *,
     candidate: Candidate,
     module_qualified_name: str,
-    proposal_index: int,
 ) -> KnowledgeRecord:
     """Convert an agent-generated proposal into an archive record."""
+    span = primary_span(candidate)
     text = "\n".join(
         [
-            proposal.detailed_description,
-            f"Novelty rationale: {proposal.novelty_rationale}",
-            f"Candidate: {candidate.id} ({candidate.symbol}).",
-            f"Agent: {proposal.agent_name}.",
+            proposal.description,
+            f"Rationale: {proposal.rationale}",
+            f"Candidate: {candidate.id} ({span.symbol}).",
+            f"Agent: {proposal.author or '(unknown)'}.",
         ]
     )
     return KnowledgeRecord(
         record_id=_safe_record_id(
-            f"proposal:{module_qualified_name}:{candidate.id}:agent:{proposal_index:04d}"
+            f"proposal:{module_qualified_name}:{candidate.id}:{proposal.id}"
         ),
         source_type="proposal",
         title=proposal.title,
@@ -306,15 +332,16 @@ def record_from_agent_proposal(
             trust_tier="internal",
         ),
         provenance=Provenance(
-            locator=f"agent_proposals:{module_qualified_name}:{candidate.id}:{proposal_index:04d}",
+            locator=f"agent_proposals:{module_qualified_name}:{candidate.id}:{proposal.id}",
             extractor="agent_proposals",
         ),
-        tags=[module_qualified_name, candidate.id, candidate.kind, "agent-proposal"],
+        tags=[module_qualified_name, candidate.id, span.kind, "agent-proposal"],
         metadata={
             "module_qualified_name": module_qualified_name,
             "candidate_id": candidate.id,
-            "agent_name": proposal.agent_name,
-            "proposal_index": proposal_index,
+            "proposal_id": proposal.id,
+            "agent_name": proposal.author,
+            "source": proposal.source,
         },
     )
 

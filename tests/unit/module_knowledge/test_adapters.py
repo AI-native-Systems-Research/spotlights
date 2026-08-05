@@ -20,8 +20,9 @@ from spotlights_engine.schemas.pipeline import (
     SpotlightReport,
 )
 from spotlights_engine.schemas.project import File, Module, ProjectTree, Repository
-from spotlights_engine.schemas.proposals import AgentProposal, DeepResearchProposal
+from spotlights_engine.schemas.proposal import Proposal
 from spotlights_engine.spotlights_manager.api import SpotlightsManagerResult
+from spotlights_engine.utils.schema_compat import make_location
 
 
 def test_records_from_module_deep_research_preserve_source_and_module_context() -> None:
@@ -29,6 +30,7 @@ def test_records_from_module_deep_research_preserve_source_and_module_context() 
         findings=[
             Finding(
                 finding_id="find-mod-0001",
+                candidate_id="cand-mod-0001",
                 title="Paged attention",
                 url="https://example.com/paper",
                 source_type="paper",
@@ -47,6 +49,7 @@ def test_records_from_module_deep_research_preserve_source_and_module_context() 
     assert record.source.url == "https://example.com/paper"
     assert record.provenance.locator == "module_deep_research:engine/cache:find-mod-0001"
     assert record.metadata["module_qualified_name"] == "engine/cache"
+    assert record.metadata["candidate_id"] == "cand-mod-0001"
     assert "engine/cache" in record.tags
 
 
@@ -80,33 +83,43 @@ def test_records_from_project_tree_create_queryable_module_map_records() -> None
 def _candidate_with_proposals() -> Candidate:
     return Candidate(
         id="cand-mod-0001",
-        file="vllm/engine/cache.py",
-        line_start=10,
-        line_end=20,
-        symbol="evict_blocks",
-        kind="method",
+        origin="code_agent",
+        locations=[
+            make_location(
+                file="vllm/engine/cache.py",
+                line_start=10,
+                line_end=20,
+                symbol="evict_blocks",
+                kind="method",
+            )
+        ],
         description="Evicts KV cache blocks under memory pressure.",
         current_approach="Greedy eviction by age.",
         evolve_rationale="Tail latency may improve with pressure-aware eviction.",
         estimated_impact="high",
         estimated_impact_explanation="Decode stalls are dominated by cache pressure.",
-        state="AGENT_PROPOSALS_CREATED",
-        deep_research_proposals=[
-            DeepResearchProposal(
+        proposals=[
+            Proposal(
+                id="prop-mod-0001",
+                source="research_finding",
                 title="Pressure-aware KV eviction",
-                detailed_description="Use pressure and reuse distance to pick eviction victims.",
-                finding_id="find-mod-0001",
-                proposal_rationale="The finding reports lower fragmentation.",
-                created_by="proposal_from_finding_creator",
-            )
-        ],
-        agent_proposals=[
-            AgentProposal(
+                description="Use pressure and reuse distance to pick eviction victims.",
+                finding_ref_id="find-mod-0001",
+                rationale="The finding reports lower fragmentation.",
+                author="proposal_from_finding_creator",
+                mechanism="reuse-distance-aware victim selection",
+                required_changes="replace greedy age ordering in evict_blocks",
+                expected_effect="lower fragmentation under pressure",
+                evaluation_metric="tail decode latency under cache pressure",
+            ),
+            Proposal(
+                id="prop-mod-0002",
+                source="agent_knowledge",
                 title="Add eviction counters",
-                detailed_description="Expose counters before changing eviction policy.",
-                agent_name="codex",
-                novelty_rationale="Instrumentation was not covered by research findings.",
-            )
+                description="Expose counters before changing eviction policy.",
+                author="codex",
+                rationale="Instrumentation was not covered by research findings.",
+            ),
         ],
     )
 
@@ -125,6 +138,7 @@ def test_records_from_candidates_include_candidate_and_attached_proposals() -> N
     assert records[0].metadata["file"] == "vllm/engine/cache.py"
     assert records[1].provenance.extractor == "proposal_from_finding_creator"
     assert records[1].metadata["finding_id"] == "find-mod-0001"
+    assert records[1].metadata["mechanism"] == "reuse-distance-aware victim selection"
     assert records[2].provenance.extractor == "agent_proposals"
     assert records[2].metadata["agent_name"] == "codex"
 
@@ -133,6 +147,7 @@ def test_records_from_module_run_and_spotlights_result_collect_memory_records() 
     candidate = _candidate_with_proposals()
     finding = Finding(
         finding_id="find-mod-0001",
+        candidate_id="cand-mod-0001",
         title="KV reuse distance",
         url="https://example.com/kv-reuse",
         source_type="paper",
@@ -152,7 +167,11 @@ def test_records_from_module_run_and_spotlights_result_collect_memory_records() 
             context=context,
             candidates=[candidate],
             findings=[finding],
-            run=RunInfo(pipeline="deep_research", run_id="run-test", started_at="2026-06-20T00:00:00+00:00"),
+            run=RunInfo(
+                pipeline="deep_research",
+                run_id="run-test",
+                started_at="2026-06-20T00:00:00+00:00",
+            ),
         ),
         module_runs={"engine/cache": module_run},
         extractor_invocation=ExtractionInvocation(

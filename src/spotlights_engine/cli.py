@@ -1,7 +1,7 @@
 """Public CLI for `spotlights-engine`.
 
 Thin shim over `spotlights_manager.run_with_telemetry`. Architectural inputs
-(`--repo`, `--objective`, `--hint`, `--max-findings-per-module`) bind to
+(`--repo`, `--objective`, `--hint`, `--max-findings-per-candidate`) bind to
 `SpotlightsManagerInput` / `SpotlightContext`; runtime/infra knobs
 (`--output-folder`, `--artifacts-dir`, parallelism, debug caps, `--no-resume`)
 bind to `SpotlightsManagerConfig`. Library users construct those types
