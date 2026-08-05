@@ -1,0 +1,93 @@
+#!/bin/bash
+#BSUB -J cc-baseline
+#BSUB -q normal
+#BSUB -n 4
+#BSUB -R "span[hosts=1]"
+#BSUB -M 16384
+#BSUB -hl
+#BSUB -W 240
+#BSUB -o /dccstor/idanfr01/spotlights/logs/cc-baseline.%J.stdout
+#BSUB -e /dccstor/idanfr01/spotlights/logs/cc-baseline.%J.stderr
+
+# One-shot Claude-Code baseline against a target repo.
+# Produces:
+#   $RUN_DIR/candidates/<symbol>__cand-NNNN.md ... (from CC)
+#   $RUN_DIR/candidates/_ranking.md              (from CC)
+#   $RUN_DIR/_stdout.json                        (CC sidecar)
+#   $RUN_DIR/run_manifest.json                   (Ophir-schema manifest)
+
+set -eo pipefail
+
+REPO=/u/idanfr/spotlights-engine
+source "$REPO/scripts/ccc/env.sh"
+
+# --- Per-run parameters ---
+TARGET_REPO="${TARGET_REPO:?set TARGET_REPO to the repo to audit}"
+TARGET_URL="${TARGET_URL:-}"
+PROMPT_PATH="${PROMPT_PATH:?set PROMPT_PATH to the CC prompt file}"
+OUTPUT_DIR="${OUTPUT_DIR:?set OUTPUT_DIR to where CC output lands}"
+OBJECTIVE="${OBJECTIVE:?set OBJECTIVE}"
+MAX_TURNS="${MAX_TURNS:-200}"
+
+RUN_ID="cc-baseline-${LSB_JOBID:-manual}-$(date -u +%Y%m%dT%H%M%SZ)"
+
+mkdir -p "$OUTPUT_DIR"
+cd "$OUTPUT_DIR"
+
+echo "=== CC baseline run ==="
+echo "  TARGET_REPO  = $TARGET_REPO"
+echo "  TARGET_URL   = ${TARGET_URL:-<git-remote>}"
+echo "  PROMPT_PATH  = $PROMPT_PATH"
+echo "  OUTPUT_DIR   = $OUTPUT_DIR"
+echo "  OBJECTIVE    = $OBJECTIVE"
+echo "  MAX_TURNS    = $MAX_TURNS"
+echo "  RUN_ID       = $RUN_ID"
+echo "  JOB_ID       = ${LSB_JOBID:-N/A}"
+echo "  HOST         = $(hostname)"
+echo "======================="
+
+# Resolve target repo URL from git remote if not supplied.
+if [ -z "$TARGET_URL" ]; then
+  TARGET_URL="$(git -C "$TARGET_REPO" config --get remote.origin.url 2>/dev/null || echo '')"
+fi
+
+STDOUT_JSON="$OUTPUT_DIR/_stdout.json"
+STDERR_LOG="$OUTPUT_DIR/_stderr.log"
+
+# Invoke claude one-shot. The `-p` flag runs in headless mode; `--output-format json`
+# emits the sidecar with usage + cost accounting.
+START_TS=$(date +%s)
+set +e
+claude -p --model claude-opus-4-8 --verbose --dangerously-skip-permissions \
+  --output-format json \
+  --max-turns "$MAX_TURNS" \
+  < "$PROMPT_PATH" \
+  > "$STDOUT_JSON" \
+  2> "$STDERR_LOG"
+CC_RC=$?
+set -e
+END_TS=$(date +%s)
+WALL_CLOCK=$((END_TS - START_TS))
+
+echo "claude exited rc=$CC_RC in ${WALL_CLOCK}s"
+
+if [ ! -s "$STDOUT_JSON" ]; then
+  echo "ERROR: _stdout.json is empty; claude did not emit JSON. See $STDERR_LOG" >&2
+  tail -50 "$STDERR_LOG" >&2 || true
+  exit 1
+fi
+
+# Build the manifest against the engine venv (needs spotlights_engine.costing).
+PYTHONPATH="$REPO/src" \
+"/dccstor/idanfr01/spotlights/envs/engine-venv/bin/python" \
+  "$REPO/scripts/ccc/cc_baseline_manifest.py" \
+    --stdout-json "$STDOUT_JSON" \
+    --run-dir     "$OUTPUT_DIR" \
+    --repo-path   "$TARGET_REPO" \
+    --repo-url    "$TARGET_URL" \
+    --objective   "$OBJECTIVE" \
+    --prompt-path "$PROMPT_PATH" \
+    --wall-clock  "$WALL_CLOCK" \
+    --run-id      "$RUN_ID"
+
+echo "===JOB_COMPLETE==="

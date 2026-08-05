@@ -1,0 +1,68 @@
+#!/bin/bash
+#BSUB -J spotlights-engine
+#BSUB -q normal
+#BSUB -n 8
+#BSUB -R "span[hosts=1]"
+#BSUB -M 32768
+#BSUB -hl
+#BSUB -W 1440
+#BSUB -o /dccstor/idanfr01/spotlights/logs/engine.%J.stdout
+#BSUB -e /dccstor/idanfr01/spotlights/logs/engine.%J.stderr
+
+# Long-running spotlights-engine batch job.
+# CPU-only (no -gpu) — engine is LLM-API-bound, GPU nodes would sit idle.
+# Adjust the CLI args at the bottom for your run.
+
+set -eo pipefail
+
+REPO=/u/idanfr/spotlights-engine
+source "$REPO/scripts/ccc/env.sh"
+
+# --- Per-run parameters (edit before submitting) ---
+TARGET_REPO="${TARGET_REPO:?set TARGET_REPO to the path of the repo to audit}"
+TARGET_URL="${TARGET_URL:-}"
+INCLUDE="${INCLUDE:?set INCLUDE to space-separated module paths, e.g. \"vllm/v1/kv_offload\"}"
+OBJECTIVE="${OBJECTIVE:?set OBJECTIVE, e.g. \"reduce p99 latency\"}"
+HINT="${HINT:-}"
+RUN_TAG="${RUN_TAG:-$(basename "$TARGET_REPO")-$(date -u +%Y%m%dT%H%M%SZ)}"
+
+# New parameterized flags (defaults preserve prior script behavior)
+MAX_FINDINGS="${MAX_FINDINGS:-15}"
+REVIEW_ARG="${REVIEW_ARG:---no-review}"
+DR_CUTOFF="${DR_CUTOFF:-}"
+
+RUN_DIR="/dccstor/idanfr01/spotlights/runs/$RUN_TAG"
+ARTIFACTS_DIR="$RUN_DIR/artifacts"
+mkdir -p "$ARTIFACTS_DIR"
+
+echo "=== Run config ==="
+echo "  REPO         = $REPO"
+echo "  TARGET       = $TARGET_REPO"
+echo "  INCLUDE      = $INCLUDE"
+echo "  OBJECTIVE    = $OBJECTIVE"
+echo "  MAX_FINDINGS = $MAX_FINDINGS"
+echo "  REVIEW_ARG   = $REVIEW_ARG"
+echo "  DR_CUTOFF    = ${DR_CUTOFF:-<none>}"
+echo "  RUN_DIR      = $RUN_DIR"
+echo "  JOB_ID       = ${LSB_JOBID:-N/A}"
+echo "  HOST         = $(hostname)"
+echo "=================="
+
+cd "$REPO"
+
+# shellcheck disable=SC2086
+spotlights-engine \
+  --repo "$TARGET_REPO" \
+  ${TARGET_URL:+--repo-url "$TARGET_URL"} \
+  --include $INCLUDE \
+  --objective "$OBJECTIVE" \
+  ${HINT:+--hint "$HINT"} \
+  --max-parallel 2 \
+  --max-findings-per-module "$MAX_FINDINGS" \
+  --max-parallel-candidates 10 \
+  ${REVIEW_ARG} \
+  ${DR_CUTOFF:+--dr-source-cutoff-date "$DR_CUTOFF"} \
+  --output-folder "$RUN_DIR" \
+  --artifacts-dir "$ARTIFACTS_DIR"
+
+echo "===JOB_COMPLETE==="
