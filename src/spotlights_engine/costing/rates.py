@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Literal
@@ -92,10 +93,17 @@ def load_external_rates(path: Path | None = None) -> dict[str, ModelRate]:
     )
 
 
+# Context-window variant tag a CLI appends to the model id, e.g. the "[1m]" in
+# "aws/claude-opus-4-8[1m]". Pricing is per model, not per context window, so we
+# strip it before the rate lookup — all context variants share one rate row.
+_CONTEXT_TAG_RE = re.compile(r"\[[^\]]*\]$")
+
+
 def _rate_key(record: UsageRecord) -> tuple[str, bool]:
     """`(provider:model, resolved)`; unresolved models fall back to the CLI family."""
     if record.model:
-        return f"{record.provider}:{record.model}", True
+        model = _CONTEXT_TAG_RE.sub("", record.model)
+        return f"{record.provider}:{model}", True
     return f"{record.provider}:{record.cli}", False
 
 
