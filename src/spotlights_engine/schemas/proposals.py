@@ -15,7 +15,9 @@ class DeepResearchProposal(BaseModel):
     """A research-backed proposal attached to a candidate.
 
     Filled in by step 4 (`proposal_from_finding_creator`). Each proposal cites
-    the originating `finding_id` so its evidence trail is preserved.
+    the originating `finding_id` so its evidence trail is preserved, and (D5)
+    carries structured `mechanism` / `required_changes` / `expected_effect` /
+    `evaluation_metric` detail that maps onto the unified `Proposal`.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -25,6 +27,14 @@ class DeepResearchProposal(BaseModel):
     finding_id: str = Field(pattern=r"^find-[A-Za-z0-9._-]+-\d{4}$")
     proposal_rationale: str = Field(min_length=1)
     created_by: str = Field(min_length=1)
+
+    # Structured proposal detail (decision D5). Emitted by step 4 when it drafts
+    # a proposal and copied onto the unified `Proposal`'s matching optional
+    # fields. Optional so an older sidecar without them still validates.
+    mechanism: str | None = None
+    required_changes: str | None = None
+    expected_effect: str | None = None
+    evaluation_metric: str | None = None
 
 
 class AgentProposal(BaseModel):

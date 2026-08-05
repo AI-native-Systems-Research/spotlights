@@ -131,6 +131,12 @@ def make_deep_proposal(finding_id: str, *, prop_id: str = "prop-mod-0001") -> Pr
         title=f"Deep proposal for {finding_id}",
         description="detailed description",
         rationale="proposal rationale",
+        # Decision D5: structured research detail rendered on the candidate page
+        # when present.
+        mechanism="paged allocation of the KV cache",
+        required_changes="rewrite the block allocator",
+        expected_effect="lower fragmentation, higher throughput",
+        evaluation_metric="tokens/sec on the existing benchmark",
     )
 
 

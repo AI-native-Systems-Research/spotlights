@@ -73,12 +73,15 @@ def test_multi_candidate_multi_finding_each_pair_runs(
     repo: Path, artifacts: Path
 ) -> None:
     inp = make_input(n_candidates=2, n_findings=2)
+    # Each candidate owns its own findings (decision D6): candidate 1 owns
+    # findings 0001/0002, candidate 2 owns 0003/0004. The pair set is Σ|F_c|,
+    # not the old cross-product.
     runner = fake_runner_factory(
         payloads={
             "cand-v1_kv_offload-0001__find-v1_kv_offload-0001": make_proposal_payload(finding_id="find-v1_kv_offload-0001"),
             "cand-v1_kv_offload-0001__find-v1_kv_offload-0002": make_proposal_payload(finding_id="find-v1_kv_offload-0002"),
-            "cand-v1_kv_offload-0002__find-v1_kv_offload-0001": make_proposal_payload(finding_id="find-v1_kv_offload-0001"),
-            "cand-v1_kv_offload-0002__find-v1_kv_offload-0002": make_proposal_payload(finding_id="find-v1_kv_offload-0002"),
+            "cand-v1_kv_offload-0002__find-v1_kv_offload-0003": make_proposal_payload(finding_id="find-v1_kv_offload-0003"),
+            "cand-v1_kv_offload-0002__find-v1_kv_offload-0004": make_proposal_payload(finding_id="find-v1_kv_offload-0004"),
         }
     )
     cfg = ProposalFromFindingConfig(repo_path=repo, artifacts_dir=artifacts)

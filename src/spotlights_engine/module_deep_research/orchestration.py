@@ -33,6 +33,11 @@ class RunnerOutcome:
     agent_name: str
     result: AgentExecResult | None = None
     error: str | None = None
+    # Wall-clock time of this runner's invocation, captured in `_run_one_runner`
+    # regardless of success/failure. The manager uses it as the per-(candidate,
+    # runner) fallback duration for usage attribution (decision D7), so N
+    # candidates don't each claim the whole step-3 wall time.
+    duration_s: float | None = None
 
 
 def module_deep_research_issue(message: str, *, recoverable: bool) -> StepIssue:
@@ -127,21 +132,25 @@ def run_runners(
 def merge_outcomes(
     outcomes: Sequence[RunnerOutcome],
     *,
-    max_findings_per_module: int,
+    max_findings_per_candidate: int,
     segment: str,
+    candidate_id: str | None = None,
 ) -> ModuleDeepResearchOutput:
-    """Merge agent outputs into the stable module deep-research contract.
+    """Merge one candidate's agent outputs into the deep-research contract.
 
-    Per-runner outputs are parsed into the lenient wire shape (bare ids), then
-    deduped and merged; the single promotion to persisted `Finding`s — capping,
-    renumbering, and prefixing each id to `find-<segment>-NNNN` (D3) — happens
-    once here via `normalize_module_deep_research_output`.
+    Called once **per candidate** (decision D1/D2): the `seen` dedup set is
+    scoped to that candidate's runs. Per-runner outputs are parsed into the
+    lenient wire shape (bare ids), then deduped and merged; the single promotion
+    to persisted `Finding`s — capping, renumbering, prefixing each id to
+    `find-<segment>-NNNN` (D3), and stamping `candidate_id` (D2) — happens once
+    here via `normalize_module_deep_research_output`.
 
     Search queries are also collected and tagged with the issuing runner
-    (`agent=outcome.agent_name`). Unlike findings they are **not** deduped —
-    identical query strings from two agents are meaningful signal — and their
-    order is preserved (outcomes in fixed `futures` order, queries in the
-    agent's emitted order) so run-to-run markdown diffs are stable."""
+    (`agent=outcome.agent_name`) and the `candidate_id` they came from (D7).
+    Unlike findings they are **not** deduped — identical query strings from two
+    agents are meaningful signal — and their order is preserved (outcomes in
+    fixed `futures` order, queries in the agent's emitted order) so run-to-run
+    markdown diffs are stable."""
     findings = []
     issues: list[StepIssue] = []
     search_logs: list[SearchQueryLog] = []
@@ -186,15 +195,17 @@ def merge_outcomes(
                         )
                         for r in query.results
                     ],
+                    candidate_id=candidate_id,
                 )
             )
 
     merged = AgentModuleDeepResearchOutput(findings=findings, issues=issues)
-    merged_findings_cap = max_findings_per_module * len(outcomes)
+    merged_findings_cap = max_findings_per_candidate * len(outcomes)
     return normalize_module_deep_research_output(
         merged,
-        max_findings_per_module=merged_findings_cap,
+        max_findings_per_candidate=merged_findings_cap,
         segment=segment,
+        candidate_id=candidate_id,
         search_queries=search_logs,
     )
 
@@ -223,6 +234,7 @@ def _run_one_runner(
         return RunnerOutcome(
             agent_name=agent_name,
             error=f"module_deep_research {agent_name} execution failed: {exc}",
+            duration_s=elapsed,
         )
 
     elapsed = time.monotonic() - started
@@ -251,7 +263,7 @@ def _run_one_runner(
             finding_count,
             f", {parse_issue_count} parse issue(s)" if parse_issue_count else "",
         )
-    return RunnerOutcome(agent_name=agent_name, result=result)
+    return RunnerOutcome(agent_name=agent_name, result=result, duration_s=elapsed)
 
 
 def _agent_issues(agent_name: str, issues: Sequence[StepIssue]) -> list[StepIssue]:

@@ -87,6 +87,13 @@ class ProposalRef(_SpecModel):
     detailed_description: str
     finding_id: str | None
     rationale: str
+    # Structured research detail (decision D5). Populated for deep-research
+    # proposals when step 4 emitted them; None for agent-knowledge proposals and
+    # for older sidecars. These guide how the evolve bundle applies the change.
+    mechanism: str | None = None
+    required_changes: str | None = None
+    expected_effect: str | None = None
+    evaluation_metric: str | None = None
 
 
 class EvolveSpec(_SpecModel):

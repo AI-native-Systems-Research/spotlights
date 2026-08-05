@@ -42,6 +42,10 @@ def build_per_pair_schema_text(*, finding_id: str, created_by: str) -> str:
                         "finding_id",
                         "proposal_rationale",
                         "created_by",
+                        "mechanism",
+                        "required_changes",
+                        "expected_effect",
+                        "evaluation_metric",
                     ],
                     "properties": {
                         "title": {"type": "string", "minLength": 1},
@@ -55,6 +59,13 @@ def build_per_pair_schema_text(*, finding_id: str, created_by: str) -> str:
                             "type": "string",
                             "const": created_by,
                         },
+                        # Structured proposal detail (decision D5). Required in
+                        # the schema so the agent always fills them when it emits
+                        # a proposal; they map onto the unified `Proposal`.
+                        "mechanism": {"type": "string", "minLength": 1},
+                        "required_changes": {"type": "string", "minLength": 1},
+                        "expected_effect": {"type": "string", "minLength": 1},
+                        "evaluation_metric": {"type": "string", "minLength": 1},
                     },
                 },
             },

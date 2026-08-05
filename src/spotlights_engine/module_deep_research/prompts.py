@@ -1,4 +1,12 @@
-"""Prompt assembly for the module deep-research step."""
+"""Prompt assembly for the module deep-research step.
+
+The survey is built **per candidate** (decision D1/D2): each discovered
+candidate gets its own literature/web survey whose prompt focuses on that
+candidate's code site (symbol, span, `current_approach`, `evolve_rationale`),
+with the module/repo context supplied only for grounding. The candidate is the
+*subject* of the search — the agent looks for better approaches to that
+specific code, not a module-wide survey with advisory hot spots.
+"""
 
 from __future__ import annotations
 
@@ -10,6 +18,7 @@ from spotlights_engine.module_deep_research.validation import (
 from spotlights_engine.schemas.candidate import Candidate
 from spotlights_engine.schemas.pipeline import ModuleDeepResearchInput
 from spotlights_engine.schemas.project import File, Module, Repository
+from spotlights_engine.utils.schema_compat import primary_file, primary_span
 
 
 def _format_main_files(files: list[File]) -> str:
@@ -33,26 +42,25 @@ def _format_repository(repository: Repository) -> str:
     )
 
 
-def _format_candidate_location(candidate: Candidate) -> str:
-    """Render `symbol (file)` for the candidate's first span, the primary hot
-    spot. Candidates always carry at least one location with one span."""
-    location = candidate.locations[0]
-    span = location.spans[0]
-    return f"`{span.symbol}` ({location.file})"
+def _format_candidate(candidate: Candidate) -> str:
+    """Render the candidate's code site — the subject of the survey.
 
-
-def _format_candidates(candidates: list[Candidate]) -> str:
-    if not candidates:
-        return "(none)"
-    blocks: list[str] = []
-    for candidate in candidates:
-        blocks.append(
-            f"- Symbol: {_format_candidate_location(candidate)}\n"
-            f"  Estimated impact: {candidate.estimated_impact}\n"
-            f"  Description: {candidate.description}\n"
-            f"  Evolve rationale: {candidate.evolve_rationale}"
-        )
-    return "\n\n".join(blocks)
+    Reads the first span of the first location via the `schema_compat`
+    accessors (decision D1 single-span wrap); both are guaranteed non-empty by
+    the `Candidate` schema."""
+    span = primary_span(candidate)
+    return (
+        f"- id: {candidate.id}\n"
+        f"- file: {primary_file(candidate)}\n"
+        f"- lines: {span.line_start}-{span.line_end}\n"
+        f"- symbol: {span.symbol}\n"
+        f"- kind: {span.kind}\n"
+        f"- description: {candidate.description}\n"
+        f"- current_approach: {candidate.current_approach}\n"
+        f"- evolve_rationale: {candidate.evolve_rationale}\n"
+        f"- estimated_impact: {candidate.estimated_impact}\n"
+        f"- estimated_impact_explanation: {candidate.estimated_impact_explanation}"
+    )
 
 
 def _format_module(module: Module, module_qualified_name: str) -> str:
@@ -67,36 +75,33 @@ def _format_module(module: Module, module_qualified_name: str) -> str:
     )
 
 
-def render_module_deep_research_prompt(
+def render_candidate_deep_research_prompt(
     request: ModuleDeepResearchInput,
     module: Module,
+    candidate: Candidate,
 ) -> str:
-    """Render the survey prompt from repository, target module, and context fields."""
-    # Show the agent the bare-id wire schema (`find-NNNN`); the manager prefixes
-    # finding ids with the module slug after parsing (decision D3, option A).
+    """Render the per-candidate survey prompt.
+
+    The survey is *about the candidate's technique/problem* — anchored on its
+    `current_approach` + `evolve_rationale` — with the module/repo as grounding
+    context. The agent emits bare-id wire findings (`find-NNNN`); the manager
+    prefixes them to `find-<segment>-<candidate_counter>-NNNN` and stamps the
+    `candidate_id` after parsing (decisions D2/D3)."""
     schema_json = json.dumps(
         AgentModuleDeepResearchOutput.model_json_schema(), indent=2
     )
     repo_path = str(request.repo_path)
-    hotspots_section = ""
-    if request.include_candidate_hotspots and request.candidates:
-        hotspots_section = (
-            "\nIdentified hot spots (from candidate_discovery):\n"
-            "These are the symbols the discovery step flagged as worth\n"
-            "evolving in this module. Use them to steer your search toward\n"
-            "sources that address them; they are hints, not a strict scope.\n"
-            f"{_format_candidates(request.candidates)}\n"
-        )
     return f"""You are running the Spotlights module_deep_research pipeline step.
 Do not modify files. Do not ask questions.
 
 Goal:
 Find external sources (papers, blogs, docs, talks, issues, PRs) that carry a
 concrete method, algorithm, technique, or design idea that could be used to
-improve the target module. Every finding must contribute an actionable idea
-the module could adopt or adapt - not just be topically related. This step
-surfaces improvement-bearing related work for the module; it does not produce
-per-file change recipes.
+improve THIS SPECIFIC candidate — the code site described below — not the
+module as a whole. Every finding must contribute an actionable idea that could
+be adopted or adapted to evolve this candidate's current approach; it must not
+just be topically related. This step surfaces improvement-bearing related work
+for the candidate; it does not produce per-file change recipes.
 
 Repository:
 {_format_repository(request.project_tree.repository)}
@@ -105,9 +110,12 @@ Repository working directory (the codex sandbox is rooted here; read files
 directly with relative paths from this root, e.g. the target module path
 below): {repo_path}
 
-Target module:
+Enclosing module (context for grounding only — the subject is the candidate):
 {_format_module(module, request.module_qualified_name)}
-{hotspots_section}
+
+Target candidate (the subject of this survey):
+{_format_candidate(candidate)}
+
 Caller context:
 Objective: {request.context.objective}
 Workload hints:
@@ -116,23 +124,21 @@ Validation plan:
 {_format_list(request.context.validation_plan)}
 
 Workflow:
-1. First understand the target module before searching. Open the module's
-   main files (and any nearby files needed to make sense of them) to learn
-   what the module does, its responsibilities, key abstractions, data flow,
-   and the techniques it already uses. The codex sandbox cwd is the
-   repository working directory shown above, so open files via their
-   repo-relative paths (e.g. the target module Path) using your
-   file-reading tools.
-2. Form a short mental model of the module's scope and the gaps,
-   bottlenecks, or open questions relative to the caller objective and
-   workload hints. These gaps define what an "improvement" looks like for
-   this module. Use this model to steer the search; do not emit it in the
-   output.
+1. First understand the candidate before searching. Open the candidate's file
+   at the lines above (and any nearby files needed to make sense of it) to
+   learn what this code does, the technique it currently uses (its
+   `current_approach`), and why it is worth evolving (`evolve_rationale`). The
+   codex sandbox cwd is the repository working directory shown above, so open
+   files via their repo-relative paths using your file-reading tools.
+2. Form a short mental model of the candidate's technique/problem and the gap,
+   bottleneck, or open question the caller objective and `evolve_rationale`
+   imply. That gap defines what an "improvement" looks like for this candidate.
+   Use this model to steer the search; do not emit it in the output.
 3. Run a focused literature/web search for sources that propose a concrete
-   method, algorithm, technique, or design idea the module could adopt to
-   close one of those gaps. You do not need to map findings to specific
-   files, symbols, or contracts inside the module - but you must be able to
-   name the transferable idea.
+   method, algorithm, technique, or design idea this candidate could adopt to
+   close that gap or replace its current approach. You do not need to map
+   findings to specific lines — but you must be able to name the transferable
+   idea and how it applies to this candidate.
 
 Output rules:
 - Return a single bare JSON object matching the ModuleDeepResearchOutput schema
@@ -141,9 +147,9 @@ Output rules:
   parsed by machine, not read by a human. Emitting only tool-call/step events
   with no final JSON text is a failure: even when you found nothing, still emit
   the JSON object (empty `findings`, with a StepIssue explaining why).
-- Include at most {request.max_findings_per_module} findings.
+- Include at most {request.max_findings_per_candidate} findings for this candidate.
 - Use finding IDs find-0001, find-0002, ... ordered by expected relevance to
-  the module and the caller objective. Most relevant first.
+  this candidate and the caller objective. Most relevant first.
 - Empty findings are valid when no relevant source survives filtering.
 - Add StepIssue entries only for warnings or errors encountered during the
   survey. Set StepIssue.step to "module_deep_research".
@@ -152,9 +158,9 @@ Output rules:
   issue, PR, talk, etc.).
 - technique_summary is a short description (1-3 sentences) that names the
   concrete method, algorithm, or design idea the source contributes and
-  states how it could improve the target module relative to the caller
+  states how it could improve THIS candidate relative to the caller
   objective (e.g., what gap or bottleneck it addresses). Do not name
-  specific local files, symbols, or contracts.
+  unrelated local files, symbols, or contracts.
 - supporting_evidence must include a short verbatim quote from the source
   (at most two sentences) plus a pointer into the source (section, figure,
   algorithm number, timestamp, or commit/line). Paraphrase only when the
@@ -176,24 +182,24 @@ Search transparency:
 - Note: this relies on your honest self-report. Capture intent-level queries
   reliably; exhaustive fidelity to the raw tool-call stream is not required.
 
-Module relevance gate:
+Candidate relevance gate:
 - Keep a finding only when it passes all of these checks:
-  1. It is about an owned responsibility of the target module, not just the
-     repository or a broad technology area.
+  1. It speaks to the candidate's own technique/problem (the code site above),
+     not just the module, the repository, or a broad technology area.
   2. It is aligned with the caller objective and workload hints.
-  3. It is not merely background or prior art that the module already
+  3. It is not merely background or prior art that the candidate already
      implements, unless the source meaningfully extends or contrasts with
-     the current approach.
+     the candidate's current approach.
   4. It carries a concrete, transferable method, algorithm, technique, or
-     design idea that the module could plausibly adopt or adapt to improve
+     design idea that this candidate could plausibly adopt or adapt to improve
      itself. Sources that only describe a problem, narrate experience, or
-     restate what the module already does do not pass. Operational test:
+     restate what the candidate already does do not pass. Operational test:
      if you cannot state the transferable idea in a single sentence, the
      finding is too diffuse - drop it.
 - Topical adjacency is not relevance. A source that shares vocabulary with
-  the module's domain, sits in a neighboring technology area, or addresses
+  the candidate's domain, sits in a neighboring technology area, or addresses
   the surrounding ecosystem is not automatically on-topic. Keep it only if
-  it speaks to the module's owned responsibilities as identified in step 1
+  it speaks to the candidate's current approach as identified in step 1
   of the workflow.
 
 Source quality:
@@ -214,4 +220,4 @@ ModuleDeepResearchOutput JSON schema:
 """.strip()
 
 
-__all__ = ["render_module_deep_research_prompt"]
+__all__ = ["render_candidate_deep_research_prompt"]

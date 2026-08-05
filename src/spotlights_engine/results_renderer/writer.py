@@ -488,6 +488,19 @@ def _render_candidate_page(
             lines.append("")
             lines.append(p.rationale)
             lines.append("")
+            # Structured research detail (decision D5) — render each only when
+            # step 4 populated it, so older/sparser proposals stay clean.
+            for label, value in (
+                ("Mechanism", p.mechanism),
+                ("Required changes", p.required_changes),
+                ("Expected effect", p.expected_effect),
+                ("Evaluation metric", p.evaluation_metric),
+            ):
+                if value:
+                    lines.append(f"**{label}.**")
+                    lines.append("")
+                    lines.append(value)
+                    lines.append("")
             lines.append("---")
             lines.append("")
 

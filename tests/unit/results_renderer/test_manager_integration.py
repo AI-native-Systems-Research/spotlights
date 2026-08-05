@@ -59,7 +59,7 @@ def _patch_pipeline(monkeypatch) -> None:
     monkeypatch.setattr(
         orch,
         "research_module",
-        lambda inp, options=None: make_research_output(n_findings=1),
+        lambda inp, options=None, **_kw: make_research_output(n_findings=1),
     )
     patch_proposal_from_finding(monkeypatch, orch)
     patch_agent_proposals(monkeypatch, orch)

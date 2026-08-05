@@ -50,7 +50,13 @@ class CandidateDiscoveryInput(BaseModel):
 
 
 class ModuleDeepResearchInput(BaseModel):
-    """Input contract for step 3 (`module_deep_research`)."""
+    """Input contract for step 3 (`module_deep_research`).
+
+    Step 3 surveys the literature **per candidate** (not once per module): it
+    iterates `candidates` and builds a candidate-focused prompt for each, so the
+    survey is about that candidate's technique/problem. `candidates` is
+    therefore the iteration set, not advisory hints.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -58,14 +64,15 @@ class ModuleDeepResearchInput(BaseModel):
     module_qualified_name: str = Field(min_length=1)
     context: SpotlightContext
     repo_path: Path
-    max_findings_per_module: int = Field(default=30, ge=0)
+    # Per-candidate cap (decision D4). The effective cap inside step 3 is
+    # `max_findings_per_candidate * len(runners)` per candidate (a union cap
+    # across runners), applied at renumber time.
+    max_findings_per_candidate: int = Field(default=10, ge=0)
 
-    # Hot spots surfaced by step 2 (`candidate_discovery`) for this module.
-    # When `include_candidate_hotspots` is true and this list is non-empty,
-    # the prompt shows them to the research agent so its search can be steered
-    # toward the symbols the discovery step already flagged as worth evolving.
+    # The candidates surveyed for this module (decision D2). Each gets its own
+    # literature/web survey; findings carry the `candidate_id` they were
+    # surveyed for.
     candidates: list[Candidate] = Field(default_factory=list)
-    include_candidate_hotspots: bool = True
 
     # Controls the default step-3 runner fan-out. False (default) → Codex only;
     # True → Codex + Claude.
@@ -88,9 +95,10 @@ class ModuleDeepResearchOutput(BaseModel):
 class ProposalFromFindingCreatorInput(BaseModel):
     """Input contract for step 4 (`proposal_from_finding_creator`).
 
-    Step 4 considers every `(candidate, finding)` pair directly: there is no
-    separate mapping step. The target module is read off
-    `candidates.module_qualified_name`.
+    Step 4 groups the flat `findings` list by `finding.candidate_id` and judges
+    each candidate only against *its own* findings — the pair set is
+    `Σ|F_c|`, not the full `|C|×|F|` cartesian product. The target module is
+    read off `candidates.module_qualified_name`.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -156,8 +164,7 @@ class SpotlightsManagerInput(BaseModel):
     repo_path: Path
     repo_url: str | None = None
     context: SpotlightContext
-    max_findings_per_module: int = Field(default=30, ge=0)
-    include_candidate_hotspots: bool = True
+    max_findings_per_candidate: int = Field(default=10, ge=0)
     enable_claude_search: bool = False
     continue_on_module_failure: bool = True
 

@@ -63,6 +63,10 @@ def make_result_dict() -> dict:
                 "title": "Make tile size GQA-aware",
                 "description": "Use a register-budget formula.",
                 "rationale": "POD-Attention suggests this.",
+                "mechanism": "Derive tile size from the register budget.",
+                "required_changes": "Rewrite the tile-size heuristic function.",
+                "expected_effect": "Higher occupancy, lower TPOT.",
+                "evaluation_metric": "Median TPOT on the existing benchmark.",
             },
             {
                 "id": "prop-v1_attention-0002",

@@ -143,12 +143,14 @@ def _build_argparser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
-        "--max-findings-per-module",
+        "--max-findings-per-candidate",
         type=int,
         default=None,
         help=(
-            "Cap on findings produced by step 3 per module. "
-            "Default: SpotlightsManagerInput default (30)."
+            "Cap on findings produced by step 3 per candidate (step 3 now "
+            "surveys the literature per candidate). The effective cap is this "
+            "value times the number of runners. "
+            "Default: SpotlightsManagerInput default (10)."
         ),
     )
     review = p.add_mutually_exclusive_group()
@@ -169,16 +171,6 @@ def _build_argparser() -> argparse.ArgumentParser:
         action="store_const",
         const=0,
         help="Disable the candidate-discovery review session (alias for --review-iterations 0).",
-    )
-
-    p.add_argument(
-        "--no-candidate-hotspots",
-        dest="include_candidate_hotspots",
-        action="store_false",
-        help=(
-            "Do not surface step-2 candidate_discovery hot spots in the "
-            "step-3 (module_deep_research) prompt. Default: they are included."
-        ),
     )
 
     p.add_argument(
@@ -350,9 +342,8 @@ def _build_input(args: argparse.Namespace) -> SpotlightsManagerInput:
     }
     if args.repo_url:
         input_kwargs["repo_url"] = args.repo_url
-    if args.max_findings_per_module is not None:
-        input_kwargs["max_findings_per_module"] = args.max_findings_per_module
-    input_kwargs["include_candidate_hotspots"] = args.include_candidate_hotspots
+    if args.max_findings_per_candidate is not None:
+        input_kwargs["max_findings_per_candidate"] = args.max_findings_per_candidate
     input_kwargs["enable_claude_search"] = args.enable_claude_search
     return SpotlightsManagerInput(**input_kwargs)
 

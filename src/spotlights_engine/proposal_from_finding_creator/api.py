@@ -1,7 +1,10 @@
 """Public entrypoint for step 4 (`proposal_from_finding_creator`).
 
 Drives one Claude Code session per `(candidate, finding)` pair, bounded by
-`max_parallel_pairs`. The architecture-shaped entrypoint is
+`max_parallel_pairs`. Findings are grouped by `finding.candidate_id` (decision
+D2/D6): each candidate is judged only against *its own* findings — the findings
+surveyed for it in step 3 — so the pair set is `Σ|F_c|`, not the full
+`|C|×|F|` cartesian product. The architecture-shaped entrypoint is
 `create_proposals`; `create_proposals_with_telemetry` returns the same output
 plus per-pair durations for the manager's telemetry record.
 """
@@ -163,10 +166,19 @@ def _validate_setup(
 def _build_pair_keys(
     candidates: list[Candidate], findings: list[Finding]
 ) -> list[tuple[Candidate, Finding, str]]:
-    """Return all pairs in candidate-outer, finding-inner order."""
+    """Return `(candidate, finding, pair_key)` triples grouped by candidate.
+
+    Each candidate is paired only with **its own** findings — those whose
+    `finding.candidate_id` matches (decision D2/D6) — instead of the full
+    cartesian product. Findings with no `candidate_id` (older sidecars, ad hoc
+    input) match no candidate and contribute no pairs. Order is candidate-outer,
+    finding-inner, preserving input order within each.
+    """
     pairs: list[tuple[Candidate, Finding, str]] = []
     for c in candidates:
         for f in findings:
+            if f.candidate_id != c.id:
+                continue
             pairs.append((c, f, f"{c.id}__{f.finding_id}"))
     return pairs
 
@@ -332,6 +344,13 @@ def _convert_proposal(drp: DeepResearchProposal, prop_id: str) -> Proposal:
         title=drp.title,
         description=drp.detailed_description,
         rationale=drp.proposal_rationale,
+        # Decision D5: carry the structured research fields the agent now emits
+        # onto the unified `Proposal` (all optional; None when the agent omitted
+        # them).
+        mechanism=drp.mechanism,
+        required_changes=drp.required_changes,
+        expected_effect=drp.expected_effect,
+        evaluation_metric=drp.evaluation_metric,
     )
 
 
@@ -369,6 +388,7 @@ async def _run_async(
         list(input.candidates.candidates), list(input.findings)
     )
 
+    total_pairs = len(pairs)
     truncated = False
     if config.debug_first_n_pairs is not None:
         if len(pairs) > config.debug_first_n_pairs:
@@ -381,7 +401,7 @@ async def _run_async(
             "running %s of %s pairs (DEBUG MODE, do not use for production)",
             config.debug_first_n_pairs,
             len(pairs),
-            len(input.candidates.candidates) * len(input.findings),
+            total_pairs,
         )
 
     semaphore = asyncio.Semaphore(config.max_parallel_pairs)
@@ -475,7 +495,17 @@ def create_proposals_with_telemetry(
     (D3); minted ids are `prop-<segment>-NNNN`. `segment` defaults to the
     candidates' module slug for standalone callers.
     """
-    will_invoke_claude = bool(input.candidates.candidates) and bool(input.findings)
+    # Under per-candidate grouping (D6), `bool(candidates) and bool(findings)`
+    # is no longer equivalent to "there is work to do": a module whose findings
+    # all belong to candidates absent from this input yields zero pairs. Gate on
+    # "at least one pair survives grouping" so the step doesn't run
+    # `ensure_claude_available()` (and possibly raise a setup error) for a run
+    # that schedules nothing.
+    will_invoke_claude = bool(
+        _build_pair_keys(
+            list(input.candidates.candidates), list(input.findings)
+        )
+    )
 
     if runner is None:
         # Don't probe for `claude` on PATH unless we'll actually shell out.

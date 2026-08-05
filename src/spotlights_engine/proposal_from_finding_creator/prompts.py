@@ -34,11 +34,15 @@ Do not modify files. Do not ask questions. You may read repository files
 under the current working directory to ground your reasoning.
 
 Goal:
-Decide whether the supplied finding meaningfully supports a change to the
-supplied candidate. If yes, emit exactly one DeepResearchProposal describing
-the change. If not, emit nothing. Be conservative: only emit a proposal when
-the finding contributes a concrete, transferable idea that can plausibly
-improve this specific candidate.
+Decide whether this finding is really relevant to THIS candidate — the specific
+code site described below — and meaningfully supports a change to it. This
+finding was surveyed for this candidate, but you must still judge it on its
+merits: if it is only topically adjacent, restates what the candidate already
+does, or does not carry a concrete idea this candidate could adopt, emit an
+empty array and nothing else. If it is genuinely relevant, emit exactly one
+DeepResearchProposal describing the change. Be conservative: only emit a
+proposal when the finding contributes a concrete, transferable idea that can
+plausibly improve this specific candidate.
 
 Target module: {module_qualified_name}
 
@@ -72,10 +76,12 @@ Validation plan:
 Output rules:
 - Return a JSON object with a single property `proposals` whose value is a
   JSON array of length 0 or 1.
-- An empty array (`[]`) means: this finding does not meaningfully apply to
-  this candidate. Prefer emptiness when the finding is only topically
-  adjacent or restates the candidate's current approach.
-- A 1-element array means: emit one DeepResearchProposal.
+- An empty array (`[]`) means: this finding is not really relevant to this
+  candidate, or does not meaningfully apply to it. Prefer emptiness when the
+  finding is only topically adjacent or restates the candidate's current
+  approach.
+- A 1-element array means: emit one DeepResearchProposal. When you emit a
+  proposal you must fill every field below (all are required):
   - title: short, action-oriented (1 line).
   - detailed_description: concrete description of the change applied to
     this candidate, grounded in the finding. May reference the candidate's
@@ -84,6 +90,16 @@ Output rules:
   - proposal_rationale: why this finding plausibly improves this specific
     candidate, including which gap or constraint it addresses.
   - created_by: must be exactly "{created_by}".
+  - mechanism: the concrete technique/algorithm/design from the finding and
+    HOW it works when applied to this candidate (not just its name).
+  - required_changes: the concrete edits this candidate's code would need —
+    which functions/regions change and roughly how; do not invent unrelated
+    locations.
+  - expected_effect: the expected improvement (e.g. lower latency, less
+    memory, higher throughput) and, where possible, in what direction/scale,
+    tied to the caller objective.
+  - evaluation_metric: how you would measure whether the change worked — the
+    concrete metric(s) and comparison to validate against.
 - Do not wrap the object in Markdown. Do not include explanatory prose.
 """.strip()
 

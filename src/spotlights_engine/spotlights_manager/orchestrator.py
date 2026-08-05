@@ -230,21 +230,26 @@ def _build_discovery_config(
 def _build_deep_research_options(
     cfg: SpotlightsManagerConfig,
     repo_path: Path,
-    last_message_path: Path,
+    last_message_dir: Path,
 ) -> CodexExecOptions:
     """Per-module options: copy any caller config and override `cwd` and
-    `output_last_message`. Never mutates the shared object."""
+    `output_last_message`. Never mutates the shared object.
+
+    `output_last_message` carries the per-candidate last-message *directory*
+    (decision D8), not a single file: step 3 mints one `<dir>/<candidate_id>.md`
+    per candidate survey so two candidates can never parse each other's codex
+    response."""
     base = cfg.deep_research
     if base is None:
         return CodexExecOptions(
             cwd=repo_path,
-            output_last_message=last_message_path,
+            output_last_message=last_message_dir,
             json_events=True,
         )
     return base.model_copy(
         update={
             "cwd": repo_path,
-            "output_last_message": last_message_path,
+            "output_last_message": last_message_dir,
             "json_events": True,
         }
     )
@@ -741,34 +746,50 @@ async def _do_step3(
     module_paths: ModulePaths,
     segment: str,
     candidates: Candidates,
-) -> tuple[ModuleDeepResearchOutput, float, list[Any]]:
+) -> tuple[
+    ModuleDeepResearchOutput,
+    float,
+    dict[str, list[Any]],
+    dict[str, dict[str, float]],
+]:
     """`segment` is the module id segment (D3): deep research renumbers and
-    prefixes each finding id to `find-<segment>-NNNN` before returning, so the
-    findings are already globally-prefixed (no manager-side rebase).
+    prefixes each finding id to `find-<segment>-<candidate_counter>-NNNN` before
+    returning, so the findings are already globally-prefixed (no manager-side
+    rebase).
 
-    The step-2 `candidates` are forwarded so the prompt can surface them as
-    hot spots (gated by `mgr_input.include_candidate_hotspots`)."""
+    The step-2 `candidates` are the iteration set (decision D1/D2): step 3 runs
+    one literature/web survey per candidate, focused on that candidate's code
+    site. Returns the merged output plus per-candidate usages and per-(candidate,
+    runner) durations for candidate-attributed usage records (D7)."""
     research_input = ModuleDeepResearchInput(
         project_tree=tree,
         module_qualified_name=qn,
         context=mgr_input.context,
         repo_path=mgr_input.repo_path,
-        max_findings_per_module=mgr_input.max_findings_per_module,
+        max_findings_per_candidate=mgr_input.max_findings_per_candidate,
         candidates=list(candidates.candidates),
-        include_candidate_hotspots=mgr_input.include_candidate_hotspots,
         enable_claude_search=mgr_input.enable_claude_search,
     )
     options = _build_deep_research_options(
-        cfg, mgr_input.repo_path, module_paths.deep_research_last_message_path
+        cfg, mgr_input.repo_path, module_paths.deep_research_last_message_dir
     )
     start = time.monotonic()
     result = await asyncio.to_thread(
         lambda: research_module(research_input, options, segment=segment)
     )
     duration = time.monotonic() - start
-    if hasattr(result, "output") and hasattr(result, "usages"):
-        return result.output, duration, list(result.usages)
-    return result, duration, []
+    # `research_module` is the `research_module_with_telemetry` alias (patchable
+    # for tests). It returns a `ModuleDeepResearchResult` carrying the contract
+    # output plus per-candidate usages/durations (decision D7). Tests may patch it
+    # with a fake that returns the bare `ModuleDeepResearchOutput`; tolerate both.
+    if hasattr(result, "output"):
+        return (
+            result.output,
+            duration,
+            {cid: list(u) for cid, u in result.usages_by_candidate.items()},
+            {cid: dict(d) for cid, d in result.per_candidate_durations_s.items()},
+        )
+    return result, duration, {}, {}
 
 
 def _synthetic_step4_output_for_zero_findings(
@@ -1151,7 +1172,12 @@ async def _run_module(
         if run_step3:
             _log.info("[%s] deep_research: start", qn)
             try:
-                research_output, dr_duration, dr_usages = await _do_step3(
+                (
+                    research_output,
+                    dr_duration,
+                    dr_usages_by_candidate,
+                    dr_per_candidate_durations,
+                ) = await _do_step3(
                     qn=qn,
                     tree=tree,
                     mgr_input=mgr_input,
@@ -1217,14 +1243,19 @@ async def _run_module(
                 session_index=session_index,
                 step="module_deep_research",
                 role="deep_research",
+                # D7: attribute each record to the candidate its survey ran for
+                # (`cand-...:codex`) with that candidate/runner's own wall time as
+                # the fallback duration, instead of repeating `deep-research:<cli>`
+                # and charging every candidate the whole step-3 duration.
                 usages=[
                     (
-                        f"deep-research:{u.cli}",
+                        f"{candidate_id}:{u.cli}",
                         u.cli,
                         u.usage,
-                        dr_duration,
+                        dr_per_candidate_durations.get(candidate_id, {}).get(u.cli),
                     )
-                    for u in dr_usages
+                    for candidate_id, cand_usages in dr_usages_by_candidate.items()
+                    for u in cand_usages
                 ],
             )
             cp = _now_checkpoint(
@@ -1281,7 +1312,15 @@ async def _run_module(
                     per_pair_durations_s={},
                 )
             else:
-                n_pairs = len(candidates.candidates) * len(research_output.findings)
+                # Step 4 groups findings by candidate (D2/D6), so the pair set is
+                # `Σ|F_c|` — each candidate paired only with its own findings —
+                # not the `|C|×|F|` cartesian.
+                candidate_ids = {c.id for c in candidates.candidates}
+                n_pairs = sum(
+                    1
+                    for f in research_output.findings
+                    if f.candidate_id in candidate_ids
+                )
                 _log.info(
                     "[%s] proposal_from_finding: start — %d (candidate, finding) pairs",
                     qn,
@@ -1715,9 +1754,8 @@ async def _run_async(
     input_fp = P.build_input_fingerprint(
         repo_path=input.repo_path,
         context=input.context,
-        max_findings_per_module=input.max_findings_per_module,
+        max_findings_per_candidate=input.max_findings_per_candidate,
         continue_on_module_failure=input.continue_on_module_failure,
-        include_candidate_hotspots=input.include_candidate_hotspots,
         enable_claude_search=input.enable_claude_search,
     )
     config_fp = P.build_config_fingerprint(

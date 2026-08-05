@@ -127,7 +127,7 @@ def test_module_deep_research_input_accepts_project_tree_and_context() -> None:
     )
 
     assert request.project_tree.repository.name == "demo"
-    assert request.max_findings_per_module == 30
+    assert request.max_findings_per_candidate == 10
     assert request.repo_path == Path("/tmp/example-repo")
 
 
@@ -185,7 +185,7 @@ def test_module_run_status_constraints() -> None:
 
 def test_spotlights_manager_input_defaults() -> None:
     inp = SpotlightsManagerInput(repo_path=Path("/tmp/repo"), context=_ctx())
-    assert inp.max_findings_per_module == 30
+    assert inp.max_findings_per_candidate == 10
     assert inp.continue_on_module_failure is True
 
 

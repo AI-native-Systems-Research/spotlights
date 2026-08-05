@@ -12,7 +12,9 @@ from spotlights_engine.module_deep_research.codex_exec import (
     CodexExecOptions,
     CodexExecResult,
 )
-from spotlights_engine.module_deep_research.prompts import render_module_deep_research_prompt
+from spotlights_engine.module_deep_research.prompts import (
+    render_candidate_deep_research_prompt,
+)
 from spotlights_engine.module_deep_research.validation import parse_module_deep_research_output
 
 __all__ = [
@@ -25,7 +27,7 @@ __all__ = [
     "ModuleDeepResearchResult",
     "ModuleResearchRunner",
     "parse_module_deep_research_output",
-    "render_module_deep_research_prompt",
+    "render_candidate_deep_research_prompt",
     "research_module",
     "research_module_with_telemetry",
 ]

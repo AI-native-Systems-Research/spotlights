@@ -229,6 +229,10 @@ def _proposals(candidate: Candidate) -> list[ProposalRef]:
                 detailed_description=p.description,
                 finding_id=p.finding_ref_id,
                 rationale=p.rationale,
+                mechanism=p.mechanism,
+                required_changes=p.required_changes,
+                expected_effect=p.expected_effect,
+                evaluation_metric=p.evaluation_metric,
             )
         )
     for p in proposals_from(candidate, "agent_knowledge"):

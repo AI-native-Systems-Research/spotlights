@@ -95,6 +95,16 @@ def test_module_page_contents(tmp_path: Path) -> None:
     assert "<https://example.com/f/1>" in cpage
     # Dangling finding id still rendered without a title/URL.
     assert "`find-mod-0099`" in cpage
+    # Decision D5: the structured research fields render on the candidate page
+    # when populated.
+    assert "**Mechanism.**" in cpage
+    assert "paged allocation of the KV cache" in cpage
+    assert "**Required changes.**" in cpage
+    assert "rewrite the block allocator" in cpage
+    assert "**Expected effect.**" in cpage
+    assert "lower fragmentation, higher throughput" in cpage
+    assert "**Evaluation metric.**" in cpage
+    assert "tokens/sec on the existing benchmark" in cpage
 
     # Module page no longer carries the per-candidate detail.
     assert "## Description" not in page

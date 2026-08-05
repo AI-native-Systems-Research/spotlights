@@ -175,12 +175,19 @@ def _looks_like_cli_envelope(payload: Any) -> bool:
 
 
 def _renumber_findings(
-    findings: list[AgentFinding], max_findings: int, *, segment: str
+    findings: list[AgentFinding],
+    max_findings: int,
+    *,
+    segment: str,
+    candidate_id: str | None = None,
 ) -> list[Finding]:
     """Cap, renumber, and prefix wire findings into persisted `Finding`s.
 
     The agent-supplied (bare, advisory) id is discarded; each surviving finding
-    gets a deterministic `find-<segment>-NNNN` id in output order."""
+    gets a deterministic `find-<segment>-NNNN` id in output order and is stamped
+    with `candidate_id` (decision D2). For the per-candidate path (D3) `segment`
+    is the composite `<module_segment>-<candidate_counter>` string, so the id
+    becomes `find-<module_segment>-<candidate_counter>-NNNN`."""
     return [
         Finding(
             finding_id=f"find-{segment}-{idx:04d}",
@@ -189,6 +196,7 @@ def _renumber_findings(
             source_type=finding.source_type,
             technique_summary=finding.technique_summary,
             supporting_evidence=finding.supporting_evidence,
+            candidate_id=candidate_id,
         )
         for idx, finding in enumerate(findings[:max_findings], start=1)
     ]
@@ -197,20 +205,25 @@ def _renumber_findings(
 def normalize_module_deep_research_output(
     output: AgentModuleDeepResearchOutput,
     *,
-    max_findings_per_module: int,
+    max_findings_per_candidate: int,
     segment: str,
+    candidate_id: str | None = None,
     search_queries: list[SearchQueryLog] | None = None,
 ) -> ModuleDeepResearchOutput:
-    """Cap findings and assign deterministic module-prefixed finding IDs in
-    output order, promoting the wire output to the persisted contract.
+    """Cap findings and assign deterministic prefixed finding IDs in output
+    order, promoting the wire output to the persisted contract.
 
-    `search_queries` is a passthrough: the wire model has no `agent` field (the
-    agent label lives only on `RunnerOutcome.agent_name`), so the caller tags
-    each query with its runner and forwards the already-built persisted
-    `SearchQueryLog`s here verbatim."""
+    `segment` is the per-candidate finding segment (D3); `candidate_id` is
+    stamped on every promoted `Finding` (D2). `search_queries` is a passthrough:
+    the wire model has no `agent` field (the agent label lives only on
+    `RunnerOutcome.agent_name`), so the caller tags each query with its runner
+    and forwards the already-built persisted `SearchQueryLog`s here verbatim."""
     return ModuleDeepResearchOutput(
         findings=_renumber_findings(
-            output.findings, max_findings_per_module, segment=segment
+            output.findings,
+            max_findings_per_candidate,
+            segment=segment,
+            candidate_id=candidate_id,
         ),
         issues=list(output.issues),
         search_queries=list(search_queries or []),
@@ -249,14 +262,16 @@ def parse_agent_output(text: str) -> AgentModuleDeepResearchOutput:
 def parse_module_deep_research_output(
     text: str,
     *,
-    max_findings_per_module: int = 30,
+    max_findings_per_candidate: int = 10,
     segment: str | None = None,
+    candidate_id: str | None = None,
 ) -> ModuleDeepResearchOutput:
     """Parse and normalize one agent response into `ModuleDeepResearchOutput`.
 
     Convenience for direct/standalone callers: combines `parse_agent_output`
     with the segment-aware normalize. `segment` defaults to `slug_for("module")`
     when omitted (standalone use); the manager always supplies the real one.
+    `candidate_id` is stamped on every promoted finding (D2) when supplied.
     """
     seg = segment if segment is not None else slug_for("module")
     parsed = parse_agent_output(text)
@@ -272,13 +287,15 @@ def parse_module_deep_research_output(
                 SearchResult(title=r.title, url=r.url, snippet=r.snippet)
                 for r in q.results
             ],
+            candidate_id=candidate_id,
         )
         for q in parsed.search_queries
     ]
     return normalize_module_deep_research_output(
         parsed,
-        max_findings_per_module=max_findings_per_module,
+        max_findings_per_candidate=max_findings_per_candidate,
         segment=seg,
+        candidate_id=candidate_id,
         search_queries=search_queries,
     )
 

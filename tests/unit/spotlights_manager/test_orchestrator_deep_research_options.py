@@ -5,6 +5,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from spotlights_engine.costing.usage import AgentUsage, CliUsage
+from spotlights_engine.module_deep_research.api import ModuleDeepResearchResult
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
 from spotlights_engine.spotlights_manager import (
     ModuleFilter,
@@ -12,6 +14,7 @@ from spotlights_engine.spotlights_manager import (
     run_with_telemetry,
 )
 from spotlights_engine.spotlights_manager import orchestrator as orch
+from spotlights_engine.spotlights_manager import persistence as P
 from tests.unit.spotlights_manager._fakes import (
     make_discovery_result,
     make_extractor_result,
@@ -117,3 +120,77 @@ def test_deep_research_options_default_when_caller_none(
     used = seen[0]
     assert used.cwd == repo
     assert used.output_last_message is not None
+
+
+def test_step3_usage_records_are_candidate_attributed(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Decision D7: step-3 usage records must carry candidate-qualified
+    invocation ids (`cand-...:codex`) and the per-(candidate, runner) wall time
+    as the fallback duration — not one `deep-research:<cli>` record per runner
+    each charged the whole step-3 duration.
+
+    This exercises the manager's real usage-attribution code path by patching
+    `research_module` with a fake that returns the telemetry-rich
+    `ModuleDeepResearchResult` (per-candidate usages + durations), the way the
+    real step 3 does. The default `make_research_output` fake returns the bare
+    output and hits the manager's `{}` fallback, so it never covers this."""
+    tree = make_tree()
+    monkeypatch.setattr(
+        orch,
+        "extract_with_telemetry",
+        lambda inp, *, config=None: make_extractor_result(tree),
+    )
+    monkeypatch.setattr(
+        orch,
+        "discover",
+        # Two candidates so cross-attribution and per-candidate durations matter.
+        lambda inp, *, config: make_discovery_result(
+            inp.module_qualified_name, n_candidates=2
+        ),
+    )
+
+    cand_a = "cand-v1_kv_offload-0001"
+    cand_b = "cand-v1_kv_offload-0002"
+
+    def _research(inp, options=None, **_kw):
+        usage = AgentUsage(input=100, output=50, model="gpt-x")
+        return ModuleDeepResearchResult(
+            output=make_research_output(),
+            usages_by_candidate={
+                cand_a: [CliUsage(cli="codex", usage=usage)],
+                cand_b: [CliUsage(cli="codex", usage=usage)],
+            },
+            per_candidate_durations_s={
+                cand_a: {"codex": 1.25},
+                cand_b: {"codex": 3.75},
+            },
+        )
+
+    monkeypatch.setattr(orch, "research_module", _research)
+    patch_proposal_from_finding(monkeypatch, orch)
+    patch_agent_proposals(monkeypatch, orch)
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+
+    cfg = SpotlightsManagerConfig(
+        artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
+    )
+    run_with_telemetry(make_input(repo), config=cfg)
+
+    module_paths = P.ManagerPaths(artifacts).for_module("v1/kv_offload")
+    records, _notes = P.read_usage_records(module_paths, "module_deep_research")
+
+    by_invocation = {r.invocation_id: r for r in records}
+    # Candidate-qualified invocation ids, one per (candidate, runner) — never the
+    # old shared `deep-research:codex`.
+    assert set(by_invocation) == {f"{cand_a}:codex", f"{cand_b}:codex"}
+    assert all(not r.invocation_id.startswith("deep-research:") for r in records)
+    # Each record carries its own candidate/runner wall time, not a shared value.
+    assert by_invocation[f"{cand_a}:codex"].api_time_s == 1.25
+    assert by_invocation[f"{cand_b}:codex"].api_time_s == 3.75

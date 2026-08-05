@@ -88,7 +88,8 @@ PipelineStep = Literal[
 ModuleRunStatus = Literal["SUCCEEDED", "DEGRADED", "SKIPPED", "FAILED"]
 
 class Finding(BaseModel):
-    finding_id: str         # ^find-\d{4}$
+    finding_id: str         # find-<module_segment>-<candidate_counter>-NNNN (decision D3)
+    candidate_id: str | None = None   # candidate surveyed for (decision D2)
     title: str
     url: str
     source_type: FindingSourceType
@@ -99,6 +100,10 @@ class DeepResearchProposal(BaseModel):
     title: str
     detailed_description: str
     finding_id: str
+    mechanism: str | None = None            # decision D5
+    required_changes: str | None = None     # decision D5
+    expected_effect: str | None = None      # decision D5
+    evaluation_metric: str | None = None    # decision D5
     proposal_rationale: str
     created_by: str
 
@@ -274,7 +279,7 @@ the per-step contracts remain pure data shapes.
 class SpotlightsManagerInput(BaseModel):
     repo_path: Path
     context: SpotlightContext
-    max_findings_per_module: int = 10
+    max_findings_per_candidate: int = 10
     continue_on_module_failure: bool = True
 ```
 
@@ -334,23 +339,41 @@ is empty, the manager marks the module run `SKIPPED`.
 
 ### 3. module_deep_research
 
-Per-module literature/web survey. The module builds its own prompt internally
-from the repo info (`Repository`) and the target `Module` fields (name, path,
-description, `main_files`, `depends_on`), keeping prompt construction out of
-the orchestrator.
+**Per-candidate** literature/web survey (decision D1/D2). Step 2's candidates
+are the iteration set: the step loops over `candidates`, and for each one builds
+a candidate-focused prompt internally from the repo info (`Repository`), the
+target `Module` fields (name, path, description, `main_files`, `depends_on`),
+and that candidate's own code site (file, span, symbol, current approach, evolve
+rationale), keeping prompt construction out of the orchestrator. Each survey
+fans out its runners, merges/dedups within that candidate, and emits findings
+scoped to it.
+
+Findings are renumbered with a **per-candidate** segment (decision D3):
+`find-<module_segment>-<candidate_counter>-NNNN`, where `candidate_counter` is
+the candidate's 1-based position in the iteration. Each promoted `Finding` is
+also stamped with `candidate_id` (decision D2) so downstream step 4 can group by
+candidate. The per-candidate finding lists are concatenated into the single flat
+`ModuleDeepResearchOutput.findings` the manager persists. `max_findings_per_candidate`
+caps how many findings each candidate's survey keeps.
 
 Uses `context.objective`, `context.workload_hints`, and
 `context.validation_plan` to bias the survey toward sources relevant to the
 caller's goal, deployment shape, and available validation path, and to filter
-out findings that are clearly off-objective.
+out findings that are clearly off-objective. A per-candidate relevance gate in
+the prompt instructs the agent to emit an empty array when nothing is really
+relevant to *that* candidate.
 
 An empty `findings` list is valid. It means no relevant source survived the
 survey and filtering pass; it only marks the module `DEGRADED` when accompanied
-by a recoverable `StepIssue`.
+by a recoverable `StepIssue`. A survey that fails for a single candidate records
+a recoverable `StepIssue` naming that candidate; sibling candidates still run.
 
-The codex agent driving the survey runs with its working directory set to
+The codex agent driving each survey runs with its working directory set to
 `repo_path`, so it can open target-module and adjacent files directly via
-their repo-relative paths when grounding findings in current code.
+their repo-relative paths when grounding findings in current code. Each
+candidate survey writes its codex last-message to its own
+`<dir>/<candidate_id>.md` file (decision D8), so two candidates can never parse
+each other's response.
 
 **Paper filter (optional).** When `paper_filter` is set, the merged/deduped
 findings are collapsed to **at most one** finding — the one matching that paper.
@@ -371,7 +394,8 @@ class ModuleDeepResearchInput(BaseModel):
     module_qualified_name: str
     context: SpotlightContext
     repo_path: Path
-    max_findings_per_module: int = 10
+    candidates: list[Candidate]        # step-2 iteration set (decision D1)
+    max_findings_per_candidate: int = 10
     paper_filter: PaperFilter | None = None  # ≤1 finding matching this paper
 ```
 
@@ -379,18 +403,24 @@ class ModuleDeepResearchInput(BaseModel):
 
 ```python
 class ModuleDeepResearchOutput(BaseModel):
-    findings: list[Finding] = []  # most relevant findings
+    findings: list[Finding] = []  # per-candidate findings, flattened;
+                                  # each carries candidate_id (decision D2)
     issues: list[StepIssue] = []
 ```
 
 ### 4. proposal_from_finding_creator
 
-For every `(candidate, finding)` pair in the cartesian product of
-`candidates.candidates × findings`, the step decides whether the finding
-provides enough information to support a concrete change to the candidate.
-If yes, it emits one `DeepResearchProposal` with `finding_id` set to the
-finding's id; if no, it emits nothing for that pair. A single candidate may
-collect zero, one, or many proposals (one per supporting finding).
+Findings are grouped by `finding.candidate_id` (decision D2/D6): each candidate
+is judged only against **its own** findings — the ones surveyed for it in step 3
+— so the pair set is `Σ|F_c|`, not the full `|C|×|F|` cartesian product. For
+every such `(candidate, finding)` pair the step decides whether the finding
+provides enough information to support a concrete change to the candidate. If
+yes, it emits one `DeepResearchProposal` with `finding_id` set to the finding's
+id (and the structured `mechanism` / `required_changes` / `expected_effect` /
+`evaluation_metric` fields, decision D5); if no, it emits nothing for that pair.
+A single candidate may collect zero, one, or many proposals (one per supporting
+finding). Findings whose `candidate_id` matches no input candidate (older
+sidecars, ad hoc input) contribute no pairs.
 
 Applicability and proposal drafting are folded into one judgment here:
 without a separate mapping step, `context.objective` is what keeps the step
@@ -400,18 +430,17 @@ environment.
 
 The contract imposes no dependency between pairs: each `(candidate, finding)`
 pair has its own emit-or-not decision tied to that finding's id, and the
-output schema does not require ordering or aggregation across pairs. Whether
-an implementation evaluates each pair in isolation, batches all findings per
-candidate, or runs the full cartesian product as one session is an
-implementation choice. The target module is read off
-`candidates.module_qualified_name`; no parallel argument is added.
+output schema does not require ordering or aggregation across pairs. The step
+drives one Claude Code session per pair, bounded by `max_parallel_pairs`. The
+target module is read off `candidates.module_qualified_name`; no parallel
+argument is added.
 
 **Input**
 
 ```python
 class ProposalFromFindingCreatorInput(BaseModel):
     candidates: Candidates             # from candidate_discovery; state == DISCOVERED
-    findings: list[Finding]            # from module_deep_research
+    findings: list[Finding]            # from module_deep_research; grouped by candidate_id
     context: SpotlightContext
 ```
 

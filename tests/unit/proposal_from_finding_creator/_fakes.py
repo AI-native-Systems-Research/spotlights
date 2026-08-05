@@ -43,10 +43,11 @@ def make_candidates(n: int = 1, qn: str = "v1/kv_offload") -> Candidates:
     )
 
 
-def make_finding(idx: int = 0) -> Finding:
+def make_finding(idx: int = 0, *, candidate_id: str | None = None) -> Finding:
     n = idx + 1
     return Finding(
         finding_id=f"find-v1_kv_offload-{n:04d}",
+        candidate_id=candidate_id,
         title="t",
         url="https://example.com",
         source_type="paper",
@@ -57,9 +58,23 @@ def make_finding(idx: int = 0) -> Finding:
 def make_input(
     n_candidates: int = 1, n_findings: int = 1
 ) -> ProposalFromFindingCreatorInput:
+    """Build `n_candidates`, each owning `n_findings` findings (decision D6).
+
+    Every finding is stamped with its owning candidate's id and finding ids are
+    globally sequential, so the pair set is `Σ|F_c| = n_candidates * n_findings`
+    — never the old `|C|×|F|` cross-product. Candidate `i` (0-based) owns
+    findings `i*n_findings .. i*n_findings + n_findings - 1`.
+    """
+    cands = make_candidates(n_candidates)
+    findings: list[Finding] = []
+    idx = 0
+    for c in cands.candidates:
+        for _ in range(n_findings):
+            findings.append(make_finding(idx, candidate_id=c.id))
+            idx += 1
     return ProposalFromFindingCreatorInput(
-        candidates=make_candidates(n_candidates),
-        findings=[make_finding(i) for i in range(n_findings)],
+        candidates=cands,
+        findings=findings,
         context=SpotlightContext(objective="reduce latency"),
     )
 

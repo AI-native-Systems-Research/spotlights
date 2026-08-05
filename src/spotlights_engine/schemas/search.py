@@ -36,6 +36,14 @@ class SearchQueryLog(BaseModel):
     query: str = ""  # NO min_length — empty must not fail the payload
     tool: str = ""
     results: list[SearchResult] = Field(default_factory=list)
+    # The candidate this query was issued for (decision D7). Optional and
+    # unconstrained beyond the id pattern; step 3 now surveys per candidate, so
+    # each persisted query carries the candidate it came from. Stays optional
+    # because the search log is advisory and must never fail validation; older
+    # sidecars and the standalone parse path leave it None.
+    candidate_id: str | None = Field(
+        default=None, pattern=r"^cand-[A-Za-z0-9._-]+-\d{4}$"
+    )
 
 
 __all__ = [

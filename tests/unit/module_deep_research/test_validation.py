@@ -53,7 +53,7 @@ def test_parse_accepts_fenced_json_and_normalizes_ids_and_cap() -> None:
 """
 
     output = parse_module_deep_research_output(
-        text, max_findings_per_module=1, segment="kv_offload"
+        text, max_findings_per_candidate=1, segment="kv_offload"
     )
 
     assert len(output.findings) == 1
@@ -183,7 +183,7 @@ def test_search_query_extra_field_and_empty_query_do_not_drop_findings() -> None
     }
 
     output = parse_module_deep_research_output(
-        json.dumps(payload), max_findings_per_module=30, segment="kv_offload"
+        json.dumps(payload), max_findings_per_candidate=30, segment="kv_offload"
     )
 
     assert len(output.findings) == 1
@@ -218,3 +218,33 @@ def test_parse_agent_output_without_search_queries_defaults_to_empty() -> None:
     parsed = parse_agent_output(json.dumps(payload))
 
     assert parsed.search_queries == []
+
+
+def test_parse_stamps_candidate_id_on_findings_and_queries() -> None:
+    """Decision D2/D7: the promoted findings and search queries carry the
+    candidate id the survey ran for, and the finding id uses the composite
+    per-candidate segment (D3)."""
+    payload = {
+        "findings": [
+            {
+                "finding_id": "find-0001",
+                "title": "Paged KV allocation",
+                "url": "https://example.com/a",
+                "source_type": "paper",
+                "technique_summary": "Paged allocation reduces KV fragmentation.",
+            }
+        ],
+        "issues": [],
+        "search_queries": [{"query": "paged kv", "tool": "web_search", "results": []}],
+    }
+
+    output = parse_module_deep_research_output(
+        json.dumps(payload),
+        segment="kv_offload-0002",
+        candidate_id="cand-kv_offload-0002",
+    )
+
+    assert len(output.findings) == 1
+    assert output.findings[0].finding_id == "find-kv_offload-0002-0001"
+    assert output.findings[0].candidate_id == "cand-kv_offload-0002"
+    assert output.search_queries[0].candidate_id == "cand-kv_offload-0002"

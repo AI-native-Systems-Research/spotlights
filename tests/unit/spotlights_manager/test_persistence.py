@@ -204,7 +204,12 @@ def test_clear_helpers_remove_artifacts(tmp_path: Path) -> None:
     (mp.discovery_run_dir / "marker").write_text("x")
     P.write_candidates(mp, make_candidates("v1/kv_offload"))
     P.write_deep_research(mp, make_research_output(), duration_s=1.0)
-    mp.deep_research_last_message_path.write_text("hello", encoding="utf-8")
+    # Step 3 now writes one codex last-message file per candidate into a
+    # directory (decision D8), not a single file.
+    mp.deep_research_last_message_dir.mkdir(parents=True, exist_ok=True)
+    (mp.deep_research_last_message_dir / "cand-v1_kv_offload-0001.md").write_text(
+        "hello", encoding="utf-8"
+    )
     P.write_deep_research_search_log(mp, make_research_output(), "v1/kv_offload")
 
     P.clear_discovery_artifacts(mp)
@@ -213,7 +218,7 @@ def test_clear_helpers_remove_artifacts(tmp_path: Path) -> None:
 
     P.clear_deep_research_artifacts(mp)
     assert not mp.deep_research_path.exists()
-    assert not mp.deep_research_last_message_path.exists()
+    assert not mp.deep_research_last_message_dir.exists()
     assert not mp.deep_research_search_log_path.exists()
 
 
@@ -265,7 +270,7 @@ def test_input_fingerprint_changes_with_enable_claude_search() -> None:
     kwargs = dict(
         repo_path=Path("/tmp/example-repo"),
         context=context,
-        max_findings_per_module=30,
+        max_findings_per_candidate=10,
         continue_on_module_failure=True,
     )
     off = P.build_input_fingerprint(**kwargs, enable_claude_search=False)

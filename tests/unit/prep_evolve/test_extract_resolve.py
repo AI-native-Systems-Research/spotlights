@@ -110,6 +110,17 @@ def test_proposal_provenance(tmp_path: Path) -> None:
     assert deep[0].agent == "claude"
     assert agent[0].finding_id is None
     assert agent[0].agent == "codex"
+    # Decision D5: the structured research fields flow onto ProposalRef for the
+    # deep-research proposal; the agent-knowledge proposal (which never set them)
+    # stays None.
+    assert deep[0].mechanism == "Derive tile size from the register budget."
+    assert deep[0].required_changes == "Rewrite the tile-size heuristic function."
+    assert deep[0].expected_effect == "Higher occupancy, lower TPOT."
+    assert deep[0].evaluation_metric == "Median TPOT on the existing benchmark."
+    assert agent[0].mechanism is None
+    assert agent[0].required_changes is None
+    assert agent[0].expected_effect is None
+    assert agent[0].evaluation_metric is None
 
 
 def test_scope_main_files_adds_whole_file_targets(tmp_path: Path) -> None:

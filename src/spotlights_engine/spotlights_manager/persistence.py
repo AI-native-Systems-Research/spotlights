@@ -57,7 +57,14 @@ from spotlights_engine.utils.id_helpers import slug_for
 # `<type>-<slug>[.s<k>]-NNNN` instead of bare `cand-0001`/`find-0001`/`prop-0001`.
 # Old run dirs hold bare ids that fail the widened schema patterns, so they ride
 # the same hard cutover.
-SCHEMA_VERSION = 4
+# Bumped to 5 for per-candidate deep research (steps 3 & 4 rework): step-3
+# findings now carry `candidate_id` and per-candidate finding segments, step-4
+# groups findings by candidate instead of the old `|C|×|F|` cartesian, the
+# `include_candidate_hotspots` fingerprint key is gone, and step 3 writes one
+# last-message file per candidate under `module_deep_research.last_messages/`.
+# Old (version-4) run dirs hold candidate-less findings that cannot be grouped
+# correctly, so they ride the same hard cutover.
+SCHEMA_VERSION = 5
 
 
 CheckpointStatus = Literal[
@@ -186,8 +193,15 @@ class ModulePaths:
         return self.dir / "module_deep_research.json"
 
     @property
-    def deep_research_last_message_path(self) -> Path:
-        return self.dir / "module_deep_research.last_message.md"
+    def deep_research_last_message_dir(self) -> Path:
+        """Per-candidate codex last-message directory (decision D8).
+
+        Step 3 now runs one survey per candidate, and the codex runner reads its
+        `--output-last-message` file back as the response it parses. A single
+        shared file would let one candidate parse another's JSON, so each
+        candidate writes `<dir>/<candidate_id>.md`, mirroring the step-4/step-5
+        `*.last_messages` layout."""
+        return self.dir / "module_deep_research.last_messages"
 
     @property
     def deep_research_search_log_path(self) -> Path:
@@ -283,17 +297,15 @@ def build_input_fingerprint(
     *,
     repo_path: Path,
     context: BaseModel,
-    max_findings_per_module: int,
+    max_findings_per_candidate: int,
     continue_on_module_failure: bool,
-    include_candidate_hotspots: bool = True,
     enable_claude_search: bool = False,
 ) -> dict[str, Any]:
     return {
         "repo_path": str(repo_path),
         "context_hash": _stable_hash(context.model_dump(mode="json")),
-        "max_findings_per_module": max_findings_per_module,
+        "max_findings_per_candidate": max_findings_per_candidate,
         "continue_on_module_failure": continue_on_module_failure,
-        "include_candidate_hotspots": include_candidate_hotspots,
         "enable_claude_search": enable_claude_search,
     }
 
@@ -658,11 +670,15 @@ def clear_deep_research_artifacts(
 ) -> None:
     for p in (
         module_paths.deep_research_path,
-        module_paths.deep_research_last_message_path,
         module_paths.deep_research_search_log_path,
     ):
         if p.exists():
             p.unlink()
+    # The last-message path is now a per-candidate directory (D8); rmtree it so a
+    # `--redo` of step 3 doesn't leak a previous session's per-candidate messages
+    # (an `unlink()` would silently no-op on a directory).
+    if module_paths.deep_research_last_message_dir.exists():
+        shutil.rmtree(module_paths.deep_research_last_message_dir)
     clear_usage_records(module_paths, "module_deep_research", session_index)
 
 

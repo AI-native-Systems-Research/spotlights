@@ -81,6 +81,7 @@
   "findings": [
     {
       "finding_id": "find-core-0001",
+      "candidate_id": "cand-core-0001",
       "title": "Parallel-friendly hot path",
       "url": "https://example.com/papers/parallel-hot-path",
       "source_type": "paper",

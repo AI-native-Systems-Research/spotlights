@@ -40,7 +40,7 @@ def test_merge_tags_queries_with_agent_and_preserves_order() -> None:
         _outcome("claude", [{"query": "q-claude-1", "results": []}]),
     ]
 
-    output = merge_outcomes(outcomes, max_findings_per_module=30, segment="mod")
+    output = merge_outcomes(outcomes, max_findings_per_candidate=30, segment="mod")
 
     assert [(q.agent, q.query) for q in output.search_queries] == [
         ("codex", "q-codex-1"),
@@ -55,7 +55,7 @@ def test_merge_does_not_dedup_identical_queries_across_agents() -> None:
         _outcome("claude", [{"query": "same query", "results": []}]),
     ]
 
-    output = merge_outcomes(outcomes, max_findings_per_module=30, segment="mod")
+    output = merge_outcomes(outcomes, max_findings_per_candidate=30, segment="mod")
 
     assert len(output.search_queries) == 2
     assert output.search_queries[0].agent == "codex"
@@ -82,7 +82,21 @@ def test_merge_carries_results_through() -> None:
         ),
     ]
 
-    output = merge_outcomes(outcomes, max_findings_per_module=30, segment="mod")
+    output = merge_outcomes(outcomes, max_findings_per_candidate=30, segment="mod")
 
     result = output.search_queries[0].results[0]
     assert (result.title, result.url, result.snippet) == ("T", "https://x", "S")
+
+
+def test_merge_tags_queries_with_candidate_id() -> None:
+    """Decision D7: search queries carry the candidate id the survey ran for."""
+    outcomes = [_outcome("codex", [{"query": "q", "results": []}])]
+
+    output = merge_outcomes(
+        outcomes,
+        max_findings_per_candidate=30,
+        segment="mod-0001",
+        candidate_id="cand-mod-0001",
+    )
+
+    assert output.search_queries[0].candidate_id == "cand-mod-0001"
