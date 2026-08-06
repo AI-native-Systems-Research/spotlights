@@ -111,17 +111,25 @@ def validate_candidate_target(
     win_start = max(0, start - 1 - _SYMBOL_WINDOW)
     win_end = min(n, end + _SYMBOL_WINDOW)
     window_text = "\n".join(lines[win_start:win_end])
-    # Tokenize the (possibly compound) symbol and require every component to be
-    # present in the window. A whole-string match would false-positive on
-    # `region` candidates whose symbol is a qualified name spanning several
-    # symbols (e.g. "Type.methodA/methodB"), which never appears verbatim.
+    # Tokenize the (possibly compound) symbol and require its *leaf* component
+    # — the name actually defined at the recorded span — to appear in the
+    # window. A whole-string match would false-positive on `region` candidates
+    # whose symbol is a qualified name spanning several symbols (e.g.
+    # "Type.methodA/methodB"), which never appears verbatim. Requiring *every*
+    # component false-positives the other way: a Python `Class.method`
+    # staticmethod records "Class.method", but the class name is declared once
+    # at the top of the class, not next to the method body, so it is not in the
+    # ±window. The leaf name is the defined symbol; leading qualifiers (class /
+    # receiver) are context declared elsewhere. Checking only the leaf still
+    # catches genuine staleness (a moved or renamed definition drops its leaf
+    # from the window) without rejecting valid qualified names.
     components = _symbol_components(span.symbol) if span.symbol else []
-    missing = [c for c in components if c not in window_text]
-    if missing:
+    leaf = components[-1] if components else None
+    if leaf and leaf not in window_text:
         raise StalenessError(
             f"recorded symbol {span.symbol!r} not found near lines "
-            f"[{start}, {end}] of {cand_file} (missing component(s): "
-            f"{', '.join(missing)}). result.json is stale relative to the repo; "
+            f"[{start}, {end}] of {cand_file} (missing defined name "
+            f"{leaf!r}). result.json is stale relative to the repo; "
             f"re-run spotlights or correct the selected result."
         )
 

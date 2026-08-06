@@ -78,6 +78,46 @@ def test_line_range_out_of_bounds(tmp_path: Path) -> None:
         validate_candidate_target(repo, cand)
 
 
+def test_qualified_method_symbol_far_from_class(tmp_path: Path) -> None:
+    """A `Class.method` symbol validates when only the class decl is far away.
+
+    Mirrors the colpali case: `BaseVisualRetrieverProcessor.score_multi_vector`
+    is a staticmethod whose class is declared ~110 lines above the method body.
+    The recorded symbol is `Class.method`; only the leaf (`method`) sits near
+    the span. The gate must not treat the distant class name as staleness.
+    """
+    repo = fx.make_repo(tmp_path)
+    target = repo / fx.CAND_FILE
+    # Class declared at the very top; the recorded method sits at CAND_START..END,
+    # well outside the ±window around the class line.
+    lines = [f"# line {i}" for i in range(1, fx.CAND_END + 4)]
+    lines[0] = "class Widget:  # class declared far from the method"
+    lines[fx.CAND_START - 1] = "    def compute(self, x):  # block start"
+    lines[fx.CAND_START] = "        return x * 2"
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    cand = _candidate(tmp_path)
+    cand.locations[0].spans[0].symbol = "Widget.compute"
+    validated = validate_candidate_target(repo, cand)
+    assert validated.line_start == fx.CAND_START
+
+
+def test_staleness_leaf_symbol_missing(tmp_path: Path) -> None:
+    """Staleness still fires when the leaf (defined) name is gone from the span."""
+    repo = fx.make_repo(tmp_path)
+    target = repo / fx.CAND_FILE
+    # Class name present near the top, but the method leaf is renamed/gone.
+    lines = [f"# line {i}" for i in range(1, fx.CAND_END + 4)]
+    lines[fx.CAND_START - 1] = "class Widget:  # only the class name is here"
+    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    cand = _candidate(tmp_path)
+    cand.locations[0].spans[0].symbol = "Widget.compute"
+    with pytest.raises(StalenessError) as exc:
+        validate_candidate_target(repo, cand)
+    assert "compute" in str(exc.value)
+
+
 def test_staleness_symbol_missing(tmp_path: Path) -> None:
     repo = fx.make_repo(tmp_path)
     # Overwrite the candidate file so the recorded symbol is gone.
