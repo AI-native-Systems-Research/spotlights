@@ -18,8 +18,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from spotlights_engine.costing.rates import (
-    RATES_ENV_VAR,
     _BUNDLED_RATES_PATH,
+    RATES_ENV_VAR,
 )
 from spotlights_engine.defaults import DEFAULT_REPO
 

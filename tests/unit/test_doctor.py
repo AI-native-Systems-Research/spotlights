@@ -1,4 +1,3 @@
-from pathlib import Path
 
 from spotlights_engine import doctor
 
