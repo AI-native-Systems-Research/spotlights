@@ -149,6 +149,18 @@ wire_api = "responses"
 Swap the host and model IDs for your LiteLLM deployment. After editing config or
 environment, re-run `claude --version` / `codex --version` from a fresh shell.
 
+### Environment variables reference
+
+Both of these are **optional** — a default run needs neither. They only apply when
+overriding the cost rate table. Spotlights does not load a `.env` file; set them in
+your shell environment. (Proxy/model configuration for the `claude` and `codex` CLIs
+lives in their own config files — see the LiteLLM proxy section above.)
+
+| Variable | Set in | Purpose |
+| --- | --- | --- |
+| `SPOTLIGHTS_RATES_FILE` | shell environment | Override the bundled cost rate table with your contracted LiteLLM rates. |
+| `SPOTLIGHTS_EXTERNAL_RATES_FILE` | shell environment | Override the bundled external-model rate table. |
+
 ### Verify all CLIs from a fresh shell
 
 Open a new terminal (so any PATH changes from the installers are picked up) and confirm all binaries resolve and report a version:
