@@ -1,9 +1,14 @@
-"""Unit tests for `spotlights_engine.candidate_discovery.agents`."""
+"""Unit tests for `spotlights_engine.candidate_discovery.agents`.
+
+The runners are now thin adapters over `llm_session`: argv comes from the
+centralized sessions (resolved via `llm_session.resolve.resolve_cli`) and the
+spawn goes through `llm_session.transport.run_blocking`. Tests patch those
+seams. Env-scrubbing is centralized and covered by `tests/unit/llm_session`.
+"""
 
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,11 +17,11 @@ import pytest
 from spotlights_engine.candidate_discovery.agents import (
     ClaudeRunner,
     CodexRunner,
-    _clean_env,
     _SchemaParseError,
 )
 from spotlights_engine.candidate_discovery.api import DiscoveryConfig
 from spotlights_engine.candidate_discovery.errors import DiscoverySetupError
+from spotlights_engine.llm_session.transport import BlockingResult
 from spotlights_engine.schemas.project import File, Module
 
 
@@ -41,46 +46,14 @@ def _config(tmp_path: Path, **overrides) -> DiscoveryConfig:
     return DiscoveryConfig.model_validate(payload)
 
 
-def test_clean_env_strips_exact_drops(monkeypatch):
-    leaked = {
-        "OPENAI_BASE_URL": "x",
-        "OPENAI_API_BASE": "x",
-        "ANTHROPIC_BASE_URL": "x",
-        "HTTP_PROXY": "x",
-        "HTTPS_PROXY": "x",
-        "ALL_PROXY": "x",
-        "VIRTUAL_ENV": "x",
-    }
-    for k, v in leaked.items():
-        monkeypatch.setenv(k, v)
-    monkeypatch.setenv("PATH", "/usr/bin")
-    monkeypatch.setenv("HOME", "/home/me")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "ak")
-    monkeypatch.setenv("OPENAI_API_KEY", "ok")
-
-    env = _clean_env()
-
-    for k in leaked:
-        assert k not in env
-    assert env["PATH"] == "/usr/bin"
-    assert env["HOME"] == "/home/me"
-    assert env["ANTHROPIC_API_KEY"] == "ak"
-    assert env["OPENAI_API_KEY"] == "ok"
-
-
-def test_clean_env_strips_prefixes(monkeypatch):
-    monkeypatch.setenv("VSCODE_PID", "1")
-    monkeypatch.setenv("VSCODE_IPC_HOOK", "x")
-    monkeypatch.setenv("OPTQUEST_RUN_ID", "x")
-    monkeypatch.setenv("SPOTLIGHTS_SESSION", "x")
-    monkeypatch.setenv("KEEP_ME", "y")
-
-    env = _clean_env()
-    assert "VSCODE_PID" not in env
-    assert "VSCODE_IPC_HOOK" not in env
-    assert "OPTQUEST_RUN_ID" not in env
-    assert "SPOTLIGHTS_SESSION" not in env
-    assert env["KEEP_ME"] == "y"
+def _blocking(returncode: int, stdout: bytes, stderr: bytes, *, timed_out: bool = False):
+    return BlockingResult(
+        stdout=stdout,
+        stderr=stderr,
+        returncode=returncode,
+        duration_s=1.0,
+        timed_out=timed_out,
+    )
 
 
 def test_runner_init_raises_when_executable_missing(tmp_path):
@@ -94,8 +67,15 @@ def test_runner_init_raises_when_executable_missing(tmp_path):
 
 
 def _force_present(monkeypatch):
+    # AgentRunner.__init__ checks presence via agents.shutil.which; the session
+    # argv builder resolves argv[0] via llm_session.resolve.resolve_cli, which
+    # uses its own shutil.which. Patch both.
     monkeypatch.setattr(
         "spotlights_engine.candidate_discovery.agents.shutil.which",
+        lambda _name: "/usr/local/bin/whatever",
+    )
+    monkeypatch.setattr(
+        "spotlights_engine.llm_session.resolve.shutil.which",
         lambda _name: "/usr/local/bin/whatever",
     )
 
@@ -109,8 +89,8 @@ def test_claude_argv_includes_required_flags(tmp_path, monkeypatch):
     iter_dir = tmp_path / "iter"
     iter_dir.mkdir()
     argv = runner._build_argv(schema_path=schema_path, iter_dir=iter_dir)
-    # argv[0] is the executable resolved via shutil.which (mocked above), not the
-    # bare "claude" name — the cmd shim is deliberately bypassed.
+    # argv[0] is the executable resolved via the session resolver (mocked), not
+    # the bare "claude" name — the cmd shim is deliberately bypassed.
     assert argv[0] == "/usr/local/bin/whatever"
     assert "-p" in argv
     assert argv[argv.index("--output-format") + 1] == "stream-json"
@@ -129,8 +109,6 @@ def test_codex_argv_includes_required_flags(tmp_path, monkeypatch):
     iter_dir = tmp_path / "iter"
     iter_dir.mkdir()
     argv = runner._build_argv(schema_path=schema_path, iter_dir=iter_dir)
-    # argv[0] is the executable resolved via shutil.which (mocked above), not the
-    # bare "codex" name.
     assert argv[0] == "/usr/local/bin/whatever"
     assert argv[1:3] == ["exec", "-"]
     assert "--json" in argv
@@ -159,7 +137,7 @@ def test_claude_argv_omits_dash_c_flag(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("runner_cls", [ClaudeRunner, CodexRunner])
 def test_invoke_passes_cwd_repo_path(runner_cls, tmp_path, monkeypatch):
-    """Plan §17 cwd asymmetry: both runners receive `cwd=repo_path`."""
+    """Plan §17 cwd asymmetry: both runners run with `cwd=repo_path`."""
     _force_present(monkeypatch)
     cfg = _config(tmp_path)
     runner = runner_cls(cfg)
@@ -173,19 +151,21 @@ def test_invoke_passes_cwd_repo_path(runner_cls, tmp_path, monkeypatch):
 
     captured: dict = {}
 
-    def fake_run(*args, **kwargs):
+    def fake_run_blocking(**kwargs):
         captured.update(kwargs)
-        return subprocess.CompletedProcess(args=args, returncode=0, stdout=b"", stderr=b"")
+        return _blocking(0, b"", b"")
 
-    with patch("spotlights_engine.candidate_discovery.agents.subprocess.run",
-               side_effect=fake_run):
-        # Both _parse_invocation_metadata implementations tolerate empty stdout
-        # by returning None-valued fields; that's fine for this assertion.
+    with patch("spotlights_engine.llm_session.claude.run_blocking",
+               side_effect=fake_run_blocking), \
+         patch("spotlights_engine.llm_session.codex.run_blocking",
+               side_effect=fake_run_blocking):
+        # Claude's no-result-event path raises _SchemaParseError with empty
+        # stdout; that's fine for this cwd assertion.
         try:
             runner.invoke(prompt="hi", iter_dir=iter_dir, schema_path=schema_path)
         except _SchemaParseError:
-            pass  # Claude's no-result-event path is irrelevant here.
-    assert captured.get("cwd") == str(cfg.repo_path)
+            pass
+    assert Path(captured.get("cwd")) == cfg.repo_path
 
 
 def test_claude_invoke_timeout_raises_schema_parse_error(tmp_path, monkeypatch):
@@ -197,11 +177,8 @@ def test_claude_invoke_timeout_raises_schema_parse_error(tmp_path, monkeypatch):
     schema_path = tmp_path / "schema.json"
     schema_path.write_text("{}")
 
-    def fake_run(*args, **kwargs):
-        raise subprocess.TimeoutExpired(cmd=args[0], timeout=1, output=b"out", stderr=b"err")
-
-    with patch("spotlights_engine.candidate_discovery.agents.subprocess.run",
-               side_effect=fake_run):
+    with patch("spotlights_engine.llm_session.claude.run_blocking",
+               return_value=_blocking(-1, b"out", b"err", timed_out=True)):
         with pytest.raises(_SchemaParseError, match="timed out"):
             runner.invoke(prompt="hi", iter_dir=iter_dir, schema_path=schema_path)
 
@@ -218,15 +195,12 @@ def test_claude_invoke_nonzero_exit_raises(tmp_path, monkeypatch):
     schema_path = tmp_path / "schema.json"
     schema_path.write_text("{}")
 
-    fake_result = subprocess.CompletedProcess(
-        args=[], returncode=7, stdout=b"out-boom", stderr=b"err-boom"
-    )
-    with patch("spotlights_engine.candidate_discovery.agents.subprocess.run",
-               return_value=fake_result):
+    with patch("spotlights_engine.llm_session.claude.run_blocking",
+               return_value=_blocking(7, b"out-boom", b"err-boom")):
         with pytest.raises(_SchemaParseError, match="exit=7") as exc:
             runner.invoke(prompt="hi", iter_dir=iter_dir, schema_path=schema_path)
+    # The centralized error message keeps the stderr tail (stdout is dropped).
     assert "err-boom" in str(exc.value)
-    assert "out-boom" in str(exc.value)
 
 
 def test_claude_parse_last_message_round_trip(tmp_path, monkeypatch):
@@ -255,11 +229,8 @@ def test_claude_parse_last_message_round_trip(tmp_path, monkeypatch):
         ),
     ]
     fake_stdout = ("\n".join(stdout_lines) + "\n").encode("utf-8")
-    fake_result = subprocess.CompletedProcess(
-        args=[], returncode=0, stdout=fake_stdout, stderr=b""
-    )
-    with patch("spotlights_engine.candidate_discovery.agents.subprocess.run",
-               return_value=fake_result):
+    with patch("spotlights_engine.llm_session.claude.run_blocking",
+               return_value=_blocking(0, fake_stdout, b"")):
         inv = runner.invoke(prompt="hi", iter_dir=iter_dir, schema_path=schema_path)
     assert inv.session_id == "sess-1"
     assert inv.duration_s == 1.234
@@ -295,11 +266,8 @@ def test_claude_invoke_uses_structured_output_when_result_empty(tmp_path, monkey
         ),
     ]
     fake_stdout = ("\n".join(stdout_lines) + "\n").encode("utf-8")
-    fake_result = subprocess.CompletedProcess(
-        args=[], returncode=0, stdout=fake_stdout, stderr=b""
-    )
-    with patch("spotlights_engine.candidate_discovery.agents.subprocess.run",
-               return_value=fake_result):
+    with patch("spotlights_engine.llm_session.claude.run_blocking",
+               return_value=_blocking(0, fake_stdout, b"")):
         runner.invoke(prompt="hi", iter_dir=iter_dir, schema_path=schema_path)
     assert json.loads(runner.parse_last_message(iter_dir)) == structured
 
@@ -317,11 +285,9 @@ def test_claude_invoke_requires_terminal_result_event(tmp_path, monkeypatch):
         json.dumps({"type": "result", "result": "{}"}),
         json.dumps({"type": "assistant", "message": "trailing event"}),
     ]
-    fake_result = subprocess.CompletedProcess(
-        args=[], returncode=0, stdout=("\n".join(stdout_lines) + "\n").encode(), stderr=b""
-    )
-    with patch("spotlights_engine.candidate_discovery.agents.subprocess.run",
-               return_value=fake_result):
+    fake_stdout = ("\n".join(stdout_lines) + "\n").encode()
+    with patch("spotlights_engine.llm_session.claude.run_blocking",
+               return_value=_blocking(0, fake_stdout, b"")):
         with pytest.raises(_SchemaParseError, match="terminal result"):
             runner.invoke(prompt="hi", iter_dir=iter_dir, schema_path=schema_path)
     assert (iter_dir / "last_message.json").read_text() == ""
@@ -336,11 +302,8 @@ def test_claude_invoke_rejects_non_ndjson_stdout(tmp_path, monkeypatch):
     schema_path = tmp_path / "schema.json"
     schema_path.write_text("{}")
 
-    fake_result = subprocess.CompletedProcess(
-        args=[], returncode=0, stdout=b"not-json\n", stderr=b""
-    )
-    with patch("spotlights_engine.candidate_discovery.agents.subprocess.run",
-               return_value=fake_result):
+    with patch("spotlights_engine.llm_session.claude.run_blocking",
+               return_value=_blocking(0, b"not-json\n", b"")):
         with pytest.raises(_SchemaParseError, match="not JSON"):
             runner.invoke(prompt="hi", iter_dir=iter_dir, schema_path=schema_path)
 
@@ -396,11 +359,8 @@ def test_invoke_retry_appends_with_separator(tmp_path, monkeypatch):
     schema_path = tmp_path / "schema.json"
     schema_path.write_text("{}")
 
-    fake_result = subprocess.CompletedProcess(
-        args=[], returncode=7, stdout=b"a", stderr=b"b"
-    )
-    with patch("spotlights_engine.candidate_discovery.agents.subprocess.run",
-               return_value=fake_result):
+    with patch("spotlights_engine.llm_session.claude.run_blocking",
+               return_value=_blocking(7, b"a", b"b")):
         with pytest.raises(_SchemaParseError):
             runner.invoke(prompt="p1", iter_dir=iter_dir, schema_path=schema_path)
         with pytest.raises(_SchemaParseError):

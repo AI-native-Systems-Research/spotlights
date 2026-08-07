@@ -13,61 +13,42 @@ sending the agent into a retry loop until `--max-turns` was exhausted; CLI
 2.1.140 fixes that, so plan mode is once again the right choice here.
 
 Subprocess plumbing — argv resolution (Windows shim bypass), live streaming
-via reader threads, deadline-based kill — lives in
-`signal_pipeline._subprocess_util`. This file is the parts specific to the
-ProjectTree extraction: schema, prompt delivery, and result parsing.
+via reader threads, deadline-based kill, env scrubbing, and transport-level
+backoff-retry — lives in the centralized `llm_session` package (via
+`ClaudeSession` + `run_with_retry`). This file is the parts specific to the
+ProjectTree extraction: schema, prompt delivery, result parsing, and the
+content-level ProjectTree validation-retry loop.
 """
 
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import ValidationError
 
+from spotlights_engine.llm_session import (
+    ClaudeSession,
+    ClaudeSessionOptions,
+    CLIResolutionError,
+    run_with_retry,
+)
+from spotlights_engine.llm_session.resolve import resolve_cli
+from spotlights_engine.llm_session.transport import default_on_event
 from spotlights_engine.modules_extractor.errors import (
     ExtractorAgentError,
     ExtractorSetupError,
     ExtractorValidationError,
 )
 from spotlights_engine.schemas.project import ProjectTree
-from spotlights_engine.signal_pipeline._subprocess_util import (
-    ClaudeResolutionError,
-    StreamingTimeout,
-    default_on_event,
-    resolve_claude_argv0,
-    run_streaming_claude,
-)
-
-_DROP_EXACT = frozenset(
-    {
-        "OPENAI_BASE_URL",
-        "OPENAI_API_BASE",
-        "ANTHROPIC_BASE_URL",
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "ALL_PROXY",
-        "VIRTUAL_ENV",
-    }
-)
-_DROP_PREFIX = ("VSCODE_", "OPTQUEST_", "SPOTLIGHTS_")
 
 # Linux MAX_ARG_STRLEN is 131_072 bytes per argument. `claude --json-schema`
 # inlines the schema as one argv string; leave headroom for environment growth.
 _MAX_SCHEMA_BYTES = 120_000
 _VALIDATION_RETRIES = 1
 _RETRY_PAYLOAD_MAX_CHARS = 80_000
-
-
-def _clean_env() -> dict[str, str]:
-    env = os.environ.copy()
-    for key in list(env):
-        if key in _DROP_EXACT or key.startswith(_DROP_PREFIX):
-            env.pop(key)
-    return env
 
 
 @dataclass
@@ -109,8 +90,8 @@ def run_extraction(
     it arrives. Default is `print(..., flush=True)`. Pass `None` to silence.
     """
     try:
-        argv0 = resolve_claude_argv0(claude_bin)
-    except ClaudeResolutionError as e:
+        resolve_cli("claude", claude_bin)
+    except CLIResolutionError as e:
         raise ExtractorSetupError(str(e), executable=claude_bin) from e
 
     if not repo_path.exists() or not repo_path.is_dir():
@@ -133,18 +114,21 @@ def run_extraction(
         (artifacts_dir / "prompt.md").write_text(prompt, encoding="utf-8")
         (artifacts_dir / "schema.json").write_text(schema_text, encoding="utf-8")
 
-    argv = argv0 + [
-        "-p",
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--json-schema",
-        schema_text,
-        "--permission-mode",
-        "plan",
-        "--max-turns",
-        str(max_turns),
-    ]
+    # One centralized session; `run_with_retry` wraps each spawn in the
+    # process-wide limiter + transport-level backoff-retry. The extractor's own
+    # ProjectTree validation-retry loop stays here — it's a distinct concern
+    # (bad content, not a bad transport).
+    session = ClaudeSession(
+        ClaudeSessionOptions(
+            json_schema=schema_text,
+            permission_mode="plan",
+            max_turns=max_turns,
+            timeout_s=timeout_s,
+            claude_bin=claude_bin,
+            output_format="stream-json",
+            stream_events=True,
+        )
+    )
 
     attempt_prompt = prompt
     attempts = _VALIDATION_RETRIES + 1
@@ -158,25 +142,22 @@ def run_extraction(
                 attempt_prompt, encoding="utf-8"
             )
 
-        try:
-            result = run_streaming_claude(
-                argv=argv,
-                prompt=attempt_prompt,
-                env=_clean_env(),
-                cwd=repo_path,
-                timeout_s=timeout_s,
-                on_event=on_event,
-            )
-        except StreamingTimeout as exc:
-            if artifacts_dir is not None:
-                _write_streams(artifacts_dir, exc.stdout, exc.stderr, attempt=attempt)
-            raise ExtractorAgentError(
-                f"claude timed out after {exc.duration_s:.1f}s",
-                timeout_s=timeout_s,
-            ) from exc
+        result = run_with_retry(
+            session,
+            attempt_prompt,
+            cwd=repo_path,
+            on_event=on_event,
+            label="modules_extractor",
+        )
 
         if artifacts_dir is not None:
             _write_streams(artifacts_dir, result.stdout, result.stderr, attempt=attempt)
+
+        if result.timed_out:
+            raise ExtractorAgentError(
+                f"claude timed out after {result.duration_s:.1f}s",
+                timeout_s=timeout_s,
+            )
 
         if result.returncode != 0:
             stderr_tail = result.stderr[-500:].decode("utf-8", "replace")
@@ -188,30 +169,21 @@ def run_extraction(
                 stdout_tail=stdout_tail,
             )
 
-        result_event = _extract_result_event(result.stdout)
-        if result_event is None:
-            raise ExtractorAgentError(
-                "claude stream-json had no terminal result event",
-            )
-        usage = result_event.get("usage") or {}
-        reported_duration = _duration_seconds(result_event)
-        total_duration_s += (
-            reported_duration if reported_duration is not None else result.duration_s
-        )
-        total_cost_usd = _add_optional_float(
-            total_cost_usd,
-            _as_float(result_event.get("total_cost_usd")),
-        )
+        if result.error is not None:
+            raise ExtractorAgentError(result.error)
+
+        reported_duration = result.duration_s
+        total_duration_s += reported_duration
+        total_cost_usd = _add_optional_float(total_cost_usd, result.cost_usd)
+        usage = result.usage
         total_input_tokens = _add_optional_int(
-            total_input_tokens,
-            _as_int(usage.get("input_tokens")),
+            total_input_tokens, usage.input if usage else None
         )
         total_output_tokens = _add_optional_int(
-            total_output_tokens,
-            _as_int(usage.get("output_tokens")),
+            total_output_tokens, usage.output if usage else None
         )
 
-        payload = _final_message_text(result_event)
+        payload = result.final_message or ""
         if not payload.strip():
             raise ExtractorAgentError("claude returned an empty final message")
 
@@ -246,7 +218,7 @@ def run_extraction(
             tree.to_json(artifacts_dir / "project_tree.json")
 
         invocation = ExtractionInvocation(
-            session_id=result_event.get("session_id"),
+            session_id=result.session_id,
             duration_s=total_duration_s,
             cost_usd=total_cost_usd,
             input_tokens=total_input_tokens,
@@ -310,73 +282,6 @@ def _notify(on_event: Callable[[str], None] | None, message: str) -> None:
         on_event(message)
     except Exception:  # noqa: BLE001 - UI callbacks must not abort extraction
         pass
-
-
-def _extract_result_event(stdout: bytes) -> dict | None:
-    last_event: dict | None = None
-    for line in stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise ExtractorAgentError(
-                f"claude stream-json line not JSON: {exc}",
-            ) from exc
-        if not isinstance(obj, dict):
-            raise ExtractorAgentError("claude stream-json line was not an object")
-        last_event = obj
-    if last_event is None or last_event.get("type") != "result":
-        return None
-    return last_event
-
-
-def _final_message_text(result_event: dict) -> str:
-    structured = result_event.get("structured_output")
-    if isinstance(structured, (dict, list)):
-        return json.dumps(structured)
-    result = result_event.get("result")
-    if isinstance(result, str) and result:
-        return result
-    message = result_event.get("message") or {}
-    content = message.get("content")
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        chunks = [c.get("text", "") for c in content if isinstance(c, dict)]
-        return "".join(chunks)
-    return ""
-
-
-def _duration_seconds(event: dict) -> float | None:
-    for key in ("duration_s", "elapsed_s"):
-        value = _as_float(event.get(key))
-        if value is not None:
-            return value
-    for key in ("duration_ms", "elapsed_ms"):
-        value = _as_float(event.get(key))
-        if value is not None:
-            return value / 1000.0
-    return None
-
-
-def _as_int(v: object) -> int | None:
-    if v is None:
-        return None
-    try:
-        return int(v)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return None
-
-
-def _as_float(v: object) -> float | None:
-    if v is None:
-        return None
-    try:
-        return float(v)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return None
 
 
 def _add_optional_float(current: float | None, value: float | None) -> float | None:

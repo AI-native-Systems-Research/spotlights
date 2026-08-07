@@ -1,65 +1,39 @@
-"""Generic `claude -p` subprocess wrapper for stages 03/04/05.
+"""Generic `claude -p` subprocess wrapper for stages 01/03/04/05.
 
-Modeled on `agent_proposals.claude_exec` but parameterised: stages
-choose `permission_mode`, `cwd`, `json_schema`, and `allowed_tools`.
+Parameterised over `permission_mode`, `cwd`, `json_schema`, and
+`allowed_tools`. This is now a thin adapter over the centralized
+`llm_session` package: `ClaudeSession` owns argv building, env scrubbing (the
+`ANTHROPIC_AUTH_TOKEN` auth-leak fix now lives in `llm_session.env.clean_env`),
+streaming, and stream-json parsing; `run_with_retry` wraps each spawn in the
+process-wide concurrency limiter and transport-level backoff-retry.
+
+Write-mode stages (s05 runs `bypassPermissions`) are single-attempt by
+construction: `run_with_retry` derives a `max_attempts=1` policy for
+`acceptEdits`/`bypassPermissions` so a partially-applied edit is never
+re-applied.
 
 Persists the assembled prompt + raw stdout/stderr under `log_dir` for
-debugging, regardless of success / failure. The runner's per-stage
-`log_dir` is `_logs/<NN>_<name>/<timestamp>/`, so each invocation gets
-its own directory and old runs aren't clobbered.
-
-**Auth-leak fix:** main's `_clean_env` (in `agent_proposals.claude_exec`
-and `modules_extractor.agent`) drops `ANTHROPIC_BASE_URL` but not
-`ANTHROPIC_AUTH_TOKEN`. When this pipeline is invoked from inside a
-Claude Code session, that token leaks into the spawned subprocess and
-overrides keychain credentials → `401 Invalid bearer token`. We drop
-both. (The same fix on main is a separate cleanup; reproducing here
-keeps the signal pipeline self-sufficient.)
-
-Subprocess plumbing — argv resolution (Windows shim bypass), live
-streaming via reader threads, deadline-based kill — lives in
-`_subprocess_util.py`. This file is just the parameterised CLI wrapper
-and result parsing.
+debugging, regardless of success / failure. The runner's per-stage `log_dir`
+is `_logs/<NN>_<name>/<timestamp>/`, so each invocation gets its own directory
+and old runs aren't clobbered.
 """
 
 from __future__ import annotations
 
 import json
-import os
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Iterable, Literal
+from typing import Literal
 
-from spotlights_engine.signal_pipeline._subprocess_util import (
-    ClaudeResolutionError,
-    StreamingTimeout,
-    default_on_event,
-    resolve_claude_argv0,
-    run_streaming_claude,
+from spotlights_engine.llm_session import (
+    ClaudeSession,
+    ClaudeSessionOptions,
+    CLIResolutionError,
+    run_with_retry,
 )
-
-
-_DROP_EXACT = frozenset(
-    {
-        "OPENAI_BASE_URL",
-        "OPENAI_API_BASE",
-        "ANTHROPIC_BASE_URL",
-        "ANTHROPIC_AUTH_TOKEN",
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "ALL_PROXY",
-        "VIRTUAL_ENV",
-    }
-)
-_DROP_PREFIX = ("VSCODE_", "OPTQUEST_", "SPOTLIGHTS_")
-
-
-def _clean_env() -> dict[str, str]:
-    env = os.environ.copy()
-    for key in list(env):
-        if key in _DROP_EXACT or key.startswith(_DROP_PREFIX):
-            env.pop(key)
-    return env
+from spotlights_engine.llm_session.resolve import resolve_cli
+from spotlights_engine.llm_session.transport import default_on_event
 
 
 class ClaudeNotAvailableError(RuntimeError):
@@ -99,8 +73,8 @@ def ensure_claude_available(claude_bin: str = "claude") -> None:
     would force-fall-back to the buffering `claude.CMD` shim on Windows.
     """
     try:
-        resolve_claude_argv0(claude_bin)
-    except ClaudeResolutionError as e:
+        resolve_cli("claude", claude_bin)
+    except CLIResolutionError as e:
         raise ClaudeNotAvailableError(str(e)) from e
 
 
@@ -127,158 +101,76 @@ def run_claude(
     `--model <id>` to the subprocess; otherwise the CLI's default applies.
     """
     try:
-        argv0 = resolve_claude_argv0(claude_bin)
-    except ClaudeResolutionError as e:
+        resolve_cli("claude", claude_bin)
+    except CLIResolutionError as e:
         raise ClaudeNotAvailableError(str(e)) from e
 
-    log_dir.mkdir(parents=True, exist_ok=True)
-    (log_dir / "prompt.md").write_text(prompt, encoding="utf-8")
-    if json_schema is not None:
-        (log_dir / "schema.json").write_text(json_schema, encoding="utf-8")
-
-    argv: list[str] = argv0 + [
-        "-p",
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--permission-mode",
-        permission_mode,
-        "--max-turns",
-        str(max_turns),
-    ]
-    if model is not None:
-        argv += ["--model", model]
-    if json_schema is not None:
-        argv += ["--json-schema", json_schema]
-    if allowed_tools is not None:
-        argv += ["--allowed-tools", ",".join(allowed_tools)]
-
-    try:
-        result = run_streaming_claude(
-            argv=argv,
-            prompt=prompt,
-            env=_clean_env(),
-            cwd=cwd,
+    session = ClaudeSession(
+        ClaudeSessionOptions(
+            model=model,
+            permission_mode=permission_mode,
+            allowed_tools=tuple(allowed_tools) if allowed_tools is not None else None,
+            max_turns=max_turns,
+            json_schema=json_schema,
+            output_format="stream-json",
+            stream_events=True,
             timeout_s=timeout_s,
-            on_event=on_event,
+            claude_bin=claude_bin,
         )
-    except StreamingTimeout as exc:
-        _persist_streams(log_dir, exc.stdout, exc.stderr)
-        return ClaudeRunResult(
-            structured_output=None,
-            duration_s=exc.duration_s,
-            error=f"claude timed out after {exc.duration_s:.1f}s",
-        )
+    )
 
-    _persist_streams(log_dir, result.stdout, result.stderr)
+    # The session persists prompt.md / schema.json / raw_stdout.log /
+    # raw_stderr.log into log_dir. Write-mode (acceptEdits/bypassPermissions)
+    # gets a single attempt automatically inside run_with_retry.
+    result = run_with_retry(
+        session,
+        prompt,
+        cwd=cwd,
+        on_event=on_event,
+        log_dir=log_dir,
+        label=f"signal_pipeline.{permission_mode}",
+    )
 
-    # Extract model from init event regardless of success/failure — useful
-    # for debugging "which model did this run?" even when the stage failed.
-    model = _extract_model_from_init(result.stdout)
+    resolved_model = result.model
 
-    if result.returncode != 0:
-        stderr_tail = result.stderr[-500:].decode("utf-8", "replace")
-        return ClaudeRunResult(
-            structured_output=None,
-            duration_s=result.duration_s,
-            error=(
-                f"claude exit={result.returncode}: stderr={stderr_tail!r} "
-                f"(see {log_dir / 'raw_stderr.log'})"
-            ),
-            model=model,
-        )
-
-    try:
-        result_event = _extract_result_event(result.stdout)
-    except _ResultEventError as e:
+    if result.error is not None:
+        error = result.error
+        if not result.timed_out and result.returncode != 0:
+            error = f"{error} (see {log_dir / 'raw_stderr.log'})"
         return ClaudeRunResult(
             structured_output=None,
             duration_s=result.duration_s,
-            error=str(e),
-            model=model,
+            error=error,
+            model=resolved_model,
+            cost_usd=result.cost_usd,
+            num_turns=result.num_turns,
         )
-    if result_event is None:
-        return ClaudeRunResult(
-            structured_output=None,
-            duration_s=result.duration_s,
-            error="claude stream-json had no terminal result event",
-            model=model,
-        )
-
-    cost_usd = result_event.get("total_cost_usd")
-    if not isinstance(cost_usd, (int, float)):
-        cost_usd = None
-    num_turns = result_event.get("num_turns")
-    if not isinstance(num_turns, int):
-        num_turns = None
 
     _write_meta(
         log_dir,
-        model=model,
-        cost_usd=cost_usd,
+        model=resolved_model,
+        cost_usd=result.cost_usd,
         duration_s=result.duration_s,
-        num_turns=num_turns,
+        num_turns=result.num_turns,
     )
 
-    structured = result_event.get("structured_output")
-    if isinstance(structured, (dict, list)):
+    if isinstance(result.structured_output, (dict, list)):
         return ClaudeRunResult(
-            structured_output=structured,
+            structured_output=result.structured_output,
             duration_s=result.duration_s,
-            model=model,
-            cost_usd=cost_usd,
-            num_turns=num_turns,
+            model=resolved_model,
+            cost_usd=result.cost_usd,
+            num_turns=result.num_turns,
         )
-
-    # Older CLI versions: the JSON payload may live in `result` as text.
-    fallback = result_event.get("result")
-    if isinstance(fallback, str) and fallback.strip():
-        try:
-            parsed = json.loads(fallback)
-        except json.JSONDecodeError as e:
-            return ClaudeRunResult(
-                structured_output=None,
-                duration_s=result.duration_s,
-                error=f"claude result text not JSON: {e}",
-                model=model,
-                cost_usd=cost_usd,
-                num_turns=num_turns,
-            )
-        if isinstance(parsed, (dict, list)):
-            return ClaudeRunResult(
-                structured_output=parsed,
-                duration_s=result.duration_s,
-                model=model,
-                cost_usd=cost_usd,
-                num_turns=num_turns,
-            )
 
     return ClaudeRunResult(
         structured_output=None,
         duration_s=result.duration_s,
         error="claude produced no structured_output and no usable fallback",
-        model=model,
-        cost_usd=cost_usd,
-        num_turns=num_turns,
+        model=resolved_model,
+        cost_usd=result.cost_usd,
+        num_turns=result.num_turns,
     )
-
-
-def _extract_model_from_init(stdout: bytes) -> str | None:
-    """Read the first stream-json line; return its `model` field if it's
-    a `system/init` event."""
-    for raw_line in stdout.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError:
-            return None
-        if isinstance(obj, dict) and obj.get("type") == "system" and obj.get("subtype") == "init":
-            model = obj.get("model")
-            return model if isinstance(model, str) else None
-        return None
-    return None
 
 
 def _write_meta(
@@ -300,36 +192,6 @@ def _write_meta(
         "num_turns": num_turns,
     }
     (log_dir / "meta.json").write_text(json.dumps(meta, indent=2) + "\n", encoding="utf-8")
-
-
-def _persist_streams(log_dir: Path, stdout: bytes, stderr: bytes) -> None:
-    (log_dir / "raw_stdout.log").write_bytes(stdout)
-    (log_dir / "raw_stderr.log").write_bytes(stderr)
-
-
-class _ResultEventError(Exception):
-    pass
-
-
-def _extract_result_event(stdout: bytes) -> dict | None:
-    """Parse stream-json stdout; return the final event iff it's a `result`."""
-    last_event: dict | None = None
-    for raw_line in stdout.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError as e:
-            raise _ResultEventError(
-                f"claude stream-json line not JSON: {e}"
-            ) from e
-        if not isinstance(obj, dict):
-            raise _ResultEventError("claude stream-json line was not an object")
-        last_event = obj
-    if last_event is None or last_event.get("type") != "result":
-        return None
-    return last_event
 
 
 __all__ = [

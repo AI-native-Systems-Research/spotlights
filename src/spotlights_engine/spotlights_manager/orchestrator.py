@@ -1743,6 +1743,44 @@ def _copy_public_manifest_to_output(*, paths: ManagerPaths, output_folder: Path)
 # ---------------------------------------------------------------------------
 
 
+def _configure_llm_session(config: SpotlightsManagerConfig, paths: ManagerPaths) -> None:
+    """Point the retry log at the artifacts folder and set the CLI budget.
+
+    Runs once at manager startup, before any module fans out. The retry log
+    lands at `<artifacts>/spotlights_manager/retries.log` (existing ManagerPaths
+    convention); it degrades to standard logging if the folder is unusable.
+
+    The global CLI limiter is only pinned when `max_cli_concurrency` is set:
+    `configure_global_limiter` raises if a slot was already lazily taken, so
+    the unset path leaves every caller on the `get_global_limiter()` env/default
+    budget. A late reconfigure (e.g. a second `run` in the same process, or a
+    prior lazy init) is downgraded to a warning rather than crashing the run.
+
+    Likewise the default retry/backoff policy is pinned only when `retry_policy`
+    is set; unset leaves callers on the built-in `RetryPolicy` defaults.
+    `configure_default_retry_policy` is last-wins (RetryPolicy is immutable), so
+    no fail-loud guard is needed there.
+    """
+    from spotlights_engine.llm_session.config import configure_default_retry_policy
+    from spotlights_engine.llm_session.limiter import configure_global_limiter
+    from spotlights_engine.llm_session.retry_log import configure_retry_log
+
+    configure_retry_log(paths.root / "retries.log")
+
+    if config.retry_policy is not None:
+        configure_default_retry_policy(config.retry_policy)
+
+    if config.max_cli_concurrency is not None:
+        try:
+            configure_global_limiter(config.max_cli_concurrency)
+        except RuntimeError as exc:
+            _log.warning(
+                "could not pin CLI concurrency to %d (%s); using existing limiter",
+                config.max_cli_concurrency,
+                exc,
+            )
+
+
 def run(
     input: SpotlightsManagerInput, *, config: SpotlightsManagerConfig
 ) -> SpotlightsManagerResult:
@@ -1755,6 +1793,12 @@ async def _run_async(
     run_start = time.monotonic()
     paths = ManagerPaths(config.artifacts_dir)
     _validate_setup(input, paths)
+
+    # Point the dedicated retry log at this run's artifacts folder (following the
+    # existing ManagerPaths convention) and, if the config pins an explicit
+    # budget, set the process-wide CLI concurrency cap before any module fans
+    # out. Both are the single sources of truth for every CLI spawn in the run.
+    _configure_llm_session(config, paths)
 
     filter_label = (
         "include" if config.module_filter is not None and config.module_filter.include else "all"
@@ -1829,6 +1873,12 @@ async def _run_async(
         else [qn for qn in all_qns if qn in selected_set]
     )
 
+    # Per-layer module fan-out limit. This is a *scheduling* knob (how many
+    # modules pipeline at once), not the safety bound against "too many
+    # concurrent requests": that bound is the process-wide `llm_session` CLI
+    # limiter (see `_configure_llm_session` / `max_cli_concurrency`), which every
+    # CLI spawn passes through regardless of how these per-layer semaphores
+    # multiply.
     sem = asyncio.Semaphore(config.max_parallel_sessions)
     manifest_lock = asyncio.Lock()
     cancel_event = None if input.continue_on_module_failure else asyncio.Event()

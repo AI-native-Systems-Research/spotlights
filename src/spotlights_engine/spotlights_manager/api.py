@@ -18,6 +18,7 @@ from spotlights_engine.candidate_discovery.api import (
     DiscoveryConfig,
     IterationTelemetry,
 )
+from spotlights_engine.llm_session.config import RetryPolicy
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
 from spotlights_engine.modules_extractor import ExtractorConfig
 from spotlights_engine.modules_extractor.agent import ExtractionInvocation
@@ -49,6 +50,22 @@ class SpotlightsManagerConfig(BaseModel):
     artifacts_dir: Path
     output_folder: Path
     max_parallel_sessions: int = Field(default=1, ge=1)
+    # Process-wide cap on *simultaneous* Claude/Codex CLI processes, enforced by
+    # the shared `llm_session` limiter. This is the single documented safety
+    # bound against "too many concurrent requests": the per-layer
+    # `max_parallel_*` semaphores multiply (manager × candidates × runners), but
+    # every CLI spawn still has to take one of these slots. `None` (the default)
+    # leaves the limiter to resolve from `SPOTLIGHTS_MAX_CLI_CONCURRENCY` or its
+    # built-in default; set an int to pin the budget explicitly for this run.
+    max_cli_concurrency: int | None = Field(default=None, ge=1)
+
+    # Process-wide default retry/backoff policy for transient CLI failures
+    # (rate-limit / overloaded / 429 / 529 / 503) and timeouts, applied by the
+    # shared `llm_session` retry loop. `None` (the default) uses the built-in
+    # `RetryPolicy` field defaults; set a `RetryPolicy` here to pin the
+    # budget/backoff explicitly for this run. Write-mode sessions still collapse
+    # to a single attempt regardless.
+    retry_policy: RetryPolicy | None = None
 
     module_filter: ModuleFilter | None = None
 

@@ -4,23 +4,26 @@ import json
 
 import pytest
 
+from spotlights_engine.costing.usage import AgentUsage
+from spotlights_engine.llm_session import SessionResult
 from spotlights_engine.modules_extractor.agent import run_extraction
 from spotlights_engine.modules_extractor.errors import ExtractorValidationError
-from spotlights_engine.signal_pipeline._subprocess_util import StreamingResult
 
 
-def _stream_result(payload: dict) -> StreamingResult:
-    event = {
-        "type": "result",
-        "subtype": "success",
-        "structured_output": payload,
-        "usage": {"input_tokens": 10, "output_tokens": 20},
-    }
-    return StreamingResult(
-        stdout=(json.dumps(event) + "\n").encode("utf-8"),
-        stderr=b"",
+def _session_result(payload: dict) -> SessionResult:
+    """A successful stream-json run whose terminal event carried `payload`.
+
+    The extractor now consumes a centralized `SessionResult`; the session has
+    already parsed `structured_output` and usage out of the raw stream, so the
+    test constructs the parsed result directly.
+    """
+    return SessionResult(
+        cli="claude",
         returncode=0,
         duration_s=1.0,
+        structured_output=payload,
+        final_message=json.dumps(payload),
+        usage=AgentUsage(input=10, output=20),
     )
 
 
@@ -84,21 +87,21 @@ def test_run_extraction_retries_once_after_project_tree_validation_error(
 ) -> None:
     prompts: list[str] = []
     results = [
-        _stream_result(_invalid_conceptual_split_payload()),
-        _stream_result(_valid_leaf_payload()),
+        _session_result(_invalid_conceptual_split_payload()),
+        _session_result(_valid_leaf_payload()),
     ]
 
-    def fake_run_streaming_claude(**kwargs) -> StreamingResult:
-        prompts.append(kwargs["prompt"])
+    def fake_run_with_retry(session, prompt, **kwargs) -> SessionResult:
+        prompts.append(prompt)
         return results.pop(0)
 
     monkeypatch.setattr(
-        "spotlights_engine.modules_extractor.agent.resolve_claude_argv0",
-        lambda _: ["claude"],
+        "spotlights_engine.modules_extractor.agent.resolve_cli",
+        lambda _cli, _bin: "/usr/local/bin/claude",
     )
     monkeypatch.setattr(
-        "spotlights_engine.modules_extractor.agent.run_streaming_claude",
-        fake_run_streaming_claude,
+        "spotlights_engine.modules_extractor.agent.run_with_retry",
+        fake_run_with_retry,
     )
     artifacts = tmp_path / "artifacts"
     artifacts.mkdir()
@@ -127,21 +130,21 @@ def test_run_extraction_retries_once_after_project_tree_validation_error(
 def test_run_extraction_raises_after_validation_retry_fails(tmp_path, monkeypatch) -> None:
     prompts: list[str] = []
     results = [
-        _stream_result(_invalid_conceptual_split_payload()),
-        _stream_result(_invalid_conceptual_split_payload()),
+        _session_result(_invalid_conceptual_split_payload()),
+        _session_result(_invalid_conceptual_split_payload()),
     ]
 
-    def fake_run_streaming_claude(**kwargs) -> StreamingResult:
-        prompts.append(kwargs["prompt"])
+    def fake_run_with_retry(session, prompt, **kwargs) -> SessionResult:
+        prompts.append(prompt)
         return results.pop(0)
 
     monkeypatch.setattr(
-        "spotlights_engine.modules_extractor.agent.resolve_claude_argv0",
-        lambda _: ["claude"],
+        "spotlights_engine.modules_extractor.agent.resolve_cli",
+        lambda _cli, _bin: "/usr/local/bin/claude",
     )
     monkeypatch.setattr(
-        "spotlights_engine.modules_extractor.agent.run_streaming_claude",
-        fake_run_streaming_claude,
+        "spotlights_engine.modules_extractor.agent.run_with_retry",
+        fake_run_with_retry,
     )
 
     with pytest.raises(ExtractorValidationError, match="after 2 attempts") as exc:

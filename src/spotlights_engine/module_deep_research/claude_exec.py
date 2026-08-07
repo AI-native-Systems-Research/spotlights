@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from collections.abc import Mapping, Sequence
 from pathlib import Path
@@ -11,8 +10,11 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 from spotlights_engine.costing.usage import AgentUsage, claude_usage_from_payload
+from spotlights_engine.llm_session.env import clean_env
+from spotlights_engine.llm_session.transport import final_message_text
 from spotlights_engine.module_deep_research.agent_exec import (
     AgentExecResult,
+    guarded_run,
     resolve_cli_executable,
 )
 
@@ -73,31 +75,36 @@ class ClaudeExecClient:
 
     def run(self, prompt: str, *, check: bool = True) -> AgentExecResult:
         cmd = self.build_command()
-        env = os.environ.copy()
+        # Centralized env scrubbing (drops ANTHROPIC_AUTH_TOKEN — the auth-leak
+        # fix — plus the proxy/base-url vars that used to bypass keychain auth).
+        env = clean_env()
         if self.options.env:
             env.update(dict(self.options.env))
 
-        completed = subprocess.run(
-            cmd,
-            input=prompt,
-            capture_output=True,
-            text=True,
-            cwd=str(Path(self.options.cwd).expanduser().resolve()),
-            env=env,
-            timeout=self.options.timeout_seconds,
-            check=False,
-        )
-        # `--output-format json` puts text and usage on the same payload;
-        # parse it once so usage is captured before the stream is discarded.
-        payload = _parse_payload(completed.stdout)
-        result = AgentExecResult(
-            command=cmd,
-            returncode=completed.returncode,
-            stdout=completed.stdout,
-            stderr=completed.stderr,
-            final_message=_final_message(completed.stdout, payload=payload),
-            usage=_usage(payload, fallback_model=self.options.model),
-        )
+        def _inner() -> AgentExecResult:
+            completed = subprocess.run(
+                cmd,
+                input=prompt,
+                capture_output=True,
+                text=True,
+                cwd=str(Path(self.options.cwd).expanduser().resolve()),
+                env=env,
+                timeout=self.options.timeout_seconds,
+                check=False,
+            )
+            # `--output-format json` puts text and usage on the same payload;
+            # parse it once so usage is captured before the stream is discarded.
+            payload = _parse_payload(completed.stdout)
+            return AgentExecResult(
+                command=cmd,
+                returncode=completed.returncode,
+                stdout=completed.stdout,
+                stderr=completed.stderr,
+                final_message=_json_output_text(completed.stdout, payload),
+                usage=_usage(payload, fallback_model=self.options.model),
+            )
+
+        result = guarded_run(_inner, cli="claude", label="module_deep_research.claude")
         if check:
             result.raise_for_status()
         return result
@@ -123,39 +130,22 @@ def _usage(payload: dict | None, *, fallback_model: str | None) -> AgentUsage | 
     return usage
 
 
-def _final_message(stdout: str, payload: dict | None = None) -> str | None:
+def _json_output_text(stdout: str, payload: dict | None) -> str | None:
+    """Extract the assistant's final text/structured output from `--output-format json`.
+
+    Delegates the structured_output → result → message.content fallback to the
+    centralized `llm_session.transport.final_message_text`, keeping the
+    module-deep-research nuance that a non-JSON stdout is returned verbatim
+    (this client tolerates a bare text response, unlike the strict stream-json
+    parsers).
+    """
     text = stdout.strip()
     if not text:
         return None
     if payload is None:
-        try:
-            parsed = json.loads(text)
-        except json.JSONDecodeError:
-            return text
-        if not isinstance(parsed, dict):
-            return text
-        payload = parsed
-
-    structured = payload.get("structured_output")
-    if isinstance(structured, (dict, list)):
-        return json.dumps(structured)
-
-    result = payload.get("result")
-    if isinstance(result, str) and result.strip():
-        return result
-
-    message = payload.get("message")
-    if isinstance(message, dict):
-        content = message.get("content")
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            chunks = [item.get("text", "") for item in content if isinstance(item, dict)]
-            joined = "".join(chunks)
-            if joined.strip():
-                return joined
-
-    return None
+        # stdout was not a JSON object — return the raw text as-is.
+        return text
+    return final_message_text(payload) or None
 
 
 __all__ = ["ClaudeExecClient", "ClaudeExecOptions"]

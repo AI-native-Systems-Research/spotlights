@@ -1,45 +1,25 @@
-"""Thin subprocess wrapper around `claude -p` for the per-pair step-4 agent.
+"""Thin wrapper around a centralized Claude session for the per-pair step-4 agent.
 
-Mirrors the shape of `candidate_discovery.agents.ClaudeRunner` but is kept
-self-contained so step 4 does not couple to candidate_discovery's runtime
-contract (iter dirs, `_SchemaParseError`, `DiscoveryConfig`).
+Reuses `spotlights_engine.llm_session` for the spawn + parse + env scrubbing +
+transport retry, and maps the shared `SessionResult` into the step's
+`PairRunResult` shape (which unwraps the schema's `{"proposals": [...]}`).
 """
 
 from __future__ import annotations
 
-import json
-import os
 import shutil
-import subprocess
-import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from spotlights_engine.costing.usage import AgentUsage, claude_usage_from_stream
+from spotlights_engine.costing.usage import AgentUsage
+from spotlights_engine.llm_session import (
+    ClaudeSession,
+    ClaudeSessionOptions,
+    run_with_retry,
+)
 from spotlights_engine.proposal_from_finding_creator.errors import (
     ProposalFromFindingSetupError,
 )
-
-_DROP_EXACT = frozenset(
-    {
-        "OPENAI_BASE_URL",
-        "OPENAI_API_BASE",
-        "ANTHROPIC_BASE_URL",
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "ALL_PROXY",
-        "VIRTUAL_ENV",
-    }
-)
-_DROP_PREFIX = ("VSCODE_", "OPTQUEST_", "SPOTLIGHTS_")
-
-
-def _clean_env() -> dict[str, str]:
-    env = os.environ.copy()
-    for key in list(env):
-        if key in _DROP_EXACT or key.startswith(_DROP_PREFIX):
-            env.pop(key)
-    return env
 
 
 @dataclass
@@ -81,122 +61,48 @@ def run_pair(
     wallclock_s: int,
 ) -> PairRunResult:
     """Run one Claude session and return the parsed structured output."""
-    # Resolve via shutil.which so Windows finds the .CMD shim. Bare
-    # "claude" → FileNotFoundError because subprocess on Windows doesn't
-    # follow PATHEXT for unqualified argv[0].
-    claude_resolved = shutil.which("claude") or "claude"
-    argv = [
-        claude_resolved,
-        "-p",
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--json-schema",
-        schema_text,
-        "--permission-mode",
-        "plan",
-        "--max-turns",
-        str(max_turns),
-    ]
-    env = _clean_env()
-    start = time.monotonic()
-    try:
-        completed = subprocess.run(
-            argv,
-            input=prompt.encode("utf-8"),
-            capture_output=True,
-            env=env,
-            cwd=str(repo_path),
-            timeout=wallclock_s,
-            check=False,
+    session = ClaudeSession(
+        ClaudeSessionOptions(
+            json_schema=schema_text,
+            permission_mode="plan",
+            max_turns=max_turns,
+            timeout_s=wallclock_s,
         )
-    except subprocess.TimeoutExpired as exc:
-        duration = time.monotonic() - start
-        stdout = exc.stdout or b""
+    )
+    result = run_with_retry(
+        session,
+        prompt,
+        cwd=repo_path,
+        on_event=None,
+        label="proposal_from_finding_creator",
+    )
+
+    if result.error is not None:
         return PairRunResult(
             pair_key=pair_key,
-            duration_s=duration,
-            error=f"claude timed out after {duration:.1f}s",
-            stdout=stdout,
-            stderr=exc.stderr or b"",
-            usage=claude_usage_from_stream(stdout),
-        )
-    duration = time.monotonic() - start
-    usage = claude_usage_from_stream(completed.stdout or b"")
-
-    if completed.returncode != 0:
-        stderr_tail = (completed.stderr or b"")[-500:].decode("utf-8", "replace")
-        return PairRunResult(
-            pair_key=pair_key,
-            duration_s=duration,
-            error=f"claude exit={completed.returncode}: stderr={stderr_tail!r}",
-            stdout=completed.stdout or b"",
-            stderr=completed.stderr or b"",
-            usage=usage,
+            duration_s=result.duration_s,
+            error=result.error,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            usage=result.usage,
         )
 
-    try:
-        result_event = _extract_result_event(completed.stdout)
-    except _ResultEventError as exc:
-        return PairRunResult(
-            pair_key=pair_key,
-            duration_s=duration,
-            error=str(exc),
-            stdout=completed.stdout or b"",
-            stderr=completed.stderr or b"",
-            usage=usage,
-        )
-
-    if result_event is None:
-        return PairRunResult(
-            pair_key=pair_key,
-            duration_s=duration,
-            error="claude stream-json had no terminal result event",
-            stdout=completed.stdout or b"",
-            stderr=completed.stderr or b"",
-            usage=usage,
-        )
-
-    structured = result_event.get("structured_output")
-    unwrapped = _unwrap_proposals(structured)
+    unwrapped = _unwrap_proposals(result.structured_output)
     if unwrapped is not None:
         return PairRunResult(
             pair_key=pair_key,
-            duration_s=duration,
+            duration_s=result.duration_s,
             structured_output=unwrapped,
-            usage=usage,
+            usage=result.usage,
         )
-
-    # Fallback: older CLI versions may put the JSON-encoded payload on `result`.
-    fallback = result_event.get("result")
-    if isinstance(fallback, str) and fallback.strip():
-        try:
-            parsed = json.loads(fallback)
-        except json.JSONDecodeError as exc:
-            return PairRunResult(
-                pair_key=pair_key,
-                duration_s=duration,
-                error=f"claude result text not JSON: {exc}",
-                stdout=completed.stdout or b"",
-                stderr=completed.stderr or b"",
-                usage=usage,
-            )
-        unwrapped = _unwrap_proposals(parsed)
-        if unwrapped is not None:
-            return PairRunResult(
-                pair_key=pair_key,
-                duration_s=duration,
-                structured_output=unwrapped,
-                usage=usage,
-            )
 
     return PairRunResult(
         pair_key=pair_key,
-        duration_s=duration,
+        duration_s=result.duration_s,
         error="claude produced no structured_output and no usable fallback text",
-        stdout=completed.stdout or b"",
-        stderr=completed.stderr or b"",
-        usage=usage,
+        stdout=result.stdout,
+        stderr=result.stderr,
+        usage=result.usage,
     )
 
 
@@ -206,9 +112,8 @@ def _unwrap_proposals(payload: object) -> list | None:
     The per-pair JSON schema (see `agent_schema.build_per_pair_schema_text`)
     is a top-level object — `{"proposals": [...]}` — because the Anthropic
     tool API requires `input_schema.type == "object"`. The rest of step 4
-    works on the inner list, so unwrap here. A bare list is also accepted
-    so a future schema change or alternative agent can keep working without
-    touching the parser.
+    works on the inner list, so unwrap here. A bare list is also accepted so a
+    future schema change or alternative agent can keep working.
     """
     if isinstance(payload, dict):
         proposals = payload.get("proposals")
@@ -218,30 +123,6 @@ def _unwrap_proposals(payload: object) -> list | None:
     if isinstance(payload, list):
         return payload
     return None
-
-
-class _ResultEventError(Exception):
-    pass
-
-
-def _extract_result_event(stdout: bytes) -> dict | None:
-    last_event: dict | None = None
-    for line in stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise _ResultEventError(
-                f"claude stream-json line not JSON: {exc}"
-            ) from exc
-        if not isinstance(obj, dict):
-            raise _ResultEventError("claude stream-json line was not an object")
-        last_event = obj
-    if last_event is None or last_event.get("type") != "result":
-        return None
-    return last_event
 
 
 __all__ = ["PairRunResult", "ensure_claude_available", "run_pair"]

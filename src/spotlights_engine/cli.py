@@ -30,6 +30,7 @@ from spotlights_engine.defaults import (
 from spotlights_engine.defaults import (
     DEFAULT_REPO as _DEFAULT_REPO,
 )
+from spotlights_engine.llm_session.config import RetryPolicy
 from spotlights_engine.module_knowledge import (
     KnowledgeBase,
     KnowledgeRecord,
@@ -120,6 +121,17 @@ def _build_argparser() -> argparse.ArgumentParser:
         type=int,
         default=1,
         help="Modules processed concurrently (default: 1).",
+    )
+    p.add_argument(
+        "--max-cli-concurrency",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Process-wide cap on simultaneous Claude/Codex CLI processes across "
+            "all modules and steps — the single safety bound against 'too many "
+            "concurrent requests'. Default: llm_session built-in (6)."
+        ),
     )
     p.add_argument(
         "--max-parallel-pairs",
@@ -227,6 +239,52 @@ def _build_argparser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Debug-only: cap step 5 to the first N candidates.",
+    )
+
+    # Transport retry / backoff knobs. Any subset may be set; unset fields fall
+    # back to the RetryPolicy defaults. Write-mode sessions stay single-attempt
+    # regardless. Applied process-wide via SpotlightsManagerConfig.retry_policy.
+    retry = p.add_argument_group("retry/backoff")
+    retry.add_argument(
+        "--retry-max-attempts",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Max attempts for transient (rate-limit/overloaded/429/529/503) failures. Default: 5.",
+    )
+    retry.add_argument(
+        "--retry-timeout-max-attempts",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Smaller attempt budget for wall-clock timeouts. Default: 2.",
+    )
+    retry.add_argument(
+        "--retry-base-delay",
+        type=float,
+        default=None,
+        metavar="S",
+        help="Base backoff delay in seconds. Default: 2.0.",
+    )
+    retry.add_argument(
+        "--retry-max-delay",
+        type=float,
+        default=None,
+        metavar="S",
+        help="Backoff delay cap in seconds. Default: 60.0.",
+    )
+    retry.add_argument(
+        "--retry-multiplier",
+        type=float,
+        default=None,
+        metavar="X",
+        help="Exponential backoff multiplier. Default: 2.0.",
+    )
+    retry.add_argument(
+        "--retry-jitter",
+        choices=("full", "equal", "none"),
+        default=None,
+        help="Backoff jitter strategy. Default: full.",
     )
 
     verbosity = p.add_mutually_exclusive_group()
@@ -407,11 +465,28 @@ def _build_config(args: argparse.Namespace) -> SpotlightsManagerConfig:
     if args.review_iterations is not None:
         discovery_cfg = DiscoveryConfig(num_review_iterations=args.review_iterations)
 
+    # Assemble a RetryPolicy only when a retry flag was passed; unset fields keep
+    # their RetryPolicy defaults so partial overrides work.
+    retry_policy: RetryPolicy | None = None
+    retry_overrides = {
+        "max_attempts": args.retry_max_attempts,
+        "timeout_max_attempts": args.retry_timeout_max_attempts,
+        "base_delay_s": args.retry_base_delay,
+        "max_delay_s": args.retry_max_delay,
+        "multiplier": args.retry_multiplier,
+        "jitter": args.retry_jitter,
+    }
+    set_overrides = {k: v for k, v in retry_overrides.items() if v is not None}
+    if set_overrides:
+        retry_policy = RetryPolicy(**set_overrides)
+
     include = _flatten_include(args.include)
     return SpotlightsManagerConfig(
         artifacts_dir=args.artifacts_dir,
         output_folder=args.output_folder,
         max_parallel_sessions=args.max_parallel,
+        max_cli_concurrency=args.max_cli_concurrency,
+        retry_policy=retry_policy,
         module_filter=ModuleFilter(include=include) if include else None,
         discovery=discovery_cfg,
         proposal_from_finding=proposal_cfg,

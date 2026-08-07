@@ -1,45 +1,23 @@
-"""Self-contained subprocess wrapper around `codex exec` for the per-candidate
-Codex pass.
+"""Thin wrapper around a centralized Codex session for the per-candidate pass.
 
-Modelled on `candidate_discovery.CodexRunner` because we want
-`--output-schema` enforcement, which `module_deep_research.CodexExecClient`
-does not expose. Returns the same `CandidateAgentRunResult` shape as the
-Claude runner so step 5's orchestration can stay agent-agnostic.
+Reuses `spotlights_engine.llm_session.CodexSession` for `--output-schema`
+enforcement + spawn/parse/env-scrub/transport-retry, and maps the shared
+`SessionResult` into the same `CandidateAgentRunResult` shape as the Claude
+runner so step 5's orchestration stays agent-agnostic.
 """
 
 from __future__ import annotations
 
-import json
-import os
 import shutil
-import subprocess
-import time
 from pathlib import Path
 
 from spotlights_engine.agent_proposals.claude_exec import CandidateAgentRunResult
 from spotlights_engine.agent_proposals.errors import AgentProposalsSetupError
-from spotlights_engine.costing.usage import codex_usage_from_stream
-
-_DROP_EXACT = frozenset(
-    {
-        "OPENAI_BASE_URL",
-        "OPENAI_API_BASE",
-        "ANTHROPIC_BASE_URL",
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "ALL_PROXY",
-        "VIRTUAL_ENV",
-    }
+from spotlights_engine.llm_session import (
+    CodexSession,
+    CodexSessionOptions,
+    run_with_retry,
 )
-_DROP_PREFIX = ("VSCODE_", "OPTQUEST_", "SPOTLIGHTS_")
-
-
-def _clean_env() -> dict[str, str]:
-    env = os.environ.copy()
-    for key in list(env):
-        if key in _DROP_EXACT or key.startswith(_DROP_PREFIX):
-            env.pop(key)
-    return env
 
 
 def ensure_codex_available() -> None:
@@ -69,130 +47,41 @@ def run_candidate_codex(
     artifacts dir) so codex can mmap it. Reads the validated JSON from
     `last_message_path` on success.
     """
-    schema_path.parent.mkdir(parents=True, exist_ok=True)
-    schema_path.write_text(schema_text, encoding="utf-8")
-    last_message_path.parent.mkdir(parents=True, exist_ok=True)
-    if last_message_path.exists():
-        try:
-            last_message_path.unlink()
-        except OSError:
-            pass
+    session = CodexSession(
+        CodexSessionOptions(
+            repo_path=repo_path,
+            output_last_message=last_message_path,
+            output_schema=schema_path,
+            schema_text=schema_text,
+            model=codex_model,
+            reasoning_effort=codex_reasoning_effort,
+            sandbox="read-only",
+            timeout_s=wallclock_s,
+        )
+    )
+    result = run_with_retry(
+        session,
+        prompt,
+        cwd=repo_path,
+        on_event=None,
+        label="agent_proposals.codex",
+    )
 
-    # Codex runs with `cwd=repo_path` and `-C <repo_path>`, so any relative
-    # path here would resolve under the target repo. Pass absolutes.
-    # Resolve via shutil.which so Windows finds the .CMD/.ps1 shim; bare
-    # "codex" → FileNotFoundError because subprocess on Windows doesn't
-    # follow PATHEXT for unqualified argv[0].
-    codex_resolved = shutil.which("codex") or "codex"
-    argv: list[str] = [
-        codex_resolved,
-        "exec",
-        "-",
-        "--json",
-        "--output-last-message",
-        str(last_message_path.resolve()),
-        "--output-schema",
-        str(schema_path.resolve()),
-        "--sandbox",
-        "read-only",
-        "-C",
-        str(repo_path),
-    ]
-    if codex_model is not None:
-        argv += ["-c", f'model="{codex_model}"']
-    if codex_reasoning_effort is not None:
-        argv += ["-c", f'model_reasoning_effort="{codex_reasoning_effort}"']
-
-    env = _clean_env()
-    start = time.monotonic()
-    try:
-        completed = subprocess.run(
-            argv,
-            input=prompt.encode("utf-8"),
-            capture_output=True,
-            env=env,
-            cwd=str(repo_path),
-            timeout=wallclock_s,
-            check=False,
-        )
-    except subprocess.TimeoutExpired as exc:
-        duration = time.monotonic() - start
-        stdout = exc.stdout or b""
-        usage = codex_usage_from_stream(stdout)
-        if usage is not None and usage.model is None and codex_model:
-            usage = usage.model_copy(update={"model": codex_model})
+    if result.error is not None:
         return CandidateAgentRunResult(
             candidate_id=candidate_id,
-            duration_s=duration,
-            error=f"codex timed out after {duration:.1f}s",
-            stdout=stdout,
-            stderr=exc.stderr or b"",
-            usage=usage,
-        )
-    duration = time.monotonic() - start
-    usage = codex_usage_from_stream(completed.stdout or b"")
-    if usage is not None and usage.model is None and codex_model:
-        usage = usage.model_copy(update={"model": codex_model})
-
-    if completed.returncode != 0:
-        stderr_tail = (completed.stderr or b"")[-500:].decode("utf-8", "replace")
-        return CandidateAgentRunResult(
-            candidate_id=candidate_id,
-            duration_s=duration,
-            error=f"codex exit={completed.returncode}: stderr={stderr_tail!r}",
-            stdout=completed.stdout or b"",
-            stderr=completed.stderr or b"",
-            usage=usage,
-        )
-
-    if not last_message_path.exists():
-        return CandidateAgentRunResult(
-            candidate_id=candidate_id,
-            duration_s=duration,
-            error="codex output_last_message file missing",
-            stdout=completed.stdout or b"",
-            stderr=completed.stderr or b"",
-            usage=usage,
-        )
-    text = last_message_path.read_text(encoding="utf-8")
-    if not text.strip():
-        return CandidateAgentRunResult(
-            candidate_id=candidate_id,
-            duration_s=duration,
-            error="codex output_last_message empty",
-            stdout=completed.stdout or b"",
-            stderr=completed.stderr or b"",
-            usage=usage,
-        )
-    try:
-        parsed = json.loads(text)
-    except json.JSONDecodeError as exc:
-        return CandidateAgentRunResult(
-            candidate_id=candidate_id,
-            duration_s=duration,
-            error=f"codex output_last_message not JSON: {exc}",
-            stdout=completed.stdout or b"",
-            stderr=completed.stderr or b"",
-            usage=usage,
-        )
-    if not isinstance(parsed, (dict, list)):
-        return CandidateAgentRunResult(
-            candidate_id=candidate_id,
-            duration_s=duration,
-            error=(
-                "codex output_last_message JSON was not an object or array: "
-                f"got {type(parsed).__name__}"
-            ),
-            stdout=completed.stdout or b"",
-            stderr=completed.stderr or b"",
-            usage=usage,
+            duration_s=result.duration_s,
+            error=result.error,
+            stdout=result.stdout,
+            stderr=result.stderr,
+            usage=result.usage,
         )
 
     return CandidateAgentRunResult(
         candidate_id=candidate_id,
-        duration_s=duration,
-        structured_output=parsed,
-        usage=usage,
+        duration_s=result.duration_s,
+        structured_output=result.structured_output,
+        usage=result.usage,
     )
 
 

@@ -1,19 +1,23 @@
-"""Agent subprocess runners and env scrubbing.
+"""Agent subprocess runners for candidate discovery.
 
-Each runner owns its own `parse_last_message` so CLI-specific missing/empty
-/output-shape checks stay out of the orchestrator. The package-internal
-`_SchemaParseError` is raised by `invoke` (timeout / nonzero exit) and by
-`parse_last_message` (bad `last_message.json`); the orchestrator is the only
-consumer and translates each occurrence into either a retry or a
-`DiscoveryValidationError`.
+The runners are thin adapters over the centralized `llm_session` package:
+`ClaudeSession`/`CodexSession` own argv building, env scrubbing, spawn, and
+stream/last-message parsing, and `run_with_retry` wraps each spawn in the
+process-wide concurrency limiter and the transport-level backoff-retry. What
+stays here is discovery-specific: the `AgentInvocation` telemetry shape, the
+`raw_stdout.log`/`raw_stderr.log` retry-separator artifact convention, and the
+`_SchemaParseError` schema-retry signal.
+
+`_SchemaParseError` is raised by `invoke` (timeout / nonzero exit / no terminal
+result event) and by `parse_last_message` (bad `last_message.json`); the
+orchestrator is the only consumer and translates each occurrence into either a
+retry or a `DiscoveryValidationError`.
 """
 
 from __future__ import annotations
 
 import json
-import os
 import shutil
-import subprocess
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
@@ -21,42 +25,30 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from spotlights_engine.candidate_discovery.errors import DiscoverySetupError
-from spotlights_engine.costing.usage import (
-    claude_usage_from_payload,
-    codex_usage_from_stream,
+from spotlights_engine.costing.usage import codex_usage_from_stream
+from spotlights_engine.llm_session import (
+    ClaudeSession,
+    ClaudeSessionOptions,
+    CodexSession,
+    CodexSessionOptions,
+    SessionResult,
+    run_with_retry,
+)
+from spotlights_engine.llm_session.transport import (
+    ResultEventError,
+    extract_result_event,
 )
 
 if TYPE_CHECKING:  # pragma: no cover
     from spotlights_engine.candidate_discovery.api import DiscoveryConfig
 
 
-_DROP_EXACT = frozenset(
-    {
-        "OPENAI_BASE_URL",
-        "OPENAI_API_BASE",
-        "ANTHROPIC_BASE_URL",
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "ALL_PROXY",
-        "VIRTUAL_ENV",
-    }
-)
-_DROP_PREFIX = ("VSCODE_", "OPTQUEST_", "SPOTLIGHTS_")
-
-
-def _clean_env() -> dict[str, str]:
-    env = os.environ.copy()
-    for key in list(env):
-        if key in _DROP_EXACT or key.startswith(_DROP_PREFIX):
-            env.pop(key)
-    return env
-
-
 class _SchemaParseError(Exception):
     """Package-internal signal that the iteration should be retried (§6.2).
 
-    Raised by `AgentRunner.invoke` (timeout / nonzero exit) and by
-    `AgentRunner.parse_last_message` (missing / empty / non-JSON output).
+    Raised by `AgentRunner.invoke` (timeout / nonzero exit / no terminal result
+    event) and by `AgentRunner.parse_last_message` (missing / empty / non-JSON
+    output).
     """
 
 
@@ -98,56 +90,62 @@ class AgentRunner(ABC):
     @abstractmethod
     def parse_last_message(self, iter_dir: Path) -> str: ...
 
+    @abstractmethod
+    def _session(self, schema_path: Path, iter_dir: Path):
+        """Build the centralized session for this iteration."""
+
+    @abstractmethod
+    def _parse_invocation_metadata(
+        self, result: SessionResult, iter_dir: Path
+    ) -> AgentInvocation: ...
+
+    def _label(self) -> str:
+        return f"candidate_discovery.{self.name}"
+
     def invoke(
         self,
         prompt: str,
         iter_dir: Path,
         schema_path: Path,
     ) -> AgentInvocation:
-        argv = self._build_argv(schema_path=schema_path, iter_dir=iter_dir)
-        env = _clean_env()
-        cwd = self._config.repo_path
+        session = self._session(schema_path=schema_path, iter_dir=iter_dir)
 
         stdout_path = iter_dir / "raw_stdout.log"
         stderr_path = iter_dir / "raw_stderr.log"
         is_retry = stdout_path.exists()
 
-        start = time.monotonic()
-        try:
-            completed = subprocess.run(
-                argv,
-                input=prompt.encode("utf-8"),
-                capture_output=True,
-                env=env,
-                cwd=str(cwd),
-                timeout=self._config.per_iteration_wallclock_s,
-                check=False,
-            )
-        except subprocess.TimeoutExpired as exc:
-            duration = time.monotonic() - start
-            stdout = exc.stdout or b""
-            stderr = exc.stderr or b""
-            _append_streams(stdout_path, stderr_path, stdout, stderr, is_retry)
+        # `run_with_retry` acquires the process-wide limiter slot and applies
+        # transport-level backoff-retry underneath the orchestrator's (0, 1)
+        # schema-retry loop. We do NOT hand the session a `log_dir`: discovery
+        # owns its raw-stream artifact convention (append-with-separator across
+        # schema retries), so we persist the returned streams ourselves.
+        result = run_with_retry(
+            session,
+            prompt,
+            cwd=self._config.repo_path,
+            on_event=None,
+            label=self._label(),
+        )
+
+        _append_streams(stdout_path, stderr_path, result.stdout, result.stderr, is_retry)
+
+        if result.timed_out:
+            self._on_failure(result, iter_dir)
             raise _SchemaParseError(
-                f"agent {self.name} timed out after {duration:.1f}s"
-            ) from exc
-
-        _append_streams(stdout_path, stderr_path, completed.stdout, completed.stderr, is_retry)
-
-        if completed.returncode != 0:
-            stdout_tail = (completed.stdout or b"")[-500:].decode("utf-8", "replace")
-            stderr_tail = (completed.stderr or b"")[-500:].decode("utf-8", "replace")
-            raise _SchemaParseError(
-                f"agent {self.name} exit={completed.returncode}: "
-                f"stderr={stderr_tail!r} stdout={stdout_tail!r}"
+                f"agent {self.name} timed out after {result.duration_s:.1f}s"
             )
+        if result.error is not None:
+            self._on_failure(result, iter_dir)
+            raise _SchemaParseError(f"agent {self.name}: {result.error}")
 
-        return self._parse_invocation_metadata(completed.stdout, iter_dir, start)
+        return self._parse_invocation_metadata(result, iter_dir)
 
-    @abstractmethod
-    def _parse_invocation_metadata(
-        self, stdout: bytes, iter_dir: Path, start: float
-    ) -> AgentInvocation: ...
+    def _on_failure(self, result: SessionResult, iter_dir: Path) -> None:  # noqa: B027
+        """Hook invoked before raising on a failed run (default no-op).
+
+        `ClaudeRunner` overrides this to blank `last_message.json`; `CodexRunner`
+        relies on the default (codex owns its own output file).
+        """
 
 
 def _append_streams(
@@ -172,50 +170,54 @@ class ClaudeRunner(AgentRunner):
     name = "claude_code"
     _executable = "claude"
 
-    def _build_argv(self, schema_path: Path, iter_dir: Path) -> list[str]:
+    def _session(self, schema_path: Path, iter_dir: Path) -> ClaudeSession:
         schema_text = schema_path.read_text(encoding="utf-8")
-        # Resolve to claude.exe (not claude.CMD). The .CMD shim buffers
-        # stdout and deadlocks subprocess.run(capture_output=True) on
-        # large outputs; the shared helper finds the npm-installed
-        # claude.exe and refuses the .CMD fallback.
-        from spotlights_engine.signal_pipeline._subprocess_util import (
-            resolve_claude_argv0,
+        return ClaudeSession(
+            ClaudeSessionOptions(
+                json_schema=schema_text,
+                permission_mode="plan",
+                max_turns=self._config.claude_max_turns,
+                timeout_s=self._config.per_iteration_wallclock_s,
+                claude_bin=self._executable,
+                # Blocking capture (no live event stream): discovery has never
+                # rendered per-event progress, and the terminal result event is
+                # parsed from the captured stdout.
+                output_format="stream-json",
+                stream_events=False,
+            )
         )
-        argv0 = resolve_claude_argv0(self._executable)
-        return [
-            *argv0,
-            "-p",
-            "--output-format",
-            "stream-json",
-            "--verbose",
-            "--json-schema",
-            schema_text,
-            "--permission-mode",
-            "plan",
-            "--max-turns",
-            str(self._config.claude_max_turns),
-        ]
+
+    def _build_argv(self, schema_path: Path, iter_dir: Path) -> list[str]:
+        return self._session(schema_path=schema_path, iter_dir=iter_dir).build_argv()
+
+    def _on_failure(self, result: SessionResult, iter_dir: Path) -> None:
+        # Preserve the pre-migration contract: a failed Claude run leaves an
+        # empty last_message.json so the orchestrator's parse_last_message sees
+        # "empty" rather than a stale success payload.
+        (iter_dir / "last_message.json").write_text("", encoding="utf-8")
 
     def _parse_invocation_metadata(
-        self, stdout: bytes, iter_dir: Path, start: float
+        self, result: SessionResult, iter_dir: Path
     ) -> AgentInvocation:
-        duration = time.monotonic() - start
         last_message_path = iter_dir / "last_message.json"
+        payload = result.final_message or ""
+        last_message_path.write_text(payload, encoding="utf-8")
 
-        result_event = self._extract_result_event(stdout)
-        if result_event is None:
-            last_message_path.write_text("", encoding="utf-8")
-            raise _SchemaParseError("claude stream-json had no terminal result event")
+        # Re-derive the CLI-reported per-iteration duration from the terminal
+        # event (the session keeps the raw stdout); fall back to wall-clock.
+        reported_duration: float | None = None
+        try:
+            event = extract_result_event(result.stdout)
+        except ResultEventError:
+            event = None
+        if event is not None:
+            reported_duration = _duration_seconds_from_event(event)
 
-        message_text = self._final_message_text(result_event)
-        last_message_path.write_text(message_text, encoding="utf-8")
-
-        usage = claude_usage_from_payload(result_event)
-        reported_duration = _duration_seconds_from_event(result_event)
+        usage = result.usage
         return AgentInvocation(
-            session_id=result_event.get("session_id"),
-            duration_s=reported_duration if reported_duration is not None else duration,
-            cost_usd=_as_float(result_event.get("total_cost_usd")),
+            session_id=result.session_id,
+            duration_s=reported_duration if reported_duration is not None else result.duration_s,
+            cost_usd=result.cost_usd,
             input_tokens=usage.input if usage else None,
             output_tokens=usage.output if usage else None,
             cache_read_tokens=usage.cache_read if usage else None,
@@ -223,44 +225,6 @@ class ClaudeRunner(AgentRunner):
             model=usage.model if usage else None,
             api_time_s=usage.api_time_s if usage else None,
         )
-
-    @staticmethod
-    def _extract_result_event(stdout: bytes) -> dict | None:
-        last_event: dict | None = None
-        for line in stdout.splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                obj = json.loads(line)
-            except json.JSONDecodeError as e:
-                raise _SchemaParseError(f"claude stream-json line not JSON: {e}") from e
-            if not isinstance(obj, dict):
-                raise _SchemaParseError("claude stream-json line was not an object")
-            last_event = obj
-        if last_event is None or last_event.get("type") != "result":
-            return None
-        return last_event
-
-    @staticmethod
-    def _final_message_text(result_event: dict) -> str:
-        # With --json-schema, the CLI parses the model output and places the
-        # validated object on `structured_output`; the `result` string is empty
-        # in that mode. Prefer structured_output when present.
-        structured = result_event.get("structured_output")
-        if isinstance(structured, (dict, list)):
-            return json.dumps(structured)
-        result = result_event.get("result")
-        if isinstance(result, str) and result:
-            return result
-        message = result_event.get("message") or {}
-        content = message.get("content")
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):
-            chunks = [c.get("text", "") for c in content if isinstance(c, dict)]
-            return "".join(chunks)
-        return ""
 
     def parse_last_message(self, iter_dir: Path) -> str:
         path = iter_dir / "last_message.json"
@@ -280,41 +244,33 @@ class CodexRunner(AgentRunner):
     name = "codex"
     _executable = "codex"
 
+    def _session(self, schema_path: Path, iter_dir: Path) -> CodexSession:
+        repo_path = self._config.repo_path
+        assert repo_path is not None, "DiscoveryConfig.repo_path is required at step entry"
+        return CodexSession(
+            CodexSessionOptions(
+                repo_path=repo_path,
+                output_last_message=iter_dir / "last_message.json",
+                output_schema=schema_path,
+                model=self._config.codex_model,
+                reasoning_effort=self._config.codex_reasoning_effort,
+                sandbox="read-only",
+                timeout_s=self._config.per_iteration_wallclock_s,
+                codex_bin=self._executable,
+            )
+        )
+
     def _build_argv(self, schema_path: Path, iter_dir: Path) -> list[str]:
-        # Codex runs with `-C <repo_path>`, so any relative path here would
-        # resolve under the target repo. Pass absolutes for both schema and
-        # last_message outputs.
-        # Resolve via shutil.which so Windows finds the .CMD/.ps1 shim;
-        # bare "codex" → FileNotFoundError because subprocess on Windows
-        # doesn't follow PATHEXT for unqualified argv[0].
-        resolved = shutil.which(self._executable) or self._executable
-        return [
-            resolved,
-            "exec",
-            "-",
-            "--json",
-            "--output-last-message",
-            str((iter_dir / "last_message.json").resolve()),
-            "--output-schema",
-            str(schema_path.resolve()),
-            "--sandbox",
-            "read-only",
-            "-C",
-            str(self._config.repo_path),
-            "-c",
-            f'model="{self._config.codex_model}"',
-            "-c",
-            f'model_reasoning_effort="{self._config.codex_reasoning_effort}"',
-        ]
+        return self._session(schema_path=schema_path, iter_dir=iter_dir).build_argv()
 
     def _parse_invocation_metadata(
-        self, stdout: bytes, iter_dir: Path, start: float
+        self, result: SessionResult, iter_dir: Path
     ) -> AgentInvocation:
-        duration = time.monotonic() - start
+        # Codex writes last_message.json itself; the session validated it.
+        duration = result.duration_s
         session_id: str | None = None
-
-        for line in stdout.splitlines():
-            line = line.strip()
+        for raw_line in result.stdout.splitlines():
+            line = raw_line.strip()
             if not line:
                 continue
             try:
@@ -328,9 +284,7 @@ class CodexRunner(AgentRunner):
                 duration = reported_duration
             session_id = obj.get("session_id") or session_id
 
-        # Shared parser: keeps the latest cumulative usage payload and
-        # normalizes codex's cached-subset convention into disjoint buckets.
-        usage = codex_usage_from_stream(stdout)
+        usage = codex_usage_from_stream(result.stdout)
         return AgentInvocation(
             session_id=session_id,
             duration_s=duration,
@@ -388,11 +342,16 @@ def _duration_seconds_from_event(event: dict) -> float | None:
     return None
 
 
+# `time` is imported for parity with the previous module surface; no longer
+# used directly here (the session owns wall-clock timing) but kept so callers
+# monkeypatching `agents.time` in tests keep a valid target.
+_ = time
+
+
 __all__ = [
     "AgentInvocation",
     "AgentRunner",
     "ClaudeRunner",
     "CodexRunner",
     "_SchemaParseError",
-    "_clean_env",
 ]

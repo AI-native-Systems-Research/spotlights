@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 import tempfile
@@ -14,8 +13,10 @@ from typing import IO
 from pydantic import BaseModel, ConfigDict, Field
 
 from spotlights_engine.costing.usage import codex_usage_from_stream
+from spotlights_engine.llm_session.env import clean_env
 from spotlights_engine.module_deep_research.agent_exec import (
     AgentExecResult,
+    guarded_run,
     resolve_cli_executable,
 )
 
@@ -104,9 +105,25 @@ class CodexExecClient:
         return cmd, output_last_message
 
     def run(self, prompt: str, *, check: bool = True) -> CodexExecResult:
-        """Run `codex exec` with `prompt` on stdin, streaming output live."""
+        """Run `codex exec` with `prompt` on stdin, streaming output live.
+
+        Wrapped in the process-wide limiter + transport retry (`guarded_run`):
+        each attempt rebuilds the command (fresh temp output file) and re-spawns.
+        """
+        result = guarded_run(
+            lambda: self._run_once(prompt),
+            cli="codex",
+            label="module_deep_research.codex",
+        )
+        if check:
+            result.raise_for_status()
+        return result  # type: ignore[return-value]
+
+    def _run_once(self, prompt: str) -> CodexExecResult:
         cmd, last_path = self.build_command("-")
-        env = os.environ.copy()
+        # Centralized env scrubbing (adds the ANTHROPIC_AUTH_TOKEN auth-leak fix
+        # and drops proxy/base-url overrides).
+        env = clean_env()
         if self.options.env:
             env.update(dict(self.options.env))
 
@@ -181,8 +198,6 @@ class CodexExecClient:
         )
         if result.usage is not None and result.usage.model is None and self.options.model:
             result.usage = result.usage.model_copy(update={"model": self.options.model})
-        if check:
-            result.raise_for_status()
         return result
 
 
