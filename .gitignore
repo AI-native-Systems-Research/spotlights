@@ -33,7 +33,6 @@ env/
 htmlcov/
 
 # uv
-uv.lock
 
 # Editors / OS
 .idea/

@@ -12,13 +12,14 @@ import argparse
 import json
 from pathlib import Path
 
+from spotlights_engine.defaults import DEFAULT_REPO
 from spotlights_engine.modules_extractor import (
     ExtractorConfig,
     extract_with_telemetry,
 )
 from spotlights_engine.schemas.pipeline import ModulesExtractorInput
 
-REPO_PATH = Path("/Users/ophir/GoProjects/llm-d-router")
+REPO_PATH = DEFAULT_REPO
 ARTIFACTS_DIR = Path(__file__).resolve().parent.parent / "tmp" / "modules_extractor_only"
 
 
