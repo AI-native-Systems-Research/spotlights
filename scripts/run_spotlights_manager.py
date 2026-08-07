@@ -13,6 +13,7 @@ import argparse
 from pathlib import Path
 
 from spotlights_engine.agent_proposals import AgentProposalsConfig
+from spotlights_engine.defaults import DEFAULT_REPO
 from spotlights_engine.proposal_from_finding_creator import (
     ProposalFromFindingConfig,
 )
@@ -24,7 +25,7 @@ from spotlights_engine.spotlights_manager import (
     run_with_telemetry,
 )
 
-REPO_PATH = Path("/Users/ophir/PycharmProjects/vllm")
+REPO_PATH = DEFAULT_REPO
 ARTIFACTS_DIR = Path(__file__).resolve().parent.parent / "tmp" / "spotlights_manager"
 OUTPUT_FOLDER = (
     Path(__file__).resolve().parent.parent / "tmp" / "spotlights_results"
