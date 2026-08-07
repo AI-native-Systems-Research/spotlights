@@ -564,6 +564,10 @@ def main(argv: list[str] | None = None) -> int:
         from spotlights_engine.prep_evolve.cli import main as prep_main
 
         return prep_main(raw_argv[1:])
+    if raw_argv and raw_argv[0] == "doctor":
+        from spotlights_engine.doctor import main as doctor_main
+
+        return doctor_main(raw_argv[1:])
 
     args = _build_argparser().parse_args(argv)
 
