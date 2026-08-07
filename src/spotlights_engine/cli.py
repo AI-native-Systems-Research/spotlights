@@ -35,6 +35,9 @@ from spotlights_engine.module_knowledge import (
     KnowledgeRecord,
     RetrieveRequest,
 )
+from spotlights_engine.proposal_from_candidate_finding_creator import (
+    ProposalFromCandidateFindingConfig,
+)
 from spotlights_engine.proposal_from_finding_creator import (
     ProposalFromFindingConfig,
 )
@@ -94,19 +97,13 @@ def _build_argparser() -> argparse.ArgumentParser:
         "--hint",
         action="append",
         default=[],
-        help=(
-            "Workload hint (repeatable). Threaded into "
-            "SpotlightContext.workload_hints."
-        ),
+        help=("Workload hint (repeatable). Threaded into SpotlightContext.workload_hints."),
     )
     p.add_argument(
         "--output-folder",
         type=Path,
         default=_DEFAULT_OUTPUT,
-        help=(
-            "Where index.md and per-module pages land "
-            f"(default: {_DEFAULT_OUTPUT})."
-        ),
+        help=(f"Where index.md and per-module pages land (default: {_DEFAULT_OUTPUT})."),
     )
     p.add_argument(
         "--artifacts-dir",
@@ -149,6 +146,27 @@ def _build_argparser() -> argparse.ArgumentParser:
         help=(
             "Cap on findings produced by step 3 per module. "
             "Default: SpotlightsManagerInput default (30)."
+        ),
+    )
+    p.add_argument(
+        "--deep-research-mode",
+        choices=("module", "candidate"),
+        default="module",
+        help=(
+            "Deep-research shape for steps 3-4. 'module' (default) runs one "
+            "module-wide survey and pairs every candidate with every finding; "
+            "'candidate' runs one survey per candidate and pairs each candidate "
+            "only with its own findings."
+        ),
+    )
+    p.add_argument(
+        "--max-findings-per-candidate",
+        type=int,
+        default=None,
+        help=(
+            "Cap on findings produced by step 3 per candidate "
+            "(--deep-research-mode candidate only). "
+            "Default: SpotlightsManagerInput default (10)."
         ),
     )
     review = p.add_mutually_exclusive_group()
@@ -352,26 +370,32 @@ def _build_input(args: argparse.Namespace) -> SpotlightsManagerInput:
         input_kwargs["repo_url"] = args.repo_url
     if args.max_findings_per_module is not None:
         input_kwargs["max_findings_per_module"] = args.max_findings_per_module
+    input_kwargs["deep_research_mode"] = args.deep_research_mode
+    if args.max_findings_per_candidate is not None:
+        input_kwargs["max_findings_per_candidate"] = args.max_findings_per_candidate
     input_kwargs["include_candidate_hotspots"] = args.include_candidate_hotspots
     input_kwargs["enable_claude_search"] = args.enable_claude_search
     return SpotlightsManagerInput(**input_kwargs)
 
 
 def _build_config(args: argparse.Namespace) -> SpotlightsManagerConfig:
+    # The step-4 pair knobs are shared between the two implementations; route
+    # them to whichever slot the selected mode reads.
     proposal_cfg: ProposalFromFindingConfig | None = None
+    candidate_proposal_cfg: ProposalFromCandidateFindingConfig | None = None
     if args.max_parallel_pairs is not None or args.debug_first_n_pairs is not None:
         kwargs: dict = {}
         if args.max_parallel_pairs is not None:
             kwargs["max_parallel_pairs"] = args.max_parallel_pairs
         if args.debug_first_n_pairs is not None:
             kwargs["debug_first_n_pairs"] = args.debug_first_n_pairs
-        proposal_cfg = ProposalFromFindingConfig(**kwargs)
+        if args.deep_research_mode == "candidate":
+            candidate_proposal_cfg = ProposalFromCandidateFindingConfig(**kwargs)
+        else:
+            proposal_cfg = ProposalFromFindingConfig(**kwargs)
 
     agent_cfg: AgentProposalsConfig | None = None
-    if (
-        args.max_parallel_candidates is not None
-        or args.debug_first_n_candidates is not None
-    ):
+    if args.max_parallel_candidates is not None or args.debug_first_n_candidates is not None:
         kwargs = {}
         if args.max_parallel_candidates is not None:
             kwargs["max_parallel_candidates"] = args.max_parallel_candidates
@@ -391,6 +415,7 @@ def _build_config(args: argparse.Namespace) -> SpotlightsManagerConfig:
         module_filter=ModuleFilter(include=include) if include else None,
         discovery=discovery_cfg,
         proposal_from_finding=proposal_cfg,
+        proposal_from_candidate_finding=candidate_proposal_cfg,
         agent_proposals=agent_cfg,
         resume=args.resume,
     )
@@ -447,14 +472,8 @@ def _print_summary(result: SpotlightsManagerResult) -> None:
         )
         print(f"[2/5] candidate_discovery ({qn}) … {n_cands} candidates")
         print(f"[3/5] module_deep_research ({qn}) … {n_findings} findings")
-        print(
-            f"[4/5] proposal_from_finding_creator ({qn}) … "
-            f"{n_proposals} proposals attached"
-        )
-        print(
-            f"[5/5] agent_proposals ({qn}) … "
-            f"{n_agent_proposals} agent proposals attached"
-        )
+        print(f"[4/5] proposal_from_finding_creator ({qn}) … {n_proposals} proposals attached")
+        print(f"[5/5] agent_proposals ({qn}) … {n_agent_proposals} agent proposals attached")
 
     if result.renderer_result is not None:
         print(f"results: {result.renderer_result.index_path}")
@@ -590,8 +609,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"result json: {json_path}")
 
     any_unrecoverable = any(
-        any(not iss.recoverable for iss in run.issues)
-        for run in result.module_runs.values()
+        any(not iss.recoverable for iss in run.issues) for run in result.module_runs.values()
     )
     return 1 if any_unrecoverable else 0
 

@@ -25,6 +25,9 @@ from spotlights_engine.agent_proposals import (
     AgentProposalsValidationError,
     create_agent_proposals_with_telemetry,
 )
+from spotlights_engine.candidate_deep_research import (
+    research_candidates_with_telemetry,
+)
 from spotlights_engine.candidate_discovery import (
     DiscoveryConfig,
     DiscoveryMutationError,
@@ -45,6 +48,12 @@ from spotlights_engine.modules_extractor import (
     ExtractorConfig,
     extract_with_telemetry,
 )
+from spotlights_engine.proposal_from_candidate_finding_creator import (
+    ProposalFromCandidateFindingConfig,
+)
+from spotlights_engine.proposal_from_candidate_finding_creator import (
+    create_proposals_with_telemetry as create_candidate_proposals_with_telemetry,
+)
 from spotlights_engine.proposal_from_finding_creator import (
     ProposalFromFindingConfig,
     ProposalFromFindingSetupError,
@@ -62,6 +71,7 @@ from spotlights_engine.schemas.finding import Finding
 from spotlights_engine.schemas.pipeline import (
     AgentProposalsInput,
     AgentProposalsOutput,
+    CandidateDeepResearchInput,
     CandidateDiscoveryInput,
     ModuleDeepResearchInput,
     ModuleDeepResearchOutput,
@@ -102,8 +112,10 @@ from spotlights_engine.utils.schema_compat import proposals_from
 _log = logging.getLogger(__name__)
 
 # Keep the historical orchestrator monkeypatch surface while using the new
-# runtime-rich entrypoint by default.
+# runtime-rich entrypoint by default. `research_candidates` is the candidate-mode
+# sibling, so candidate-mode tests get the same seam.
 research_module = research_module_with_telemetry
+research_candidates = research_candidates_with_telemetry
 
 
 # ---------------------------------------------------------------------------
@@ -222,18 +234,20 @@ def _build_discovery_config(
     artifacts_dir: Path,
 ) -> DiscoveryConfig:
     base = cfg.discovery if cfg.discovery is not None else DiscoveryConfig()
-    return base.model_copy(
-        update={"repo_path": repo_path, "artifacts_dir": artifacts_dir}
-    )
+    return base.model_copy(update={"repo_path": repo_path, "artifacts_dir": artifacts_dir})
 
 
 def _build_deep_research_options(
     cfg: SpotlightsManagerConfig,
     repo_path: Path,
-    last_message_path: Path,
+    last_message_path: Path | None,
 ) -> CodexExecOptions:
     """Per-module options: copy any caller config and override `cwd` and
-    `output_last_message`. Never mutates the shared object."""
+    `output_last_message`. Never mutates the shared object.
+
+    `last_message_path` is `None` in candidate mode, where the concrete
+    per-candidate file is derived inside the candidate loop from
+    `deep_research_last_message_dir` instead."""
     base = cfg.deep_research
     if base is None:
         return CodexExecOptions(
@@ -260,9 +274,20 @@ def _build_proposal_from_finding_config(
         if cfg.proposal_from_finding is not None
         else ProposalFromFindingConfig()
     )
-    return base.model_copy(
-        update={"repo_path": repo_path, "artifacts_dir": artifacts_dir}
+    return base.model_copy(update={"repo_path": repo_path, "artifacts_dir": artifacts_dir})
+
+
+def _build_proposal_from_candidate_finding_config(
+    cfg: SpotlightsManagerConfig,
+    repo_path: Path,
+    artifacts_dir: Path,
+) -> ProposalFromCandidateFindingConfig:
+    base = (
+        cfg.proposal_from_candidate_finding
+        if cfg.proposal_from_candidate_finding is not None
+        else ProposalFromCandidateFindingConfig()
     )
+    return base.model_copy(update={"repo_path": repo_path, "artifacts_dir": artifacts_dir})
 
 
 def _build_agent_proposals_config(
@@ -270,14 +295,8 @@ def _build_agent_proposals_config(
     repo_path: Path,
     artifacts_dir: Path,
 ) -> AgentProposalsConfig:
-    base = (
-        cfg.agent_proposals
-        if cfg.agent_proposals is not None
-        else AgentProposalsConfig()
-    )
-    return base.model_copy(
-        update={"repo_path": repo_path, "artifacts_dir": artifacts_dir}
-    )
+    base = cfg.agent_proposals if cfg.agent_proposals is not None else AgentProposalsConfig()
+    return base.model_copy(update={"repo_path": repo_path, "artifacts_dir": artifacts_dir})
 
 
 def _now_checkpoint(
@@ -483,9 +502,7 @@ def _ensure_resume_compatible(
         and "agent_proposals_hash" in config_fp
         and config_fp["agent_proposals_hash"] == P.default_agent_proposals_hash()
     ):
-        current_without_step5 = {
-            k: v for k, v in config_fp.items() if k != "agent_proposals_hash"
-        }
+        current_without_step5 = {k: v for k, v in config_fp.items() if k != "agent_proposals_hash"}
         if existing_fp == current_without_step5:
             existing["config_fingerprint"] = dict(config_fp)
             P.write_manifest(paths, existing)
@@ -544,9 +561,7 @@ def _run_extractor_if_needed(
     # them so the per-step "no resume" guard is satisfied.
     P.clear_extractor_artifacts(paths)
 
-    extractor_cfg: ExtractorConfig = cfg.extractor.model_copy(
-        update={"artifacts_dir": paths.root}
-    )
+    extractor_cfg: ExtractorConfig = cfg.extractor.model_copy(update={"artifacts_dir": paths.root})
 
     _log.info("extractor: start")
     start = time.monotonic()
@@ -571,9 +586,7 @@ def _run_extractor_if_needed(
     manifest["extractor"] = {"completed": True, "duration_s": duration}
     P.write_manifest(paths, manifest)
     n_modules = sum(1 for _ in result.project_tree.walk())
-    _log.info(
-        "extractor: complete in %.1fs — kept %d modules", duration, n_modules
-    )
+    _log.info("extractor: complete in %.1fs — kept %d modules", duration, n_modules)
     return result.project_tree, result.invocation
 
 
@@ -595,8 +608,7 @@ class _ModulePlan:
 
 
 _FAIL_FAST_CANCELLED_MESSAGE = (
-    "module not started because another module failed and "
-    "continue_on_module_failure=False"
+    "module not started because another module failed and continue_on_module_failure=False"
 )
 
 
@@ -614,9 +626,7 @@ def _plan_module(state: LoadedModuleState) -> _ModulePlan:
     cp = state.checkpoint
     started_at = cp.started_at if cp is not None else _now_iso()
 
-    def _plan(
-        *, s2=False, s3=False, s4=False, s5=False, skip=False
-    ) -> _ModulePlan:
+    def _plan(*, s2=False, s3=False, s4=False, s5=False, skip=False) -> _ModulePlan:
         return _ModulePlan(
             skip_module=skip,
             redo_step2=s2,
@@ -695,9 +705,7 @@ def _plan_module(state: LoadedModuleState) -> _ModulePlan:
 
 
 def _plan_requires_step_execution(plan: _ModulePlan) -> bool:
-    return (
-        plan.redo_step2 or plan.redo_step3 or plan.redo_step4 or plan.redo_step5
-    )
+    return plan.redo_step2 or plan.redo_step3 or plan.redo_step4 or plan.redo_step5
 
 
 async def _do_step2(
@@ -720,9 +728,9 @@ async def _do_step2(
         module_qualified_name=qn,
         context=mgr_input.context,
     )
-    discovery_cfg = _build_discovery_config(
-        cfg, mgr_input.repo_path, module_paths.dir
-    ).model_copy(update={"id_segment": segment})
+    discovery_cfg = _build_discovery_config(cfg, mgr_input.repo_path, module_paths.dir).model_copy(
+        update={"id_segment": segment}
+    )
     result = await asyncio.to_thread(discover, discovery_input, config=discovery_cfg)
     return (
         result.candidates,
@@ -746,8 +754,25 @@ async def _do_step3(
     prefixes each finding id to `find-<segment>-NNNN` before returning, so the
     findings are already globally-prefixed (no manager-side rebase).
 
-    The step-2 `candidates` are forwarded so the prompt can surface them as
-    hot spots (gated by `mgr_input.include_candidate_hotspots`)."""
+    In `module` mode the step-2 `candidates` are forwarded so the prompt can
+    surface them as hot spots (gated by `mgr_input.include_candidate_hotspots`);
+    in `candidate` mode they are the iteration set — one survey per candidate.
+
+    Both branches return the same arity so the shared step-3 persist tail is
+    mode-agnostic. The element *type* of `usages` differs: module mode yields
+    `CliUsage` (cli + usage only), candidate mode `CandidateCliUsage` (also
+    candidate id and per-run duration), which is why the usage-writing block
+    branches on mode too."""
+    if mgr_input.deep_research_mode == "candidate":
+        return await _do_step3_candidate(
+            qn=qn,
+            tree=tree,
+            mgr_input=mgr_input,
+            cfg=cfg,
+            module_paths=module_paths,
+            segment=segment,
+            candidates=candidates,
+        )
     research_input = ModuleDeepResearchInput(
         project_tree=tree,
         module_qualified_name=qn,
@@ -769,6 +794,58 @@ async def _do_step3(
     if hasattr(result, "output") and hasattr(result, "usages"):
         return result.output, duration, list(result.usages)
     return result, duration, []
+
+
+async def _do_step3_candidate(
+    *,
+    qn: str,
+    tree: ProjectTree,
+    mgr_input: SpotlightsManagerInput,
+    cfg: SpotlightsManagerConfig,
+    module_paths: ModulePaths,
+    segment: str,
+    candidates: Candidates,
+) -> tuple[ModuleDeepResearchOutput, float, list[Any]]:
+    """Candidate-mode step 3: one survey per candidate.
+
+    Base codex options are built with no concrete `output_last_message`; the
+    per-candidate last-message directory is threaded separately so each survey
+    derives its own file and cannot parse another candidate's JSON (D6)."""
+    research_input = CandidateDeepResearchInput(
+        project_tree=tree,
+        module_qualified_name=qn,
+        context=mgr_input.context,
+        repo_path=mgr_input.repo_path,
+        candidates=list(candidates.candidates),
+        max_findings_per_candidate=mgr_input.max_findings_per_candidate,
+        enable_claude_search=mgr_input.enable_claude_search,
+    )
+    options = _build_deep_research_options(cfg, mgr_input.repo_path, None)
+    start = time.monotonic()
+    # `research_candidates` is a module-level alias so tests can patch it with a
+    # stub that returns a bare output instead of a telemetry result; both shapes
+    # are unwrapped below, hence the `Any`.
+    result: Any = await asyncio.to_thread(
+        lambda: research_candidates(
+            research_input,
+            options,
+            segment=segment,
+            last_message_dir=module_paths.deep_research_last_message_dir,
+        )
+    )
+    duration = time.monotonic() - start
+    if hasattr(result, "output") and hasattr(result, "usages"):
+        return result.output, duration, list(result.usages)
+    return result, duration, []
+
+
+def _candidate_mode_pair_count(candidates: Candidates, findings: list[Finding]) -> int:
+    """`Σ|F_c|`: candidate-mode step 4 pairs each candidate only with the
+    findings whose `candidate_id` names it. Findings with a missing or
+    out-of-input `candidate_id` are dropped (and reported) by the step itself,
+    so they don't count here either."""
+    ids = {c.id for c in candidates.candidates}
+    return sum(1 for f in findings if f.candidate_id in ids)
 
 
 def _synthetic_step4_output_for_zero_findings(
@@ -804,15 +881,37 @@ async def _do_step4(
     dict[str, float],
     dict[str, Any],
 ]:
-    """Returns (output, total_duration_s, per_pair_durations_s)."""
+    """Returns (output, total_duration_s, per_pair_durations_s).
+
+    Both modes share the input contract and the result shape, so the persist /
+    checkpoint tail after this call is mode-agnostic; only the package that
+    fans out the pairs (cartesian vs. grouped by `Finding.candidate_id`) and
+    the infra-config slot differ."""
     pf_input = ProposalFromFindingCreatorInput(
         candidates=candidates,
         findings=list(findings),
         context=mgr_input.context,
     )
-    pf_cfg = _build_proposal_from_finding_config(
-        cfg, mgr_input.repo_path, module_paths.dir
-    )
+    if mgr_input.deep_research_mode == "candidate":
+        pfc_cfg = _build_proposal_from_candidate_finding_config(
+            cfg, mgr_input.repo_path, module_paths.dir
+        )
+        candidate_result = await asyncio.to_thread(
+            lambda: create_candidate_proposals_with_telemetry(
+                pf_input,
+                config=pfc_cfg,
+                candidate_states=candidate_states,
+                proposal_id_start=proposal_id_start,
+                segment=segment,
+            )
+        )
+        return (
+            candidate_result.output,
+            candidate_result.total_duration_s,
+            dict(candidate_result.per_pair_durations_s),
+            dict(candidate_result.usages_by_pair),
+        )
+    pf_cfg = _build_proposal_from_finding_config(cfg, mgr_input.repo_path, module_paths.dir)
     result = await asyncio.to_thread(
         lambda: create_proposals_with_telemetry(
             pf_input,
@@ -852,9 +951,7 @@ async def _do_step5(
         candidates=candidates,
         context=mgr_input.context,
     )
-    ap_cfg = _build_agent_proposals_config(
-        cfg, mgr_input.repo_path, module_paths.dir
-    )
+    ap_cfg = _build_agent_proposals_config(cfg, mgr_input.repo_path, module_paths.dir)
     result = await asyncio.to_thread(
         lambda: create_agent_proposals_with_telemetry(
             ap_input,
@@ -885,12 +982,7 @@ async def _write_cancelled_checkpoint(
     manifest_lock: asyncio.Lock,
     manifest: dict[str, Any],
 ) -> ModuleCheckpoint:
-    if (
-        plan.redo_step5
-        and not plan.redo_step2
-        and not plan.redo_step3
-        and not plan.redo_step4
-    ):
+    if plan.redo_step5 and not plan.redo_step2 and not plan.redo_step3 and not plan.redo_step4:
         failed_step: PipelineStep = "agent_proposals"
     elif plan.redo_step4 and not plan.redo_step2 and not plan.redo_step3:
         failed_step = "proposal_from_finding_creator"
@@ -962,11 +1054,7 @@ async def _run_module(
 
     module_start = time.monotonic()
 
-    if (
-        cancel_event is not None
-        and cancel_event.is_set()
-        and _plan_requires_step_execution(plan)
-    ):
+    if cancel_event is not None and cancel_event.is_set() and _plan_requires_step_execution(plan):
         return await _write_cancelled_checkpoint(
             qn=qn,
             state=state,
@@ -996,18 +1084,10 @@ async def _run_module(
         # ------------------------- step 2 -----------------------------------
         candidates: Candidates | None = state.candidates
         if plan.redo_step2:
-            P.clear_discovery_artifacts(
-                module_paths, session_index=session_index
-            )
-            P.clear_deep_research_artifacts(
-                module_paths, session_index=session_index
-            )
-            P.clear_proposal_from_finding_artifacts(
-                module_paths, session_index=session_index
-            )
-            P.clear_agent_proposals_artifacts(
-                module_paths, session_index=session_index
-            )
+            P.clear_discovery_artifacts(module_paths, session_index=session_index)
+            P.clear_deep_research_artifacts(module_paths, session_index=session_index)
+            P.clear_proposal_from_finding_artifacts(module_paths, session_index=session_index)
+            P.clear_agent_proposals_artifacts(module_paths, session_index=session_index)
             cp = _now_checkpoint(
                 qn=qn,
                 status="PENDING",
@@ -1027,9 +1107,7 @@ async def _run_module(
                     segment=segment,
                 )
             except Exception as e:  # noqa: BLE001
-                if isinstance(
-                    e, (DiscoverySetupError, DiscoveryValidationError, ValueError)
-                ):
+                if isinstance(e, (DiscoverySetupError, DiscoveryValidationError, ValueError)):
                     retryable = False
                 elif isinstance(e, DiscoveryMutationError):
                     retryable = True
@@ -1052,12 +1130,8 @@ async def _run_module(
                     started_at=plan.started_at,
                 )
                 P.write_checkpoint(module_paths, cp)
-                await _update_module_in_manifest(
-                    paths, manifest, manifest_lock, qn, cp
-                )
-                _log.error(
-                    "[%s] discovery: failed: %s: %s", qn, type(e).__name__, e
-                )
+                await _update_module_in_manifest(paths, manifest, manifest_lock, qn, cp)
+                _log.error("[%s] discovery: failed: %s: %s", qn, type(e).__name__, e)
                 _log.debug("[%s] discovery: traceback", qn, exc_info=True)
                 _log.info(
                     "[%s] module FAILED in %.1fs",
@@ -1138,15 +1212,9 @@ async def _run_module(
         # ------------------------- step 3 -----------------------------------
         run_step3 = plan.redo_step2 or plan.redo_step3 or state.deep_research is None
         if plan.redo_step3:
-            P.clear_deep_research_artifacts(
-                module_paths, session_index=session_index
-            )
-            P.clear_proposal_from_finding_artifacts(
-                module_paths, session_index=session_index
-            )
-            P.clear_agent_proposals_artifacts(
-                module_paths, session_index=session_index
-            )
+            P.clear_deep_research_artifacts(module_paths, session_index=session_index)
+            P.clear_proposal_from_finding_artifacts(module_paths, session_index=session_index)
+            P.clear_agent_proposals_artifacts(module_paths, session_index=session_index)
 
         if run_step3:
             _log.info("[%s] deep_research: start", qn)
@@ -1178,9 +1246,7 @@ async def _run_module(
                     started_at=plan.started_at,
                 )
                 P.write_checkpoint(module_paths, cp)
-                await _update_module_in_manifest(
-                    paths, manifest, manifest_lock, qn, cp
-                )
+                await _update_module_in_manifest(paths, manifest, manifest_lock, qn, cp)
                 _log.error(
                     "[%s] deep_research: failed: %s: %s",
                     qn,
@@ -1206,18 +1272,26 @@ async def _run_module(
                 len(research_output.findings),
             )
             for iss in research_output.issues:
-                _log.warning(
-                    "[%s] deep_research: %s: %s", qn, iss.severity, iss.message
-                )
+                _log.warning("[%s] deep_research: %s: %s", qn, iss.severity, iss.message)
             P.write_deep_research(module_paths, research_output, dr_duration)
             P.write_deep_research_search_log(module_paths, research_output, qn)
-            _write_cli_usage_records(
-                module_paths=module_paths,
-                qn=qn,
-                session_index=session_index,
-                step="module_deep_research",
-                role="deep_research",
-                usages=[
+            # Module mode: one survey per module, so the whole-step duration is
+            # the right fallback for each runner record. Candidate mode: one
+            # survey per candidate, so records are keyed `<candidate_id>:<cli>`
+            # with the per-run wallclock (D8) — same generic sink, same
+            # step/role (the `UsageStep` union is closed).
+            if mgr_input.deep_research_mode == "candidate":
+                dr_usage_tuples: list[tuple[str, str, Any, float | None]] = [
+                    (
+                        f"{u.candidate_id}:{u.cli}",
+                        u.cli,
+                        u.usage,
+                        u.duration_s,
+                    )
+                    for u in dr_usages
+                ]
+            else:
+                dr_usage_tuples = [
                     (
                         f"deep-research:{u.cli}",
                         u.cli,
@@ -1225,7 +1299,14 @@ async def _run_module(
                         dr_duration,
                     )
                     for u in dr_usages
-                ],
+                ]
+            _write_cli_usage_records(
+                module_paths=module_paths,
+                qn=qn,
+                session_index=session_index,
+                step="module_deep_research",
+                role="deep_research",
+                usages=dr_usage_tuples,
             )
             cp = _now_checkpoint(
                 qn=qn,
@@ -1252,12 +1333,8 @@ async def _run_module(
             or state.proposal_from_finding is None
         )
         if plan.redo_step4 and not (plan.redo_step2 or plan.redo_step3):
-            P.clear_proposal_from_finding_artifacts(
-                module_paths, session_index=session_index
-            )
-            P.clear_agent_proposals_artifacts(
-                module_paths, session_index=session_index
-            )
+            P.clear_proposal_from_finding_artifacts(module_paths, session_index=session_index)
+            P.clear_agent_proposals_artifacts(module_paths, session_index=session_index)
 
         proposal_output: ProposalFromFindingCreatorOutput | None = None
 
@@ -1267,13 +1344,10 @@ async def _run_module(
                 # advances to FINDING_PROPOSALS_CREATED with no proposals,
                 # no Claude session is scheduled.
                 _log.info(
-                    "[%s] proposal_from_finding: skipped (no findings) — "
-                    "synthetic empty output",
+                    "[%s] proposal_from_finding: skipped (no findings) — synthetic empty output",
                     qn,
                 )
-                proposal_output = _synthetic_step4_output_for_zero_findings(
-                    candidates
-                )
+                proposal_output = _synthetic_step4_output_for_zero_findings(candidates)
                 P.write_proposal_from_finding(
                     module_paths,
                     proposal_output,
@@ -1281,7 +1355,12 @@ async def _run_module(
                     per_pair_durations_s={},
                 )
             else:
-                n_pairs = len(candidates.candidates) * len(research_output.findings)
+                if mgr_input.deep_research_mode == "candidate":
+                    # Candidate mode pairs each candidate only with its own
+                    # findings, so the count is Σ|F_c| rather than |C|×|F|.
+                    n_pairs = _candidate_mode_pair_count(candidates, research_output.findings)
+                else:
+                    n_pairs = len(candidates.candidates) * len(research_output.findings)
                 _log.info(
                     "[%s] proposal_from_finding: start — %d (candidate, finding) pairs",
                     qn,
@@ -1327,9 +1406,7 @@ async def _run_module(
                         started_at=plan.started_at,
                     )
                     P.write_checkpoint(module_paths, cp)
-                    await _update_module_in_manifest(
-                        paths, manifest, manifest_lock, qn, cp
-                    )
+                    await _update_module_in_manifest(paths, manifest, manifest_lock, qn, cp)
                     _log.error(
                         "[%s] proposal_from_finding: failed: %s: %s",
                         qn,
@@ -1353,8 +1430,7 @@ async def _run_module(
                     for c in proposal_output.candidates.candidates
                 )
                 _log.info(
-                    "[%s] proposal_from_finding: complete in %.1fs — "
-                    "%d proposals attached",
+                    "[%s] proposal_from_finding: complete in %.1fs — %d proposals attached",
                     qn,
                     pf_duration,
                     n_proposals,
@@ -1410,19 +1486,13 @@ async def _run_module(
             or plan.redo_step5
             or state.agent_proposals is None
         )
-        if plan.redo_step5 and not (
-            plan.redo_step2 or plan.redo_step3 or plan.redo_step4
-        ):
-            P.clear_agent_proposals_artifacts(
-                module_paths, session_index=session_index
-            )
+        if plan.redo_step5 and not (plan.redo_step2 or plan.redo_step3 or plan.redo_step4):
+            P.clear_agent_proposals_artifacts(module_paths, session_index=session_index)
 
         agent_output: AgentProposalsOutput | None = None
         if run_step5:
             n_candidates = len(proposal_output.candidates.candidates)
-            _log.info(
-                "[%s] agent_proposals: start — %d candidates", qn, n_candidates
-            )
+            _log.info("[%s] agent_proposals: start — %d candidates", qn, n_candidates)
             # D3: step 5 continues minting prop- ids past step 4's allocation.
             # Count the research-backed proposals already attached (works for
             # both fresh runs and resume, where proposal_output is loaded from
@@ -1473,18 +1543,14 @@ async def _run_module(
                     started_at=plan.started_at,
                 )
                 P.write_checkpoint(module_paths, cp)
-                await _update_module_in_manifest(
-                    paths, manifest, manifest_lock, qn, cp
-                )
+                await _update_module_in_manifest(paths, manifest, manifest_lock, qn, cp)
                 _log.error(
                     "[%s] agent_proposals: failed: %s: %s",
                     qn,
                     type(e).__name__,
                     e,
                 )
-                _log.debug(
-                    "[%s] agent_proposals: traceback", qn, exc_info=True
-                )
+                _log.debug("[%s] agent_proposals: traceback", qn, exc_info=True)
                 _log.info(
                     "[%s] module FAILED in %.1fs",
                     qn,
@@ -1497,8 +1563,7 @@ async def _run_module(
                 for c in agent_output.candidates.candidates
             )
             _log.info(
-                "[%s] agent_proposals: complete in %.1fs — "
-                "%d agent proposals attached",
+                "[%s] agent_proposals: complete in %.1fs — %d agent proposals attached",
                 qn,
                 ap_duration,
                 n_agent_proposals,
@@ -1562,9 +1627,7 @@ async def _run_module(
         # unrecoverable issue. On success, last_step is the furthest step
         # whose sidecar was written.
         if final_status == "FAILED":
-            if agent_output is not None and any(
-                not iss.recoverable for iss in agent_output.issues
-            ):
+            if agent_output is not None and any(not iss.recoverable for iss in agent_output.issues):
                 failed_step: PipelineStep | None = "agent_proposals"
             elif proposal_output is not None and any(
                 not iss.recoverable for iss in proposal_output.issues
@@ -1591,9 +1654,7 @@ async def _run_module(
             error=(
                 None
                 if final_status != "FAILED"
-                else "; ".join(
-                    iss.message for iss in combined_issues if not iss.recoverable
-                )
+                else "; ".join(iss.message for iss in combined_issues if not iss.recoverable)
             ),
             issues=combined_issues,
             started_at=plan.started_at,
@@ -1656,9 +1717,7 @@ def _accumulated_duration_s(
         return 0.0
 
     extractor = manifest.get("extractor")
-    extractor_duration = (
-        extractor.get("duration_s") if isinstance(extractor, dict) else None
-    )
+    extractor_duration = extractor.get("duration_s") if isinstance(extractor, dict) else None
     total = _f(extractor_duration)
     for tel in per_module_telemetry.values():
         total += _f(tel.discovery_total_duration_s)
@@ -1668,9 +1727,7 @@ def _accumulated_duration_s(
     return total
 
 
-def _copy_public_manifest_to_output(
-    *, paths: ManagerPaths, output_folder: Path
-) -> None:
+def _copy_public_manifest_to_output(*, paths: ManagerPaths, output_folder: Path) -> None:
     if not paths.run_manifest_path.exists():
         return
     output_folder.mkdir(parents=True, exist_ok=True)
@@ -1700,9 +1757,7 @@ async def _run_async(
     _validate_setup(input, paths)
 
     filter_label = (
-        "include"
-        if config.module_filter is not None and config.module_filter.include
-        else "all"
+        "include" if config.module_filter is not None and config.module_filter.include else "all"
     )
     _log.info(
         "run start: repo=%s objective=%r modules_filter=%s max_parallel=%d",
@@ -1712,6 +1767,9 @@ async def _run_async(
         config.max_parallel_sessions,
     )
 
+    # Both fingerprint builders emit only the keys effective for the selected
+    # mode (D5), so a module-mode run dir written before candidate mode existed
+    # still fingerprint-matches and resumes, while switching modes mismatches.
     input_fp = P.build_input_fingerprint(
         repo_path=input.repo_path,
         context=input.context,
@@ -1719,6 +1777,8 @@ async def _run_async(
         continue_on_module_failure=input.continue_on_module_failure,
         include_candidate_hotspots=input.include_candidate_hotspots,
         enable_claude_search=input.enable_claude_search,
+        deep_research_mode=input.deep_research_mode,
+        max_findings_per_candidate=input.max_findings_per_candidate,
     )
     config_fp = P.build_config_fingerprint(
         module_filter=config.module_filter,
@@ -1727,6 +1787,8 @@ async def _run_async(
         deep_research_cfg=config.deep_research,
         proposal_from_finding_cfg=config.proposal_from_finding,
         agent_proposals_cfg=config.agent_proposals,
+        proposal_from_candidate_finding_cfg=config.proposal_from_candidate_finding,
+        deep_research_mode=input.deep_research_mode,
     )
     manifest = _ensure_resume_compatible(
         paths,
@@ -1769,9 +1831,7 @@ async def _run_async(
 
     sem = asyncio.Semaphore(config.max_parallel_sessions)
     manifest_lock = asyncio.Lock()
-    cancel_event = (
-        None if input.continue_on_module_failure else asyncio.Event()
-    )
+    cancel_event = None if input.continue_on_module_failure else asyncio.Event()
 
     # D3: ids are made globally unique by embedding each module's slug
     # (`<type>-<slug>[.s<k>]-NNNN`), so there is no run-wide id block to size and
@@ -1795,18 +1855,12 @@ async def _run_async(
             if cancel_event is not None:
                 cancel_event.set()
             raise
-        if (
-            cancel_event is not None
-            and cp.status == "FAILED"
-            and not cp.retryable
-        ):
+        if cancel_event is not None and cp.status == "FAILED" and not cp.retryable:
             cancel_event.set()
         return cp
 
     tasks = [asyncio.create_task(_wrapped(qn)) for qn in ordered_qns]
-    results = (
-        await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
-    )
+    results = await asyncio.gather(*tasks, return_exceptions=True) if tasks else []
 
     # Build the module_runs and per-module telemetry from disk so a crash
     # mid-write doesn't show as success.
@@ -1820,9 +1874,7 @@ async def _run_async(
         run_record = _assemble_module_run(
             qn,
             state,
-            task_exception=(
-                results[idx] if isinstance(results[idx], BaseException) else None
-            ),
+            task_exception=(results[idx] if isinstance(results[idx], BaseException) else None),
         )
         module_runs[qn] = run_record
         per_module_telemetry[qn] = ModuleTelemetry(
@@ -1841,9 +1893,7 @@ async def _run_async(
             },
             issues=list(run_record.issues),
         )
-        if run_record.status == "FAILED" and any(
-            not iss.recoverable for iss in run_record.issues
-        ):
+        if run_record.status == "FAILED" and any(not iss.recoverable for iss in run_record.issues):
             any_unrecoverable = True
 
     manifest["status"] = (
@@ -1923,9 +1973,7 @@ async def _run_async(
         total_cost=total_cost,
         manifest=manifest,
     )
-    _copy_public_manifest_to_output(
-        paths=paths, output_folder=config.output_folder
-    )
+    _copy_public_manifest_to_output(paths=paths, output_folder=config.output_folder)
 
     return SpotlightsManagerResult(
         report=report,
@@ -1937,9 +1985,7 @@ async def _run_async(
     )
 
 
-def _render_results(
-    *, artifacts_dir: Path, output_folder: Path
-) -> tuple[Any, list[StepIssue]]:
+def _render_results(*, artifacts_dir: Path, output_folder: Path) -> tuple[Any, list[StepIssue]]:
     """Step 6 — invoke the results renderer and translate failures into a
     manager-level `StepIssue`. Returns `(RendererResult | None, issues)`."""
     # Late import to avoid an import cycle (results_renderer imports
@@ -1970,9 +2016,7 @@ def _render_results(
                 severity="warning",
             )
         )
-        _log.warning(
-            "renderer: skipped: %s: %s", type(exc).__name__, exc
-        )
+        _log.warning("renderer: skipped: %s: %s", type(exc).__name__, exc)
         return None, issues
     except Exception as exc:  # noqa: BLE001
         issues.append(

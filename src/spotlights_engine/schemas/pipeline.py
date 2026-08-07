@@ -85,12 +85,42 @@ class ModuleDeepResearchOutput(BaseModel):
     search_queries: list[SearchQueryLog] = Field(default_factory=list)
 
 
-class ProposalFromFindingCreatorInput(BaseModel):
-    """Input contract for step 4 (`proposal_from_finding_creator`).
+class CandidateDeepResearchInput(BaseModel):
+    """Input contract for step 3 in candidate mode (`candidate_deep_research`).
 
-    Step 4 considers every `(candidate, finding)` pair directly: there is no
-    separate mapping step. The target module is read off
-    `candidates.module_qualified_name`.
+    Deliberately a separate contract from `ModuleDeepResearchInput`: the
+    module-only knobs (`max_findings_per_module`,
+    `include_candidate_hotspots`) are structurally absent rather than present
+    and ignored, and `candidates` is promoted from advisory hot spots to the
+    iteration set — one survey is run per candidate.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    project_tree: ProjectTree
+    module_qualified_name: str = Field(min_length=1)
+    context: SpotlightContext
+    repo_path: Path
+
+    # The iteration set: one deep-research survey is run per candidate.
+    candidates: list[Candidate] = Field(default_factory=list)
+
+    max_findings_per_candidate: int = Field(default=10, ge=0)
+
+    # Controls the default step-3 runner fan-out. False (default) → Codex only;
+    # True → Codex + Claude.
+    enable_claude_search: bool = False
+
+
+class ProposalFromFindingCreatorInput(BaseModel):
+    """Input contract for step 4, in both deep-research modes.
+
+    Consumed by `proposal_from_finding_creator` (module mode), which considers
+    every `(candidate, finding)` pair directly, and by
+    `proposal_from_candidate_finding_creator` (candidate mode), which groups
+    `findings` by `Finding.candidate_id` and pairs each candidate only with its
+    own findings. There is no separate mapping step in either mode. The target
+    module is read off `candidates.module_qualified_name`.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -161,6 +191,14 @@ class SpotlightsManagerInput(BaseModel):
     enable_claude_search: bool = False
     continue_on_module_failure: bool = True
 
+    # Picks which step-3/step-4 pair runs. "module" (default) keeps today's
+    # module-wide survey + cartesian proposal pass; "candidate" runs one survey
+    # per candidate and pairs each candidate only with its own findings.
+    deep_research_mode: Literal["module", "candidate"] = "module"
+    # Candidate-mode per-candidate finding cap; ignored in module mode, which
+    # reads `max_findings_per_module` instead.
+    max_findings_per_candidate: int = Field(default=10, ge=0)
+
 
 class RunInfo(BaseModel):
     """Info about the run that produced a `SpotlightReport`."""
@@ -196,6 +234,7 @@ class SpotlightReport(BaseModel):
 __all__ = [
     "AgentProposalsInput",
     "AgentProposalsOutput",
+    "CandidateDeepResearchInput",
     "CandidateDiscoveryInput",
     "ModuleDeepResearchInput",
     "ModuleDeepResearchOutput",

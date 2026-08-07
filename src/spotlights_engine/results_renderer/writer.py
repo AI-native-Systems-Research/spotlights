@@ -103,15 +103,11 @@ def emit(
 
 def _prepare_output_folder(output: Path, config: RendererConfig) -> None:
     if output.exists() and not output.is_dir():
-        raise RendererSetupError(
-            f"output_folder exists and is not a directory: {output}"
-        )
+        raise RendererSetupError(f"output_folder exists and is not a directory: {output}")
     output.mkdir(parents=True, exist_ok=True)
     if not config.overwrite:
         if any(output.iterdir()):
-            raise RendererSetupError(
-                f"output_folder is not empty and overwrite=False: {output}"
-            )
+            raise RendererSetupError(f"output_folder is not empty and overwrite=False: {output}")
         return
     modules_dir = output / "modules"
     if modules_dir.exists():
@@ -161,17 +157,11 @@ def _render_index(
         )
     )
     input_fp = manifest.get("input_fingerprint") if isinstance(manifest, dict) else None
-    repo_path = (
-        input_fp.get("repo_path") if isinstance(input_fp, dict) else None
-    ) or "_(unknown)_"
+    repo_path = (input_fp.get("repo_path") if isinstance(input_fp, dict) else None) or "_(unknown)_"
     extractor = manifest.get("extractor") if isinstance(manifest, dict) else None
-    extractor_duration = (
-        extractor.get("duration_s") if isinstance(extractor, dict) else None
-    )
+    extractor_duration = extractor.get("duration_s") if isinstance(extractor, dict) else None
     lines.append(f"- **Repo path:** {repo_path}")
-    lines.append(
-        f"- **Run created:** {manifest.get('created_at', '_(unknown)_')}"
-    )
+    lines.append(f"- **Run created:** {manifest.get('created_at', '_(unknown)_')}")
     lines.append(f"- **Run status:** {manifest.get('status', '_(unknown)_')}")
     lines.append(
         "- **Extractor duration (s):** "
@@ -207,9 +197,7 @@ def _render_index(
     if not rows:
         lines.append("_(no modules to display)_")
     else:
-        lines.append(
-            "| Module | Candidates | High-impact | Relevant findings |"
-        )
+        lines.append("| Module | Candidates | High-impact | Relevant findings |")
         lines.append("|---|---:|---:|---:|")
         for row in rows:
             lines.append(
@@ -257,9 +245,7 @@ def _render_run_manifest(rm: RunManifest | None) -> list[str]:
     lines.append(f"- **Date:** {rm.date}")
     lines.append(f"- **Target repo:** {repo_url}")
     lines.append(f"- **Target commit:** {_sha_cell(rm.target.commit_sha)}")
-    lines.append(
-        f"- **Spotlights commit:** {_sha_cell(rm.spotlights.commit_sha)}"
-    )
+    lines.append(f"- **Spotlights commit:** {_sha_cell(rm.spotlights.commit_sha)}")
     lines.append(f"- **Pipeline:** {rm.spotlights.pipeline}")
     lines.append(f"- **Candidates:** {rm.outputs.num_candidates}")
     status = rm.outputs.module_status
@@ -274,10 +260,7 @@ def _render_run_manifest(rm: RunManifest | None) -> list[str]:
 
     lines.append("### Cost & usage")
     lines.append("")
-    lines.append(
-        f"- **Total cost (USD):** ${rm.cost.amount_usd:.4f}  "
-        f"_(source: {rm.cost.source})_"
-    )
+    lines.append(f"- **Total cost (USD):** ${rm.cost.amount_usd:.4f}  _(source: {rm.cost.source})_")
     if rm.external_cost is not None:
         lines.append(
             f"- **External cost (USD):** ${rm.external_cost.amount_usd:.4f}  "
@@ -285,10 +268,7 @@ def _render_run_manifest(rm: RunManifest | None) -> list[str]:
         )
     lines.append(f"- **Total tokens:** {rm.total_tokens}")
     lines.append(f"- **Wall clock (s):** {rm.timing.wall_clock_s:.1f}")
-    lines.append(
-        f"- **Accumulated duration (s):** "
-        f"{rm.timing.accumulated_duration_s:.1f}"
-    )
+    lines.append(f"- **Accumulated duration (s):** {rm.timing.accumulated_duration_s:.1f}")
     lines.append(f"- **API time (s):** {rm.timing.api_time_s:.1f}")
     lines.append("")
 
@@ -296,10 +276,7 @@ def _render_run_manifest(rm: RunManifest | None) -> list[str]:
         lines.append("_(no model usage captured)_")
         lines.append("")
     else:
-        lines.append(
-            "| Model | Provider | Role | Input | Output | Cache read | "
-            "Cache create |"
-        )
+        lines.append("| Model | Provider | Role | Input | Output | Cache read | Cache create |")
         lines.append("|---|---|---|---:|---:|---:|---:|")
         for m in rm.models_used:
             lines.append(
@@ -315,14 +292,8 @@ def _render_run_manifest(rm: RunManifest | None) -> list[str]:
 
     lines.append("### Notes")
     lines.append("")
-    external_rate_note = (
-        rm.external_cost.rate_note if rm.external_cost is not None else ""
-    )
-    note_parts = [
-        part
-        for part in (rm.cost.rate_note, external_rate_note, rm.notes)
-        if part
-    ]
+    external_rate_note = rm.external_cost.rate_note if rm.external_cost is not None else ""
+    note_parts = [part for part in (rm.cost.rate_note, external_rate_note, rm.notes) if part]
     if note_parts:
         for part in note_parts:
             lines.append(f"- {part}")
@@ -348,9 +319,7 @@ def _render_module_page(view: ModulePageView) -> str:
     lines.append("## Module")
     module = view.module
     if module is None:
-        lines.append(
-            "_(module not present in project_tree — only checkpoint state is available)_"
-        )
+        lines.append("_(module not present in project_tree — only checkpoint state is available)_")
     else:
         lines.append(f"- **Path:** `{module.path}`")
         if module.description:
@@ -429,9 +398,7 @@ def _render_candidate_page(
     lines.append("")
 
     file_link = _file_link(primary_file(cand), config)
-    lines.append(
-        f"- **File:** {file_link} (lines {span.line_start}–{span.line_end})"
-    )
+    lines.append(f"- **File:** {file_link} (lines {span.line_start}–{span.line_end})")
     lines.append(f"- **Symbol:** `{span.symbol}`")
     lines.append(f"- **Kind:** {span.kind}")
     lines.append(f"- **Estimated impact:** {cand.estimated_impact}")
@@ -465,15 +432,9 @@ def _render_candidate_page(
     else:
         for n, p in enumerate(research_proposals, start=1):
             lines.append(f"### {n}. {p.title}")
-            finding = (
-                findings_by_id.get(p.finding_ref_id)
-                if p.finding_ref_id is not None
-                else None
-            )
+            finding = findings_by_id.get(p.finding_ref_id) if p.finding_ref_id is not None else None
             if finding is not None:
-                lines.append(
-                    f"- **Finding:** `{p.finding_ref_id}` — *{finding.title}*"
-                )
+                lines.append(f"- **Finding:** `{p.finding_ref_id}` — *{finding.title}*")
                 lines.append(f"- **Source URL:** <{finding.url}>")
             elif p.finding_ref_id is not None:
                 lines.append(f"- **Finding:** `{p.finding_ref_id}`")
@@ -488,6 +449,21 @@ def _render_candidate_page(
             lines.append("")
             lines.append(p.rationale)
             lines.append("")
+            # Candidate-mode step 4 fills these four; module mode leaves them
+            # `None`, so gating on presence keeps module-mode Markdown
+            # byte-identical.
+            for heading, value in (
+                ("Mechanism.", p.mechanism),
+                ("Required changes.", p.required_changes),
+                ("Expected effect.", p.expected_effect),
+                ("Evaluation metric.", p.evaluation_metric),
+            ):
+                if value is None:
+                    continue
+                lines.append(f"**{heading}**")
+                lines.append("")
+                lines.append(value)
+                lines.append("")
             lines.append("---")
             lines.append("")
 
@@ -539,9 +515,7 @@ def _render_issues_grouped(issues: list[StepIssue]) -> list[str]:
         lines.append(f"### {step}")
         for iss in by_step[step]:
             recoverable = "recoverable" if iss.recoverable else "unrecoverable"
-            lines.append(
-                f"- **[{iss.severity}, {recoverable}]** {iss.message}"
-            )
+            lines.append(f"- **[{iss.severity}, {recoverable}]** {iss.message}")
         lines.append("")
     return lines
 

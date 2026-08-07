@@ -7,7 +7,6 @@ from pathlib import Path
 from spotlights_engine.results_renderer.aggregator import aggregate
 from spotlights_engine.results_renderer.api import RendererConfig
 from spotlights_engine.results_renderer.loader import load_run
-
 from tests.unit.results_renderer._fixtures import make_full_run
 
 
@@ -65,12 +64,45 @@ def test_skipped_modules_excluded_when_disabled(tmp_path: Path) -> None:
     paths, _ = make_full_run(tmp_path)
     # Pretend kernels is SKIPPED via manifest tweak.
     import json
+
     manifest = json.loads(paths.manifest_path.read_text())
     manifest["modules"]["kernels"]["status"] = "SKIPPED"
     paths.manifest_path.write_text(json.dumps(manifest))
 
     loaded = load_run(tmp_path)
-    _, _, skipped, _ = aggregate(
-        loaded, RendererConfig(include_skipped_modules=False)
-    )
+    _, _, skipped, _ = aggregate(loaded, RendererConfig(include_skipped_modules=False))
     assert "kernels" in skipped
+
+
+def test_relevant_findings_count_is_mode_agnostic() -> None:
+    """`_count_relevant_findings` intersects on `finding_ref_id`, which both
+    step-4 implementations set identically, so candidate-tagged findings count
+    exactly as module-wide ones do."""
+    from spotlights_engine.results_renderer.aggregator import (
+        _count_relevant_findings,
+    )
+    from spotlights_engine.schemas.proposal import Proposal
+    from tests.unit.results_renderer._fixtures import make_candidate, make_finding
+
+    tagged = make_finding(1).model_copy(update={"candidate_id": "cand-mod-0001"})
+    other = make_finding(2).model_copy(update={"candidate_id": "cand-mod-0002"})
+    cand = make_candidate(
+        1,
+        deep_proposals=[
+            Proposal(
+                id="prop-mod-0001",
+                source="research_finding",
+                finding_ref_id=tagged.finding_id,
+                author="proposal_from_candidate_finding_creator",
+                title="t",
+                description="d",
+                rationale="r",
+                mechanism="m",
+                required_changes="rc",
+                expected_effect="ee",
+                evaluation_metric="em",
+            )
+        ],
+    )
+
+    assert _count_relevant_findings([cand], [tagged, other]) == 1

@@ -28,6 +28,9 @@ from spotlights_engine.costing.records import UsageRecord, UsageStep
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
 from spotlights_engine.module_deep_research.search_log import render_search_log_markdown
 from spotlights_engine.modules_extractor.agent import ExtractionInvocation
+from spotlights_engine.proposal_from_candidate_finding_creator import (
+    ProposalFromCandidateFindingConfig,
+)
 from spotlights_engine.proposal_from_finding_creator import (
     ProposalFromFindingConfig,
 )
@@ -190,6 +193,18 @@ class ModulePaths:
         return self.dir / "module_deep_research.last_message.md"
 
     @property
+    def deep_research_last_message_dir(self) -> Path:
+        """Per-candidate last-message directory used by candidate mode.
+
+        Candidate mode runs N codex surveys per module, so a single
+        `output_last_message` file would let one candidate's survey parse
+        another's JSON (the runner reads the file back as `final_message`).
+        Each survey therefore writes `<candidate_id>.md` in here. Module mode
+        keeps using the single-file `deep_research_last_message_path`.
+        """
+        return self.dir / "module_deep_research.last_messages"
+
+    @property
     def deep_research_search_log_path(self) -> Path:
         return self.dir / "module_deep_research.search_log.md"
 
@@ -287,10 +302,36 @@ def build_input_fingerprint(
     continue_on_module_failure: bool,
     include_candidate_hotspots: bool = True,
     enable_claude_search: bool = False,
+    deep_research_mode: str = "module",
+    max_findings_per_candidate: int | None = None,
 ) -> dict[str, Any]:
+    """Fingerprint the knobs **effective for the selected deep-research mode**.
+
+    In `module` mode the returned dict is exactly the historical six keys, so a
+    pre-existing run dir resumes with no mismatch and `SCHEMA_VERSION` does not
+    have to move. In `candidate` mode the module-only knobs
+    (`max_findings_per_module`, `include_candidate_hotspots`) are omitted — a
+    change to a knob the mode never reads must not invalidate a resume — and
+    `deep_research_mode` / `max_findings_per_candidate` are added. Because the
+    key sets differ, switching modes on resume can never compare equal, which
+    is the desired `ResumeMismatchError`.
+
+    `enable_claude_search` stays in both: both modes consume it to choose
+    Codex-only vs. Codex+Claude step-3 surveys.
+    """
+    context_hash = _stable_hash(context.model_dump(mode="json"))
+    if deep_research_mode == "candidate":
+        return {
+            "repo_path": str(repo_path),
+            "context_hash": context_hash,
+            "continue_on_module_failure": continue_on_module_failure,
+            "enable_claude_search": enable_claude_search,
+            "deep_research_mode": "candidate",
+            "max_findings_per_candidate": max_findings_per_candidate,
+        }
     return {
         "repo_path": str(repo_path),
-        "context_hash": _stable_hash(context.model_dump(mode="json")),
+        "context_hash": context_hash,
         "max_findings_per_module": max_findings_per_module,
         "continue_on_module_failure": continue_on_module_failure,
         "include_candidate_hotspots": include_candidate_hotspots,
@@ -306,18 +347,24 @@ def build_config_fingerprint(
     deep_research_cfg: BaseModel | None,
     proposal_from_finding_cfg: BaseModel | None,
     agent_proposals_cfg: BaseModel | None,
+    proposal_from_candidate_finding_cfg: BaseModel | None = None,
+    deep_research_mode: str = "module",
 ) -> dict[str, Any]:
+    """Hash the per-step infra configs.
+
+    The candidate-mode step-4 config hash is emitted **only** in candidate mode:
+    every other key hashes an `or <Default>()`, so adding one unconditionally
+    would change the config fingerprint of every existing module-mode run dir.
+    """
     effective_discovery_cfg = discovery_cfg or DiscoveryConfig()
     effective_deep_research_cfg = deep_research_cfg or CodexExecOptions()
     effective_proposal_cfg = proposal_from_finding_cfg or ProposalFromFindingConfig()
     effective_agent_proposals_cfg = agent_proposals_cfg or AgentProposalsConfig()
-    return {
+    fingerprint = {
         "module_filter": (
             module_filter.model_dump(mode="json") if module_filter is not None else None
         ),
-        "extractor_hash": hash_pydantic_excluding(
-            extractor_cfg, exclude={"artifacts_dir"}
-        ),
+        "extractor_hash": hash_pydantic_excluding(extractor_cfg, exclude={"artifacts_dir"}),
         "discovery_hash": hash_pydantic_excluding(
             effective_discovery_cfg, exclude={"artifacts_dir", "repo_path"}
         ),
@@ -331,15 +378,22 @@ def build_config_fingerprint(
             effective_agent_proposals_cfg, exclude={"artifacts_dir", "repo_path"}
         ),
     }
+    if deep_research_mode == "candidate":
+        effective_candidate_proposal_cfg = (
+            proposal_from_candidate_finding_cfg or ProposalFromCandidateFindingConfig()
+        )
+        fingerprint["proposal_from_candidate_finding_hash"] = hash_pydantic_excluding(
+            effective_candidate_proposal_cfg,
+            exclude={"artifacts_dir", "repo_path"},
+        )
+    return fingerprint
 
 
 def default_agent_proposals_hash() -> str:
     """Stable hash of the default `AgentProposalsConfig`. Used by the one-shot
     pre-step-5 manifest forward migration; see orchestrator
     `_ensure_resume_compatible`."""
-    return hash_pydantic_excluding(
-        AgentProposalsConfig(), exclude={"artifacts_dir", "repo_path"}
-    )
+    return hash_pydantic_excluding(AgentProposalsConfig(), exclude={"artifacts_dir", "repo_path"})
 
 
 def read_manifest(paths: ManagerPaths) -> dict[str, Any] | None:
@@ -355,11 +409,7 @@ def write_manifest(paths: ManagerPaths, manifest: dict[str, Any]) -> None:
 
 
 def write_run_manifest(paths: ManagerPaths, manifest: Any) -> None:
-    payload = (
-        manifest.model_dump(mode="json")
-        if hasattr(manifest, "model_dump")
-        else manifest
-    )
+    payload = manifest.model_dump(mode="json") if hasattr(manifest, "model_dump") else manifest
     _atomic_write_json(paths.run_manifest_path, payload)
 
 
@@ -414,12 +464,9 @@ def read_module_state(module_paths: ModulePaths) -> LoadedModuleState:
     discovery_total_duration_s: float | None = None
     discovery_total_cost_usd: float | None = None
     if module_paths.discovery_telemetry_path.exists():
-        payload = json.loads(
-            module_paths.discovery_telemetry_path.read_text(encoding="utf-8")
-        )
+        payload = json.loads(module_paths.discovery_telemetry_path.read_text(encoding="utf-8"))
         discovery_telemetry = [
-            IterationTelemetry.model_validate(it)
-            for it in payload.get("iterations", [])
+            IterationTelemetry.model_validate(it) for it in payload.get("iterations", [])
         ]
         discovery_total_duration_s = payload.get("total_duration_s")
         discovery_total_cost_usd = payload.get("total_cost_usd")
@@ -427,9 +474,7 @@ def read_module_state(module_paths: ModulePaths) -> LoadedModuleState:
     deep_research: ModuleDeepResearchOutput | None = None
     deep_research_duration_s: float | None = None
     if module_paths.deep_research_path.exists():
-        payload = json.loads(
-            module_paths.deep_research_path.read_text(encoding="utf-8")
-        )
+        payload = json.loads(module_paths.deep_research_path.read_text(encoding="utf-8"))
         # Sidecar wraps the output with telemetry — the contract object lives
         # under "output", everything else is runtime metadata.
         if "output" in payload:
@@ -443,9 +488,7 @@ def read_module_state(module_paths: ModulePaths) -> LoadedModuleState:
     proposal_from_finding_duration_s: float | None = None
     proposal_from_finding_per_pair_durations_s: dict[str, float] = {}
     if module_paths.proposal_from_finding_path.exists():
-        payload = json.loads(
-            module_paths.proposal_from_finding_path.read_text(encoding="utf-8")
-        )
+        payload = json.loads(module_paths.proposal_from_finding_path.read_text(encoding="utf-8"))
         if "output" in payload:
             proposal_from_finding = ProposalFromFindingCreatorOutput.model_validate(
                 payload["output"]
@@ -457,17 +500,13 @@ def read_module_state(module_paths: ModulePaths) -> LoadedModuleState:
                     str(k): float(v) for k, v in per_pair.items()
                 }
         else:
-            proposal_from_finding = ProposalFromFindingCreatorOutput.model_validate(
-                payload
-            )
+            proposal_from_finding = ProposalFromFindingCreatorOutput.model_validate(payload)
 
     agent_proposals: AgentProposalsOutput | None = None
     agent_proposals_duration_s: float | None = None
     agent_proposals_per_candidate_durations_s: dict[str, dict[str, float]] = {}
     if module_paths.agent_proposals_path.exists():
-        payload = json.loads(
-            module_paths.agent_proposals_path.read_text(encoding="utf-8")
-        )
+        payload = json.loads(module_paths.agent_proposals_path.read_text(encoding="utf-8"))
         if "output" in payload:
             agent_proposals = AgentProposalsOutput.model_validate(payload["output"])
             agent_proposals_duration_s = payload.get("duration_s")
@@ -476,9 +515,7 @@ def read_module_state(module_paths: ModulePaths) -> LoadedModuleState:
                 normalized: dict[str, dict[str, float]] = {}
                 for cand_id, durations in per_cand.items():
                     if isinstance(durations, dict):
-                        normalized[str(cand_id)] = {
-                            str(k): float(v) for k, v in durations.items()
-                        }
+                        normalized[str(cand_id)] = {str(k): float(v) for k, v in durations.items()}
                 agent_proposals_per_candidate_durations_s = normalized
         else:
             agent_proposals = AgentProposalsOutput.model_validate(payload)
@@ -502,16 +539,12 @@ def read_module_state(module_paths: ModulePaths) -> LoadedModuleState:
 
 def write_checkpoint(module_paths: ModulePaths, checkpoint: ModuleCheckpoint) -> None:
     module_paths.dir.mkdir(parents=True, exist_ok=True)
-    _atomic_write_text(
-        module_paths.status_path, checkpoint.model_dump_json(indent=2) + "\n"
-    )
+    _atomic_write_text(module_paths.status_path, checkpoint.model_dump_json(indent=2) + "\n")
 
 
 def write_candidates(module_paths: ModulePaths, candidates: Candidates) -> None:
     module_paths.dir.mkdir(parents=True, exist_ok=True)
-    _atomic_write_text(
-        module_paths.candidates_path, candidates.model_dump_json(indent=2) + "\n"
-    )
+    _atomic_write_text(module_paths.candidates_path, candidates.model_dump_json(indent=2) + "\n")
 
 
 def write_discovery_telemetry(
@@ -607,11 +640,7 @@ def read_usage_records(
             if path.suffix != ".json":
                 continue
             try:
-                records.append(
-                    UsageRecord.model_validate_json(
-                        path.read_text(encoding="utf-8")
-                    )
-                )
+                records.append(UsageRecord.model_validate_json(path.read_text(encoding="utf-8")))
             except (OSError, ValueError) as exc:
                 notes.append(f"ignored unreadable usage file {path.name}: {exc}")
     return records, notes
@@ -656,6 +685,13 @@ def clear_discovery_artifacts(
 def clear_deep_research_artifacts(
     module_paths: ModulePaths, *, session_index: int | None = None
 ) -> None:
+    # The per-candidate last-message directory only exists after a
+    # candidate-mode step 3; the module-mode single file only after a
+    # module-mode one. Both are cleared unconditionally so a `--redo` never
+    # leaks a prior run's messages, and each branch is a no-op for the other
+    # mode.
+    if module_paths.deep_research_last_message_dir.exists():
+        shutil.rmtree(module_paths.deep_research_last_message_dir)
     for p in (
         module_paths.deep_research_path,
         module_paths.deep_research_last_message_path,
@@ -727,24 +763,18 @@ def write_extractor_outputs(
         paths.project_tree_path,
         project_tree.model_dump_json(indent=2) + "\n",
     )
-    _atomic_write_json(
-        paths.extractor_invocation_path, dataclasses.asdict(invocation)
-    )
+    _atomic_write_json(paths.extractor_invocation_path, dataclasses.asdict(invocation))
 
 
 def read_extractor_outputs(
     paths: ManagerPaths,
 ) -> tuple[ProjectTree | None, ExtractionInvocation | None]:
     tree = (
-        ProjectTree.from_json(paths.project_tree_path)
-        if paths.project_tree_path.exists()
-        else None
+        ProjectTree.from_json(paths.project_tree_path) if paths.project_tree_path.exists() else None
     )
     invocation: ExtractionInvocation | None = None
     if paths.extractor_invocation_path.exists():
-        payload = json.loads(
-            paths.extractor_invocation_path.read_text(encoding="utf-8")
-        )
+        payload = json.loads(paths.extractor_invocation_path.read_text(encoding="utf-8"))
         invocation = ExtractionInvocation(**payload)
     return tree, invocation
 

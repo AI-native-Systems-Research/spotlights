@@ -3,6 +3,10 @@
 `Finding` is produced by step 3 (`module_deep_research`). Step 4
 (`proposal_from_finding_creator`) consumes the findings list directly and
 considers each `(candidate, finding)` pair when drafting proposals.
+
+`candidate_id` is populated only in `candidate` deep-research mode (step 3
+`candidate_deep_research`), where each survey is scoped to one candidate. In
+`module` mode the field is always `None`.
 """
 
 from __future__ import annotations
@@ -34,6 +38,10 @@ class Finding(BaseModel):
     source_type: FindingSourceType
     technique_summary: str = Field(min_length=1)
     supporting_evidence: str = ""
+
+    # Set only by `candidate_deep_research` (candidate mode); `None` in module
+    # mode, where a survey covers the whole module rather than one candidate.
+    candidate_id: str | None = Field(default=None, pattern=r"^cand-[A-Za-z0-9._-]+-\d{4}$")
 
 
 __all__ = [

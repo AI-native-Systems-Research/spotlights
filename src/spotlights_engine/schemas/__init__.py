@@ -6,15 +6,17 @@ Everything else in the package is internal and may change without notice.
 Layout:
     common     — SpotlightContext, StepIssue, PipelineStep, ModuleRunStatus
     project    — File, Module, Repository, ProjectTree
-    finding    — Finding, FindingSourceType
+    finding    — Finding, FindingSourceType (candidate_id set in candidate mode)
     search     — SearchResult, SearchQueryLog (deep-research search log)
     proposals  — DeepResearchProposal, AgentProposal (DR pipeline-internal)
     proposal   — Proposal, ProposalSource (unified report shape)
     candidate  — Candidate, Candidates, CandidateKind, CandidateState,
                  EstimatedImpact, CodeKind, CodeSpan, CodeLocation,
                  CandidateOrigin
-    pipeline   — Per-step DR I/O contracts + ModuleRun + SpotlightsManagerInput;
-                 plus the cross-pipeline `SpotlightReport` and `RunInfo`.
+    pipeline   — Per-step DR I/O contracts (both deep-research modes:
+                 ModuleDeepResearchInput and CandidateDeepResearchInput) +
+                 ModuleRun + SpotlightsManagerInput; plus the cross-pipeline
+                 `SpotlightReport` and `RunInfo`.
 """
 
 from __future__ import annotations
@@ -45,6 +47,7 @@ from spotlights_engine.schemas.finding import (
 from spotlights_engine.schemas.pipeline import (
     AgentProposalsInput,
     AgentProposalsOutput,
+    CandidateDeepResearchInput,
     CandidateDiscoveryInput,
     ModuleDeepResearchInput,
     ModuleDeepResearchOutput,
@@ -67,6 +70,7 @@ __all__ = [
     "Anomaly",
     "AnomalySeverity",
     "Candidate",
+    "CandidateDeepResearchInput",
     "CandidateDiscoveryInput",
     "CandidateKind",
     "CandidateOrigin",

@@ -36,6 +36,11 @@ class SearchQueryLog(BaseModel):
     query: str = ""  # NO min_length — empty must not fail the payload
     tool: str = ""
     results: list[SearchResult] = Field(default_factory=list)
+    # Set only in candidate deep-research mode, where one module's log
+    # concatenates several per-candidate surveys. `None` in module mode.
+    # `extra="ignore"` drops undeclared keys, so the field must be declared
+    # here to survive a round-trip.
+    candidate_id: str | None = None
 
 
 __all__ = [

@@ -21,6 +21,9 @@ from spotlights_engine.candidate_discovery.api import (
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
 from spotlights_engine.modules_extractor import ExtractorConfig
 from spotlights_engine.modules_extractor.agent import ExtractionInvocation
+from spotlights_engine.proposal_from_candidate_finding_creator import (
+    ProposalFromCandidateFindingConfig,
+)
 from spotlights_engine.proposal_from_finding_creator import (
     ProposalFromFindingConfig,
 )
@@ -53,6 +56,10 @@ class SpotlightsManagerConfig(BaseModel):
     discovery: DiscoveryConfig | None = None
     deep_research: CodexExecOptions | None = None
     proposal_from_finding: ProposalFromFindingConfig | None = None
+    # Step-4 infra for candidate mode (`SpotlightsManagerInput.deep_research_mode
+    # == "candidate"`); ignored in module mode, which reads
+    # `proposal_from_finding` instead.
+    proposal_from_candidate_finding: ProposalFromCandidateFindingConfig | None = None
     agent_proposals: AgentProposalsConfig | None = None
 
     resume: bool = True
@@ -68,9 +75,7 @@ class ModuleTelemetry(BaseModel):
     discovery_total_cost_usd: float | None = None
     deep_research_duration_s: float | None = None
     proposal_from_finding_duration_s: float | None = None
-    proposal_from_finding_per_pair_durations_s: dict[str, float] = Field(
-        default_factory=dict
-    )
+    proposal_from_finding_per_pair_durations_s: dict[str, float] = Field(default_factory=dict)
     agent_proposals_duration_s: float | None = None
     agent_proposals_per_candidate_durations_s: dict[str, dict[str, float]] = Field(
         default_factory=dict
@@ -106,9 +111,7 @@ class SpotlightsManagerResult(BaseModel):
     renderer_result: RendererResult | None = None
 
 
-def run(
-    input: SpotlightsManagerInput, *, config: SpotlightsManagerConfig
-) -> SpotlightReport:
+def run(input: SpotlightsManagerInput, *, config: SpotlightsManagerConfig) -> SpotlightReport:
     """Cross-pipeline entrypoint: returns the assembled `SpotlightReport`.
 
     For the runtime-rich result (per-module telemetry, extractor

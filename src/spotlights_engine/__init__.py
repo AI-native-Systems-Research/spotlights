@@ -22,6 +22,9 @@ from spotlights_engine.module_knowledge import (
     RetrievedItem,
     RetrieveRequest,
 )
+from spotlights_engine.proposal_from_candidate_finding_creator import (
+    ProposalFromCandidateFindingConfig,
+)
 from spotlights_engine.proposal_from_finding_creator import (
     ProposalFromFindingConfig,
     ProposalFromFindingSetupError,
@@ -53,6 +56,7 @@ __all__ = [
     "ManagerSetupError",
     "ModuleFilter",
     "ModuleTelemetry",
+    "ProposalFromCandidateFindingConfig",
     "ProposalFromFindingConfig",
     "ProposalFromFindingSetupError",
     "ProposalFromFindingValidationError",

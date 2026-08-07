@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from pydantic import ValidationError
@@ -12,6 +13,7 @@ from spotlights_engine.schemas.candidate import Candidate, Candidates
 from spotlights_engine.schemas.common import SpotlightContext, StepIssue
 from spotlights_engine.schemas.finding import Finding
 from spotlights_engine.schemas.pipeline import (
+    CandidateDeepResearchInput,
     CandidateDiscoveryInput,
     ModuleDeepResearchInput,
     ModuleDeepResearchOutput,
@@ -109,9 +111,7 @@ def test_candidate_discovery_input_round_trips() -> None:
 
 def test_candidate_discovery_input_rejects_empty_qualified_name() -> None:
     with pytest.raises(ValidationError):
-        CandidateDiscoveryInput(
-            project_tree=_tree(), module_qualified_name="", context=_ctx()
-        )
+        CandidateDiscoveryInput(project_tree=_tree(), module_qualified_name="", context=_ctx())
 
 
 def test_module_deep_research_input_accepts_project_tree_and_context() -> None:
@@ -187,6 +187,63 @@ def test_spotlights_manager_input_defaults() -> None:
     inp = SpotlightsManagerInput(repo_path=Path("/tmp/repo"), context=_ctx())
     assert inp.max_findings_per_module == 30
     assert inp.continue_on_module_failure is True
+    # Additive: module mode stays the default so existing callers are unaffected.
+    assert inp.deep_research_mode == "module"
+    assert inp.max_findings_per_candidate == 10
+
+
+def test_spotlights_manager_input_rejects_unknown_deep_research_mode() -> None:
+    with pytest.raises(ValidationError):
+        SpotlightsManagerInput(
+            repo_path=Path("/tmp/repo"),
+            context=_ctx(),
+            deep_research_mode="hybrid",  # type: ignore[arg-type]
+        )
+
+
+# CandidateDeepResearchInput (step 3, candidate mode) -------------------------
+
+
+def test_candidate_deep_research_input_defaults() -> None:
+    request = CandidateDeepResearchInput(
+        project_tree=_research_tree(),
+        module_qualified_name="inference/attention",
+        context=_ctx(),
+        repo_path=Path("/tmp/example-repo"),
+    )
+
+    assert request.candidates == []
+    assert request.max_findings_per_candidate == 10
+    assert request.enable_claude_search is False
+
+
+def test_candidate_deep_research_input_forbids_module_only_knobs() -> None:
+    # The module-mode knobs are structurally absent, not just ignored.
+    base: dict[str, Any] = dict(
+        project_tree=_research_tree(),
+        module_qualified_name="inference/attention",
+        context=_ctx(),
+        repo_path=Path("/tmp/example-repo"),
+    )
+    for extra in ("max_findings_per_module", "include_candidate_hotspots"):
+        with pytest.raises(ValidationError):
+            CandidateDeepResearchInput.model_validate({**base, extra: 5})
+
+
+def test_candidate_deep_research_input_round_trips_through_json() -> None:
+    request = CandidateDeepResearchInput(
+        project_tree=_research_tree(),
+        module_qualified_name="inference/attention",
+        context=_ctx(),
+        repo_path=Path("/tmp/example-repo"),
+        candidates=list(_candidates().candidates),
+        max_findings_per_candidate=3,
+    )
+
+    again = CandidateDeepResearchInput.model_validate_json(request.model_dump_json())
+
+    assert again.max_findings_per_candidate == 3
+    assert [c.id for c in again.candidates] == [c.id for c in request.candidates]
 
 
 def test_module_run_round_trips_through_json() -> None:
