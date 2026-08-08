@@ -181,6 +181,27 @@ uv sync --all-extras
 source .venv/bin/activate
 ```
 
+### Preflight with `doctor`
+
+Before your first real run, verify the environment end-to-end:
+
+```bash
+spotlights-engine doctor            # optionally: --repo /path/to/target
+```
+
+Unlike a PATH-only check, `doctor` actually runs each agent CLI (`claude`, `codex`)
+with a one-word prompt. A single probe proves three things at once:
+
+- **install** — the CLI resolves on PATH and executes;
+- **auth** — it exits cleanly with parseable output (an unauthenticated CLI errors out);
+- **pricing readiness** — the model the CLI reports has a matching row in the cost
+  rate table, so a real run will not silently drop that model's cost.
+
+It exits non-zero on any failure. Because it launches the CLIs, `doctor` spends a
+tiny amount per probe — that is the only way to verify auth and the reported model.
+If a probe reports a model with no rate row, add it to the table or point
+`SPOTLIGHTS_RATES_FILE` at a table that prices it.
+
 ### Install the Spotlights skill
 
 The engine ships Claude Code slash commands (currently `/spotlights-objective-setting` and `/spotlights-sort-candidates`) as bundled markdown templates. They are not active until you install them into a Claude Code commands directory — same model as [spec-kit](https://github.com/github/spec-kit). From the project you want to optimize:
