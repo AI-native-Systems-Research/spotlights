@@ -160,8 +160,9 @@ def probe_cli(name: str, *, rates: dict[str, ModelRate], cwd: Path | None = None
             ok=False,
             detail=(
                 f"reported model {reported!r} has no rate row ({key}). "
-                f"Add it to the rate table or set {RATES_ENV_VAR} to a table that "
-                "prices it — an unpriced model silently drops from the cost total."
+                f"Add a row keyed {key!r} to the rate table or set {RATES_ENV_VAR} "
+                "to a table that prices it — an unpriced model silently drops from "
+                'the cost total. See README → "Adding a model to the rate table".'
             ),
         )
     return CheckResult(
