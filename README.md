@@ -118,7 +118,7 @@ Then install the bundled slash commands ([Install the Spotlights skill](docs/INS
 spotlights-engine init      # installs the /spotlights-* Claude Code slash commands
 ```
 
-Before your first real run, verify the environment end-to-end ([Preflight with `doctor`](docs/INSTALL.md#preflight-with-doctor)):
+Verify the environment end-to-end ([Preflight with `doctor`](docs/INSTALL.md#preflight-with-doctor)):
 
 ```bash
 spotlights-engine doctor
