@@ -35,7 +35,6 @@ from spotlights_engine.costing.rates import (
     load_rates,
 )
 from spotlights_engine.costing.records import PROVIDER_FOR_CLI
-from spotlights_engine.defaults import DEFAULT_REPO
 
 # Minimal prompt: cheapest thing that still forces a real model turn and a
 # usage payload we can read the model id from.
@@ -172,12 +171,6 @@ def probe_cli(name: str, *, rates: dict[str, ModelRate], cwd: Path | None = None
     )
 
 
-def check_repo(repo: Path) -> CheckResult:
-    ok = repo.is_dir()
-    detail = str(repo) if ok else f"target repo not found at {repo}"
-    return CheckResult(name="repo", ok=ok, detail=detail)
-
-
 def check_rates() -> CheckResult:
     env_path = os.environ.get(RATES_ENV_VAR)
     if env_path:
@@ -194,7 +187,7 @@ def check_rates() -> CheckResult:
     return CheckResult(name="rates", ok=False, detail="no rate table found")
 
 
-def run_checks(repo: Path) -> list[CheckResult]:
+def run_checks() -> list[CheckResult]:
     rates_check = check_rates()
     # If the rate table itself is unreadable, load_rates would raise; probing
     # then can't validate pricing, so fall back to an empty table (every model
@@ -204,35 +197,27 @@ def run_checks(repo: Path) -> list[CheckResult]:
     except (OSError, ValueError):
         rates = {}
     return [
-        probe_cli("claude", rates=rates, cwd=repo if repo.is_dir() else None),
-        probe_cli("codex", rates=rates, cwd=repo if repo.is_dir() else None),
-        check_repo(repo),
+        probe_cli("claude", rates=rates),
+        probe_cli("codex", rates=rates),
         rates_check,
     ]
 
 
 def _build_argparser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(
+    return argparse.ArgumentParser(
         prog="spotlights-engine doctor",
         description=(
-            "Live preflight: run each agent CLI with a trivial prompt to verify "
-            "it is installed, authenticated, and reports a model the rate table "
-            "prices; check the target repo and rate table. Spends a tiny amount "
-            "per CLI probe. Run before your first spotlights-engine run."
+            "Live environment preflight: run each agent CLI with a trivial "
+            "prompt to verify it is installed, authenticated, and reports a "
+            "model the rate table prices. Spends a tiny amount per CLI probe. "
+            "Run before your first spotlights-engine run."
         ),
     )
-    p.add_argument(
-        "--repo",
-        type=Path,
-        default=DEFAULT_REPO,
-        help=f"Path to the target repo to verify (default: {DEFAULT_REPO}).",
-    )
-    return p
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = _build_argparser().parse_args(argv)
-    results = run_checks(args.repo)
+    _build_argparser().parse_args(argv)
+    results = run_checks()
     for r in results:
         mark = "ok  " if r.ok else "FAIL"
         print(f"[{mark}] {r.name}: {r.detail}")

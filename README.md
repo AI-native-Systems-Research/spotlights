@@ -186,7 +186,7 @@ source .venv/bin/activate
 Before your first real run, verify the environment end-to-end:
 
 ```bash
-spotlights-engine doctor            # optionally: --repo /path/to/target
+spotlights-engine doctor
 ```
 
 Unlike a PATH-only check, `doctor` actually runs each agent CLI (`claude`, `codex`)

@@ -77,32 +77,27 @@ def test_probe_cli_strips_context_window_tag(monkeypatch):
     assert res.ok is True
 
 
-def test_check_repo(tmp_path):
-    assert doctor.check_repo(tmp_path).ok is True
-    assert doctor.check_repo(tmp_path / "nope").ok is False
-
-
-def test_run_checks_returns_all(monkeypatch, tmp_path):
+def test_run_checks_returns_all(monkeypatch):
     monkeypatch.setattr(doctor.shutil, "which", lambda _n: "/bin/" + _n)
     monkeypatch.setattr(
         doctor,
         "_probe_model",
         lambda name, **_kw: ProbeOutcome(ok=True, model=None, error=""),
     )
-    results = doctor.run_checks(tmp_path)
+    results = doctor.run_checks()
     names = {r.name for r in results}
-    assert {"claude", "codex", "repo", "rates"} <= names
+    assert {"claude", "codex", "rates"} <= names
 
 
-def test_main_exit_code_fail(monkeypatch, tmp_path, capsys):
+def test_main_exit_code_fail(monkeypatch, capsys):
     monkeypatch.setattr(doctor.shutil, "which", lambda _n: None)
-    code = doctor.main(["--repo", str(tmp_path)])
+    code = doctor.main([])
     out = capsys.readouterr().out
     assert code == 1
     assert "claude" in out
 
 
-def test_main_exit_code_ok(monkeypatch, tmp_path):
+def test_main_exit_code_ok(monkeypatch):
     monkeypatch.setattr(doctor.shutil, "which", lambda _n: "/bin/" + _n)
 
     def fake_probe(name, **_kw):
@@ -111,5 +106,5 @@ def test_main_exit_code_ok(monkeypatch, tmp_path):
 
     monkeypatch.setattr(doctor, "_probe_model", fake_probe)
     # Uses the bundled rate table, which has both required keys.
-    code = doctor.main(["--repo", str(tmp_path)])
+    code = doctor.main([])
     assert code == 0
