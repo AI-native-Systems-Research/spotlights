@@ -77,17 +77,10 @@ Browse the full rendered run under [`examples/vllm_subset/`](examples/vllm_subse
 > [!IMPORTANT]
 > Spotlights drives **two** external agent CLIs — `claude` **and** `codex` — both installed **and** authenticated.
 
-| CLI | Runtime / auth | Used for |
-|---|---|---|
-| `claude` | Claude Code (Pro/Max/Team/Enterprise/Console plan, or a LiteLLM proxy) | modules extractor, candidate discovery, Claude executors (steps 4–5) |
-| `codex` | Codex CLI (ChatGPT plan or OpenAI API key, or a LiteLLM proxy) | `module_deep_research`, Codex executors (steps 2, 5) |
-
-### Install
-
-| Agent | Install |
-| --- | --- |
-| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `curl -fsSL https://claude.ai/install.sh \| bash` |
-| [Codex](https://github.com/openai/codex) | `curl -fsSL https://chatgpt.com/codex/install.sh \| sh` |
+| Agent | Install | Used for |
+| --- | --- | --- |
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `curl -fsSL https://claude.ai/install.sh \| bash` | modules extractor, candidate discovery, Claude executors (steps 4–5) |
+| [Codex](https://github.com/openai/codex) | `curl -fsSL https://chatgpt.com/codex/install.sh \| sh` | `module_deep_research`, Codex executors (steps 2, 5) |
 
 For LiteLLM gateway config and a quick response check, see [docs/agent-cli-setup.md](docs/agent-cli-setup.md).
 
