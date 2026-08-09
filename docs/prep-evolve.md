@@ -18,7 +18,7 @@ Pass `--evolver all` to emit one bundle per compatible evolver (skydiscover is r
 
 ### Usage
 
-`prep-evolve` consumes a completed run's `result.json` plus a `(module, candidate)` selection. Run the engine first (see [Quickstart](#quickstart-on-a-vllm-subset)), then point at the same target repo:
+`prep-evolve` consumes a completed run's `result.json` plus a `(module, candidate)` selection. Run the engine first (see [Quickstart](../README.md#quickstart)), then point at the same target repo:
 
 ```bash
 spotlights-engine prep-evolve \
