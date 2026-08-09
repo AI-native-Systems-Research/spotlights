@@ -101,10 +101,27 @@ For LiteLLM gateway config and a quick response check, see [docs/agent-cli-setup
 <a id="quickstart"></a>
 ## Quickstart on a vLLM subset
 
-First install the engine and the slash commands (see [docs/INSTALL.md](docs/INSTALL.md)), including:
+Prerequisites: Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/).
+
+First install the engine and the slash commands (full guide: [docs/INSTALL.md](docs/INSTALL.md)):
+
+```bash
+git clone https://github.com/AI-native-Systems-Research/spotlights.git
+cd spotlights
+uv sync --all-extras
+source .venv/bin/activate
+```
+
+Then install the bundled slash commands ([Install the Spotlights skill](docs/INSTALL.md#install-the-spotlights-skill)):
 
 ```bash
 spotlights-engine init      # installs the /spotlights-* Claude Code slash commands
+```
+
+Before your first real run, verify the environment end-to-end ([Preflight with `doctor`](docs/INSTALL.md#preflight-with-doctor)):
+
+```bash
+spotlights-engine doctor
 ```
 
 Clone vLLM next to this repo, then **run the engine** on one module:
