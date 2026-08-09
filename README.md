@@ -95,9 +95,17 @@ For LiteLLM gateway config and a quick response check, see [docs/agent-cli-setup
 
 | Command | Purpose |
 |---|---|
-| `spotlights-engine` | Main engine: structural map → candidates → proposals. Subcommands: `doctor`, `init`, `prep-evolve`, `knowledge`. |
-| `spotlights-objectives` | Objective-setting helper. |
+| `spotlights-engine` | Main engine: structural map → candidates → proposals. Subcommands: `doctor`, `init`, `prep-evolve`. |
 | `signal-pipeline` | Telemetry-driven discovery (**preview**) — a separate entry point. |
+
+## Skills
+
+`spotlights-engine init` installs two Claude Code slash commands into your project (`.claude/commands/`):
+
+| Skill | Purpose |
+|---|---|
+| `/spotlights-objective-setting` | Interactive interview that helps you frame a sharp optimization objective for a run. |
+| `/spotlights-sort-candidates` | Ranks a finished run's candidates by estimated impact, writing `sorted_candidates.md` / `.json`. |
 
 <a id="quickstart"></a>
 ## Quickstart on a vLLM subset
