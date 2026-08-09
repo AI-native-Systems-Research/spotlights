@@ -103,7 +103,7 @@ For LiteLLM gateway config and a quick response check, see [docs/agent-cli-setup
 
 Prerequisites: Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/).
 
-First install the engine and the slash commands (full guide: [docs/INSTALL.md](docs/INSTALL.md)):
+First install the engine:
 
 ```bash
 git clone https://github.com/AI-native-Systems-Research/spotlights.git
