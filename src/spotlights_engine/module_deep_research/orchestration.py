@@ -4,16 +4,18 @@ from __future__ import annotations
 
 import concurrent.futures
 import logging
+import math
 import re
 import time
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from spotlights_engine.module_deep_research.agent_exec import AgentExecResult, ModuleResearchRunner
 from spotlights_engine.module_deep_research.claude_exec import ClaudeExecClient, ClaudeExecOptions
 from spotlights_engine.module_deep_research.codex_exec import CodexExecClient, CodexExecOptions
 from spotlights_engine.module_deep_research.validation import (
+    AgentFinding,
     AgentModuleDeepResearchOutput,
     normalize_module_deep_research_output,
     parse_agent_output,
@@ -124,25 +126,42 @@ def run_runners(
         return [future.result() for future in futures]
 
 
-def merge_outcomes(
-    outcomes: Sequence[RunnerOutcome],
-    *,
-    max_findings_per_module: int,
-    segment: str,
-) -> ModuleDeepResearchOutput:
-    """Merge agent outputs into the stable module deep-research contract.
+def resolve_consensus_threshold(k: int, threshold: int | None) -> int:
+    """ceil(k/2) when unset; clamped to [1, k] when set.
 
-    Per-runner outputs are parsed into the lenient wire shape (bare ids), then
-    deduped and merged; the single promotion to persisted `Finding`s — capping,
-    renumbering, and prefixing each id to `find-<segment>-NNNN` (D3) — happens
-    once here via `normalize_module_deep_research_output`.
+    An explicit threshold above K is treated as "unanimous" (`= K`) rather than
+    silently discarding every finding."""
+    if threshold is None:
+        return math.ceil(k / 2)
+    return max(1, min(threshold, k))
 
-    Search queries are also collected and tagged with the issuing runner
+
+@dataclass(frozen=True)
+class RunResult:
+    """One search run's within-run merged output.
+
+    `findings` are the enabled runners of a *single* run unioned and deduped by
+    `_finding_keys` (wire shape, bare ids, no cap, no renumber). `issues` and
+    `search_logs` are that run's issues and per-runner tagged query logs."""
+
+    findings: list[AgentFinding] = field(default_factory=list)
+    issues: list[StepIssue] = field(default_factory=list)
+    search_logs: list[SearchQueryLog] = field(default_factory=list)
+
+
+def merge_run(outcomes: Sequence[RunnerOutcome]) -> RunResult:
+    """Union the enabled runners of ONE run, dedup by `_finding_keys`, keep order.
+
+    No cap. No renumber. This is the per-runner collection loop of the old
+    `merge_outcomes`, minus the normalize/cap tail: it returns the deduped wire
+    findings for one run plus that run's issues and query logs.
+
+    Search queries are collected and tagged with the issuing runner
     (`agent=outcome.agent_name`). Unlike findings they are **not** deduped —
     identical query strings from two agents are meaningful signal — and their
     order is preserved (outcomes in fixed `futures` order, queries in the
     agent's emitted order) so run-to-run markdown diffs are stable."""
-    findings = []
+    findings: list[AgentFinding] = []
     issues: list[StepIssue] = []
     search_logs: list[SearchQueryLog] = []
     seen: set[str] = set()
@@ -189,13 +208,89 @@ def merge_outcomes(
                 )
             )
 
-    merged = AgentModuleDeepResearchOutput(findings=findings, issues=issues)
-    merged_findings_cap = max_findings_per_module * len(outcomes)
+    return RunResult(findings=findings, issues=issues, search_logs=search_logs)
+
+
+def consensus_merge(
+    runs: Sequence[RunResult],
+    *,
+    k: int,
+    threshold: int | None,
+    segment: str,
+) -> ModuleDeepResearchOutput:
+    """Keep findings that recur across `>= threshold` of the K merged runs.
+
+    The vote is computed over the K merged run-outputs, so a source cited by
+    both codex and claude *in the same run* counts as one vote for that run (it
+    was deduped inside the run first). A source must recur across different runs
+    to accumulate votes.
+
+    The threshold defaults to `ceil(k_effective/2)` where `k_effective` is the
+    number of runs that produced >= 1 finding, so a single infra failure that
+    empties one run does not silently raise the bar. An explicit threshold is
+    honored literally (clamped to `[1, k_effective]`).
+
+    Survivors are ordered by descending vote count, then first-occurrence run
+    index and position; `normalize_module_deep_research_output` mints the
+    `find-<segment>-NNNN` ids in that order, with no cap."""
+    all_issues: list[StepIssue] = []
+    all_search_logs: list[SearchQueryLog] = []
+    for run in runs:
+        all_issues.extend(run.issues)
+        all_search_logs.extend(run.search_logs)
+
+    k_effective = sum(1 for run in runs if run.findings)
+    if k_effective < k:
+        all_issues.append(
+            module_deep_research_issue(
+                f"consensus: {k - k_effective} of {k} search run(s) produced no "
+                f"findings; threshold resolved against {k_effective} effective run(s)",
+                recoverable=True,
+            )
+        )
+    thr = resolve_consensus_threshold(max(k_effective, 1), threshold)
+
+    votes: dict[str, int] = {}
+    first_seen: dict[str, tuple[int, int]] = {}  # key -> (run_idx, pos_in_run)
+    repr_finding: dict[str, AgentFinding] = {}  # key -> representative wire finding
+    for run_idx, run in enumerate(runs):
+        # one vote per key PER RUN: collapse this run's keys to a set first
+        run_keys_seen: set[str] = set()
+        for pos, finding in enumerate(run.findings):
+            keys = _finding_keys(finding.title, finding.url)
+            canonical = _canonical_vote_key(keys)
+            if canonical in run_keys_seen:
+                continue  # already voted this run
+            run_keys_seen.add(canonical)
+            votes[canonical] = votes.get(canonical, 0) + 1
+            if canonical not in first_seen:
+                first_seen[canonical] = (run_idx, pos)
+                repr_finding[canonical] = finding
+
+    survivors = [key for key, v in votes.items() if v >= thr]
+    survivors.sort(key=lambda key: (-votes[key], first_seen[key]))
+    kept = [repr_finding[key] for key in survivors]
+
+    merged = AgentModuleDeepResearchOutput(findings=kept, issues=all_issues)
     return normalize_module_deep_research_output(
         merged,
-        max_findings_per_module=merged_findings_cap,
         segment=segment,
-        search_queries=search_logs,
+        search_queries=all_search_logs,
+    )
+
+
+def merge_outcomes(
+    outcomes: Sequence[RunnerOutcome],
+    *,
+    segment: str,
+) -> ModuleDeepResearchOutput:
+    """Back-compat shim: merge a single run's outcomes (K=1, threshold=1).
+
+    Equivalent to today's union-with-first-occurrence-dedup, minus the per-unit
+    cap. New callers should use the `merge_run` + `consensus_merge` pair to run
+    K-run consensus."""
+    return consensus_merge(
+        [merge_run(outcomes)], k=1, threshold=1, segment=segment
     )
 
 
@@ -267,6 +362,18 @@ def _finding_keys(title: str, url: str) -> set[str]:
     if normalized_url:
         keys.add(f"url:{normalized_url}")
     return keys
+
+
+def _canonical_vote_key(keys: set[str]) -> str:
+    """Prefer the URL key (stronger identity) over the title key.
+
+    URL identity is stronger and already arxiv-normalized; the title is the
+    fallback when a finding has no usable URL (`_normalize_url` returns "" for
+    empty/`unknown`)."""
+    url_keys = sorted(k for k in keys if k.startswith("url:"))
+    if url_keys:
+        return url_keys[0]
+    return sorted(keys)[0]  # title-only fallback
 
 
 def _normalize_url(url: str) -> str:

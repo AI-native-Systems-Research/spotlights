@@ -3,9 +3,9 @@
 Sibling of `module_deep_research.api`: instead of one module-wide survey this
 runs one survey **per candidate**, tagging every finding and search-query log
 with the candidate it belongs to. The pure helpers (`select_runners`,
-`merge_outcomes`, `parse_agent_output` via the merge, the runner clients) are
-imported from `module_deep_research`; only the timed fan-out is copied, because
-`RunnerOutcome` carries no duration and must not gain one.
+`merge_run`/`consensus_merge`, `parse_agent_output` via the merge, the runner
+clients) are imported from `module_deep_research`; only the timed fan-out is
+copied, because `RunnerOutcome` carries no duration and must not gain one.
 
 Issues are reported under the existing `module_deep_research` `PipelineStep`
 and usage records under the existing `module_deep_research` `UsageStep`: both
@@ -35,7 +35,9 @@ from spotlights_engine.module_deep_research.api import (
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
 from spotlights_engine.module_deep_research.orchestration import (
     RunnerOutcome,
-    merge_outcomes,
+    RunResult,
+    consensus_merge,
+    merge_run,
     module_deep_research_issue,
     select_runners,
 )
@@ -360,7 +362,7 @@ def _research_one_candidate(
     """Survey one candidate; a failure degrades only this candidate.
 
     Per-runner failures are already turned into recoverable issues by
-    `merge_outcomes`; this wrapper additionally covers prompt/options/id
+    `merge_run`; this wrapper additionally covers prompt/options/id
     derivation *and* merge/tagging errors so one bad candidate leaves the module
     `DEGRADED` rather than `FAILED` (D7). Everything that can raise must stay
     inside the `try`: this runs in a worker thread and an escaping exception
@@ -382,36 +384,42 @@ def _research_one_candidate(
             runners=runners,
             enable_claude_search=request.enable_claude_search,
         )
-        timed = _run_runners_timed(
-            prompt=prompt,
-            runners=active_runners,
-            check=check,
-            log_prefix=f"[{request.module_qualified_name} {candidate.id}] ",
-        )
-
-        outcomes = [outcome for outcome, _ in timed]
+        # OUTER K loop: survey this candidate `num_search_runs` times and merge
+        # each run's runners into one `RunResult`, then take consensus across
+        # the K merged run-outputs. Sequential within a candidate to bound
+        # concurrent CLI load (candidates already fan out in parallel upstream).
+        runs: list[RunResult] = []
         usages: list[CandidateCliUsage] = []
-        for outcome, duration in timed:
-            if outcome.result is None or outcome.result.usage is None:
-                continue
-            cli = _cli_for_agent(outcome.agent_name)
-            if cli is None:
-                continue
-            usages.append(
-                CandidateCliUsage(
-                    candidate_id=candidate.id,
-                    cli=cli,
-                    usage=outcome.result.usage,
-                    duration_s=duration,
-                )
+        for _ in range(request.num_search_runs):
+            timed = _run_runners_timed(
+                prompt=prompt,
+                runners=active_runners,
+                check=check,
+                log_prefix=f"[{request.module_qualified_name} {candidate.id}] ",
             )
+            runs.append(merge_run([outcome for outcome, _ in timed]))
+            for outcome, duration in timed:
+                if outcome.result is None or outcome.result.usage is None:
+                    continue
+                cli = _cli_for_agent(outcome.agent_name)
+                if cli is None:
+                    continue
+                usages.append(
+                    CandidateCliUsage(
+                        candidate_id=candidate.id,
+                        cli=cli,
+                        usage=outcome.result.usage,
+                        duration_s=duration,
+                    )
+                )
 
-        merged = merge_outcomes(
-            outcomes,
-            max_findings_per_module=request.max_findings_per_candidate,
+        merged = consensus_merge(
+            runs,
+            k=request.num_search_runs,
+            threshold=request.search_consensus_threshold,
             segment=candidate_segment,
         )
-        # `merge_outcomes`/`_renumber_findings` build bare `Finding`s and
+        # `consensus_merge`/`_renumber_findings` build bare `Finding`s and
         # un-tagged `SearchQueryLog`s, so the candidate tag is stamped on
         # post-merge.
         tagged = merged.model_copy(

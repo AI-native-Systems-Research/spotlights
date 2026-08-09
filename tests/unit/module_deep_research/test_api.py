@@ -51,19 +51,19 @@ def _tree() -> ProjectTree:
     )
 
 
-def _request(module_qualified_name: str = "inference/attention") -> ModuleDeepResearchInput:
+def _request(
+    module_qualified_name: str = "inference/attention",
+    *,
+    num_search_runs: int = 1,
+) -> ModuleDeepResearchInput:
+    # Default K=1 keeps most tests to a single run (the closest analog to the
+    # pre-consensus behavior); tests that exercise the K loop pass K explicitly.
     return ModuleDeepResearchInput(
         project_tree=_tree(),
         module_qualified_name=module_qualified_name,
         context=SpotlightContext(objective="reduce latency"),
         repo_path=Path("/tmp/example-repo"),
-        max_findings_per_module=5,
-    )
-
-
-def _request_with_cap(max_findings_per_module: int) -> ModuleDeepResearchInput:
-    return _request().model_copy(
-        update={"max_findings_per_module": max_findings_per_module}
+        num_search_runs=num_search_runs,
     )
 
 
@@ -118,9 +118,10 @@ def test_research_module_records_nonzero_runner_exit_as_recoverable_issue() -> N
     output = research_module(_request(), runner=runner)
 
     assert output.findings == []
-    assert len(output.issues) == 1
-    assert output.issues[0].recoverable is True
-    assert "network down" in output.issues[0].message
+    # The runner's nonzero-exit issue, plus a consensus issue noting that the
+    # only run produced no findings (k_effective < K).
+    assert all(i.recoverable for i in output.issues)
+    assert any("network down" in i.message for i in output.issues)
 
 
 def test_codex_command_shape_places_top_level_flags_before_exec(tmp_path: Path) -> None:
@@ -221,14 +222,15 @@ def test_research_module_parallel_runner_pool() -> None:
     assert output.issues == []
 
 
-def test_research_module_treats_finding_cap_as_per_runner() -> None:
+def test_research_module_keeps_all_findings_with_no_cap() -> None:
+    # There is no per-unit cap any more; a single run's union is kept in full.
     runners = [
         NamedFakeRunner("codex", _payload("A", "https://example.com/a")),
         NamedFakeRunner("claude", _payload("B", "https://example.com/b")),
         NamedFakeRunner("extra", _payload("C", "https://example.com/c")),
     ]
 
-    output = research_module(_request_with_cap(1), runners=runners)
+    output = research_module(_request(), runners=runners)
 
     assert [finding.finding_id for finding in output.findings] == [
         "find-inference_attention-0001",
@@ -236,6 +238,36 @@ def test_research_module_treats_finding_cap_as_per_runner() -> None:
         "find-inference_attention-0003",
     ]
     assert [finding.title for finding in output.findings] == ["A", "B", "C"]
+
+
+def test_research_module_runs_k_times_and_takes_consensus() -> None:
+    # With K=3 (default threshold ceil(3/2)=2), a runner invoked once per run is
+    # invoked K times; its deterministic finding recurs in all 3 runs and is
+    # kept.
+    runner = FakeRunner(_payload("PagedAttention", "https://example.com/paged"))
+
+    output = research_module(_request(num_search_runs=3), runner=runner)
+
+    assert len(runner.prompts) == 3
+    assert [finding.title for finding in output.findings] == ["PagedAttention"]
+
+
+def test_research_module_drops_findings_below_threshold() -> None:
+    # A runner whose payload changes each call emits a distinct finding per run,
+    # so no source reaches the ceil(3/2)=2 consensus bar and output is empty.
+    class RotatingRunner(FakeRunner):
+        def __init__(self) -> None:
+            super().__init__("")
+            self._i = 0
+
+        def run(self, prompt: str, *, check: bool = True) -> CodexExecResult:
+            self.final_message = _payload(f"Title-{self._i}", f"https://x/{self._i}")
+            self._i += 1
+            return super().run(prompt, check=check)
+
+    output = research_module(_request(num_search_runs=3), runner=RotatingRunner())
+
+    assert output.findings == []
 
 
 def test_claude_default_max_turns_is_40() -> None:

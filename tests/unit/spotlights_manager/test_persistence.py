@@ -308,7 +308,8 @@ def test_input_fingerprint_changes_with_enable_claude_search() -> None:
     kwargs: dict[str, Any] = dict(
         repo_path=Path("/tmp/example-repo"),
         context=context,
-        max_findings_per_module=30,
+        num_search_runs=3,
+        search_consensus_threshold=None,
         continue_on_module_failure=True,
     )
     off = P.build_input_fingerprint(**kwargs, enable_claude_search=False)
@@ -324,36 +325,34 @@ def test_input_fingerprint_changes_with_enable_claude_search() -> None:
 _FP_BASE: dict[str, Any] = dict(
     repo_path=Path("/tmp/example-repo"),
     context=SpotlightContext(objective="reduce latency"),
-    max_findings_per_module=30,
+    num_search_runs=3,
+    search_consensus_threshold=None,
     continue_on_module_failure=True,
 )
 
 
-def test_module_mode_input_fingerprint_is_exactly_the_historical_six_keys() -> None:
-    # HARD constraint: a run dir written before candidate mode existed must
-    # still fingerprint-match, so module mode may not gain or lose a key.
+def test_module_mode_input_fingerprint_is_exactly_the_expected_keys() -> None:
     fp = P.build_input_fingerprint(**_FP_BASE)
 
     assert set(fp) == {
         "repo_path",
         "context_hash",
-        "max_findings_per_module",
         "continue_on_module_failure",
         "include_candidate_hotspots",
         "enable_claude_search",
+        "num_search_runs",
+        "search_consensus_threshold",
     }
 
 
 def test_passing_the_module_mode_default_explicitly_changes_nothing() -> None:
     assert P.build_input_fingerprint(**_FP_BASE) == P.build_input_fingerprint(
-        **_FP_BASE, deep_research_mode="module", max_findings_per_candidate=10
+        **_FP_BASE, deep_research_mode="module"
     )
 
 
 def test_candidate_mode_input_fingerprint_omits_the_module_only_knobs() -> None:
-    fp = P.build_input_fingerprint(
-        **_FP_BASE, deep_research_mode="candidate", max_findings_per_candidate=7
-    )
+    fp = P.build_input_fingerprint(**_FP_BASE, deep_research_mode="candidate")
 
     assert set(fp) == {
         "repo_path",
@@ -361,23 +360,19 @@ def test_candidate_mode_input_fingerprint_omits_the_module_only_knobs() -> None:
         "continue_on_module_failure",
         "enable_claude_search",
         "deep_research_mode",
-        "max_findings_per_candidate",
+        "num_search_runs",
+        "search_consensus_threshold",
     }
     # Both modes consume `enable_claude_search`, so it stays effective.
     assert fp["enable_claude_search"] is False
-    assert fp["max_findings_per_candidate"] == 7
+    assert fp["num_search_runs"] == 3
 
 
 def test_candidate_mode_ignores_changes_to_knobs_it_never_reads() -> None:
-    kwargs = dict(_FP_BASE)
-    kwargs["max_findings_per_module"] = 999
-    first = P.build_input_fingerprint(
-        **_FP_BASE, deep_research_mode="candidate", max_findings_per_candidate=7
-    )
+    first = P.build_input_fingerprint(**_FP_BASE, deep_research_mode="candidate")
     second = P.build_input_fingerprint(
-        **kwargs,
+        **_FP_BASE,
         deep_research_mode="candidate",
-        max_findings_per_candidate=7,
         include_candidate_hotspots=False,
     )
 
@@ -386,22 +381,22 @@ def test_candidate_mode_ignores_changes_to_knobs_it_never_reads() -> None:
 
 def test_switching_mode_can_never_produce_an_equal_input_fingerprint() -> None:
     module_fp = P.build_input_fingerprint(**_FP_BASE)
-    candidate_fp = P.build_input_fingerprint(
-        **_FP_BASE, deep_research_mode="candidate", max_findings_per_candidate=30
-    )
+    candidate_fp = P.build_input_fingerprint(**_FP_BASE, deep_research_mode="candidate")
 
     assert module_fp != candidate_fp
 
 
-def test_candidate_mode_input_fingerprint_tracks_its_own_cap() -> None:
-    first = P.build_input_fingerprint(
-        **_FP_BASE, deep_research_mode="candidate", max_findings_per_candidate=5
-    )
-    second = P.build_input_fingerprint(
-        **_FP_BASE, deep_research_mode="candidate", max_findings_per_candidate=6
-    )
-
-    assert first != second
+def test_input_fingerprint_tracks_the_consensus_knobs() -> None:
+    for mode in ("module", "candidate"):
+        base = P.build_input_fingerprint(**_FP_BASE, deep_research_mode=mode)
+        more_runs = P.build_input_fingerprint(
+            **{**_FP_BASE, "num_search_runs": 5}, deep_research_mode=mode
+        )
+        thr = P.build_input_fingerprint(
+            **{**_FP_BASE, "search_consensus_threshold": 2}, deep_research_mode=mode
+        )
+        assert base != more_runs
+        assert base != thr
 
 
 def _config_fp(**overrides: Any) -> dict:

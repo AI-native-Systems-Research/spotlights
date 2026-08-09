@@ -152,12 +152,24 @@ def _build_argparser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
-        "--max-findings-per-module",
+        "--num-search-runs",
         type=int,
         default=None,
+        metavar="K",
         help=(
-            "Cap on findings produced by step 3 per module. "
-            "Default: SpotlightsManagerInput default (30)."
+            "Run step-3 search K times per unit; keep findings that recur "
+            "across >= threshold runs. Cost scales by K (2K with "
+            "--enable-claude-search). Default: 3."
+        ),
+    )
+    p.add_argument(
+        "--search-consensus-threshold",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Min number of runs a finding must appear in to be kept. "
+            "Default: ceil(K/2)."
         ),
     )
     p.add_argument(
@@ -169,16 +181,6 @@ def _build_argparser() -> argparse.ArgumentParser:
             "module-wide survey and pairs every candidate with every finding; "
             "'candidate' runs one survey per candidate and pairs each candidate "
             "only with its own findings."
-        ),
-    )
-    p.add_argument(
-        "--max-findings-per-candidate",
-        type=int,
-        default=None,
-        help=(
-            "Cap on findings produced by step 3 per candidate "
-            "(--deep-research-mode candidate only). "
-            "Default: SpotlightsManagerInput default (10)."
         ),
     )
     review = p.add_mutually_exclusive_group()
@@ -426,11 +428,11 @@ def _build_input(args: argparse.Namespace) -> SpotlightsManagerInput:
     }
     if args.repo_url:
         input_kwargs["repo_url"] = args.repo_url
-    if args.max_findings_per_module is not None:
-        input_kwargs["max_findings_per_module"] = args.max_findings_per_module
+    if args.num_search_runs is not None:
+        input_kwargs["num_search_runs"] = args.num_search_runs
+    if args.search_consensus_threshold is not None:
+        input_kwargs["search_consensus_threshold"] = args.search_consensus_threshold
     input_kwargs["deep_research_mode"] = args.deep_research_mode
-    if args.max_findings_per_candidate is not None:
-        input_kwargs["max_findings_per_candidate"] = args.max_findings_per_candidate
     input_kwargs["include_candidate_hotspots"] = args.include_candidate_hotspots
     input_kwargs["enable_claude_search"] = args.enable_claude_search
     return SpotlightsManagerInput(**input_kwargs)

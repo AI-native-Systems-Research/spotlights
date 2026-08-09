@@ -69,16 +69,20 @@ def make_request(
     n_candidates: int = 1,
     *,
     module_qualified_name: str = MODULE_QN,
-    max_findings_per_candidate: int = 5,
+    num_search_runs: int = 1,
+    search_consensus_threshold: int | None = None,
     repo_path: Path = Path("/tmp/example-repo"),
 ) -> CandidateDeepResearchInput:
+    # Default K=1 keeps per-candidate tests to a single run (closest analog to
+    # pre-consensus behavior); tests exercising the K loop pass K explicitly.
     return CandidateDeepResearchInput(
         project_tree=tree(),
         module_qualified_name=module_qualified_name,
         context=SpotlightContext(objective="reduce latency"),
         repo_path=repo_path,
         candidates=[make_candidate(i) for i in range(n_candidates)],
-        max_findings_per_candidate=max_findings_per_candidate,
+        num_search_runs=num_search_runs,
+        search_consensus_threshold=search_consensus_threshold,
     )
 
 

@@ -1,4 +1,4 @@
-"""Unit tests for search-query collection in `merge_outcomes`."""
+"""Unit tests for search-query collection in `merge_outcomes` (K=1 shim)."""
 
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ def test_merge_tags_queries_with_agent_and_preserves_order() -> None:
         _outcome("claude", [{"query": "q-claude-1", "results": []}]),
     ]
 
-    output = merge_outcomes(outcomes, max_findings_per_module=30, segment="mod")
+    output = merge_outcomes(outcomes, segment="mod")
 
     assert [(q.agent, q.query) for q in output.search_queries] == [
         ("codex", "q-codex-1"),
@@ -55,7 +55,7 @@ def test_merge_does_not_dedup_identical_queries_across_agents() -> None:
         _outcome("claude", [{"query": "same query", "results": []}]),
     ]
 
-    output = merge_outcomes(outcomes, max_findings_per_module=30, segment="mod")
+    output = merge_outcomes(outcomes, segment="mod")
 
     assert len(output.search_queries) == 2
     assert output.search_queries[0].agent == "codex"
@@ -82,7 +82,7 @@ def test_merge_carries_results_through() -> None:
         ),
     ]
 
-    output = merge_outcomes(outcomes, max_findings_per_module=30, segment="mod")
+    output = merge_outcomes(outcomes, segment="mod")
 
     result = output.search_queries[0].results[0]
     assert (result.title, result.url, result.snippet) == ("T", "https://x", "S")

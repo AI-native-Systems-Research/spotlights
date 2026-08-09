@@ -109,25 +109,24 @@ def test_search_queries_are_tagged_with_their_candidate() -> None:
     }
 
 
-def test_max_findings_per_candidate_caps_each_survey_independently() -> None:
+def test_findings_are_uncapped_per_survey() -> None:
+    # No per-candidate cap any more: every finding of each survey is kept.
     runner = FakeRunner(agent_payload("A", "B", "C", "D"))
 
-    output = research_candidates(
-        make_request(2, max_findings_per_candidate=2), runner=runner, segment=SEGMENT
-    )
+    output = research_candidates(make_request(2), runner=runner, segment=SEGMENT)
 
-    assert len(output.findings) == 4  # 2 per candidate, not 2 in total
+    assert len(output.findings) == 8  # 4 per candidate
     per_candidate: dict[str | None, list[Finding]] = {}
     for f in output.findings:
         per_candidate.setdefault(f.candidate_id, []).append(f)
     assert {k: len(v) for k, v in per_candidate.items()} == {
-        f"cand-{SEGMENT}-0001": 2,
-        f"cand-{SEGMENT}-0002": 2,
+        f"cand-{SEGMENT}-0001": 4,
+        f"cand-{SEGMENT}-0002": 4,
     }
 
 
 def test_dedup_is_per_candidate_so_the_same_url_survives_twice() -> None:
-    # `merge_outcomes` allocates its `seen` set per call, so one call per
+    # `merge_run` allocates its `seen` set per call, so one call per
     # candidate means a shared source is kept once *per candidate*.
     runner = FakeRunner(agent_payload("A"))
 
@@ -216,7 +215,7 @@ def test_a_post_merge_failure_degrades_only_its_candidate() -> None:
         return agent_payload("healthy")
 
     output = research_candidates(
-        make_request(2, max_findings_per_candidate=20_000),
+        make_request(2),
         runner=FakeRunner(payload_for=payload_for),
         segment=SEGMENT,
     )
@@ -273,6 +272,22 @@ def test_usages_are_attributed_per_candidate_and_runner() -> None:
         (f"cand-{SEGMENT}-0002", "codex"),
     ]
     assert all(u.duration_s is not None and u.duration_s >= 0 for u in result.usages)
+
+
+def test_usages_accumulate_across_k_runs_per_candidate() -> None:
+    # Each of the K sequential runs of a candidate emits its own usage record,
+    # so a single candidate surveyed with K=3 yields 3 records (all tagged with
+    # that candidate), not one — the K-run spend must be fully accounted.
+    codex = FakeRunner(agent_payload("A"), name="codex", usage=usage())
+
+    result = research_candidates_with_telemetry(
+        make_request(1, num_search_runs=3), runner=codex, segment=SEGMENT
+    )
+
+    assert len(codex.prompts) == 3  # invoked once per run
+    assert [u.candidate_id for u in result.usages] == [f"cand-{SEGMENT}-0001"] * 3
+    # The deterministic finding recurs in all 3 runs and survives consensus once.
+    assert [f.title for f in result.output.findings] == ["A"]
 
 
 def test_runners_without_usage_contribute_no_usage_records() -> None:

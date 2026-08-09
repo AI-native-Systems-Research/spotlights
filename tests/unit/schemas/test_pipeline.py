@@ -127,7 +127,8 @@ def test_module_deep_research_input_accepts_project_tree_and_context() -> None:
     )
 
     assert request.project_tree.repository.name == "demo"
-    assert request.max_findings_per_module == 30
+    assert request.num_search_runs == 3
+    assert request.search_consensus_threshold is None
     assert request.repo_path == Path("/tmp/example-repo")
 
 
@@ -185,11 +186,11 @@ def test_module_run_status_constraints() -> None:
 
 def test_spotlights_manager_input_defaults() -> None:
     inp = SpotlightsManagerInput(repo_path=Path("/tmp/repo"), context=_ctx())
-    assert inp.max_findings_per_module == 30
+    assert inp.num_search_runs == 3
+    assert inp.search_consensus_threshold is None
     assert inp.continue_on_module_failure is True
     # Additive: module mode stays the default so existing callers are unaffected.
     assert inp.deep_research_mode == "module"
-    assert inp.max_findings_per_candidate == 10
 
 
 def test_spotlights_manager_input_rejects_unknown_deep_research_mode() -> None:
@@ -213,7 +214,8 @@ def test_candidate_deep_research_input_defaults() -> None:
     )
 
     assert request.candidates == []
-    assert request.max_findings_per_candidate == 10
+    assert request.num_search_runs == 3
+    assert request.search_consensus_threshold is None
     assert request.enable_claude_search is False
 
 
@@ -237,12 +239,14 @@ def test_candidate_deep_research_input_round_trips_through_json() -> None:
         context=_ctx(),
         repo_path=Path("/tmp/example-repo"),
         candidates=list(_candidates().candidates),
-        max_findings_per_candidate=3,
+        num_search_runs=4,
+        search_consensus_threshold=2,
     )
 
     again = CandidateDeepResearchInput.model_validate_json(request.model_dump_json())
 
-    assert again.max_findings_per_candidate == 3
+    assert again.num_search_runs == 4
+    assert again.search_consensus_threshold == 2
     assert [c.id for c in again.candidates] == [c.id for c in request.candidates]
 
 

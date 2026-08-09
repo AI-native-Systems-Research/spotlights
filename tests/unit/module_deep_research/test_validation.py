@@ -26,7 +26,7 @@ def _payload_with_one_finding() -> dict:
     }
 
 
-def test_parse_accepts_fenced_json_and_normalizes_ids_and_cap() -> None:
+def test_parse_accepts_fenced_json_and_normalizes_ids() -> None:
     text = """Here is the result:
 ```json
 {
@@ -52,15 +52,15 @@ def test_parse_accepts_fenced_json_and_normalizes_ids_and_cap() -> None:
 ```
 """
 
-    output = parse_module_deep_research_output(
-        text, max_findings_per_module=1, segment="kv_offload"
-    )
+    output = parse_module_deep_research_output(text, segment="kv_offload")
 
-    assert len(output.findings) == 1
+    # No per-unit cap any more: every parsed finding is kept and renumbered.
+    assert len(output.findings) == 2
     # The agent emits bare `find-NNNN`; the finding id is renumbered and
     # prefixed with the module segment (D3).
     assert output.findings[0].finding_id == "find-kv_offload-0001"
     assert output.findings[0].title == "Paged KV allocation"
+    assert output.findings[1].finding_id == "find-kv_offload-0002"
     assert output.issues == []
 
 
@@ -183,7 +183,7 @@ def test_search_query_extra_field_and_empty_query_do_not_drop_findings() -> None
     }
 
     output = parse_module_deep_research_output(
-        json.dumps(payload), max_findings_per_module=30, segment="kv_offload"
+        json.dumps(payload), segment="kv_offload"
     )
 
     assert len(output.findings) == 1

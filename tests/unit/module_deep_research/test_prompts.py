@@ -68,7 +68,6 @@ def test_prompt_is_built_from_repository_module_and_context() -> None:
             validation_plan=["compare tokens/sec on existing benchmark"],
         ),
         repo_path=repo_path,
-        max_findings_per_module=3,
     )
 
     prompt = render_module_deep_research_prompt(request, tree.modules[0])
@@ -81,7 +80,7 @@ def test_prompt_is_built_from_repository_module_and_context() -> None:
     assert "reduce decode latency for long-context serving" in prompt
     assert "single-node 8xH100" in prompt
     assert "compare tokens/sec on existing benchmark" in prompt
-    assert "at most 3 findings" in prompt
+    assert "do not artificially limit the count" in prompt
     assert "ModuleDeepResearchOutput JSON schema" in prompt
     assert "Empty findings are valid" in prompt
     assert "Workflow:" in prompt
@@ -123,7 +122,6 @@ def _base_request(**overrides: object) -> ModuleDeepResearchInput:
             validation_plan=[],
         ),
         "repo_path": Path("/tmp/example-repo"),
-        "max_findings_per_module": 3,
     }
     kwargs.update(overrides)
     return ModuleDeepResearchInput(**kwargs)

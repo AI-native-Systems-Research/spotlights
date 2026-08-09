@@ -174,13 +174,12 @@ def _looks_like_cli_envelope(payload: Any) -> bool:
     return len(_CLI_ENVELOPE_MARKERS.intersection(payload)) >= 3
 
 
-def _renumber_findings(
-    findings: list[AgentFinding], max_findings: int, *, segment: str
-) -> list[Finding]:
-    """Cap, renumber, and prefix wire findings into persisted `Finding`s.
+def _renumber_findings(findings: list[AgentFinding], *, segment: str) -> list[Finding]:
+    """Renumber and prefix wire findings into persisted `Finding`s.
 
-    The agent-supplied (bare, advisory) id is discarded; each surviving finding
-    gets a deterministic `find-<segment>-NNNN` id in output order."""
+    The agent-supplied (bare, advisory) id is discarded; each finding gets a
+    deterministic `find-<segment>-NNNN` id in output order. All input findings
+    are kept — there is no per-unit cap (consensus decides survivors upstream)."""
     return [
         Finding(
             finding_id=f"find-{segment}-{idx:04d}",
@@ -190,28 +189,25 @@ def _renumber_findings(
             technique_summary=finding.technique_summary,
             supporting_evidence=finding.supporting_evidence,
         )
-        for idx, finding in enumerate(findings[:max_findings], start=1)
+        for idx, finding in enumerate(findings, start=1)
     ]
 
 
 def normalize_module_deep_research_output(
     output: AgentModuleDeepResearchOutput,
     *,
-    max_findings_per_module: int,
     segment: str,
     search_queries: list[SearchQueryLog] | None = None,
 ) -> ModuleDeepResearchOutput:
-    """Cap findings and assign deterministic module-prefixed finding IDs in
-    output order, promoting the wire output to the persisted contract.
+    """Assign deterministic module-prefixed finding IDs in output order,
+    promoting the wire output to the persisted contract.
 
     `search_queries` is a passthrough: the wire model has no `agent` field (the
     agent label lives only on `RunnerOutcome.agent_name`), so the caller tags
     each query with its runner and forwards the already-built persisted
     `SearchQueryLog`s here verbatim."""
     return ModuleDeepResearchOutput(
-        findings=_renumber_findings(
-            output.findings, max_findings_per_module, segment=segment
-        ),
+        findings=_renumber_findings(output.findings, segment=segment),
         issues=list(output.issues),
         search_queries=list(search_queries or []),
     )
@@ -249,7 +245,6 @@ def parse_agent_output(text: str) -> AgentModuleDeepResearchOutput:
 def parse_module_deep_research_output(
     text: str,
     *,
-    max_findings_per_module: int = 30,
     segment: str | None = None,
 ) -> ModuleDeepResearchOutput:
     """Parse and normalize one agent response into `ModuleDeepResearchOutput`.
@@ -277,7 +272,6 @@ def parse_module_deep_research_output(
     ]
     return normalize_module_deep_research_output(
         parsed,
-        max_findings_per_module=max_findings_per_module,
         segment=seg,
         search_queries=search_queries,
     )

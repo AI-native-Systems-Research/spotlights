@@ -58,7 +58,13 @@ class ModuleDeepResearchInput(BaseModel):
     module_qualified_name: str = Field(min_length=1)
     context: SpotlightContext
     repo_path: Path
-    max_findings_per_module: int = Field(default=30, ge=0)
+
+    # K-run consensus knobs. `num_search_runs` (K) is how many independent
+    # step-3 search runs are executed per unit; `search_consensus_threshold` is
+    # the min vote count for a finding to survive. `None` → resolved to
+    # `ceil(K/2)` at orchestration time so the default tracks K.
+    num_search_runs: int = Field(default=3, ge=1)
+    search_consensus_threshold: int | None = Field(default=None, ge=1)
 
     # Hot spots surfaced by step 2 (`candidate_discovery`) for this module.
     # When `include_candidate_hotspots` is true and this list is non-empty,
@@ -89,10 +95,9 @@ class CandidateDeepResearchInput(BaseModel):
     """Input contract for step 3 in candidate mode (`candidate_deep_research`).
 
     Deliberately a separate contract from `ModuleDeepResearchInput`: the
-    module-only knobs (`max_findings_per_module`,
-    `include_candidate_hotspots`) are structurally absent rather than present
-    and ignored, and `candidates` is promoted from advisory hot spots to the
-    iteration set — one survey is run per candidate.
+    module-only knob (`include_candidate_hotspots`) is structurally absent
+    rather than present and ignored, and `candidates` is promoted from advisory
+    hot spots to the iteration set — one survey is run per candidate.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -105,7 +110,9 @@ class CandidateDeepResearchInput(BaseModel):
     # The iteration set: one deep-research survey is run per candidate.
     candidates: list[Candidate] = Field(default_factory=list)
 
-    max_findings_per_candidate: int = Field(default=10, ge=0)
+    # K-run consensus knobs (per candidate). See `ModuleDeepResearchInput`.
+    num_search_runs: int = Field(default=3, ge=1)
+    search_consensus_threshold: int | None = Field(default=None, ge=1)
 
     # Controls the default step-3 runner fan-out. False (default) → Codex only;
     # True → Codex + Claude.
@@ -186,18 +193,21 @@ class SpotlightsManagerInput(BaseModel):
     repo_path: Path
     repo_url: str | None = None
     context: SpotlightContext
-    max_findings_per_module: int = Field(default=30, ge=0)
     include_candidate_hotspots: bool = True
     enable_claude_search: bool = False
     continue_on_module_failure: bool = True
+
+    # K-run consensus knobs, threaded to both step-3 orchestrators.
+    # `num_search_runs` (K) is the number of independent search runs per unit;
+    # `search_consensus_threshold` is the min vote count to keep a finding
+    # (`None` → resolved to `ceil(K/2)`).
+    num_search_runs: int = Field(default=3, ge=1)
+    search_consensus_threshold: int | None = Field(default=None, ge=1)
 
     # Picks which step-3/step-4 pair runs. "module" (default) keeps today's
     # module-wide survey + cartesian proposal pass; "candidate" runs one survey
     # per candidate and pairs each candidate only with its own findings.
     deep_research_mode: Literal["module", "candidate"] = "module"
-    # Candidate-mode per-candidate finding cap; ignored in module mode, which
-    # reads `max_findings_per_module` instead.
-    max_findings_per_candidate: int = Field(default=10, ge=0)
 
 
 class RunInfo(BaseModel):

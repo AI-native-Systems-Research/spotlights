@@ -309,7 +309,7 @@ def test_candidate_mode_dispatches_step3_to_research_candidates(
     assert result.module_runs[QN].status == "SUCCEEDED"
 
 
-def test_candidate_mode_threads_its_own_findings_cap(
+def test_candidate_mode_threads_its_consensus_knobs(
     monkeypatch, repo: Path, artifacts: Path
 ) -> None:
     seen: list = []
@@ -320,9 +320,13 @@ def test_candidate_mode_threads_its_own_findings_cap(
 
     _wire(monkeypatch, candidate_research=_research_candidates)
 
-    run_with_telemetry(_candidate_input(repo, max_findings_per_candidate=4), config=_cfg(artifacts))
+    run_with_telemetry(
+        _candidate_input(repo, num_search_runs=4, search_consensus_threshold=2),
+        config=_cfg(artifacts),
+    )
 
-    assert seen[0].max_findings_per_candidate == 4
+    assert seen[0].num_search_runs == 4
+    assert seen[0].search_consensus_threshold == 2
 
 
 def test_candidate_mode_passes_the_per_candidate_last_message_dir(

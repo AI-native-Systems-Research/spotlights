@@ -538,7 +538,7 @@ def test_resume_mismatch_on_changed_input(
     )
     run_with_telemetry(make_input(repo), config=cfg)
 
-    inp2 = make_input(repo).model_copy(update={"max_findings_per_module": 99})
+    inp2 = make_input(repo).model_copy(update={"num_search_runs": 99})
     with pytest.raises(ResumeMismatchError):
         run_with_telemetry(inp2, config=cfg)
 

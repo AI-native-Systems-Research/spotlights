@@ -141,7 +141,7 @@ Output rules:
   parsed by machine, not read by a human. Emitting only tool-call/step events
   with no final JSON text is a failure: even when you found nothing, still emit
   the JSON object (empty `findings`, with a StepIssue explaining why).
-- Include at most {request.max_findings_per_module} findings.
+- Report every source that passes the relevance gate; do not artificially limit the count.
 - Use finding IDs find-0001, find-0002, ... ordered by expected relevance to
   the module and the caller objective. Most relevant first.
 - Empty findings are valid when no relevant source survives filtering.

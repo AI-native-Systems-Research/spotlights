@@ -10,7 +10,9 @@ from spotlights_engine.costing.usage import CliUsage
 from spotlights_engine.module_deep_research.agent_exec import ModuleResearchRunner
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
 from spotlights_engine.module_deep_research.orchestration import (
-    merge_outcomes,
+    RunResult,
+    consensus_merge,
+    merge_run,
     module_deep_research_issue,
     run_runners,
     select_runners,
@@ -90,24 +92,33 @@ def research_module_with_telemetry(
         runners=runners,
         enable_claude_search=request.enable_claude_search,
     )
-    outcomes = run_runners(
-        prompt=prompt,
-        runners=active_runners,
-        check=check,
-        module_qualified_name=request.module_qualified_name,
-    )
+    # OUTER K loop: run the enabled-runner fan-out `num_search_runs` times and
+    # merge each run's runners into one `RunResult`, then take consensus across
+    # the K merged run-outputs. Sequential to keep the global CLI limiter from
+    # being overrun (the inner `run_runners` already fans codex/claude out
+    # concurrently).
+    runs: list[RunResult] = []
     usages: list[CliUsage] = []
-    for outcome in outcomes:
-        if outcome.result is None or outcome.result.usage is None:
-            continue
-        cli = _cli_for_agent(outcome.agent_name)
-        if cli is None:
-            continue
-        usages.append(CliUsage(cli=cli, usage=outcome.result.usage))
+    for _ in range(request.num_search_runs):
+        outcomes = run_runners(
+            prompt=prompt,
+            runners=active_runners,
+            check=check,
+            module_qualified_name=request.module_qualified_name,
+        )
+        runs.append(merge_run(outcomes))
+        for outcome in outcomes:
+            if outcome.result is None or outcome.result.usage is None:
+                continue
+            cli = _cli_for_agent(outcome.agent_name)
+            if cli is None:
+                continue
+            usages.append(CliUsage(cli=cli, usage=outcome.result.usage))
     return ModuleDeepResearchResult(
-        output=merge_outcomes(
-            outcomes,
-            max_findings_per_module=request.max_findings_per_module,
+        output=consensus_merge(
+            runs,
+            k=request.num_search_runs,
+            threshold=request.search_consensus_threshold,
             segment=seg,
         ),
         usages=usages,

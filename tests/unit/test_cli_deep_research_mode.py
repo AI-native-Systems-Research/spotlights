@@ -1,4 +1,4 @@
-"""CLI binding for `--deep-research-mode` / `--max-findings-per-candidate`."""
+"""CLI binding for `--deep-research-mode` and the K-run consensus knobs."""
 
 from __future__ import annotations
 
@@ -19,7 +19,8 @@ def test_deep_research_mode_defaults_to_module() -> None:
     args = _parse()
 
     assert args.deep_research_mode == "module"
-    assert args.max_findings_per_candidate is None
+    assert args.num_search_runs is None
+    assert args.search_consensus_threshold is None
     assert cli._build_input(args).deep_research_mode == "module"
 
 
@@ -34,15 +35,26 @@ def test_unknown_mode_is_rejected_by_argparse() -> None:
         _parse("--deep-research-mode", "hybrid")
 
 
-def test_max_findings_per_candidate_falls_back_to_the_schema_default() -> None:
-    # Omitting the flag must not pin the value, so the schema default governs.
-    assert cli._build_input(_parse()).max_findings_per_candidate == 10
+def test_consensus_knobs_fall_back_to_the_schema_defaults() -> None:
+    # Omitting the flags must not pin the values, so the schema defaults govern.
+    inp = cli._build_input(_parse())
+    assert inp.num_search_runs == 3
+    assert inp.search_consensus_threshold is None
 
 
-def test_max_findings_per_candidate_binds_when_supplied() -> None:
-    args = _parse("--deep-research-mode", "candidate", "--max-findings-per-candidate", "4")
+def test_consensus_knobs_bind_when_supplied() -> None:
+    args = _parse("--num-search-runs", "5", "--search-consensus-threshold", "2")
+    inp = cli._build_input(args)
 
-    assert cli._build_input(args).max_findings_per_candidate == 4
+    assert inp.num_search_runs == 5
+    assert inp.search_consensus_threshold == 2
+
+
+def test_old_max_findings_flags_are_gone() -> None:
+    with pytest.raises(SystemExit):
+        _parse("--max-findings-per-module", "5")
+    with pytest.raises(SystemExit):
+        _parse("--max-findings-per-candidate", "5")
 
 
 # step-4 pair knobs route to the slot the selected mode reads -----------------

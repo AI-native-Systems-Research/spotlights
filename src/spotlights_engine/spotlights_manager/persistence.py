@@ -60,7 +60,10 @@ from spotlights_engine.utils.id_helpers import slug_for
 # `<type>-<slug>[.s<k>]-NNNN` instead of bare `cand-0001`/`find-0001`/`prop-0001`.
 # Old run dirs hold bare ids that fail the widened schema patterns, so they ride
 # the same hard cutover.
-SCHEMA_VERSION = 4
+# Bumped to 5 for K-run consensus search: the input fingerprint drops
+# `max_findings_per_*` and adds `num_search_runs`/`search_consensus_threshold`,
+# so old run dirs are rejected at the clearer `schema_version` gate.
+SCHEMA_VERSION = 5
 
 
 CheckpointStatus = Literal[
@@ -298,23 +301,24 @@ def build_input_fingerprint(
     *,
     repo_path: Path,
     context: BaseModel,
-    max_findings_per_module: int,
+    num_search_runs: int,
+    search_consensus_threshold: int | None,
     continue_on_module_failure: bool,
     include_candidate_hotspots: bool = True,
     enable_claude_search: bool = False,
     deep_research_mode: str = "module",
-    max_findings_per_candidate: int | None = None,
 ) -> dict[str, Any]:
     """Fingerprint the knobs **effective for the selected deep-research mode**.
 
-    In `module` mode the returned dict is exactly the historical six keys, so a
-    pre-existing run dir resumes with no mismatch and `SCHEMA_VERSION` does not
-    have to move. In `candidate` mode the module-only knobs
-    (`max_findings_per_module`, `include_candidate_hotspots`) are omitted — a
-    change to a knob the mode never reads must not invalidate a resume — and
-    `deep_research_mode` / `max_findings_per_candidate` are added. Because the
-    key sets differ, switching modes on resume can never compare equal, which
-    is the desired `ResumeMismatchError`.
+    In `candidate` mode the module-only knob (`include_candidate_hotspots`) is
+    omitted — a change to a knob the mode never reads must not invalidate a
+    resume — and `deep_research_mode` is added. Because the key sets differ,
+    switching modes on resume can never compare equal, which is the desired
+    `ResumeMismatchError`.
+
+    The K-run consensus knobs (`num_search_runs`, `search_consensus_threshold`)
+    live in both branches: both modes read them, and a change to either alters
+    the output, so a change should invalidate a resume.
 
     `enable_claude_search` stays in both: both modes consume it to choose
     Codex-only vs. Codex+Claude step-3 surveys.
@@ -327,15 +331,17 @@ def build_input_fingerprint(
             "continue_on_module_failure": continue_on_module_failure,
             "enable_claude_search": enable_claude_search,
             "deep_research_mode": "candidate",
-            "max_findings_per_candidate": max_findings_per_candidate,
+            "num_search_runs": num_search_runs,
+            "search_consensus_threshold": search_consensus_threshold,
         }
     return {
         "repo_path": str(repo_path),
         "context_hash": context_hash,
-        "max_findings_per_module": max_findings_per_module,
         "continue_on_module_failure": continue_on_module_failure,
         "include_candidate_hotspots": include_candidate_hotspots,
         "enable_claude_search": enable_claude_search,
+        "num_search_runs": num_search_runs,
+        "search_consensus_threshold": search_consensus_threshold,
     }
 
 

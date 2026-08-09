@@ -14,8 +14,8 @@ from tests.unit.candidate_deep_research._fakes import (
 )
 
 
-def _render(*, candidate_idx: int = 0, max_findings_per_candidate: int = 5) -> str:
-    request = make_request(1, max_findings_per_candidate=max_findings_per_candidate)
+def _render(*, candidate_idx: int = 0) -> str:
+    request = make_request(1)
     module = resolve_target_module(request.project_tree, MODULE_QN)
     assert module is not None
     return render_candidate_deep_research_prompt(request, module, make_candidate(candidate_idx))
@@ -39,8 +39,8 @@ def test_prompt_keeps_module_and_repository_context_for_grounding() -> None:
     assert MODULE_QN in prompt
 
 
-def test_prompt_uses_the_per_candidate_cap() -> None:
-    assert "Include at most 3 findings." in _render(max_findings_per_candidate=3)
+def test_prompt_imposes_no_numeric_finding_cap() -> None:
+    assert "do not artificially limit the count" in _render()
 
 
 def test_prompt_pins_the_shared_step_name_and_wire_schema() -> None:

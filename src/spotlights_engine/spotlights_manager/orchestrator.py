@@ -778,7 +778,8 @@ async def _do_step3(
         module_qualified_name=qn,
         context=mgr_input.context,
         repo_path=mgr_input.repo_path,
-        max_findings_per_module=mgr_input.max_findings_per_module,
+        num_search_runs=mgr_input.num_search_runs,
+        search_consensus_threshold=mgr_input.search_consensus_threshold,
         candidates=list(candidates.candidates),
         include_candidate_hotspots=mgr_input.include_candidate_hotspots,
         enable_claude_search=mgr_input.enable_claude_search,
@@ -817,7 +818,8 @@ async def _do_step3_candidate(
         context=mgr_input.context,
         repo_path=mgr_input.repo_path,
         candidates=list(candidates.candidates),
-        max_findings_per_candidate=mgr_input.max_findings_per_candidate,
+        num_search_runs=mgr_input.num_search_runs,
+        search_consensus_threshold=mgr_input.search_consensus_threshold,
         enable_claude_search=mgr_input.enable_claude_search,
     )
     options = _build_deep_research_options(cfg, mgr_input.repo_path, None)
@@ -1817,12 +1819,12 @@ async def _run_async(
     input_fp = P.build_input_fingerprint(
         repo_path=input.repo_path,
         context=input.context,
-        max_findings_per_module=input.max_findings_per_module,
+        num_search_runs=input.num_search_runs,
+        search_consensus_threshold=input.search_consensus_threshold,
         continue_on_module_failure=input.continue_on_module_failure,
         include_candidate_hotspots=input.include_candidate_hotspots,
         enable_claude_search=input.enable_claude_search,
         deep_research_mode=input.deep_research_mode,
-        max_findings_per_candidate=input.max_findings_per_candidate,
     )
     config_fp = P.build_config_fingerprint(
         module_filter=config.module_filter,
