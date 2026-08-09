@@ -4,9 +4,6 @@ This page covers installing the engine, the bundled Claude Code slash commands, 
 
 ← Back to [README](../README.md)
 
-> [!NOTE]
-> The module deep-research step runs Codex only by default. Pass `--enable-claude-search` to also fan out to the Claude runner; individual runner failures are treated as recoverable, so one flaky provider does not fail the whole step. Enable this when running the `claude` CLI directly against Anthropic — its `WebSearch` tool works well there. Leave it off when routing through a LiteLLM server, where `WebSearch` currently does not work reliably.
-
 ## Installing the engine
 
 ```bash
@@ -18,7 +15,7 @@ source .venv/bin/activate
 
 ## Install the Spotlights skill
 
-The engine ships Claude Code slash commands (currently `/spotlights-objective-setting` and `/spotlights-sort-candidates`) as bundled markdown templates. They are not active until you install them into a Claude Code commands directory — same model as [spec-kit](https://github.com/github/spec-kit). From the project you want to optimize:
+The engine ships Claude Code slash commands (currently `/spotlights-objective-setting` and `/spotlights-sort-candidates`) as bundled markdown templates. They are not active until you install them into a Claude Code commands directory. Locally In the project:
 
 ```bash
 spotlights-engine init           # writes .claude/commands/spotlights-*.md
@@ -47,7 +44,7 @@ Before your first real run, verify the environment end-to-end:
 spotlights-engine doctor
 ```
 
-Unlike a PATH-only check, `doctor` actually runs each agent CLI (`claude`, `codex`)
+`doctor` runs each agent CLI (`claude`, `codex`)
 with a one-word prompt. A single probe proves three things at once:
 
 - **install** — the CLI resolves on PATH and executes;
@@ -58,7 +55,7 @@ with a one-word prompt. A single probe proves three things at once:
 It exits non-zero on any failure. Because it launches the CLIs, `doctor` spends a
 tiny amount per probe — that is the only way to verify auth and the reported model.
 If a probe reports a model with no rate row, add it to the table or point
-`SPOTLIGHTS_RATES_FILE` at a table that prices it.
+`SPOTLIGHTS_RATES_FILE` at a table that prices it. See [docs/cost-and-manifest.md](cost-and-manifest.md).
 
 ## Engine Configuration
 
