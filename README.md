@@ -75,7 +75,7 @@ Browse the full rendered run under [`examples/vllm_subset/`](examples/vllm_subse
 ## Requirements
 
 > [!IMPORTANT]
-> Spotlights drives **two** external agent CLIs — `claude` **and** `codex` — both installed **and** authenticated. Verify your environment end-to-end with `spotlights-engine doctor`.
+> Spotlights drives **two** external agent CLIs — `claude` **and** `codex` — both installed **and** authenticated.
 
 | CLI | Runtime / auth | Used for |
 |---|---|---|
@@ -89,7 +89,7 @@ Browse the full rendered run under [`examples/vllm_subset/`](examples/vllm_subse
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `curl -fsSL https://claude.ai/install.sh \| bash` |
 | [Codex](https://github.com/openai/codex) | `curl -fsSL https://chatgpt.com/codex/install.sh \| sh` |
 
-Plus Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/). For LiteLLM gateway config and a quick response check, see [docs/agent-cli-setup.md](docs/agent-cli-setup.md).
+For LiteLLM gateway config and a quick response check, see [docs/agent-cli-setup.md](docs/agent-cli-setup.md).
 
 ## Commands
 
