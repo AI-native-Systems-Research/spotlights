@@ -1,12 +1,12 @@
 # Cost and the run manifest
 
-Every Spotlights run writes a manifest recording provenance, token usage, timing, and cost. Cost is computed from token counts and a rate table you can override to match your contracted LiteLLM pricing. This page explains the manifest, the rate-table format, and how to price a model the bundled table doesn't know about. For running the engine, see the [README](../README.md); for setup, [INSTALL](INSTALL.md).
+Every Spotlights run writes a manifest recording provenance, token usage, timing, and cost. Cost is computed from token counts and a rate table you can override to match your contracted LiteLLM pricing. This page explains the manifest, the rate-table format, and how to price a model the bundled table doesn't know about.
 
 ← Back to [README](../README.md)
 
 ## The run manifest
 
-Each completed manager run writes a public run manifest to:
+Each completed engine run writes a public run manifest to:
 
 ```text
 <artifacts-dir>/spotlights_manager/run_manifest.json
