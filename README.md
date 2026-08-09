@@ -93,12 +93,10 @@ For LiteLLM gateway config and a quick response check, see [docs/agent-cli-setup
 
 ## Skills
 
-`spotlights-engine init` installs two Claude Code slash commands into your project (`.claude/commands/`):
-
 | Skill | Purpose |
 |---|---|
 | `/spotlights-objective-setting` | Interactive interview that helps you frame a sharp optimization objective for a run. |
-| `/spotlights-sort-candidates` | Ranks a finished run's candidates by estimated impact, writing `sorted_candidates.md` / `.json`. |
+| `/spotlights-sort-candidates` | Ranks a finished run's candidates by estimated impact. |
 
 <a id="quickstart"></a>
 ## Quickstart on a vLLM subset
