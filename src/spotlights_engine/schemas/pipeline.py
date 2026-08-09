@@ -10,6 +10,7 @@ another with typed payloads.
 
 from __future__ import annotations
 
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
@@ -70,6 +71,24 @@ class ModuleDeepResearchInput(BaseModel):
     # Controls the default step-3 runner fan-out. False (default) → Codex only;
     # True → Codex + Claude.
     enable_claude_search: bool = False
+
+    # When set, restricts findings to sources first published or released
+    # strictly before this date. Enforced in two ways: (a) the DR prompt
+    # instructs the agent to honor the cutoff and populate `publication_date`
+    # on every finding, and (b) the merge step drops any finding whose
+    # self-reported `publication_date` falls on or after the cutoff. When
+    # None (the default), the DR step behaves identically to runs that never
+    # knew about the field. Useful for historical baselining and "would the
+    # agent derive X without seeing later-published solutions" tests.
+    source_cutoff_date: date | None = None
+
+    # Directory into which per-runner raw stdout / stderr / final-message /
+    # summary files are written, one set per CLI runner. When `None` (the
+    # default), no per-runner artifacts are written — preserves the historical
+    # behavior for standalone DR callers. The manager always supplies one so
+    # runner failures (empty envelope, transport errors, quota timeouts) can
+    # be diagnosed after the fact.
+    runner_artifacts_dir: Path | None = None
 
 
 class ModuleDeepResearchOutput(BaseModel):
@@ -149,7 +168,13 @@ class ModuleRun(BaseModel):
 
 
 class SpotlightsManagerInput(BaseModel):
-    """Input contract for the top-level `SpotlightsManager`."""
+    """Input contract for the top-level `SpotlightsManager`.
+
+    `dr_source_cutoff_date` is threaded through to every per-module
+    `ModuleDeepResearchInput.source_cutoff_date`; see that field's docstring
+    for semantics. Unset (None) means no cutoff, which is the historical
+    behavior.
+    """
 
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
@@ -160,6 +185,7 @@ class SpotlightsManagerInput(BaseModel):
     include_candidate_hotspots: bool = True
     enable_claude_search: bool = False
     continue_on_module_failure: bool = True
+    dr_source_cutoff_date: date | None = None
 
 
 class RunInfo(BaseModel):
