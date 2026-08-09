@@ -1,6 +1,6 @@
 # Installing Spotlights
 
-This page covers what happens after the engine is installed: the `doctor` preflight, the bundled Claude Code slash commands, and the full configuration reference. To install the two external agent CLIs (`claude`, `codex`) and optionally route them through a LiteLLM gateway, see [agent-cli-setup.md](agent-cli-setup.md); to install the engine itself, see the [README quickstart](../README.md#quickstart). If you just want to see what Spotlights does first, start with the [README](../README.md).
+This page covers what happens after the engine is installed: the `doctor` preflight, the bundled Claude Code slash commands, and the full configuration reference.
 
 ← Back to [README](../README.md)
 
