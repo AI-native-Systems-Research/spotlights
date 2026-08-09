@@ -1,12 +1,8 @@
 # Evolve bundles (`prep-evolve`)
 
-Spotlights decides *what* to optimize; evolvers (evolutionary code-search backends) do the *how*. The `prep-evolve` subcommand is the bridge: pick a candidate from a finished run and it generates a self-contained, ready-to-run bundle for one of three external evolvers. Run the engine first (see the [README](../README.md) quickstart), then use this page.
+Spotlights decides *what* to optimize; **evolvers** (evolutionary code-search backends) do the *how*. The `prep-evolve` subcommand is the bridge: pick a candidate from a finished run and it generates a self-contained, ready-to-run **evolve bundle** for one of three external evolvers. Each bundle contains the native config, a seed/target laid out the way that evolver expects, the findings/proposals digest folded into the prompt the evolver reads, and an evaluator scaffold. It does **not** run the evolve; it hands you a directory to `cd` into plus the exact launch command. Run the engine first (see the [README](../README.md) quickstart), then use this page.
 
 ← Back to [README](../README.md)
-
-## Evolve bundles (`prep-evolve`)
-
-Spotlights decides *what* to optimize; **evolvers** (evolutionary code-search backends) do the *how*. The `prep-evolve` subcommand is the bridge: pick a candidate from a finished run and it generates a self-contained, ready-to-run **evolve bundle** for one of three external evolvers. Each bundle contains the native config, a seed/target laid out the way that evolver expects, the findings/proposals digest folded into the prompt the evolver reads, and an evaluator scaffold. It does **not** run the evolve; it hands you a directory to `cd` into plus the exact launch command.
 
 | Evolver (`--evolver`) | Edit scope | Native config | Run command |
 |---|---|---|---|
