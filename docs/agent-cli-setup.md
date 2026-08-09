@@ -1,6 +1,6 @@
 # Installing the agent CLIs
 
-Spotlights drives two external agent CLIs — `claude` (Claude Code) and `codex` (Codex). Both must be installed and authenticated before a run. This page covers installing them, optionally routing them through a LiteLLM gateway, and a quick response check. For the engine itself, the `doctor` preflight, and the bundled slash commands, see the full [installation guide](INSTALL.md).
+Spotlights drives two external agent CLIs — `claude` (Claude Code) and `codex` (Codex). Both must be installed and authenticated before a run. This page covers installing them, optionally routing them through a LiteLLM gateway, and a quick response check.
 
 ← Back to [README](../README.md)
 
