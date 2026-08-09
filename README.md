@@ -293,7 +293,7 @@ Rate files are JSON keyed by `"provider:model"`:
 
 ```json
 {
-  "anthropic:claude-opus-4-8": {
+  "anthropic:aws/claude-opus-4-8": {
     "input": 0.0000038,
     "output": 0.000019,
     "cache_read": 0.00000038,
@@ -301,7 +301,7 @@ Rate files are JSON keyed by `"provider:model"`:
     "unit": "per_token",
     "note": "LiteLLM (bedrock) rate as of 2026-07-07: Claude Opus 4.8 $3.80/MTok input, $19/MTok output, $0.38/MTok cache read, $4.75/MTok cache write. Override for a different contract or 1h cache writes ($10/MTok)."
   },
-  "openai:gpt-5.5": {
+  "openai:codex": {
     "input": 0.0000025,
     "output": 0.000015,
     "cache_read": 0.0000005,
@@ -312,7 +312,28 @@ Rate files are JSON keyed by `"provider:model"`:
 }
 ```
 
+The key must be **exactly** the `provider:model` id the CLI reports — that is what the cost lookup matches against. Claude reports a bedrock-style id like `aws/claude-opus-4-8`, so its key is `anthropic:aws/claude-opus-4-8`. Codex reports no resolvable model id, so its usage falls back to the CLI-family key `openai:codex`. If you are unsure what id your CLI reports, run `spotlights-engine doctor` — it prints the exact key it looked up.
+
 If a model is missing from the table, Spotlights still writes the manifest and prices the models it can. The manifest's `cost.rate_note` and `notes` fields list any unpriced models so partial cost is visible.
+
+#### Adding a model to the rate table
+
+If `doctor` (or a run's `unpriced_models`) reports a model with no rate row — e.g. `[FAIL] claude: reported model 'aws/claude-opus-4-7' has no rate row (anthropic:aws/claude-opus-4-7)` — add a row for it:
+
+```bash
+# 1. Copy the bundled table (or start from your existing contracted one)
+mkdir -p "$HOME/.config/spotlights"
+cp src/spotlights_engine/costing/rates.json "$HOME/.config/spotlights/rates.json"
+
+# 2. Add a row keyed by the EXACT id doctor printed inside the parentheses,
+#    e.g. "anthropic:aws/claude-opus-4-7", with your per-token rates.
+
+# 3. Point the engine at your table and re-check
+export SPOTLIGHTS_RATES_FILE="$HOME/.config/spotlights/rates.json"
+spotlights-engine doctor
+```
+
+`doctor` reads the same table (`SPOTLIGHTS_RATES_FILE` if set, else the bundled default), so a green `doctor` means the run will price that model.
 
 ## Telemetry-driven discovery (preview)
 
