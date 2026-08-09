@@ -1,32 +1,20 @@
 # Installing Spotlights
 
-This page covers what happens after the engine is installed: the `doctor` preflight, the bundled Claude Code slash commands, and the full configuration reference.
+This page covers installing the engine, the bundled Claude Code slash commands, the `doctor` preflight, and the full configuration reference.
 
 ← Back to [README](../README.md)
 
 > [!NOTE]
 > The module deep-research step runs Codex only by default. Pass `--enable-claude-search` to also fan out to the Claude runner; individual runner failures are treated as recoverable, so one flaky provider does not fail the whole step. Enable this when running the `claude` CLI directly against Anthropic — its `WebSearch` tool works well there. Leave it off when routing through a LiteLLM server, where `WebSearch` currently does not work reliably.
 
-## Preflight with `doctor`
-
-Before your first real run, verify the environment end-to-end:
+## Installing the engine
 
 ```bash
-spotlights-engine doctor
+git clone https://github.com/AI-native-Systems-Research/spotlights.git
+cd spotlights
+uv sync --all-extras
+source .venv/bin/activate
 ```
-
-Unlike a PATH-only check, `doctor` actually runs each agent CLI (`claude`, `codex`)
-with a one-word prompt. A single probe proves three things at once:
-
-- **install** — the CLI resolves on PATH and executes;
-- **auth** — it exits cleanly with parseable output (an unauthenticated CLI errors out);
-- **pricing readiness** — the model the CLI reports has a matching row in the cost
-  rate table, so a real run will not silently drop that model's cost.
-
-It exits non-zero on any failure. Because it launches the CLIs, `doctor` spends a
-tiny amount per probe — that is the only way to verify auth and the reported model.
-If a probe reports a model with no rate row, add it to the table or point
-`SPOTLIGHTS_RATES_FILE` at a table that prices it.
 
 ## Install the Spotlights skill
 
@@ -51,7 +39,28 @@ Open Claude Code in the same directory and the slash commands appear:
 /spotlights-sort-candidates
 ```
 
-## Configuration
+## Preflight with `doctor`
+
+Before your first real run, verify the environment end-to-end:
+
+```bash
+spotlights-engine doctor
+```
+
+Unlike a PATH-only check, `doctor` actually runs each agent CLI (`claude`, `codex`)
+with a one-word prompt. A single probe proves three things at once:
+
+- **install** — the CLI resolves on PATH and executes;
+- **auth** — it exits cleanly with parseable output (an unauthenticated CLI errors out);
+- **pricing readiness** — the model the CLI reports has a matching row in the cost
+  rate table, so a real run will not silently drop that model's cost.
+
+It exits non-zero on any failure. Because it launches the CLIs, `doctor` spends a
+tiny amount per probe — that is the only way to verify auth and the reported model.
+If a probe reports a model with no rate row, add it to the table or point
+`SPOTLIGHTS_RATES_FILE` at a table that prices it.
+
+## Engine Configuration
 
 All flags are optional once `--repo` and the agent CLIs are available.
 
