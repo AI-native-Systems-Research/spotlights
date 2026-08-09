@@ -211,6 +211,25 @@ def _build_argparser() -> argparse.ArgumentParser:
         help="Debug-only: cap step 5 to the first N candidates.",
     )
 
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help=(
+            "Resolve and print the module scope, objective, and parallelism "
+            "that would run, then exit without invoking any agent (no cost)."
+        ),
+    )
+    p.add_argument(
+        "--max-cost",
+        type=float,
+        default=None,
+        metavar="USD",
+        help=(
+            "Advisory cost ceiling in USD. Recorded for enforcement at step "
+            "boundaries; must be > 0."
+        ),
+    )
+
     verbosity = p.add_mutually_exclusive_group()
     verbosity.add_argument(
         "--quiet",
@@ -564,6 +583,10 @@ def main(argv: list[str] | None = None) -> int:
         from spotlights_engine.prep_evolve.cli import main as prep_main
 
         return prep_main(raw_argv[1:])
+    if raw_argv and raw_argv[0] == "doctor":
+        from spotlights_engine.doctor import main as doctor_main
+
+        return doctor_main(raw_argv[1:])
 
     args = _build_argparser().parse_args(argv)
 
@@ -577,6 +600,21 @@ def main(argv: list[str] | None = None) -> int:
 
     args.artifacts_dir.mkdir(parents=True, exist_ok=True)
     args.output_folder.mkdir(parents=True, exist_ok=True)
+
+    if args.max_cost is not None and args.max_cost <= 0:
+        _build_argparser().error("--max-cost must be > 0")
+
+    if args.dry_run:
+        include = _flatten_include(args.include)
+        scope = ", ".join(include) if include else "(all modules)"
+        print("dry-run: no agents invoked, no cost incurred.")
+        print(f"  repo:        {args.repo}")
+        print(f"  objective:   {args.objective!r}")
+        print(f"  scope:       {scope}")
+        print(f"  max-parallel:{args.max_parallel}")
+        if args.max_cost is not None:
+            print(f"  max-cost:    ${args.max_cost:.2f}")
+        return 0
 
     _configure_logging(args)
 
