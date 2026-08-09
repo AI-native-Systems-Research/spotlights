@@ -108,10 +108,31 @@ def test_non_git_mode_skips_pycache(tmp_path):
         (pycache / "new.pyc").write_text("new garbage")
 
 
+def test_non_git_mode_mtime_only_touch_does_not_raise(tmp_path):
+    """Rewriting identical bytes (or bumping mtime) is not a mutation.
+
+    This is the regression the content-hash manifest exists for: on macOS,
+    Spotlight / Time Machine / Finder touch files during an agent run, and an
+    mtime-keyed manifest reported those as repo mutations.
+    """
+    p = tmp_path / "a.py"
+    p.write_text("a = 1\n")
+    guard = RepoGuard(tmp_path)
+    with guard.observe():
+        p.write_text("a = 1\n")  # same content, new mtime
+        os.utime(p, (0, 0))  # and an explicit mtime bump
+
+
 @pytest.mark.skipif(
     not hasattr(os, "setxattr"), reason="xattr APIs unavailable on this platform"
 )
-def test_non_git_mode_xattr_change_raises(tmp_path):
+def test_non_git_mode_xattr_change_does_not_raise(tmp_path):
+    """Extended-attribute churn is deliberately invisible to the guard.
+
+    Inverted from the previous contract: the manifest used to include an xattr
+    digest, so this raised. It now keys on content, because macOS metadata
+    churn made the xattr digest a source of false mutations.
+    """
     p = tmp_path / "a.py"
     p.write_text("a = 1\n")
     guard = RepoGuard(tmp_path)
@@ -119,6 +140,5 @@ def test_non_git_mode_xattr_change_raises(tmp_path):
         os.setxattr(p, "user.test", b"v1", follow_symlinks=False)
     except OSError:
         pytest.skip("filesystem does not support user xattrs")
-    with pytest.raises(DiscoveryMutationError):
-        with guard.observe():
-            os.setxattr(p, "user.test", b"v2", follow_symlinks=False)
+    with guard.observe():
+        os.setxattr(p, "user.test", b"v2", follow_symlinks=False)
