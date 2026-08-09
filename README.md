@@ -23,6 +23,7 @@ The core philosophy behind the project: execution tooling — coding agents, evo
   <a href="docs/cost-and-manifest.md">Cost</a> ·
   <a href="docs/prep-evolve.md">prep-evolve</a> ·
   <a href="docs/telemetry-preview.md">Telemetry (preview)</a> ·
+  <a href="docs/spotlight-report.md">SpotlightReport</a> ·
   <a href="#signal-sources--roadmap">Roadmap</a>
 </p>
 
