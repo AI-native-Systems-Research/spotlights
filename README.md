@@ -124,7 +124,7 @@ Verify the environment end-to-end ([Preflight with `doctor`](docs/INSTALL.md#pre
 spotlights-engine doctor
 ```
 
-Clone vLLM next to this repo, then **run the engine** on one module:
+Clone [vLLM](https://github.com/vllm-project/vllm) next to this repo, then **run the engine** on one module:
 
 ```bash
 spotlights-engine \
