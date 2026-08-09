@@ -75,14 +75,21 @@ Browse the full rendered run under [`examples/vllm_subset/`](examples/vllm_subse
 ## Requirements
 
 > [!IMPORTANT]
-> Spotlights drives **two** external agent CLIs — `claude` **and** `codex` — both installed **and** authenticated. Verify your environment end-to-end with `spotlights-engine doctor`. Full setup: [docs/INSTALL.md](docs/INSTALL.md).
+> Spotlights drives **two** external agent CLIs — `claude` **and** `codex` — both installed **and** authenticated. Verify your environment end-to-end with `spotlights-engine doctor`.
 
 | CLI | Runtime / auth | Used for |
 |---|---|---|
 | `claude` | Claude Code (Pro/Max/Team/Enterprise/Console plan, or a LiteLLM proxy) | modules extractor, candidate discovery, Claude executors (steps 4–5) |
 | `codex` | Codex CLI (ChatGPT plan or OpenAI API key, or a LiteLLM proxy) | `module_deep_research`, Codex executors (steps 2, 5) |
 
-Plus Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/). See [docs/INSTALL.md](docs/INSTALL.md) for install, LiteLLM proxy config, and the `doctor` preflight.
+### Install
+
+| Agent | Install |
+| --- | --- |
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `curl -fsSL https://claude.ai/install.sh \| bash` |
+| [Codex](https://github.com/openai/codex) | `curl -fsSL https://chatgpt.com/codex/install.sh \| sh` |
+
+Plus Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/). For LiteLLM gateway config and a quick response check, see [docs/agent-cli-setup.md](docs/agent-cli-setup.md).
 
 ## Commands
 
