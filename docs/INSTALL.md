@@ -64,6 +64,7 @@ All flags are optional once `--repo` and the agent CLIs are available.
 | Flag | Default | Purpose |
 |---|---|---|
 | `--repo` | `../vllm` | Target repo path. |
+| `--repo-url` | inferred from `--repo` | Canonical target repo URL recorded in the public run manifest. |
 | `--include` | (all modules) | Restrict to slash-form leaf qualified names. |
 | `--objective` | `"reduce hot-path latency on common workloads"` | Threaded into discovery + deep research. |
 | `--hint` (repeatable) | `[]` | Workload hints; map to `SpotlightContext.workload_hints`. |
@@ -73,4 +74,6 @@ All flags are optional once `--repo` and the agent CLIs are available.
 | `--max-parallel-pairs` | `5` | Within-step parallelism for step 4. |
 | `--max-parallel-candidates` | `5` | Within-step parallelism for step 5. |
 | `--max-findings-per-module` | `30` | Cap on findings produced by step 3 per module. |
+| `--review-iterations N` | `3` | Number of candidate-discovery review iterations after the bootstrap pass (step 2). Iter 0 is Claude bootstrap; iters 1..N alternate Codex/Claude, so `N=3` runs 4 iterations total (Claude → Codex → Claude → Codex). `0` disables the review session (bootstrap pass only). |
+| `--no-review` | off | Alias for `--review-iterations 0`. Mutually exclusive with `--review-iterations`. |
 | `--enable-claude-search` | off | Also run the Claude runner in step 3 (default: Codex only). Enable when using the `claude` CLI directly against Anthropic (its `WebSearch` works); leave off behind a LiteLLM server, where `WebSearch` is currently unreliable. |
