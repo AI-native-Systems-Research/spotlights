@@ -83,6 +83,9 @@ Browse the full rendered run under [`examples/vllm_subset/`](examples/vllm_subse
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `curl -fsSL https://claude.ai/install.sh \| bash` | modules extractor, candidate discovery, Claude executors (steps 4–5) |
 | [Codex](https://github.com/openai/codex) | `curl -fsSL https://chatgpt.com/codex/install.sh \| sh` | `module_deep_research`, Codex executors (steps 2, 5) |
 
+> [!TIP]
+> Tested and recommended models: **Opus 4.8** for Claude Code and **GPT-5.5** for Codex.
+
 For LiteLLM gateway config and a quick response check, see [docs/agent-cli-setup.md](docs/agent-cli-setup.md).
 
 ## Commands
