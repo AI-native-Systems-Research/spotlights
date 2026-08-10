@@ -54,6 +54,7 @@ Spotlights writes a browsable tree of Markdown. Each candidate is a full write-u
 > **Why it matters.** Large CPU offload pools and burst stores put this scan on the scheduler `prepare_store` path. Faster victim selection reduces scheduler stalls, improving TPOT when many requests are storing new KV blocks while old blocks are still protected.
 >
 > **Proposal — Add an S3-FIFO probationary filter in front of ARC** to cut eviction scan cost on one-hit KV blocks.
+>
 > Grounded in *FIFO Queues are All You Need for Cache Eviction* (<https://jasony.me/publication/sosp23-s3fifo.pdf>): a small probationary FIFO filters most one-hit blocks before they reach T1/T2, preserving ARC's adaptive partitioning for the reusable prefixes that matter.
 
 On disk:
@@ -76,10 +77,10 @@ Browse the full rendered run under [`examples/vllm_subset/`](examples/vllm_subse
 ## Requirements
 
 > [!IMPORTANT]
-> Spotlights drives **two** external agent CLIs — `claude` **and** `codex` — both installed **and** authenticated.
+> Spotlights drives **two** external agent CLIs — `claude` and `codex` — both installed and authenticated.
 
 | Agent | Install | Used for |
-| --- | --- | --- |
+|---|---|---|
 | [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | `curl -fsSL https://claude.ai/install.sh \| bash` | modules extractor, candidate discovery, Claude executors (steps 4–5) |
 | [Codex](https://github.com/openai/codex) | `curl -fsSL https://chatgpt.com/codex/install.sh \| sh` | `module_deep_research`, Codex executors (steps 2, 5) |
 
@@ -105,9 +106,9 @@ For LiteLLM gateway config and a quick response check, see [docs/agent-cli-setup
 <a id="quickstart"></a>
 ## Quickstart on a vLLM subset
 
-Prerequisites: Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/).
+**Prerequisites:** Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/).
 
-First install the engine:
+**1. Install the engine**
 
 ```bash
 git clone https://github.com/AI-native-Systems-Research/spotlights.git
@@ -116,22 +117,22 @@ uv sync --all-extras
 source .venv/bin/activate
 ```
 
-Then install the bundled slash commands ([Install the Spotlights skill](docs/INSTALL.md#install-the-spotlights-skill)):
+**2. Install the bundled slash commands** ([Install the Spotlights skill](docs/INSTALL.md#install-the-spotlights-skill))
 
 ```bash
 spotlights-engine init      # installs the /spotlights-* Claude Code slash commands
 ```
 
-Verify the environment end-to-end ([Preflight with `doctor`](docs/INSTALL.md#preflight-with-doctor)):
+**3. Verify the environment end-to-end** ([Preflight with `doctor`](docs/INSTALL.md#preflight-with-doctor))
 
 ```bash
 spotlights-engine doctor
 ```
 
+**4. Run the engine on one module.** Clone [vLLM](https://github.com/vllm-project/vllm) next to this repo, decide your objective, then run the engine:
+
 > [!TIP]
 > **Framing the objective (optional).** The run needs an `--objective` and, optionally, one or more `--hint`s. You can write them by hand, as below. Or, in Claude Code, run the optional [`/spotlights-objective-setting`](#skills) interview — it walks you through your goal and prints a ready-to-paste flag line (`--objective "…" --hint "…"`). Either path produces the same flags; the skill is just a convenience, never a required step.
-
-Clone [vLLM](https://github.com/vllm-project/vllm) next to this repo, then **run the engine** on one module:
 
 ```bash
 spotlights-engine \
@@ -151,7 +152,7 @@ A single-module run like this takes roughly **30–45 minutes** and a **few doll
 spotlights-engine --include vllm/v1/kv_offload vllm/v1/attention/paged_kv ...
 ```
 
-**Then rank the candidates by impact.** A finished run can surface ~100 candidates; the bundled `/spotlights-sort-candidates` slash command ranks them for your objective. In Claude Code, from the same directory:
+**5. Rank the candidates by impact.** A finished run can surface ~100 candidates; the bundled `/spotlights-sort-candidates` slash command ranks them for your objective. In Claude Code, from the same directory:
 
 ```
 /spotlights-sort-candidates
