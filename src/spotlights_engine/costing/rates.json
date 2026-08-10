@@ -14,6 +14,14 @@
     "cache_read": 0.0000005,
     "cache_create": 0.0,
     "unit": "per_token",
-    "note": "LiteLLM (azure) rate as of 2026-07-07: GPT-5.5 $2.50/MTok input, $15/MTok output, $0.50/MTok cache read; Codex has no cache-create bucket. Keyed by the CLI family (codex stream reports no resolvable model id). Override for a different contract."
+    "note": "CLI-family fallback for Codex invocations whose stream did not emit a resolvable model id; same rate as openai:gpt-5.5 because gpt-5.5 is the model behind every codex invocation in this deployment. LiteLLM (azure) rate as of 2026-07-07: $2.50/MTok input, $15/MTok output, $0.50/MTok cache read; Codex has no cache-create bucket. Override for a different contract."
+  },
+  "openai:gpt-5.5": {
+    "input": 0.0000025,
+    "output": 0.000015,
+    "cache_read": 0.0000005,
+    "cache_create": 0.0,
+    "unit": "per_token",
+    "note": "LiteLLM (azure) rate as of 2026-07-07: GPT-5.5 $2.50/MTok input, $15/MTok output, $0.50/MTok cache read; no cache-create bucket. Used when the Codex stream emits msg.model=gpt-5.5; identical rates to the openai:codex CLI-family fallback."
   }
 }

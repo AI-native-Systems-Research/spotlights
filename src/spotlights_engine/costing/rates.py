@@ -41,6 +41,47 @@ class ModelRate(BaseModel):
     note: str = ""
 
 
+class CostCoverage(BaseModel):
+    """Which rate keys got dollarized and what share of tokens they cover.
+
+    `priced_token_share` is total-tokens of priced records over total-tokens of
+    all records (0.0 when there were no records). 1.0 means every model this
+    run used had a rate row and `amount_usd` is the full run cost; anything
+    less means `amount_usd` is a partial figure and `unpriced_models` names the
+    rate keys that were skipped.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    priced_token_share: float = Field(default=0.0, ge=0.0, le=1.0)
+    priced_models: list[str] = Field(default_factory=list)
+    unpriced_models: list[str] = Field(default_factory=list)
+
+
+class ByModelCost(BaseModel):
+    """One row of the `by_model` breakdown: a `(provider, model, role)` group's
+    token totals, whether it got a rate, and its dollar contribution.
+
+    `amount_usd` is 0.0 when `priced` is false — an unpriced group contributes
+    nothing to the run total. Rows are keyed as `provider:model` for the rate
+    lookup; the `role` column is not part of the rate key but is preserved so
+    the breakdown lines up 1:1 with `models_used`.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    provider: str
+    model: str
+    role: str
+    rate_key: str
+    priced: bool
+    amount_usd: float = Field(default=0.0, ge=0.0)
+    input: int = Field(default=0, ge=0)
+    output: int = Field(default=0, ge=0)
+    cache_read: int = Field(default=0, ge=0)
+    cache_create: int = Field(default=0, ge=0)
+
+
 class CostSummary(BaseModel):
     """Result of `compute_cost` — feeds the run manifest's `cost` block."""
 
@@ -52,6 +93,8 @@ class CostSummary(BaseModel):
     ] = "contracted-rate-table"
     rate_note: str = ""
     unpriced_models: list[str] = Field(default_factory=list)
+    coverage: CostCoverage = Field(default_factory=CostCoverage)
+    by_model: list[ByModelCost] = Field(default_factory=list)
 
 
 def _load_rates_from(
@@ -107,6 +150,17 @@ def _rate_key(record: UsageRecord) -> tuple[str, bool]:
     return f"{record.provider}:{record.cli}", False
 
 
+def _group_key(record: UsageRecord) -> tuple[str, str, str]:
+    """`(provider, model_or_cli, role)` — same grouping as `aggregate_models_used`.
+
+    Kept in lockstep so `cost.by_model` lines up 1:1 with `models_used`; the
+    context-tag stripping matches `_rate_key` so the group's `rate_key` is the
+    exact string we look up in the rate table.
+    """
+    model = _CONTEXT_TAG_RE.sub("", record.model) if record.model else record.cli
+    return (record.provider, model, record.role)
+
+
 def compute_cost(
     records: Iterable[UsageRecord],
     rates: dict[str, ModelRate],
@@ -114,26 +168,89 @@ def compute_cost(
         "contracted-rate-table", "litellm-proxy-log", "public-api-rate-table"
     ] = "contracted-rate-table",
 ) -> CostSummary:
+    # Materialize once so we can iterate twice (grouping + coverage) without
+    # forcing the caller to hand us a list.
+    record_list = list(records)
+
     total = 0.0
     applied: dict[str, ModelRate] = {}
     unpriced: set[str] = set()
     unresolved = 0
 
-    for record in records:
+    # Group records the same way `aggregate_models_used` does so `by_model`
+    # lines up 1:1 with `models_used`. Each group's rate_key comes from
+    # `_rate_key` (its resolution flag drives the `unresolved` counter below).
+    grouped: dict[
+        tuple[str, str, str],
+        dict[str, int | float | str | bool],
+    ] = {}
+    for record in record_list:
         key, resolved = _rate_key(record)
         if not resolved:
             unresolved += 1
         rate = rates.get(key)
-        if rate is None:
+        contribution = 0.0
+        if rate is not None:
+            contribution = (
+                record.input * rate.input
+                + record.output * rate.output
+                + record.cache_read * rate.cache_read
+                + record.cache_create * rate.cache_create
+            )
+            total += contribution
+            applied[key] = rate
+        else:
             unpriced.add(key)
-            continue
-        total += (
-            record.input * rate.input
-            + record.output * rate.output
-            + record.cache_read * rate.cache_read
-            + record.cache_create * rate.cache_create
+
+        gk = _group_key(record)
+        bucket = grouped.setdefault(
+            gk,
+            {
+                "rate_key": key,
+                "priced": rate is not None,
+                "amount_usd": 0.0,
+                "input": 0,
+                "output": 0,
+                "cache_read": 0,
+                "cache_create": 0,
+            },
         )
-        applied[key] = rate
+        bucket["amount_usd"] = float(bucket["amount_usd"]) + contribution
+        bucket["input"] = int(bucket["input"]) + record.input
+        bucket["output"] = int(bucket["output"]) + record.output
+        bucket["cache_read"] = int(bucket["cache_read"]) + record.cache_read
+        bucket["cache_create"] = int(bucket["cache_create"]) + record.cache_create
+
+    by_model = [
+        ByModelCost(
+            provider=provider,
+            model=model,
+            role=role,
+            rate_key=str(bucket["rate_key"]),
+            priced=bool(bucket["priced"]),
+            amount_usd=float(bucket["amount_usd"]),
+            input=int(bucket["input"]),
+            output=int(bucket["output"]),
+            cache_read=int(bucket["cache_read"]),
+            cache_create=int(bucket["cache_create"]),
+        )
+        for (provider, model, role), bucket in sorted(grouped.items())
+    ]
+
+    total_tokens = sum(
+        row.input + row.output + row.cache_read + row.cache_create for row in by_model
+    )
+    priced_tokens = sum(
+        row.input + row.output + row.cache_read + row.cache_create
+        for row in by_model
+        if row.priced
+    )
+    priced_token_share = (priced_tokens / total_tokens) if total_tokens else 0.0
+    coverage = CostCoverage(
+        priced_token_share=priced_token_share,
+        priced_models=sorted({row.rate_key for row in by_model if row.priced}),
+        unpriced_models=sorted(unpriced),
+    )
 
     note_parts: list[str] = []
     if applied:
@@ -159,12 +276,16 @@ def compute_cost(
         source=source,
         rate_note="; ".join(note_parts),
         unpriced_models=sorted(unpriced),
+        coverage=coverage,
+        by_model=by_model,
     )
 
 
 __all__ = [
     "EXTERNAL_RATES_ENV_VAR",
     "RATES_ENV_VAR",
+    "ByModelCost",
+    "CostCoverage",
     "CostSummary",
     "ModelRate",
     "compute_cost",

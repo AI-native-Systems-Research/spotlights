@@ -7,7 +7,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from spotlights_engine.costing.rates import CostSummary
+from spotlights_engine.costing.rates import ByModelCost, CostCoverage, CostSummary
 from spotlights_engine.costing.records import UsageRecord
 
 
@@ -46,11 +46,23 @@ class RunManifestSpotlights(BaseModel):
 
 
 class RunManifestCost(BaseModel):
+    """Cost block in the run manifest.
+
+    `amount_usd` is a numeric sum of everything that got a rate row; when
+    `coverage.priced_token_share < 1.0` it is a PARTIAL figure and readers must
+    consult `coverage.unpriced_models` / `by_model` to see what was left out.
+    The name is stable across full and partial runs to keep existing consumers
+    working; partial-ness is signalled structurally via `coverage`, not by
+    swapping the field.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     amount_usd: float = 0.0
     source: str = "contracted-rate-table"
     rate_note: str = ""
+    coverage: CostCoverage = Field(default_factory=CostCoverage)
+    by_model: list[ByModelCost] = Field(default_factory=list)
 
 
 class RunManifestTiming(BaseModel):
@@ -156,12 +168,16 @@ def build_run_manifest(
             amount_usd=cost.amount_usd,
             source=cost.source,
             rate_note=cost.rate_note,
+            coverage=cost.coverage,
+            by_model=list(cost.by_model),
         ),
         external_cost=(
             RunManifestCost(
                 amount_usd=external_cost.amount_usd,
                 source=external_cost.source,
                 rate_note=external_cost.rate_note,
+                coverage=external_cost.coverage,
+                by_model=list(external_cost.by_model),
             )
             if external_cost is not None
             else None
