@@ -151,7 +151,7 @@ spotlights-engine --include vllm/v1/kv_offload vllm/v1/attention/paged_kv ...
 /spotlights-sort-candidates
 ```
 
-Point it at `./spotlights-out/result.json` and it writes a ranked `sorted_candidates.md` (a summary table linking each candidate to its write-up) plus a machine-readable `sorted_candidates.json`.
+Point it at `./spotlights-out/result.json` and it writes a ranked `./spotlights-out/sorted/sorted_candidates.md` (a summary table linking each candidate to its write-up) plus a machine-readable `./spotlights-out/sorted/sorted_candidates.json`.
 
 ## Signal sources & roadmap
 
