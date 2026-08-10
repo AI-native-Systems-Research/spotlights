@@ -99,7 +99,7 @@ For LiteLLM gateway config and a quick response check, see [docs/agent-cli-setup
 
 | Skill | Purpose |
 |---|---|
-| `/spotlights-objective-setting` | Interactive interview that helps you frame a sharp optimization objective for a run. |
+| `/spotlights-objective-setting` | Optional interview that helps you frame a sharp optimization objective and prints ready-to-paste `--objective`/`--hint` flags. You can also write those flags by hand. |
 | `/spotlights-sort-candidates` | Ranks a finished run's candidates by estimated impact. |
 
 <a id="quickstart"></a>
@@ -127,6 +127,9 @@ Verify the environment end-to-end ([Preflight with `doctor`](docs/INSTALL.md#pre
 ```bash
 spotlights-engine doctor
 ```
+
+> [!TIP]
+> **Framing the objective (optional).** The run needs an `--objective` and, optionally, one or more `--hint`s. You can write them by hand, as below. Or, in Claude Code, run the optional [`/spotlights-objective-setting`](#skills) interview — it walks you through your goal and prints a ready-to-paste flag line (`--objective "…" --hint "…"`). Either path produces the same flags; the skill is just a convenience, never a required step.
 
 Clone [vLLM](https://github.com/vllm-project/vllm) next to this repo, then **run the engine** on one module:
 
