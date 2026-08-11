@@ -102,6 +102,36 @@ def _is_real_source_file(repo_path: Path, rel: str) -> bool:
     )
 
 
+def _is_real_file(repo_path: Path, rel: str) -> bool:
+    """A real non-symlink file, of any extension (source or not)."""
+    p = repo_path / rel
+    return p.is_file() and not _has_symlink_component(repo_path, rel)
+
+
+def _dir_has_direct_source_file(repo_path: Path, module_path: str) -> bool:
+    """True when the module's own directory holds ≥1 direct source-extension file.
+
+    Distinguishes a module that simply hasn't cited its source (strict gate
+    applies) from one that *has no* source-extension file to cite — e.g. a
+    `docker/` directory of Dockerfiles + `.hcl` + `.json`, whose only real
+    source lives in a child directory. The latter is allowed to cite its own
+    non-source files (Dockerfile, bake config) as `main_files`.
+
+    Symlinks are ignored to match the non-symlink invariant enforced elsewhere.
+    """
+    d = repo_path / module_path
+    try:
+        entries = list(d.iterdir())
+    except (OSError, NotADirectoryError):
+        return False
+    return any(
+        entry.is_file()
+        and not entry.is_symlink()
+        and is_source_file(entry.name)
+        for entry in entries
+    )
+
+
 def _is_ancestor(ancestor: str, descendant: str) -> bool:
     """Physical-path ancestry (`ancestor` strictly contains `descendant`)."""
     return descendant == ancestor or descendant.startswith(ancestor + "/")
@@ -331,6 +361,12 @@ def validate_enriched_tree(
     owned_by: dict[str, str] = {}
     emitted_set = set(emitted_paths)
     for module_path, main_files in _iter_module_mainfiles(enriched):
+        # A module directory holding no direct source-extension file (e.g. a
+        # `docker/` of Dockerfiles + `.hcl` + `.json`, whose only real source
+        # lives in a child) has nothing source-typed to cite, so it may cite its
+        # own real non-symlink files of any extension. A directory that *does*
+        # hold source keeps the strict source-extension gate.
+        allow_any_file = not _dir_has_direct_source_file(repo_path, module_path)
         for f in main_files:
             fpath = f.path
             if not fpath.startswith(module_path + "/") and not (
@@ -341,7 +377,12 @@ def validate_enriched_tree(
                     raise CrossArtifactError(
                         f"main_file {fpath!r} is not under module {module_path!r}"
                     )
-            if not _is_real_source_file(repo_path, fpath):
+            if allow_any_file:
+                if not _is_real_file(repo_path, fpath):
+                    raise CrossArtifactError(
+                        f"main_file {fpath!r} is not a real non-symlink file"
+                    )
+            elif not _is_real_source_file(repo_path, fpath):
                 raise CrossArtifactError(
                     f"main_file {fpath!r} is not a real non-symlink source file"
                 )

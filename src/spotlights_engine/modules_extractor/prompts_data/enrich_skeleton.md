@@ -57,7 +57,11 @@ Inspect the repository source and emit a strict `EnrichedTree`:
 
 - Describe each emitted module/submodule from the actual code.
 - Choose 1–5 `main_files` per module — real, non-symlink source files under that
-  module's directory, not owned by a separately emitted descendant.
+  module's directory, not owned by a separately emitted descendant. Exception:
+  when the module's own directory holds NO direct source-code file (e.g. a
+  `docker/` of Dockerfiles + `.hcl` + `.json` whose only real source sits in a
+  child), cite that directory's most representative real files of any extension
+  (a Dockerfile, a build/config file) instead.
 - Record top-level `depends_on` and fold decisions.
 
 ### Coverage rules (hard)
@@ -79,6 +83,11 @@ Inspect the repository source and emit a strict `EnrichedTree`:
     never a synthetic merged path. Record it in `folds[]` with `path`, `into`,
     `reason`, and `evidence_files` (≥1 real source file under `path`). At least
     one evidence file MUST also appear in the target module's `main_files`.
+  - A module with **exactly one** source-bearing child directory violates the
+    zero-or-≥2 rule below if it emits that child. Either fold the child into the
+    parent (cite its files in the parent's `main_files`), or — if the parent is
+    a pure passthrough with no responsibility of its own — emit the child as the
+    module and fold the parent away.
 - **LEAF** — one cohesive submodule; no `submodules` key.
 - **SPLIT** — a directory with 2+ real nested source-bearing child directories,
   each its own logical unit. A parent has zero or ≥2 children, never exactly

@@ -186,6 +186,68 @@ def test_readme_or_nonsource_main_file_fails(tmp_path: Path) -> None:
         validate_enriched_tree(tree, tmp_path, _repository(), skel)
 
 
+def test_source_less_module_may_cite_nonsource_main_files(tmp_path: Path) -> None:
+    # The vllm `docker/` regression: a directory with zero direct
+    # source-extension files (only Dockerfiles + `.hcl` + `.json`) whose only
+    # real source lives in a child `entrypoints/`. It has nothing source-typed
+    # to cite, so it may cite its own real non-symlink files of any extension as
+    # main_files. The source child is folded, and one of its `.sh` files is the
+    # fold evidence in the module's main_files.
+    _write(tmp_path / "docker" / "Dockerfile", "FROM scratch\n")
+    _write(tmp_path / "docker" / "docker-bake.hcl", 'target "x" {}\n')
+    _write(tmp_path / "docker" / "entrypoints" / "run.sh", "echo hi\n")
+    _write(tmp_path / "docker" / "entrypoints" / "test_run.sh", "echo test\n")
+    skel = build_skeleton(tmp_path, "")
+    repo = Repository(name="r", summary="s", source_root="")
+    data = {
+        "modules": [
+            {
+                "name": "docker",
+                "path": "docker",
+                "description": "Container build definitions and entrypoints.",
+                "depends_on": [],
+                "main_files": [
+                    {"path": "docker/Dockerfile", "role": "Primary build image."},
+                    {"path": "docker/docker-bake.hcl", "role": "buildx bake targets."},
+                    {"path": "docker/entrypoints/run.sh", "role": "Entrypoint (folded)."},
+                ],
+                "submodules": [],
+            }
+        ],
+        "folds": [
+            {
+                "path": "docker/entrypoints",
+                "into": "docker",
+                "reason": "single cohesive entrypoint unit",
+                "evidence_files": ["docker/entrypoints/run.sh"],
+            }
+        ],
+    }
+    tree = EnrichedTree.model_validate(data)
+    validate_enriched_tree(tree, tmp_path, repo, skel)
+    cov = compute_coverage(tree, skel)
+    assert cov.ok
+    assert "docker" in cov.emitted
+    assert "docker/entrypoints" in cov.folded
+
+
+def test_source_bearing_module_keeps_strict_main_file_gate(tmp_path: Path) -> None:
+    # A module directory that DOES hold a direct source file keeps the strict
+    # source-extension gate: a Dockerfile sitting next to real source cannot be
+    # cited as a main_file.
+    _repo(tmp_path)
+    _write(tmp_path / "pkg" / "core" / "Dockerfile", "FROM scratch\n")
+    skel = build_skeleton(tmp_path, "pkg")
+    data = _full_tree()
+    data["modules"][0]["main_files"] = [
+        {"path": "pkg/core/Dockerfile", "role": "Build image."},
+        {"path": "pkg/core/engine.py", "role": "Engine."},
+    ]
+    tree = EnrichedTree.model_validate(data)
+    with pytest.raises(CrossArtifactError, match="not a real non-symlink source file"):
+        validate_enriched_tree(tree, tmp_path, _repository(), skel)
+
+
 def test_external_dependency_colliding_with_internal_qn_fails(tmp_path: Path) -> None:
     _repo(tmp_path)
     skel = build_skeleton(tmp_path, "pkg")
