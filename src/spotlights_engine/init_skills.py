@@ -16,6 +16,7 @@ import argparse
 import hashlib
 import json
 import sys
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from importlib import resources
 from importlib.metadata import PackageNotFoundError, version
@@ -28,6 +29,15 @@ _SKILL_PREFIX = "spotlights-"
 _MANIFEST_DIR = ".spotlights"
 _MANIFEST_NAME = "manifest.json"
 _CLAUDE_COMMANDS_REL = Path(".claude") / "commands"
+
+
+@dataclass
+class _InstallItem:
+    """One file to install, resolved to its manifest-relative POSIX path."""
+
+    rel_path: str  # e.g. ".claude/commands/spotlights-share-candidates/SKILL.md"
+    source: Traversable
+    label: str  # human-facing, e.g. "spotlights-share-candidates/SKILL.md"
 
 
 def _package_version() -> str:
@@ -107,17 +117,23 @@ def _write_manifest(scope_root: Path, files: dict[str, str]) -> Path:
     return manifest_path
 
 
-def _list_bundled_skills() -> list[tuple[str, Traversable]]:
-    """Return (slug, traversable) for every `<slug>.md` in the bundle."""
+def _plan_install_items() -> list[_InstallItem]:
+    """Resolve every bundled file to an _InstallItem.
+
+    Top-level `<slug>.md` files become prefixed slash commands. (Directory
+    skills are added in a later step.)
+    """
     root = _bundled_templates()
     if not root.is_dir():
         return []
-    out: list[tuple[str, Traversable]] = []
+    items: list[_InstallItem] = []
     for entry in root.iterdir():
         if entry.is_file() and entry.name.endswith(".md"):
             slug = entry.name[:-3]
-            out.append((slug, entry))
-    return sorted(out, key=lambda x: x[0])
+            target_name = f"{_SKILL_PREFIX}{slug}.md"
+            rel_path = (_CLAUDE_COMMANDS_REL / target_name).as_posix()
+            items.append(_InstallItem(rel_path, entry, target_name))
+    return sorted(items, key=lambda it: it.rel_path)
 
 
 def install_skills(scope: str = "project", force: bool = False) -> int:
@@ -129,8 +145,8 @@ def install_skills(scope: str = "project", force: bool = False) -> int:
     dest_dir = scope_root / _CLAUDE_COMMANDS_REL
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    skills = _list_bundled_skills()
-    if not skills:
+    items = _plan_install_items()
+    if not items:
         print(
             "spotlights-engine init: no bundled skills found "
             f"(looked in {_PACKAGE}/{_TEMPLATES_SUBDIR}).",
@@ -148,43 +164,38 @@ def install_skills(scope: str = "project", force: bool = False) -> int:
     skipped_user_edited: list[str] = []
     skipped_existing: list[str] = []
 
-    for slug, source in skills:
-        target_name = f"{_SKILL_PREFIX}{slug}.md"
-        target_path = dest_dir / target_name
-        rel_path = str((_CLAUDE_COMMANDS_REL / target_name).as_posix())
-        bundled_text = source.read_text(encoding="utf-8")
+    for item in items:
+        target_path = scope_root / Path(item.rel_path)
+        bundled_text = item.source.read_text(encoding="utf-8")
         bundled_hash = hashlib.sha256(bundled_text.encode("utf-8")).hexdigest()
 
         if target_path.exists():
             if not force:
-                skipped_existing.append(target_name)
+                skipped_existing.append(item.label)
                 # Preserve any prior manifest entry as-is so we don't lie about ownership.
-                if rel_path in existing_files:
-                    new_files[rel_path] = existing_files[rel_path]
+                if item.rel_path in existing_files:
+                    new_files[item.rel_path] = existing_files[item.rel_path]
                 continue
             # --force: only overwrite files we own and the user hasn't edited.
             on_disk_hash = _sha256(target_path)
-            recorded_hash = existing_files.get(rel_path)
+            recorded_hash = existing_files.get(item.rel_path)
             if recorded_hash is None:
                 # Not in manifest -> not ours. Don't touch.
-                skipped_user_edited.append(target_name)
+                skipped_user_edited.append(item.label)
                 continue
             if on_disk_hash != recorded_hash:
                 # User edited a file we installed previously. Don't clobber.
-                skipped_user_edited.append(target_name)
-                new_files[rel_path] = recorded_hash
+                skipped_user_edited.append(item.label)
+                new_files[item.rel_path] = recorded_hash
                 continue
 
+        target_path.parent.mkdir(parents=True, exist_ok=True)
         target_path.write_text(bundled_text, encoding="utf-8")
-        new_files[rel_path] = bundled_hash
-        installed.append(target_name)
+        new_files[item.rel_path] = bundled_hash
+        installed.append(item.label)
 
-    # Carry over manifest entries for files we don't manage in this bundle anymore
-    # (defensive — currently we ship a single skill, but this is cheap insurance).
-    bundled_rel_paths = {
-        str((_CLAUDE_COMMANDS_REL / f"{_SKILL_PREFIX}{slug}.md").as_posix())
-        for slug, _ in skills
-    }
+    # Carry over manifest entries for files we don't manage in this bundle anymore.
+    bundled_rel_paths = {item.rel_path for item in items}
     for rel_path, recorded_hash in existing_files.items():
         if rel_path not in bundled_rel_paths and rel_path not in new_files:
             new_files[rel_path] = recorded_hash
