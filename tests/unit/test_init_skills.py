@@ -181,6 +181,36 @@ class TestInstallSkills:
         assert ".claude/commands/spotlights-objective-setting.md" in manifest["files"]
         assert ".claude/commands/spotlights-share-candidates/SKILL.md" in manifest["files"]
 
+    def test_directory_skill_excludes_junk(self, fake_bundle, project_root):
+        skill = fake_bundle / "share-candidates"
+        (skill / "__pycache__").mkdir(parents=True)
+        (skill / "tests" / "__pycache__").mkdir(parents=True)
+        (skill / "SKILL.md").write_text("# sc\n", encoding="utf-8")
+        (skill / "build_bundle.py").write_text("x = 1\n", encoding="utf-8")
+        (skill / "build_bundle.pyc").write_text("junk\n", encoding="utf-8")
+        (skill / ".DS_Store").write_text("junk\n", encoding="utf-8")
+        (skill / "__pycache__" / "build_bundle.cpython-314.pyc").write_text("junk\n", encoding="utf-8")
+        (skill / "tests" / "__pycache__" / "t.pyc").write_text("junk\n", encoding="utf-8")
+
+        rc = init_skills.install_skills(scope="project")
+        assert rc == 0
+
+        base = project_root / ".claude" / "commands" / "spotlights-share-candidates"
+        assert (base / "SKILL.md").is_file()
+        assert (base / "build_bundle.py").is_file()
+        assert not (base / "build_bundle.pyc").exists()
+        assert not (base / ".DS_Store").exists()
+        assert not (base / "__pycache__").exists()
+        assert not (base / "tests").exists()  # tests/ held only __pycache__, nothing copied
+
+        manifest = json.loads(
+            (project_root / ".spotlights" / "manifest.json").read_text(encoding="utf-8")
+        )
+        for rel in manifest["files"]:
+            assert "__pycache__" not in rel
+            assert not rel.endswith(".pyc")
+            assert not rel.endswith(".DS_Store")
+
 
 class TestCliEntryPoint:
     def test_init_routed_via_main(self, fake_bundle, project_root):
