@@ -82,7 +82,11 @@ Inspect the repository source and emit a strict `EnrichedTree`:
   - A fold always targets a **strict emitted ancestor** — never a sibling and
     never a synthetic merged path. Record it in `folds[]` with `path`, `into`,
     `reason`, and `evidence_files` (≥1 real source file under `path`). At least
-    one evidence file MUST also appear in the target module's `main_files`.
+    one evidence file MUST also appear in the target module's `main_files` —
+    EXCEPT for an organizational passthrough whose only direct file is an
+    `__init__.py` and whose real source is emitted as a child module. That
+    passthrough has no substantive file of its own to cite, so list its
+    `__init__.py` as the evidence file; it need not appear in `main_files`.
   - A module with **exactly one** source-bearing child directory violates the
     zero-or-≥2 rule below if it emits that child. Either fold the child into the
     parent (cite its files in the parent's `main_files`), or — if the parent is

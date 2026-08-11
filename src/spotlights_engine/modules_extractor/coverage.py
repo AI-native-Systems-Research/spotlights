@@ -567,6 +567,13 @@ def _validate_folds(
     for path, files in _iter_module_mainfiles(enriched):
         main_files_of[path] = {f.path for f in files}
 
+    # Organizational-only passthroughs (skeleton-classified: only direct source
+    # is `__init__.py` and fewer than two source-bearing children). Their real
+    # content lives in an emitted descendant, so no substantive source file of
+    # their own can appear in the target's main_files — the Rule 7 in-main_files
+    # requirement is unsatisfiable for them and is waived below.
+    organizational = set(skeleton.organizational_only)
+
     seen_paths: set[str] = set()
     for fold in enriched.folds:
         fpath = _norm(fold.path)
@@ -603,6 +610,13 @@ def _validate_folds(
                     f"fold target {into!r} is not {fpath!r}'s nearest emitted "
                     f"ancestor ({nearest!r})"
                 )
+        # An organizational-only passthrough (its real source emitted as a child
+        # module, itself holding only an `__init__.py`) has no substantive source
+        # of its own to cite, so the in-main_files requirement below cannot be
+        # met. Accept the fold on the strength of the structural checks already
+        # passed; the descendant emission is what actually covers the content.
+        if fpath in organizational:
+            continue
         # Rule 7: ≥1 unique non-symlink inventoried source file under the folded
         # path, outside any separately emitted descendant, present in the
         # target's main_files.

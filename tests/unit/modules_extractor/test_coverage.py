@@ -248,6 +248,49 @@ def test_source_bearing_module_keeps_strict_main_file_gate(tmp_path: Path) -> No
         validate_enriched_tree(tree, tmp_path, _repository(), skel)
 
 
+def test_passthrough_fold_evidence_need_not_be_in_main_files(tmp_path: Path) -> None:
+    # The vllm `fla/` regression: an organizational passthrough package whose
+    # only direct file is `__init__.py`, with its real source in an emitted child
+    # `fla/ops/`. Folding the passthrough into an emitted ancestor cites only its
+    # `__init__.py` as evidence — nothing substantive of its own exists to place
+    # in the target's main_files, so Rule 7's in-main_files requirement is waived.
+    _repo(tmp_path)
+    _write(tmp_path / "pkg" / "core" / "fla" / "__init__.py", "# passthrough\n")
+    _write(tmp_path / "pkg" / "core" / "fla" / "ops" / "chunk.py")
+    _write(tmp_path / "pkg" / "core" / "fla" / "ops" / "index.py")
+    skel = build_skeleton(tmp_path, "pkg")
+    assert "pkg/core/fla" in skel.organizational_only
+
+    data = _full_tree()
+    # Emit fla/ops directly under core (the passthrough fla is not emitted).
+    data["modules"][0]["submodules"].append(
+        {
+            "name": "ops",
+            "path": "pkg/core/fla/ops",
+            "description": "Fused linear-attention ops.",
+            "main_files": [
+                {"path": "pkg/core/fla/ops/chunk.py", "role": "Chunked op."}
+            ],
+        }
+    )
+    # Fold the passthrough into core; evidence is the __init__.py, NOT in
+    # core.main_files.
+    data["folds"].append(
+        {
+            "path": "pkg/core/fla",
+            "into": "pkg/core",
+            "reason": "organizational passthrough; real source emitted as ops child",
+            "evidence_files": ["pkg/core/fla/__init__.py"],
+        }
+    )
+    tree = EnrichedTree.model_validate(data)
+    validate_enriched_tree(tree, tmp_path, _repository(), skel)
+    cov = compute_coverage(tree, skel)
+    assert cov.ok
+    assert "pkg/core/fla/ops" in cov.emitted
+    assert "pkg/core/fla" in cov.folded
+
+
 def test_external_dependency_colliding_with_internal_qn_fails(tmp_path: Path) -> None:
     _repo(tmp_path)
     skel = build_skeleton(tmp_path, "pkg")
