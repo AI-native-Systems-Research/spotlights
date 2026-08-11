@@ -1,6 +1,6 @@
 ---
 name: share-candidates
-description: Use when sharing top-ranked Spotlights candidates with an external team as a browsable offline bundle — "share candidates", "make a zip of the top candidates", "browsable candidates". Takes a folder containing sorted_candidates.md and produces share-bundle/ + share-candidates.zip.
+description: Use when sharing top-ranked Spotlights candidates with an external team as a browsable offline bundle — "share candidates", "make a zip of the top candidates", "browsable candidates". Takes a folder containing sorted_candidates.md and produces share-bundle/ + share-candidates.zip. Depends on sort-candidates: if no sorted_candidates.md exists yet, run sort-candidates first to produce it.
 ---
 
 # Share Candidates
@@ -8,6 +8,15 @@ description: Use when sharing top-ranked Spotlights candidates with an external 
 Packages the top-N candidates from a `sorted_candidates.md` ranking into a
 self-contained ZIP an external team can unzip and open by double-clicking
 `index.html` — no server, works offline (except outbound reference links).
+
+## Prerequisites
+
+This skill consumes `sorted_candidates.md`, which is produced by the
+**sort-candidates** skill (`spotlights-sort-candidates`). If the source folder
+does not already contain `sorted_candidates.md`, run sort-candidates first to
+rank a run's `result.json` into that file, then return here. This is a soft
+(documented) dependency — Claude Code does not enforce skill ordering, so it is
+your responsibility to run the ranking step first.
 
 ## Procedure
 
