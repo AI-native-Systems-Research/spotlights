@@ -421,7 +421,9 @@ def test_run_manifest_accumulated_duration_defaults_to_zero() -> None:
 
 
 def test_compute_cost_reports_coverage_and_by_model_on_partial_run() -> None:
-    """Partial-priced run: coverage.priced_token_share and by_model both surface it."""
+    """Partial-priced run: top-level priced_token_share + per-row shares
+    together tell the reader what fraction of the run got dollarized and
+    where each `(provider, model, role)` group sits relative to the total."""
     records = [
         UsageRecord.from_usage(
             AgentUsage(input=10, output=5, cache_read=3, cache_create=2, model="m1"),
@@ -458,7 +460,7 @@ def test_compute_cost_reports_coverage_and_by_model_on_partial_run() -> None:
     )
 
     # 20 priced tokens vs 100 unpriced -> 20/120 share.
-    assert summary.coverage.priced_token_share == pytest.approx(20 / 120)
+    assert summary.priced_token_share == pytest.approx(20 / 120)
     assert summary.coverage.priced_models == ["openai:m1"]
     assert summary.coverage.unpriced_models == ["anthropic:missing"]
     assert summary.unpriced_models == ["anthropic:missing"]
@@ -471,13 +473,16 @@ def test_compute_cost_reports_coverage_and_by_model_on_partial_run() -> None:
     assert priced.priced is True
     assert priced.rate_key == "openai:m1"
     assert priced.amount_usd == pytest.approx(0.213)
-    assert priced.input == 10 and priced.output == 5
+    # 20 tokens on this row / 120 total across all rows.
+    assert priced.priced_token_share == pytest.approx(20 / 120)
 
     assert unpriced.priced is False
     assert unpriced.rate_key == "anthropic:missing"
     assert unpriced.amount_usd == 0.0
-    assert unpriced.input == 100
+    assert unpriced.priced_token_share == pytest.approx(100 / 120)
 
+    # Per-row shares must sum to 1.0 (they partition the run's tokens).
+    assert sum(r.priced_token_share for r in summary.by_model) == pytest.approx(1.0)
     # by_model dollar sum invariant: matches amount_usd.
     assert sum(r.amount_usd for r in summary.by_model) == pytest.approx(
         summary.amount_usd
@@ -488,7 +493,7 @@ def test_compute_cost_full_coverage_when_every_model_has_a_rate() -> None:
     records = [_opus_record()]
     summary = compute_cost(records, load_rates())
 
-    assert summary.coverage.priced_token_share == 1.0
+    assert summary.priced_token_share == 1.0
     assert summary.coverage.unpriced_models == []
     assert summary.unpriced_models == []
     assert all(row.priced for row in summary.by_model)
@@ -498,15 +503,16 @@ def test_compute_cost_empty_records_reports_zero_share() -> None:
     summary = compute_cost([], {})
 
     assert summary.amount_usd == 0.0
-    assert summary.coverage.priced_token_share == 0.0
+    assert summary.priced_token_share == 0.0
     assert summary.coverage.priced_models == []
     assert summary.coverage.unpriced_models == []
     assert summary.by_model == []
 
 
 def test_run_manifest_exposes_coverage_and_by_model() -> None:
-    """The manifest's cost block carries coverage and by_model through
-    verbatim so downstream readers get the same structural signal."""
+    """The manifest's cost block carries priced_token_share, coverage, and
+    by_model through verbatim so downstream readers get the same structural
+    signal `compute_cost` produced."""
     records = [
         UsageRecord.from_usage(
             AgentUsage(input=10, output=5, model="m1"),
@@ -539,16 +545,18 @@ def test_run_manifest_exposes_coverage_and_by_model() -> None:
         notes=[],
     )
 
-    assert manifest.cost.coverage.priced_token_share == 1.0
+    assert manifest.cost.priced_token_share == 1.0
     assert manifest.cost.coverage.priced_models == ["openai:m1"]
     assert manifest.cost.by_model[0].rate_key == "openai:m1"
     assert manifest.cost.by_model[0].priced is True
     assert manifest.cost.by_model[0].amount_usd == pytest.approx(summary.amount_usd)
+    assert manifest.cost.by_model[0].priced_token_share == pytest.approx(1.0)
 
 
 def test_old_manifest_dict_without_coverage_validates() -> None:
-    """A persisted manifest predating the coverage/by_model additions still
-    validates — the new fields default to empty coverage / [] by_model."""
+    """A persisted manifest predating the priced_token_share / coverage /
+    by_model additions still validates — the new fields default to
+    0.0 / empty coverage / [] by_model."""
     from spotlights_engine.costing.manifest import RunManifest
 
     summary = compute_cost([], {})
@@ -567,11 +575,13 @@ def test_old_manifest_dict_without_coverage_validates() -> None:
         notes=[],
     )
     payload = manifest.model_dump(mode="json")
+    payload["cost"].pop("priced_token_share", None)
     payload["cost"].pop("coverage", None)
     payload["cost"].pop("by_model", None)
 
     reloaded = RunManifest.model_validate(payload)
-    assert reloaded.cost.coverage.priced_token_share == 0.0
+    assert reloaded.cost.priced_token_share == 0.0
+    assert reloaded.cost.coverage.priced_models == []
     assert reloaded.cost.by_model == []
 
 

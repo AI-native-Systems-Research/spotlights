@@ -49,16 +49,17 @@ class RunManifestCost(BaseModel):
     """Cost block in the run manifest.
 
     `amount_usd` is a numeric sum of everything that got a rate row; when
-    `coverage.priced_token_share < 1.0` it is a PARTIAL figure and readers must
-    consult `coverage.unpriced_models` / `by_model` to see what was left out.
-    The name is stable across full and partial runs to keep existing consumers
-    working; partial-ness is signalled structurally via `coverage`, not by
-    swapping the field.
+    `priced_token_share < 1.0` it is a PARTIAL figure and readers must consult
+    `coverage.unpriced_models` / `by_model` to see what was left out. The name
+    is stable across full and partial runs to keep existing consumers working;
+    partial-ness is signalled structurally via the sibling `priced_token_share`
+    plus `coverage`, not by swapping the field.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     amount_usd: float = 0.0
+    priced_token_share: float = Field(default=0.0, ge=0.0, le=1.0)
     source: str = "contracted-rate-table"
     rate_note: str = ""
     coverage: CostCoverage = Field(default_factory=CostCoverage)
@@ -166,6 +167,7 @@ def build_run_manifest(
         total_tokens=sum(record.total_tokens for record in records),
         cost=RunManifestCost(
             amount_usd=cost.amount_usd,
+            priced_token_share=cost.priced_token_share,
             source=cost.source,
             rate_note=cost.rate_note,
             coverage=cost.coverage,
@@ -174,6 +176,7 @@ def build_run_manifest(
         external_cost=(
             RunManifestCost(
                 amount_usd=external_cost.amount_usd,
+                priced_token_share=external_cost.priced_token_share,
                 source=external_cost.source,
                 rate_note=external_cost.rate_note,
                 coverage=external_cost.coverage,

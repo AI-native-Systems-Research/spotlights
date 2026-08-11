@@ -42,30 +42,30 @@ class ModelRate(BaseModel):
 
 
 class CostCoverage(BaseModel):
-    """Which rate keys got dollarized and what share of tokens they cover.
+    """Which rate keys got dollarized.
 
-    `priced_token_share` is total-tokens of priced records over total-tokens of
-    all records (0.0 when there were no records). 1.0 means every model this
-    run used had a rate row and `amount_usd` is the full run cost; anything
-    less means `amount_usd` is a partial figure and `unpriced_models` names the
-    rate keys that were skipped.
+    `amount_usd` at the parent level is a full-run figure only when
+    `unpriced_models` is empty; otherwise it is partial and `unpriced_models`
+    names the rate keys that were skipped. Token share sits on the parent as
+    `priced_token_share` — it is a top-level property, not a coverage detail.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    priced_token_share: float = Field(default=0.0, ge=0.0, le=1.0)
     priced_models: list[str] = Field(default_factory=list)
     unpriced_models: list[str] = Field(default_factory=list)
 
 
 class ByModelCost(BaseModel):
     """One row of the `by_model` breakdown: a `(provider, model, role)` group's
-    token totals, whether it got a rate, and its dollar contribution.
+    rate-lookup result, its dollar contribution, and its share of the run's
+    tokens.
 
-    `amount_usd` is 0.0 when `priced` is false — an unpriced group contributes
-    nothing to the run total. Rows are keyed as `provider:model` for the rate
-    lookup; the `role` column is not part of the rate key but is preserved so
-    the breakdown lines up 1:1 with `models_used`.
+    Token counts themselves live on `models_used` (the same
+    `(provider, model, role)` grouping) — this row keeps only `priced_token_share`
+    (this group's total tokens divided by the run's total tokens) so a reader
+    can compare rows at a glance without cross-referencing `models_used`.
+    `amount_usd` is 0.0 when `priced` is false.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -76,18 +76,22 @@ class ByModelCost(BaseModel):
     rate_key: str
     priced: bool
     amount_usd: float = Field(default=0.0, ge=0.0)
-    input: int = Field(default=0, ge=0)
-    output: int = Field(default=0, ge=0)
-    cache_read: int = Field(default=0, ge=0)
-    cache_create: int = Field(default=0, ge=0)
+    priced_token_share: float = Field(default=0.0, ge=0.0, le=1.0)
 
 
 class CostSummary(BaseModel):
-    """Result of `compute_cost` — feeds the run manifest's `cost` block."""
+    """Result of `compute_cost` — feeds the run manifest's `cost` block.
+
+    `priced_token_share` (0.0–1.0) is the fraction of this run's tokens that
+    landed on a priced group. 1.0 means every model got a rate row and
+    `amount_usd` is the full run cost; anything less means `amount_usd` is a
+    partial figure and `coverage.unpriced_models` names what was left out.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
     amount_usd: float = 0.0
+    priced_token_share: float = Field(default=0.0, ge=0.0, le=1.0)
     source: Literal[
         "contracted-rate-table", "litellm-proxy-log", "public-api-rate-table"
     ] = "contracted-rate-table"
@@ -221,6 +225,22 @@ def compute_cost(
         bucket["cache_read"] = int(bucket["cache_read"]) + record.cache_read
         bucket["cache_create"] = int(bucket["cache_create"]) + record.cache_create
 
+    # Compute the run's token total once so each by_model row can carry its
+    # share directly (a reader gets the split at a glance without dividing
+    # against a separate models_used table).
+    def _bucket_tokens(bucket: dict[str, int | float | str | bool]) -> int:
+        return (
+            int(bucket["input"])
+            + int(bucket["output"])
+            + int(bucket["cache_read"])
+            + int(bucket["cache_create"])
+        )
+
+    total_tokens = sum(_bucket_tokens(bucket) for bucket in grouped.values())
+    priced_tokens = sum(
+        _bucket_tokens(bucket) for bucket in grouped.values() if bucket["priced"]
+    )
+
     by_model = [
         ByModelCost(
             provider=provider,
@@ -229,25 +249,15 @@ def compute_cost(
             rate_key=str(bucket["rate_key"]),
             priced=bool(bucket["priced"]),
             amount_usd=float(bucket["amount_usd"]),
-            input=int(bucket["input"]),
-            output=int(bucket["output"]),
-            cache_read=int(bucket["cache_read"]),
-            cache_create=int(bucket["cache_create"]),
+            priced_token_share=(
+                _bucket_tokens(bucket) / total_tokens if total_tokens else 0.0
+            ),
         )
         for (provider, model, role), bucket in sorted(grouped.items())
     ]
 
-    total_tokens = sum(
-        row.input + row.output + row.cache_read + row.cache_create for row in by_model
-    )
-    priced_tokens = sum(
-        row.input + row.output + row.cache_read + row.cache_create
-        for row in by_model
-        if row.priced
-    )
     priced_token_share = (priced_tokens / total_tokens) if total_tokens else 0.0
     coverage = CostCoverage(
-        priced_token_share=priced_token_share,
         priced_models=sorted({row.rate_key for row in by_model if row.priced}),
         unpriced_models=sorted(unpriced),
     )
@@ -273,6 +283,7 @@ def compute_cost(
 
     return CostSummary(
         amount_usd=total,
+        priced_token_share=priced_token_share,
         source=source,
         rate_note="; ".join(note_parts),
         unpriced_models=sorted(unpriced),
