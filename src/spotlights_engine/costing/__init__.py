@@ -22,6 +22,8 @@ from spotlights_engine.costing.manifest import (
 from spotlights_engine.costing.rates import (
     EXTERNAL_RATES_ENV_VAR,
     RATES_ENV_VAR,
+    ByModelCost,
+    CostCoverage,
     CostSummary,
     ModelRate,
     compute_cost,
@@ -46,7 +48,9 @@ __all__ = [
     "PROVIDER_FOR_CLI",
     "RATES_ENV_VAR",
     "AgentUsage",
+    "ByModelCost",
     "CliUsage",
+    "CostCoverage",
     "CostSummary",
     "ModelRate",
     "ModelUsed",

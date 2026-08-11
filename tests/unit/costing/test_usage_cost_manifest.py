@@ -418,3 +418,186 @@ def test_run_manifest_accumulated_duration_defaults_to_zero() -> None:
     )
 
     assert manifest.timing.accumulated_duration_s == 0.0
+
+
+def test_compute_cost_reports_coverage_and_by_model_on_partial_run() -> None:
+    """Partial-priced run: top-level priced_token_share + per-row shares
+    together tell the reader what fraction of the run got dollarized and
+    where each `(provider, model, role)` group sits relative to the total."""
+    records = [
+        UsageRecord.from_usage(
+            AgentUsage(input=10, output=5, cache_read=3, cache_create=2, model="m1"),
+            step="candidate_discovery",
+            module_qualified_name="pkg/a",
+            session_index=1,
+            invocation_index=0,
+            invocation_id="i0",
+            cli="codex",
+            role="candidate_discovery",
+        ),
+        UsageRecord.from_usage(
+            AgentUsage(input=100, model="missing"),
+            step="module_deep_research",
+            module_qualified_name="pkg/a",
+            session_index=1,
+            invocation_index=1,
+            invocation_id="i1",
+            cli="claude",
+            role="deep_research",
+        ),
+    ]
+
+    summary = compute_cost(
+        records,
+        {
+            "openai:m1": ModelRate(
+                input=0.01,
+                output=0.02,
+                cache_read=0.001,
+                cache_create=0.005,
+            )
+        },
+    )
+
+    # 20 priced tokens vs 100 unpriced -> 20/120 share.
+    assert summary.priced_token_share == pytest.approx(20 / 120)
+    assert summary.coverage.priced_models == ["openai:m1"]
+    assert summary.coverage.unpriced_models == ["anthropic:missing"]
+    assert summary.unpriced_models == ["anthropic:missing"]
+
+    # One row per (provider, model, role) — same grouping as models_used.
+    by_model = {(r.provider, r.model, r.role): r for r in summary.by_model}
+    priced = by_model[("openai", "m1", "candidate_discovery")]
+    unpriced = by_model[("anthropic", "missing", "deep_research")]
+
+    assert priced.priced is True
+    assert priced.rate_key == "openai:m1"
+    assert priced.amount_usd == pytest.approx(0.213)
+    # 20 tokens on this row / 120 total across all rows.
+    assert priced.priced_token_share == pytest.approx(20 / 120)
+
+    assert unpriced.priced is False
+    assert unpriced.rate_key == "anthropic:missing"
+    assert unpriced.amount_usd == 0.0
+    assert unpriced.priced_token_share == pytest.approx(100 / 120)
+
+    # Per-row shares must sum to 1.0 (they partition the run's tokens).
+    assert sum(r.priced_token_share for r in summary.by_model) == pytest.approx(1.0)
+    # by_model dollar sum invariant: matches amount_usd.
+    assert sum(r.amount_usd for r in summary.by_model) == pytest.approx(
+        summary.amount_usd
+    )
+
+
+def test_compute_cost_full_coverage_when_every_model_has_a_rate() -> None:
+    records = [_opus_record()]
+    summary = compute_cost(records, load_rates())
+
+    assert summary.priced_token_share == 1.0
+    assert summary.coverage.unpriced_models == []
+    assert summary.unpriced_models == []
+    assert all(row.priced for row in summary.by_model)
+
+
+def test_compute_cost_empty_records_reports_zero_share() -> None:
+    summary = compute_cost([], {})
+
+    assert summary.amount_usd == 0.0
+    assert summary.priced_token_share == 0.0
+    assert summary.coverage.priced_models == []
+    assert summary.coverage.unpriced_models == []
+    assert summary.by_model == []
+
+
+def test_run_manifest_exposes_coverage_and_by_model() -> None:
+    """The manifest's cost block carries priced_token_share, coverage, and
+    by_model through verbatim so downstream readers get the same structural
+    signal `compute_cost` produced."""
+    records = [
+        UsageRecord.from_usage(
+            AgentUsage(input=10, output=5, model="m1"),
+            step="candidate_discovery",
+            module_qualified_name="pkg/a",
+            session_index=1,
+            invocation_index=0,
+            invocation_id="i0",
+            cli="codex",
+            role="candidate_discovery",
+        ),
+    ]
+    summary = compute_cost(
+        records,
+        {"openai:m1": ModelRate(input=0.01, output=0.02, cache_read=0.0, cache_create=0.0)},
+    )
+
+    manifest = build_run_manifest(
+        run_id="run-1",
+        date="2026-07-06T00:00:00Z",
+        objective="find spots",
+        provenance={},
+        config_fingerprint={},
+        records=records,
+        cost=summary,
+        wall_clock_s=1.0,
+        candidates_path="/tmp/out/index.md",
+        num_candidates=0,
+        module_status={},
+        notes=[],
+    )
+
+    assert manifest.cost.priced_token_share == 1.0
+    assert manifest.cost.coverage.priced_models == ["openai:m1"]
+    assert manifest.cost.by_model[0].rate_key == "openai:m1"
+    assert manifest.cost.by_model[0].priced is True
+    assert manifest.cost.by_model[0].amount_usd == pytest.approx(summary.amount_usd)
+    assert manifest.cost.by_model[0].priced_token_share == pytest.approx(1.0)
+
+
+def test_old_manifest_dict_without_coverage_validates() -> None:
+    """A persisted manifest predating the priced_token_share / coverage /
+    by_model additions still validates — the new fields default to
+    0.0 / empty coverage / [] by_model."""
+    from spotlights_engine.costing.manifest import RunManifest
+
+    summary = compute_cost([], {})
+    manifest = build_run_manifest(
+        run_id="run-1",
+        date="2026-07-06T00:00:00Z",
+        objective="find spots",
+        provenance={},
+        config_fingerprint={},
+        records=[],
+        cost=summary,
+        wall_clock_s=1.0,
+        candidates_path="/tmp/out/index.md",
+        num_candidates=0,
+        module_status={},
+        notes=[],
+    )
+    payload = manifest.model_dump(mode="json")
+    payload["cost"].pop("priced_token_share", None)
+    payload["cost"].pop("coverage", None)
+    payload["cost"].pop("by_model", None)
+
+    reloaded = RunManifest.model_validate(payload)
+    assert reloaded.cost.priced_token_share == 0.0
+    assert reloaded.cost.coverage.priced_models == []
+    assert reloaded.cost.by_model == []
+
+
+def test_bundled_rates_price_gpt5_and_codex_at_identical_rates() -> None:
+    """openai:gpt-5.5 (resolved) and openai:codex (CLI-family fallback) must
+    price the same tokens to the same dollars. Same-cli, same-model reality;
+    the split is a stream-emission quirk, not a billing difference."""
+    rates = load_rates()
+    ext_rates = load_external_rates()
+
+    assert "openai:gpt-5.5" in rates
+    assert "openai:codex" in rates
+    for table in (rates, ext_rates):
+        gpt = table["openai:gpt-5.5"]
+        codex = table["openai:codex"]
+        assert gpt.input == codex.input
+        assert gpt.output == codex.output
+        assert gpt.cache_read == codex.cache_read
+        assert gpt.cache_create == codex.cache_create
