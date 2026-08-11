@@ -1,15 +1,21 @@
-"""Prompt loading for the modules extractor.
+"""Prompt loading and rendering for the modules extractor.
 
-The prompt template lives in `prompts_data/extraction.md` as package data and
-is loaded once via `importlib.resources` so behavior does not depend on cwd.
-The template is parameter-free — module discovery is structurally identical
-for every repo, and `repo_path` is delivered to the agent via the subprocess
-`cwd`, not the prompt.
+Prompt templates live in `prompts_data/*.md` as package data and are loaded
+once via `importlib.resources` so behavior does not depend on cwd.
+
+The legacy `extraction.md` is parameter-free. The two-phase prompts embed
+untrusted repository/inventory data in clearly delimited JSON blocks:
+`render_enrich_prompt` and `render_review_prompt` substitute those blocks into
+the loaded templates. Substitution uses explicit `{token}` replacement (not
+`str.format`) so literal braces in the template body (the JSON shape examples)
+are left untouched.
 """
 
 from __future__ import annotations
 
+import json
 from importlib import resources
+from typing import Any
 
 
 def _load(name: str) -> str:
@@ -21,6 +27,164 @@ def _load(name: str) -> str:
 
 
 EXTRACTION_PROMPT: str = _load("extraction.md")
+IDENTIFY_SOURCE_ROOT_PROMPT: str = _load("identify_source_root.md")
+ENRICH_SKELETON_PROMPT: str = _load("enrich_skeleton.md")
+REVIEW_ENRICHED_PROMPT: str = _load("review_enriched.md")
 
 
-__all__ = ["EXTRACTION_PROMPT"]
+def _as_json_block(data: Any) -> str:
+    """Deterministic, human-readable JSON for embedding in a prompt."""
+    return json.dumps(data, indent=2, sort_keys=True)
+
+
+def render_identify_source_root_prompt() -> str:
+    """Stage-1 prompt is parameter-free (repo delivered via subprocess cwd)."""
+    return IDENTIFY_SOURCE_ROOT_PROMPT
+
+
+_WHOLE_REPO_SCOPE_RULES = (
+    "Your scope is the **entire repository** below the source root: every node "
+    "in the SKELETON above is yours. Emit or fold every `required` path."
+)
+
+
+def _shard_scope_rules(scope: dict[str, Any]) -> str:
+    """The hard scope rules for one enrichment shard.
+
+    A sub-shard sees only its own slice of the skeleton, so these rules — not
+    the data — are what keep its fragment mergeable: emitting outside the scope
+    would break the disjoint-union invariant, and a spine `main_file` reaching
+    into a promoted child is a merge-time hard failure with no possible repair.
+    """
+    root = scope.get("root_path", "")
+    lines = [
+        f"Your scope is the subtree rooted at `{root}` and nothing else.",
+        "",
+        f"- Emit or fold **only** paths at or under `{root}`. Never emit or fold "
+        "a path outside it, even if you read files there for context.",
+        f"- Return exactly ONE top-level module, whose `path` is `{root}`. Every "
+        "other module you emit is nested inside it.",
+    ]
+    owns_root = scope.get("owns_root", True)
+    if not owns_root:
+        lines.append(
+            f"- Do **not** emit any ancestor of `{root}`; `{root}` is your "
+            "top-level object here."
+        )
+    # Only a shard emitting a *top-level branch root* may declare `depends_on`.
+    # The branch's own spine is always depth ≤ 1; a deeper spine emits a module
+    # that becomes a submodule after the merge, and submodules have no
+    # `depends_on` field at all.
+    if not (owns_root and int(scope.get("depth", 0)) <= 1):
+        lines.append(
+            "- Do **not** declare `depends_on`. This subtree is part of a larger "
+            "top-level module, and that module's dependencies are declared "
+            "elsewhere. Leave `depends_on` empty."
+        )
+    promoted = list(scope.get("promoted_children") or [])
+    if promoted:
+        listed = ", ".join(f"`{p}`" for p in promoted)
+        lines += [
+            "",
+            f"These subtrees are owned by other shards and have been removed "
+            f"from your SKELETON: {listed}. Therefore:",
+            "",
+            "- Do **not** emit them and do **not** fold them.",
+            "- Do **not** choose any `main_files` entry that lives under them — "
+            "those files belong to modules another shard emits, and claiming one "
+            "invalidates the whole result.",
+            f"- `{root}`'s `source_child_count` counts those removed children, so "
+            "it will be larger than the `children` actually present above. That "
+            "is expected.",
+            f"- The zero-or-≥2-children rule below does **not** apply to `{root}` "
+            "itself: those removed subtrees are re-attached as its children "
+            f"afterwards, so `{root}` may legitimately carry exactly one child "
+            "of its own here. The rule still applies to every module nested "
+            "inside it.",
+        ]
+    return "\n".join(lines)
+
+
+def render_enrich_prompt(
+    *, repository: Any, skeleton: Any, top_level_qns: Any = None
+) -> str:
+    """Stage-3 enrichment prompt for the **whole repository** (single mode).
+
+    `repository` and `skeleton` are JSON-serializable (dicts or the model
+    `.model_dump()` output). Returns the rendered prompt string.
+    """
+    scope = {"root_path": skeleton.get("source_root", "")
+             if isinstance(skeleton, dict) else "",
+             "whole_repository": True}
+    return (
+        ENRICH_SKELETON_PROMPT
+        .replace("{repository_json}", _as_json_block(repository))
+        .replace("{skeleton_json}", _as_json_block(skeleton))
+        .replace("{scope_json}", _as_json_block(scope))
+        .replace("{scope_rules}", _WHOLE_REPO_SCOPE_RULES)
+        .replace("{top_level_qns_json}", _as_json_block(list(top_level_qns or [])))
+    )
+
+
+def render_enrich_shard_prompt(
+    *, repository: Any, subtree: Any, scope: Any, top_level_qns: Any
+) -> str:
+    """Stage-3 enrichment prompt scoped to one shard's subtree.
+
+    The `SKELETON` block carries the shard's subtree slice, not the whole
+    skeleton — this is the substitution that shrinks the embedded blob from
+    "whole monorepo" to "one branch".
+    """
+    return (
+        ENRICH_SKELETON_PROMPT
+        .replace("{repository_json}", _as_json_block(repository))
+        .replace("{skeleton_json}", _as_json_block(subtree))
+        .replace("{scope_json}", _as_json_block(scope))
+        .replace("{scope_rules}", _shard_scope_rules(dict(scope)))
+        .replace("{top_level_qns_json}", _as_json_block(list(top_level_qns)))
+    )
+
+
+def render_review_prompt(*, skeleton: Any, enriched: Any) -> str:
+    """Stage-4 Codex review prompt with the Skeleton + EnrichedTree data blocks."""
+    return (
+        REVIEW_ENRICHED_PROMPT
+        .replace("{skeleton_json}", _as_json_block(skeleton))
+        .replace("{enriched_json}", _as_json_block(enriched))
+        .replace("{scope_json}", _as_json_block({"whole_repository": True}))
+        .replace(
+            "{scope_rules}",
+            "Review the entire tree above.",
+        )
+    )
+
+
+def render_review_shard_prompt(*, subtree: Any, fragment: Any, scope: Any) -> str:
+    """Stage-4 Codex review prompt scoped to one top-level branch."""
+    root = dict(scope).get("root_path", "")
+    return (
+        REVIEW_ENRICHED_PROMPT
+        .replace("{skeleton_json}", _as_json_block(subtree))
+        .replace("{enriched_json}", _as_json_block(fragment))
+        .replace("{scope_json}", _as_json_block(scope))
+        .replace(
+            "{scope_rules}",
+            f"Review only the branch rooted at `{root}`. The data above is that "
+            "branch's slice of the skeleton and of the enriched tree; other "
+            "branches are reviewed separately. Every issue you report must cite "
+            f"a `path` at or under `{root}`.",
+        )
+    )
+
+
+__all__ = [
+    "ENRICH_SKELETON_PROMPT",
+    "EXTRACTION_PROMPT",
+    "IDENTIFY_SOURCE_ROOT_PROMPT",
+    "REVIEW_ENRICHED_PROMPT",
+    "render_enrich_prompt",
+    "render_enrich_shard_prompt",
+    "render_identify_source_root_prompt",
+    "render_review_prompt",
+    "render_review_shard_prompt",
+]

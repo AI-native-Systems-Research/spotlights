@@ -1,4 +1,4 @@
-"""Claude Code subprocess runner for the modules extractor.
+"""Claude Code subprocess runner for the modules extractor (legacy path).
 
 The agent is invoked non-interactively over the target repo: `cwd` is set to
 `repo_path`, the prompt is sent on stdin, and the result is constrained by a
@@ -14,20 +14,43 @@ sending the agent into a retry loop until `--max-turns` was exhausted; CLI
 
 Subprocess plumbing — argv resolution (Windows shim bypass), live streaming
 via reader threads, deadline-based kill — lives in
-`signal_pipeline._subprocess_util`. This file is the parts specific to the
-ProjectTree extraction: schema, prompt delivery, and result parsing.
+`signal_pipeline._subprocess_util`. The provider-neutral stream/usage/artifact
+helpers are shared with the two-phase path in `claude_stage`. This file is the
+parts specific to the single-shot ProjectTree extraction: schema, prompt
+delivery, retry loop, and result parsing.
 """
 
 from __future__ import annotations
 
 import json
-import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
 from pydantic import ValidationError
 
+from spotlights_engine.modules_extractor.claude_stage import (
+    MAX_SCHEMA_BYTES as _MAX_SCHEMA_BYTES,
+)
+from spotlights_engine.modules_extractor.claude_stage import (
+    add_optional_float as _add_optional_float,
+)
+from spotlights_engine.modules_extractor.claude_stage import (
+    add_optional_int as _add_optional_int,
+)
+from spotlights_engine.modules_extractor.claude_stage import as_float as _as_float
+from spotlights_engine.modules_extractor.claude_stage import as_int as _as_int
+from spotlights_engine.modules_extractor.claude_stage import clean_env as _clean_env
+from spotlights_engine.modules_extractor.claude_stage import (
+    duration_seconds as _duration_seconds,
+)
+from spotlights_engine.modules_extractor.claude_stage import (
+    extract_result_event as _extract_result_event,
+)
+from spotlights_engine.modules_extractor.claude_stage import (
+    final_message_text as _final_message_text,
+)
+from spotlights_engine.modules_extractor.claude_stage import notify as _notify
 from spotlights_engine.modules_extractor.errors import (
     ExtractorAgentError,
     ExtractorSetupError,
@@ -42,32 +65,8 @@ from spotlights_engine.signal_pipeline._subprocess_util import (
     run_streaming_claude,
 )
 
-_DROP_EXACT = frozenset(
-    {
-        "OPENAI_BASE_URL",
-        "OPENAI_API_BASE",
-        "ANTHROPIC_BASE_URL",
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "ALL_PROXY",
-        "VIRTUAL_ENV",
-    }
-)
-_DROP_PREFIX = ("VSCODE_", "OPTQUEST_", "SPOTLIGHTS_")
-
-# Linux MAX_ARG_STRLEN is 131_072 bytes per argument. `claude --json-schema`
-# inlines the schema as one argv string; leave headroom for environment growth.
-_MAX_SCHEMA_BYTES = 120_000
 _VALIDATION_RETRIES = 1
 _RETRY_PAYLOAD_MAX_CHARS = 80_000
-
-
-def _clean_env() -> dict[str, str]:
-    env = os.environ.copy()
-    for key in list(env):
-        if key in _DROP_EXACT or key.startswith(_DROP_PREFIX):
-            env.pop(key)
-    return env
 
 
 @dataclass
@@ -301,94 +300,6 @@ def _validation_retry_prompt(prompt: str, exc: ValidationError, payload: str) ->
         "Previous invalid JSON:\n"
         f"{payload_preview}\n"
     )
-
-
-def _notify(on_event: Callable[[str], None] | None, message: str) -> None:
-    if on_event is None:
-        return
-    try:
-        on_event(message)
-    except Exception:  # noqa: BLE001 - UI callbacks must not abort extraction
-        pass
-
-
-def _extract_result_event(stdout: bytes) -> dict | None:
-    last_event: dict | None = None
-    for line in stdout.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            obj = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise ExtractorAgentError(
-                f"claude stream-json line not JSON: {exc}",
-            ) from exc
-        if not isinstance(obj, dict):
-            raise ExtractorAgentError("claude stream-json line was not an object")
-        last_event = obj
-    if last_event is None or last_event.get("type") != "result":
-        return None
-    return last_event
-
-
-def _final_message_text(result_event: dict) -> str:
-    structured = result_event.get("structured_output")
-    if isinstance(structured, (dict, list)):
-        return json.dumps(structured)
-    result = result_event.get("result")
-    if isinstance(result, str) and result:
-        return result
-    message = result_event.get("message") or {}
-    content = message.get("content")
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        chunks = [c.get("text", "") for c in content if isinstance(c, dict)]
-        return "".join(chunks)
-    return ""
-
-
-def _duration_seconds(event: dict) -> float | None:
-    for key in ("duration_s", "elapsed_s"):
-        value = _as_float(event.get(key))
-        if value is not None:
-            return value
-    for key in ("duration_ms", "elapsed_ms"):
-        value = _as_float(event.get(key))
-        if value is not None:
-            return value / 1000.0
-    return None
-
-
-def _as_int(v: object) -> int | None:
-    if v is None:
-        return None
-    try:
-        return int(v)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return None
-
-
-def _as_float(v: object) -> float | None:
-    if v is None:
-        return None
-    try:
-        return float(v)  # type: ignore[arg-type]
-    except (TypeError, ValueError):
-        return None
-
-
-def _add_optional_float(current: float | None, value: float | None) -> float | None:
-    if current is None and value is None:
-        return None
-    return (current or 0.0) + (value or 0.0)
-
-
-def _add_optional_int(current: int | None, value: int | None) -> int | None:
-    if current is None and value is None:
-        return None
-    return (current or 0) + (value or 0)
 
 
 __all__ = [

@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import IO
@@ -54,6 +55,35 @@ class CodexExecResult(AgentExecResult):
                 f"{self.returncode}\nCOMMAND: {' '.join(self.command)}\n"
                 f"STDOUT:\n{self.stdout}\nSTDERR:\n{self.stderr}"
             )
+
+
+class CodexExecTimeout(subprocess.TimeoutExpired):
+    """A `codex exec` run that exceeded its timeout.
+
+    Subclasses `subprocess.TimeoutExpired` so existing callers that only catch
+    the base class keep working, while adding the partial in-memory buffers,
+    final-message content when the output file was written, and the wall time
+    the run consumed. Without these the review stage cannot satisfy the raw
+    artifact contract on a timeout.
+    """
+
+    def __init__(
+        self,
+        *,
+        cmd: list[str],
+        timeout: float | None,
+        stdout: str,
+        stderr: str,
+        final_message: str | None,
+        duration_s: float,
+        output_last_message: Path | None,
+    ) -> None:
+        super().__init__(cmd=cmd, timeout=timeout or 0.0, output=stdout, stderr=stderr)
+        self.partial_stdout = stdout
+        self.partial_stderr = stderr
+        self.final_message = final_message
+        self.duration_s = duration_s
+        self.output_last_message = output_last_message
 
 
 class CodexExecClient:
@@ -149,6 +179,7 @@ class CodexExecClient:
         stdout_thread.start()
         stderr_thread.start()
 
+        start = time.monotonic()
         try:
             proc.stdin.write(prompt)
         finally:
@@ -161,7 +192,21 @@ class CodexExecClient:
             proc.wait()
             stdout_thread.join()
             stderr_thread.join()
-            raise
+            duration_s = time.monotonic() - start
+            partial_final = None
+            if last_path and last_path.exists():
+                partial_final = last_path.read_text(
+                    encoding="utf-8", errors="replace"
+                )
+            raise CodexExecTimeout(
+                cmd=cmd,
+                timeout=self.options.timeout_seconds,
+                stdout="".join(stdout_chunks),
+                stderr="".join(stderr_chunks),
+                final_message=partial_final,
+                duration_s=duration_s,
+                output_last_message=last_path,
+            ) from None
 
         stdout_thread.join()
         stderr_thread.join()
@@ -198,4 +243,9 @@ def _tee_stream(source: IO[str], sink: IO[str] | None, buffer: list[str]) -> Non
             pass
 
 
-__all__ = ["CodexExecClient", "CodexExecOptions", "CodexExecResult"]
+__all__ = [
+    "CodexExecClient",
+    "CodexExecOptions",
+    "CodexExecResult",
+    "CodexExecTimeout",
+]

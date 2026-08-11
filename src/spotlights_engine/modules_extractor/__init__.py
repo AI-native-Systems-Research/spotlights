@@ -15,6 +15,9 @@ narrative spec.
 
 from spotlights_engine.modules_extractor.errors import (
     ExtractorAgentError,
+    ExtractorArtifactError,
+    ExtractorCoverageError,
+    ExtractorReviewError,
     ExtractorSetupError,
     ExtractorValidationError,
     ModulesExtractorError,
@@ -28,8 +31,11 @@ from spotlights_engine.modules_extractor.extractor import (
 
 __all__ = [
     "ExtractorAgentError",
+    "ExtractorArtifactError",
     "ExtractorConfig",
+    "ExtractorCoverageError",
     "ExtractorResult",
+    "ExtractorReviewError",
     "ExtractorSetupError",
     "ExtractorValidationError",
     "ModulesExtractorError",

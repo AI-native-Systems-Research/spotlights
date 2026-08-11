@@ -1,0 +1,996 @@
+"""Shard derivation, merge determinism, and the shard-local validators.
+
+Everything here is pure Python — no Claude, no Codex. The few tests that need a
+filesystem build a tiny synthetic repo, because `validate_enriched_tree` checks
+paths against the real filesystem.
+
+The fixtures deliberately encode the three traps that splitting a branch
+creates (single-child spine, spine `main_file` under a promoted child, spine
+with no legal `main_file`), since those are the failure modes that the pure
+Python merge and the repair-less Stage 5 cannot recover from.
+"""
+
+from __future__ import annotations
+
+import random
+from pathlib import Path
+
+import pytest
+
+from spotlights_engine.modules_extractor.coverage import (
+    CrossArtifactError,
+    compute_coverage,
+    validate_enriched_tree,
+)
+from spotlights_engine.modules_extractor.errors import ExtractorValidationError
+from spotlights_engine.modules_extractor.extractor import ExtractorConfig
+from spotlights_engine.modules_extractor.sharding import (
+    NOT_SPLIT_BELOW_THRESHOLD,
+    NOT_SPLIT_NO_DIRECT_FILE,
+    NOT_SPLIT_ONE_PROMOTABLE,
+    NOT_SPLIT_TOP_LEVEL_ONLY,
+    EnrichShard,
+    ShardPlan,
+    branch_coverage,
+    covers_entire_skeleton,
+    derive_enrich_shards,
+    derive_review_shards,
+    merge_fragments,
+    node_weight,
+    owning_shard,
+    validate_shard_depends_on,
+    validate_shard_scope,
+    validate_spine_main_files,
+)
+from spotlights_engine.modules_extractor.skeleton import build_skeleton
+from spotlights_engine.modules_extractor.stage_schemas import (
+    EnrichedTree,
+    Skeleton,
+    SkeletonNode,
+)
+from spotlights_engine.schemas.project import Repository
+
+# ── Synthetic skeleton builders (no filesystem) ───────────────────────────
+
+
+def _node(
+    path: str,
+    *,
+    required: bool = True,
+    files: int = 2,
+    children: tuple[SkeletonNode, ...] = (),
+    rep: list[str] | None = None,
+) -> SkeletonNode:
+    return SkeletonNode(
+        path=path,
+        direct_source_file_count=files,
+        source_child_count=len(children),
+        representative_files=(
+            rep if rep is not None else [f"{path}/main.py"]
+        ),
+        required=required,
+        required_reasons=["two_or_more_direct_source_files"] if required else [],
+        children=list(children),
+    )
+
+
+def _skel(*nodes: SkeletonNode, source_root: str = "") -> Skeleton:
+    return Skeleton(
+        source_root=source_root,
+        nodes=list(nodes),
+        ignored=["node_modules", "vendor"],
+        excluded=["docs"],
+        organizational_only=[],
+        skipped_symlinks=[],
+        inventory_fingerprint="fp-v1",
+    )
+
+
+def _cfg(**kwargs) -> ExtractorConfig:
+    return ExtractorConfig(**kwargs)
+
+
+# ── Derivation: the top-level partition ───────────────────────────────────
+
+
+def test_two_branches_yield_two_shards_sorted_by_root_path() -> None:
+    plan = derive_enrich_shards(_skel(_node("zeta"), _node("alpha")), _cfg())
+
+    assert [s.key for s in plan.shards] == ["alpha", "zeta"]
+    assert [s.root_path for s in plan.shards] == ["alpha", "zeta"]
+    assert plan.top_level_qns == ["alpha", "zeta"]
+    assert all(s.depth == 0 and s.owns_root and not s.is_subshard for s in plan.shards)
+    assert all(s.parent_key is None for s in plan.shards)
+
+
+def test_single_top_level_branch_degenerates_to_one_shard() -> None:
+    skeleton = _skel(_node("pkg"))
+    plan = derive_enrich_shards(skeleton, _cfg())
+
+    assert len(plan.shards) == 1
+    shard = plan.shards[0]
+    assert shard.key == "pkg"
+    # Its scope is the whole repository, so it must keep today's deadline.
+    assert covers_entire_skeleton(shard, skeleton)
+
+
+def test_shard_keys_are_artifact_safe_and_unique() -> None:
+    plan = derive_enrich_shards(
+        _skel(_node("src/my-pkg"), _node("src/my.pkg")), _cfg()
+    )
+    keys = [s.key for s in plan.shards]
+    assert keys == ["src__mypkg", "src__mypkg_2"]
+    assert len(set(keys)) == len(keys)
+
+
+# ── Derivation: the size-gated split and its three gates ──────────────────
+
+
+def _heavy_branch(n_children: int = 4, *, rep: list[str] | None = None) -> SkeletonNode:
+    """A branch whose weight is spread across `n_children` promotable children."""
+    children = tuple(
+        _node(
+            f"pkg/c{i}",
+            children=tuple(_node(f"pkg/c{i}/g{j}") for j in range(3)),
+        )
+        for i in range(n_children)
+    )
+    return _node("pkg", children=children, rep=rep)
+
+
+def test_heavy_branch_splits_into_spine_plus_child_subshards() -> None:
+    skeleton = _skel(_heavy_branch())
+    plan = derive_enrich_shards(
+        skeleton, _cfg(enrich_subshard_threshold=4, enrich_subshard_child_min=2)
+    )
+
+    keys = sorted(s.key for s in plan.shards)
+    assert keys == ["pkg__c0", "pkg__c1", "pkg__c2", "pkg__c3", "pkg__spine"]
+
+    spine = next(s for s in plan.shards if s.key == "pkg__spine")
+    assert spine.owns_root and spine.is_subshard and spine.depth == 1
+    assert spine.promoted_children == [f"pkg/c{i}" for i in range(4)]
+    assert spine.parent_key == "pkg"
+
+    child = next(s for s in plan.shards if s.key == "pkg__c0")
+    assert not child.owns_root and child.is_subshard and child.depth == 1
+    assert child.parent_key == "pkg"
+
+    # The sub-shards partition the branch's required set: every required node is
+    # owned by exactly one shard.
+    branch_required = skeleton.required_paths()
+    owned: dict[str, list[str]] = {}
+    for path in branch_required:
+        owner = owning_shard(path, plan.shards)
+        assert owner is not None
+        owned.setdefault(owner.key, []).append(path)
+    assert sum(len(v) for v in owned.values()) == len(branch_required)
+    union = {p for s in plan.shards for p in s.subtree.required_paths()}
+    assert union == branch_required
+
+
+def test_light_children_stay_with_the_spine() -> None:
+    branch = _node(
+        "pkg",
+        children=(
+            _node("pkg/heavy1", children=(_node("pkg/heavy1/x"),)),
+            _node("pkg/heavy2", children=(_node("pkg/heavy2/x"),)),
+            _node("pkg/light", required=False, files=1),
+        ),
+    )
+    plan = derive_enrich_shards(
+        _skel(branch), _cfg(enrich_subshard_threshold=3, enrich_subshard_child_min=2)
+    )
+    spine = next(s for s in plan.shards if s.key == "pkg__spine")
+    assert spine.promoted_children == ["pkg/heavy1", "pkg/heavy2"]
+    assert "pkg/light" in spine.subtree.all_paths()
+
+
+def test_branch_with_one_promotable_child_is_not_split() -> None:
+    """The Rule-4 split gate.
+
+    Splitting here would graft a single child under the spine, and the merged
+    tree would carry a single-child parent that Stage 5 rejects with no possible
+    LLM recovery on the pure-Python merge.
+    """
+    branch = _node(
+        "pkg",
+        children=(
+            _node("pkg/heavy", children=tuple(_node(f"pkg/heavy/g{j}") for j in range(4))),
+            _node("pkg/light", required=False, files=1),
+        ),
+    )
+    plan = derive_enrich_shards(
+        _skel(branch), _cfg(enrich_subshard_threshold=2, enrich_subshard_child_min=2)
+    )
+
+    assert [s.key for s in plan.shards] == ["pkg"]
+    assert plan.not_split_reasons["pkg"] == NOT_SPLIT_ONE_PROMOTABLE
+
+
+def test_namespace_only_branch_root_is_not_split() -> None:
+    """The main_files split gate: the spine would have no legal `main_file`."""
+    plan = derive_enrich_shards(
+        _skel(_heavy_branch(rep=[])),
+        _cfg(enrich_subshard_threshold=4, enrich_subshard_child_min=2),
+    )
+    assert [s.key for s in plan.shards] == ["pkg"]
+    assert plan.not_split_reasons["pkg"] == NOT_SPLIT_NO_DIRECT_FILE
+
+
+def test_init_only_root_is_split_because_the_predicate_keys_on_representative_files() -> None:
+    """`direct_source_file_count == 0` but `representative_files != []`.
+
+    `__init__.py` is a real source file and satisfies Rule 3, so a namespace
+    package carrying only `__init__.py` is still splittable — proving the gate
+    keys on `representative_files`, not on the init-excluding count.
+    """
+    branch = _heavy_branch()
+    branch = branch.model_copy(
+        update={"direct_source_file_count": 0, "representative_files": ["pkg/__init__.py"]}
+    )
+    plan = derive_enrich_shards(
+        _skel(branch), _cfg(enrich_subshard_threshold=4, enrich_subshard_child_min=2)
+    )
+    assert "pkg__spine" in {s.key for s in plan.shards}
+
+
+def test_branch_below_threshold_is_not_split() -> None:
+    plan = derive_enrich_shards(
+        _skel(_heavy_branch()), _cfg(enrich_subshard_threshold=1000)
+    )
+    assert [s.key for s in plan.shards] == ["pkg"]
+    assert plan.not_split_reasons["pkg"] == NOT_SPLIT_BELOW_THRESHOLD
+
+
+def test_top_level_only_mode_never_subshards() -> None:
+    plan = derive_enrich_shards(
+        _skel(_heavy_branch()),
+        _cfg(enrich_sharding="top_level_only", enrich_subshard_threshold=1),
+    )
+    assert [s.key for s in plan.shards] == ["pkg"]
+    assert plan.not_split_reasons["pkg"] == NOT_SPLIT_TOP_LEVEL_ONLY
+
+
+# ── Derivation: the shard-count cap ───────────────────────────────────────
+
+
+def _weighted_branch() -> SkeletonNode:
+    """Four promotable children with strictly decreasing weight (4, 3, 2, 1)."""
+    children = tuple(
+        _node(
+            f"pkg/c{i}",
+            children=tuple(_node(f"pkg/c{i}/g{j}") for j in range(4 - i - 1)),
+        )
+        for i in range(4)
+    )
+    return _node("pkg", children=children)
+
+
+def test_shard_cap_promotes_only_the_heaviest_children() -> None:
+    branch = _weighted_branch()
+    assert [node_weight(c) for c in branch.children] == [4, 3, 2, 1]
+
+    # 1 branch + 2 promoted = 3 shards total.
+    plan = derive_enrich_shards(
+        _skel(branch),
+        _cfg(
+            enrich_subshard_threshold=4,
+            enrich_subshard_child_min=1,
+            enrich_max_shards=3,
+            enrich_subshard_max_depth=1,
+        ),
+    )
+    assert len(plan.shards) == 3
+    spine = next(s for s in plan.shards if s.key == "pkg__spine")
+    assert spine.promoted_children == ["pkg/c0", "pkg/c1"]
+    # The un-promoted children stayed with the spine.
+    assert "pkg/c2" in spine.subtree.all_paths()
+    assert "pkg/c3" in spine.subtree.all_paths()
+
+
+def test_shard_cap_is_stable_across_runs() -> None:
+    cfg = _cfg(
+        enrich_subshard_threshold=4,
+        enrich_subshard_child_min=1,
+        enrich_max_shards=3,
+        enrich_subshard_max_depth=1,
+    )
+    first = derive_enrich_shards(_skel(_weighted_branch()), cfg)
+    second = derive_enrich_shards(_skel(_weighted_branch()), cfg)
+    assert [s.key for s in first.shards] == [s.key for s in second.shards]
+
+
+def test_depth_two_recursion_draws_from_the_remaining_budget() -> None:
+    """A grandchild split must not push the total past `enrich_max_shards`."""
+    deep = _node(
+        "pkg",
+        children=(
+            _node(
+                "pkg/big",
+                children=tuple(
+                    _node(f"pkg/big/g{j}", children=(_node(f"pkg/big/g{j}/x"),))
+                    for j in range(4)
+                ),
+            ),
+            _node("pkg/other", children=(_node("pkg/other/y"),)),
+        ),
+    )
+    cfg = _cfg(
+        enrich_subshard_threshold=2,
+        enrich_subshard_child_min=2,
+        enrich_subshard_max_depth=2,
+        enrich_max_shards=5,
+    )
+    plan = derive_enrich_shards(_skel(deep), cfg)
+    assert len(plan.shards) <= cfg.enrich_max_shards
+    assert max(s.depth for s in plan.shards) == 2
+
+
+def test_a_depth_two_shard_is_never_split_again() -> None:
+    deep = _node(
+        "pkg",
+        children=(
+            _node(
+                "pkg/big",
+                children=tuple(
+                    _node(
+                        f"pkg/big/g{j}",
+                        children=tuple(_node(f"pkg/big/g{j}/h{k}") for k in range(3)),
+                    )
+                    for j in range(2)
+                ),
+            ),
+            _node("pkg/other", children=(_node("pkg/other/y"),)),
+        ),
+    )
+    plan = derive_enrich_shards(
+        _skel(deep),
+        _cfg(
+            enrich_subshard_threshold=1,
+            enrich_subshard_child_min=1,
+            enrich_subshard_max_depth=2,
+            enrich_max_shards=64,
+        ),
+    )
+    assert max(s.depth for s in plan.shards) == 2
+
+
+# ── Derivation: subtree slicing ───────────────────────────────────────────
+
+
+def test_spine_subtree_prunes_promoted_children_and_copies_globals_verbatim() -> None:
+    skeleton = _skel(_heavy_branch())
+    plan = derive_enrich_shards(
+        skeleton, _cfg(enrich_subshard_threshold=4, enrich_subshard_child_min=2)
+    )
+    spine = next(s for s in plan.shards if s.key == "pkg__spine")
+
+    assert spine.subtree.all_paths() == {"pkg"}
+    for i in range(4):
+        child = next(s for s in plan.shards if s.key == f"pkg__c{i}")
+        assert f"pkg/c{i}" in child.subtree.all_paths()
+        assert f"pkg/c{i}" not in spine.subtree.all_paths()
+
+    # `ignored` is a global list of directory *names*, not branch-relative
+    # paths, so slicing must not empty it.
+    assert spine.subtree.ignored == skeleton.ignored
+    assert spine.subtree.source_root == skeleton.source_root
+    assert spine.subtree.inventory_fingerprint == skeleton.inventory_fingerprint
+
+    # The spine's root keeps `source_child_count` verbatim even though the
+    # promoted children were pruned — rewriting it without the reasons would
+    # produce an incoherent node.
+    root = spine.subtree.nodes[0]
+    assert root.source_child_count == 4
+    assert root.children == []
+
+
+def test_branch_subtrees_are_unpruned() -> None:
+    plan = derive_enrich_shards(
+        _skel(_heavy_branch()),
+        _cfg(enrich_subshard_threshold=4, enrich_subshard_child_min=2),
+    )
+    branch = plan.branch_subtrees["pkg"]
+    assert "pkg/c0" in branch.all_paths()
+    assert branch.required_paths() == {
+        "pkg",
+        *(f"pkg/c{i}" for i in range(4)),
+        *(f"pkg/c{i}/g{j}" for i in range(4) for j in range(3)),
+    }
+
+
+def test_review_shards_are_the_top_level_partition_only() -> None:
+    review = derive_review_shards(_skel(_heavy_branch(), _node("csrc")))
+    assert [s.key for s in review] == ["csrc", "pkg"]
+    assert all(s.depth == 0 and not s.is_subshard for s in review)
+    assert "pkg/c0" in next(s for s in review if s.key == "pkg").subtree.all_paths()
+
+
+# ── Merge ─────────────────────────────────────────────────────────────────
+
+
+def _mod(path: str, *, subs=(), depends=(), files=None) -> dict:
+    return {
+        "name": path.rsplit("/", 1)[-1],
+        "path": path,
+        "description": f"Module {path}.",
+        "depends_on": list(depends),
+        "main_files": files or [{"path": f"{path}/main.py", "role": "Entry."}],
+        "submodules": list(subs),
+    }
+
+
+def _sub(path: str, *, subs=(), files=None) -> dict:
+    d = _mod(path, subs=subs, files=files)
+    d.pop("depends_on")
+    return d
+
+
+def _frag(*modules: dict, folds=()) -> EnrichedTree:
+    return EnrichedTree.model_validate({"modules": list(modules), "folds": list(folds)})
+
+
+def _plan_for(shards: list[EnrichShard], branch_roots: dict[str, str]) -> ShardPlan:
+    return ShardPlan(shards=shards, branch_roots=branch_roots)
+
+
+def _shard(key: str, root: str, **kwargs) -> EnrichShard:
+    return EnrichShard(
+        key=key,
+        root_path=root,
+        subtree=_skel(_node(root)),
+        **kwargs,
+    )
+
+
+def test_merge_is_order_independent() -> None:
+    a = _shard("alpha", "alpha")
+    b = _shard("beta", "beta")
+    plan = _plan_for([a, b], {"alpha": "alpha", "beta": "beta"})
+    pairs = [
+        (a, _frag(_mod("alpha"))),
+        (b, _frag(_mod("beta"))),
+    ]
+    skeleton = _skel(_node("alpha"), _node("beta"))
+    expected = merge_fragments(pairs, skeleton=skeleton, plan=plan).model_dump_json()
+
+    rng = random.Random(7)
+    for _ in range(5):
+        shuffled = list(pairs)
+        rng.shuffle(shuffled)
+        got = merge_fragments(shuffled, skeleton=skeleton, plan=plan)
+        assert got.model_dump_json() == expected
+    assert [m.path for m in merge_fragments(pairs, skeleton=skeleton, plan=plan).modules] == [
+        "alpha",
+        "beta",
+    ]
+
+
+def test_merge_reassembles_subshards_and_demotes_them() -> None:
+    spine = _shard(
+        "pkg__spine",
+        "pkg",
+        is_subshard=True,
+        parent_key="pkg",
+        depth=1,
+        promoted_children=["pkg/a", "pkg/b"],
+    )
+    a = _shard("pkg__a", "pkg/a", is_subshard=True, parent_key="pkg", owns_root=False, depth=1)
+    b = _shard("pkg__b", "pkg/b", is_subshard=True, parent_key="pkg", owns_root=False, depth=1)
+    plan = _plan_for([spine, a, b], {"pkg": "pkg"})
+    skeleton = _skel(_node("pkg", children=(_node("pkg/a"), _node("pkg/b"))))
+
+    merged = merge_fragments(
+        [
+            (spine, _frag(_mod("pkg", depends=["other"]))),
+            (a, _frag(_mod("pkg/a"))),
+            (b, _frag(_mod("pkg/b"))),
+        ],
+        skeleton=skeleton,
+        plan=plan,
+    )
+
+    assert len(merged.modules) == 1
+    top = merged.modules[0]
+    assert top.path == "pkg"
+    # The branch's depends_on comes only from the spine fragment.
+    assert top.depends_on == ["other"]
+    assert [s.path for s in top.submodules] == ["pkg/a", "pkg/b"]
+    # Grafted children are demoted: EnrichedSubmodule has no depends_on field.
+    assert not hasattr(top.submodules[0], "depends_on")
+
+
+def test_merge_grafts_a_depth_two_grandchild_bottom_up() -> None:
+    spine = _shard(
+        "pkg__spine", "pkg", is_subshard=True, parent_key="pkg", depth=1,
+        promoted_children=["pkg/a", "pkg/b"],
+    )
+    a_spine = _shard(
+        "pkg__a__spine", "pkg/a", is_subshard=True, parent_key="pkg", depth=2,
+        promoted_children=["pkg/a/g1", "pkg/a/g2"],
+    )
+    g1 = _shard(
+        "pkg__a__g1", "pkg/a/g1", is_subshard=True, parent_key="pkg",
+        owns_root=False, depth=2,
+    )
+    g2 = _shard(
+        "pkg__a__g2", "pkg/a/g2", is_subshard=True, parent_key="pkg",
+        owns_root=False, depth=2,
+    )
+    b = _shard("pkg__b", "pkg/b", is_subshard=True, parent_key="pkg", owns_root=False, depth=1)
+    plan = _plan_for([spine, a_spine, g1, g2, b], {"pkg": "pkg"})
+    skeleton = _skel(
+        _node(
+            "pkg",
+            children=(
+                _node("pkg/a", children=(_node("pkg/a/g1"), _node("pkg/a/g2"))),
+                _node("pkg/b"),
+            ),
+        )
+    )
+
+    merged = merge_fragments(
+        [
+            (b, _frag(_mod("pkg/b"))),
+            (g2, _frag(_mod("pkg/a/g2"))),
+            (spine, _frag(_mod("pkg"))),
+            (g1, _frag(_mod("pkg/a/g1"))),
+            (a_spine, _frag(_mod("pkg/a"))),
+        ],
+        skeleton=skeleton,
+        plan=plan,
+    )
+
+    top = merged.modules[0]
+    assert [s.path for s in top.submodules] == ["pkg/a", "pkg/b"]
+    a_module = top.submodules[0]
+    assert [s.path for s in a_module.submodules] == ["pkg/a/g1", "pkg/a/g2"]
+
+
+def test_merge_never_manufactures_a_single_child_parent(tmp_path) -> None:
+    """The split gate guarantees ≥2 grafted children; assert the merge honors it."""
+    spine = _shard(
+        "pkg__spine", "pkg", is_subshard=True, parent_key="pkg", depth=1,
+        promoted_children=["pkg/a", "pkg/b"],
+    )
+    a = _shard("pkg__a", "pkg/a", is_subshard=True, parent_key="pkg", owns_root=False, depth=1)
+    b = _shard("pkg__b", "pkg/b", is_subshard=True, parent_key="pkg", owns_root=False, depth=1)
+    plan = _plan_for([spine, a, b], {"pkg": "pkg"})
+    skeleton = _skel(_node("pkg", children=(_node("pkg/a"), _node("pkg/b"))))
+    merged = merge_fragments(
+        [(spine, _frag(_mod("pkg"))), (a, _frag(_mod("pkg/a"))), (b, _frag(_mod("pkg/b")))],
+        skeleton=skeleton,
+        plan=plan,
+    )
+    assert len(merged.modules[0].submodules) >= 2
+
+
+def test_merge_rejects_two_shards_emitting_the_same_path() -> None:
+    a = _shard("alpha", "alpha")
+    b = _shard("beta", "beta")
+    plan = _plan_for([a, b], {"alpha": "alpha", "beta": "beta"})
+    with pytest.raises(ExtractorValidationError, match="partition is broken"):
+        merge_fragments(
+            [(a, _frag(_mod("alpha"))), (b, _frag(_mod("alpha")))],
+            skeleton=_skel(_node("alpha"), _node("beta")),
+            plan=plan,
+        )
+
+
+def test_merge_rejects_a_missing_graft_target() -> None:
+    a = _shard(
+        "pkg__a", "pkg/a", is_subshard=True, parent_key="pkg", owns_root=False, depth=1
+    )
+    plan = _plan_for([a], {"pkg": "pkg"})
+    with pytest.raises(ExtractorValidationError, match="no shard fragment for its own root"):
+        merge_fragments(
+            [(a, _frag(_mod("pkg/a")))],
+            skeleton=_skel(_node("pkg", children=(_node("pkg/a"),))),
+            plan=plan,
+        )
+
+
+# ── Partition + merge, as properties over many random shapes ──────────────
+#
+# The fixture tests above pin specific shapes; these assert the two invariants
+# the whole completeness argument rests on — the partition is exhaustive and
+# disjoint, and the merge neither invents nor drops a node — across the shard
+# derivation's whole configuration space.
+
+
+def _random_node(rng: random.Random, path: str, depth: int) -> SkeletonNode:
+    kids = (
+        [_random_node(rng, f"{path}/c{i}", depth + 1)
+         for i in range(rng.choice([0, 0, 1, 2, 2, 3]))]
+        if depth < 4
+        else []
+    )
+    return SkeletonNode(
+        path=path,
+        direct_source_file_count=rng.choice([0, 1, 2, 3]),
+        source_child_count=len(kids),
+        # An empty `representative_files` is the namespace-only root that must
+        # never be split, so let the generator produce both.
+        representative_files=([f"{path}/f.py"] if rng.random() > 0.2 else []),
+        required=rng.random() > 0.3,
+        required_reasons=[],
+        children=kids,
+    )
+
+
+def _random_case(seed: int) -> tuple[Skeleton, ExtractorConfig, random.Random]:
+    rng = random.Random(seed)
+    skeleton = _skel(
+        *(_random_node(rng, f"t{i}", 0) for i in range(rng.choice([1, 1, 2, 3])))
+    )
+    config = _cfg(
+        enrich_subshard_threshold=rng.choice([1, 2, 4, 40]),
+        enrich_subshard_child_min=rng.choice([1, 2, 3]),
+        enrich_subshard_max_depth=rng.choice([1, 2]),
+        enrich_max_shards=rng.choice([2, 3, 5, 24]),
+    )
+    return skeleton, config, rng
+
+
+@pytest.mark.parametrize("seed", range(60))
+def test_shards_partition_the_inventory_exhaustively_and_disjointly(seed: int) -> None:
+    skeleton, config, _ = _random_case(seed)
+    plan = derive_enrich_shards(skeleton, config)
+
+    owner_of: dict[str, str] = {}
+    for shard in plan.shards:
+        for path in shard.subtree.all_paths():
+            assert path not in owner_of, (
+                f"{path!r} is claimed by both {owner_of.get(path)!r} and {shard.key!r}"
+            )
+            owner_of[path] = shard.key
+    assert set(owner_of) == skeleton.all_paths()
+
+    # `owning_shard` (used by the branch precheck and review attribution) must
+    # agree with that partition, and must be total.
+    for path in skeleton.all_paths():
+        found = owning_shard(path, plan.shards)
+        assert found is not None and found.key == owner_of[path]
+
+    # No split may produce a single-child spine (Stage-5 Rule 4 would reject the
+    # merged tree with no possible recovery) or a spine with no legal main_file.
+    for shard in plan.shards:
+        if shard.promoted_children:
+            assert shard.owns_root
+            assert len(shard.promoted_children) >= 2
+            assert shard.subtree.nodes[0].representative_files
+        assert shard.depth <= config.enrich_subshard_max_depth
+    assert len({s.key for s in plan.shards}) == len(plan.shards)
+    assert len(plan.shards) <= max(config.enrich_max_shards, len(skeleton.nodes))
+
+
+def _emit_everything(node: SkeletonNode, *, top: bool) -> dict:
+    d = _mod(node.path, subs=[_emit_everything(c, top=False) for c in node.children])
+    if not top:
+        d.pop("depends_on")
+    return d
+
+
+@pytest.mark.parametrize("seed", range(60))
+def test_merge_is_loss_free_and_order_independent(seed: int) -> None:
+    skeleton, config, rng = _random_case(seed)
+    plan = derive_enrich_shards(skeleton, config)
+    pairs = [
+        (s, _frag(_emit_everything(s.subtree.nodes[0], top=True))) for s in plan.shards
+    ]
+
+    union: set[str] = set()
+    for _, fragment in pairs:
+        union |= fragment.emitted_paths()
+
+    merged = merge_fragments(pairs, skeleton=skeleton, plan=plan)
+    assert merged.emitted_paths() == union == skeleton.all_paths()
+    assert compute_coverage(merged, skeleton).missing == []
+    assert len(merged.modules) == len(plan.branch_roots)
+
+    shuffled = list(pairs)
+    rng.shuffle(shuffled)
+    assert (
+        merge_fragments(shuffled, skeleton=skeleton, plan=plan).model_dump_json()
+        == merged.model_dump_json()
+    )
+
+
+# ── Shard-local validators ────────────────────────────────────────────────
+
+
+def test_shard_scope_requires_exactly_one_top_level_module_at_the_root() -> None:
+    shard = _shard("alpha", "alpha")
+    with pytest.raises(CrossArtifactError, match="exactly one top-level module"):
+        validate_shard_scope(shard, _frag(_mod("alpha"), _mod("beta")))
+    with pytest.raises(CrossArtifactError, match="expected 'alpha'"):
+        validate_shard_scope(shard, _frag(_mod("beta")))
+
+
+def test_shard_scope_rejects_an_out_of_scope_emit() -> None:
+    shard = _shard("alpha", "alpha")
+    with pytest.raises(CrossArtifactError, match="outside"):
+        validate_shard_scope(shard, _frag(_mod("alpha", subs=[_sub("beta/x")])))
+
+
+def test_shard_scope_rejects_an_out_of_scope_fold() -> None:
+    shard = _shard("alpha", "alpha")
+    fold = {
+        "path": "beta/x",
+        "into": "alpha",
+        "reason": "r",
+        "evidence_files": ["beta/x/f.py"],
+    }
+    with pytest.raises(CrossArtifactError, match="outside its scope"):
+        validate_shard_scope(shard, _frag(_mod("alpha"), folds=[fold]))
+
+
+def test_child_subshard_must_not_declare_depends_on() -> None:
+    child = _shard(
+        "pkg__a", "pkg/a", is_subshard=True, parent_key="pkg", owns_root=False, depth=1
+    )
+    frag = _frag(_mod("pkg/a", depends=["other"]))
+    with pytest.raises(CrossArtifactError, match="must not declare depends_on"):
+        validate_shard_depends_on(child, frag, carries_depends_on=False)
+    # The spine (or an un-split top-level shard) legitimately carries it.
+    validate_shard_depends_on(child, frag, carries_depends_on=True)
+
+
+def test_depth_two_spine_does_not_carry_depends_on() -> None:
+    """`owns_root` alone is not the predicate: a depth-2 spine emits a module
+    that becomes a *submodule* after the merge, so it must not declare deps."""
+    branch_spine = _shard(
+        "pkg__spine", "pkg", is_subshard=True, parent_key="pkg", depth=1,
+        promoted_children=["pkg/a"],
+    )
+    inner_spine = _shard(
+        "pkg__a__spine", "pkg/a", is_subshard=True, parent_key="pkg", depth=2,
+        promoted_children=["pkg/a/g1"],
+    )
+    plan = _plan_for([branch_spine, inner_spine], {"pkg": "pkg"})
+    assert plan.carries_depends_on(branch_spine)
+    assert not plan.carries_depends_on(inner_spine)
+
+
+def test_spine_main_files_may_not_reach_into_a_promoted_child() -> None:
+    spine = _shard(
+        "pkg__spine", "pkg", is_subshard=True, parent_key="pkg", depth=1,
+        promoted_children=["pkg/a"],
+    )
+    frag = _frag(
+        _mod("pkg", files=[{"path": "pkg/a/core.py", "role": "Core."}])
+    )
+    with pytest.raises(CrossArtifactError) as exc:
+        validate_spine_main_files(spine, frag)
+    assert "pkg/a/core.py" in str(exc.value)
+    assert "pkg/a" in str(exc.value)
+
+
+def test_primary_shard_is_the_branch_owner_not_the_first_key() -> None:
+    """`vllm__engine` sorts before `vllm__spine`, so a lexicographic-key rule
+    would make an arbitrary child primary."""
+    spine = _shard(
+        "vllm__spine", "vllm", is_subshard=True, parent_key="vllm", depth=1,
+        promoted_children=["vllm/engine", "vllm/v1"],
+    )
+    engine = _shard(
+        "vllm__engine", "vllm/engine", is_subshard=True, parent_key="vllm",
+        owns_root=False, depth=1,
+    )
+    v1 = _shard(
+        "vllm__v1", "vllm/v1", is_subshard=True, parent_key="vllm",
+        owns_root=False, depth=1,
+    )
+    csrc = _shard("zcsrc", "zcsrc")
+    plan = _plan_for([engine, spine, v1, csrc], {"vllm": "vllm", "zcsrc": "zcsrc"})
+    assert plan.primary_shard() is spine
+
+
+# ── The spine hazards, against a real filesystem ─────────────────────────
+
+
+def _write(path: Path, content: str = "x = 1\n") -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+
+
+def _spine_repo(tmp_path: Path) -> Path:
+    """`pkg` owns one direct file, two promotable children, two light leaves."""
+    _write(tmp_path / "pkg" / "root.py")
+    _write(tmp_path / "pkg" / "a" / "a1.py")
+    _write(tmp_path / "pkg" / "a" / "a2.py")
+    _write(tmp_path / "pkg" / "b" / "b1.py")
+    _write(tmp_path / "pkg" / "b" / "b2.py")
+    _write(tmp_path / "pkg" / "light1" / "l.py")
+    _write(tmp_path / "pkg" / "light2" / "m.py")
+    return tmp_path
+
+
+SPINE_CFG = dict(enrich_subshard_threshold=2, enrich_subshard_child_min=1)
+
+
+def _spine_plan(repo: Path) -> tuple[Skeleton, ShardPlan]:
+    skeleton = build_skeleton(repo, "")
+    return skeleton, derive_enrich_shards(skeleton, _cfg(**SPINE_CFG))
+
+
+def test_spine_repo_splits_as_designed(tmp_path) -> None:
+    skeleton, plan = _spine_plan(_spine_repo(tmp_path))
+    assert sorted(s.key for s in plan.shards) == ["pkg__a", "pkg__b", "pkg__spine"]
+    spine = next(s for s in plan.shards if s.key == "pkg__spine")
+    assert spine.promoted_children == ["pkg/a", "pkg/b"]
+    assert "pkg/light1" in spine.subtree.all_paths()
+
+
+def _spine_fragment(main_files=None) -> EnrichedTree:
+    """Spine emits `pkg` + exactly ONE light child, folding the other."""
+    return _frag(
+        _mod(
+            "pkg",
+            subs=[_sub("pkg/light1", files=[{"path": "pkg/light1/l.py", "role": "L."}])],
+            files=main_files
+            or [
+                {"path": "pkg/root.py", "role": "Root."},
+                {"path": "pkg/light2/m.py", "role": "Folded helper."},
+            ],
+        ),
+        folds=[
+            {
+                "path": "pkg/light2",
+                "into": "pkg",
+                "reason": "single-file helper",
+                "evidence_files": ["pkg/light2/m.py"],
+            }
+        ],
+    )
+
+
+def _repository() -> Repository:
+    return Repository(name="demo", summary="A demo repo.", source_root="")
+
+
+def test_single_child_spine_passes_locally_and_the_merge_passes_rule_4(tmp_path) -> None:
+    """Rule-4 deferral.
+
+    The spine's pruned subtree makes it look like a single-child parent; the
+    merged branch module has three children. Without `rule4_exempt_paths` this
+    fixture would burn the shard's one repair and then hard-fail.
+    """
+    repo = _spine_repo(tmp_path)
+    skeleton, plan = _spine_plan(repo)
+    spine = next(s for s in plan.shards if s.key == "pkg__spine")
+    fragment = _spine_fragment()
+    assert len(fragment.modules[0].submodules) == 1
+
+    # Local (subtree-scoped) validation passes only because the spine's root is
+    # exempt from Rule 4.
+    validate_enriched_tree(
+        fragment,
+        repo,
+        _repository(),
+        spine.subtree,
+        skip_dependency_resolution=True,
+        allowed_internal_qns=set(plan.top_level_qns),
+        rule4_exempt_paths={spine.root_path},
+    )
+    with pytest.raises(CrossArtifactError, match="single child"):
+        validate_enriched_tree(
+            fragment,
+            repo,
+            _repository(),
+            spine.subtree,
+            skip_dependency_resolution=True,
+            allowed_internal_qns=set(plan.top_level_qns),
+        )
+
+    # The merged tree passes the *unchanged* full Rule-4 check.
+    pairs = [
+        (spine, fragment),
+        (next(s for s in plan.shards if s.key == "pkg__a"), _frag(_mod("pkg/a", files=[
+            {"path": "pkg/a/a1.py", "role": "A1."}]))),
+        (next(s for s in plan.shards if s.key == "pkg__b"), _frag(_mod("pkg/b", files=[
+            {"path": "pkg/b/b1.py", "role": "B1."}]))),
+    ]
+    merged = merge_fragments(pairs, skeleton=skeleton, plan=plan)
+    assert len(merged.modules[0].submodules) == 3
+    validate_enriched_tree(merged, repo, _repository(), skeleton)
+    assert compute_coverage(merged, skeleton).missing == []
+
+
+def test_branch_precheck_uses_the_unpruned_branch_skeleton(tmp_path) -> None:
+    repo = _spine_repo(tmp_path)
+    _, plan = _spine_plan(repo)
+    spine = next(s for s in plan.shards if s.key == "pkg__spine")
+    a = next(s for s in plan.shards if s.key == "pkg__a")
+    b = next(s for s in plan.shards if s.key == "pkg__b")
+
+    complete = [
+        (spine, _spine_fragment()),
+        (a, _frag(_mod("pkg/a", files=[{"path": "pkg/a/a1.py", "role": "A1."}]))),
+        (b, _frag(_mod("pkg/b", files=[{"path": "pkg/b/b1.py", "role": "B1."}]))),
+    ]
+    assert branch_coverage(plan, "pkg", complete).missing == []
+
+    # Drop the `pkg/b` sub-shard: the branch-local union is now short a required
+    # path, which the spine's own (pruned) coverage could never have seen.
+    assert branch_coverage(plan, "pkg", complete[:2]).missing == ["pkg/b"]
+
+
+def test_spine_main_file_under_a_promoted_child_is_fatal_after_the_merge(tmp_path) -> None:
+    """The trap the shard-local predicate exists to catch.
+
+    In the spine's own pruned fragment the file is legal (Rule 3 checks the
+    nearest *emitted* owner, and `pkg/a` is not emitted there). After the merge
+    `pkg/a` *is* emitted, so it becomes the owner and Stage 5 fails with no
+    possible LLM recovery.
+    """
+    repo = _spine_repo(tmp_path)
+    skeleton, plan = _spine_plan(repo)
+    spine = next(s for s in plan.shards if s.key == "pkg__spine")
+    a = next(s for s in plan.shards if s.key == "pkg__a")
+    b = next(s for s in plan.shards if s.key == "pkg__b")
+
+    bad = _spine_fragment(
+        main_files=[
+            {"path": "pkg/a/a2.py", "role": "Reaching into a promoted child."},
+            {"path": "pkg/light2/m.py", "role": "Folded helper."},
+        ]
+    )
+    # Legal in the spine's own subtree...
+    validate_enriched_tree(
+        bad,
+        repo,
+        _repository(),
+        spine.subtree,
+        skip_dependency_resolution=True,
+        rule4_exempt_paths={spine.root_path},
+    )
+    # ...and fatal after the merge.
+    merged = merge_fragments(
+        [
+            (spine, bad),
+            (a, _frag(_mod("pkg/a", files=[{"path": "pkg/a/a1.py", "role": "A1."}]))),
+            (b, _frag(_mod("pkg/b", files=[{"path": "pkg/b/b1.py", "role": "B1."}]))),
+        ],
+        skeleton=skeleton,
+        plan=plan,
+    )
+    with pytest.raises(CrossArtifactError, match="belongs to emitted descendant"):
+        validate_enriched_tree(merged, repo, _repository(), skeleton)
+
+    # The shard-local predicate is what stands between the two.
+    with pytest.raises(CrossArtifactError, match="promoted child"):
+        validate_spine_main_files(spine, bad)
+
+
+def test_a_split_namespace_root_would_have_no_legal_main_file(tmp_path) -> None:
+    """Proof the `representative_files` gate closes a real trap.
+
+    Force the split of a branch root that owns no direct source file: every file
+    in the branch is then owned by an emitted promoted child, so no `main_files`
+    choice satisfies both `_check_main_files` (≥1 entry) and Rule 3.
+    """
+    repo = tmp_path
+    _write(repo / "pkg" / "a" / "a1.py")
+    _write(repo / "pkg" / "a" / "a2.py")
+    _write(repo / "pkg" / "b" / "b1.py")
+    _write(repo / "pkg" / "b" / "b2.py")
+    skeleton = build_skeleton(repo, "")
+    root = skeleton.nodes[0]
+    assert root.representative_files == []  # a pure namespace directory
+
+    # Derivation refuses the split...
+    plan = derive_enrich_shards(skeleton, _cfg(**SPINE_CFG))
+    assert [s.key for s in plan.shards] == ["pkg"]
+    assert plan.not_split_reasons["pkg"] == NOT_SPLIT_NO_DIRECT_FILE
+
+    # ...and this is why: every candidate main file belongs to an emitted child.
+    forced = _frag(
+        _mod("pkg", subs=[
+            _sub("pkg/a", files=[{"path": "pkg/a/a1.py", "role": "A1."}]),
+            _sub("pkg/b", files=[{"path": "pkg/b/b1.py", "role": "B1."}]),
+        ], files=[{"path": "pkg/a/a2.py", "role": "Anything at all."}])
+    )
+    with pytest.raises(CrossArtifactError, match="belongs to emitted descendant"):
+        validate_enriched_tree(forced, repo, _repository(), skeleton)
