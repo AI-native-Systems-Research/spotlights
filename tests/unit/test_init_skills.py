@@ -298,6 +298,37 @@ class TestInstallSkills:
             not in manifest["files"]
         )
 
+    def test_subdir_without_skill_md_is_ignored(
+        self, fake_bundle, project_root
+    ):
+        # A subdirectory with files but no SKILL.md is NOT a directory skill.
+        not_a_skill = fake_bundle / "helpers"
+        not_a_skill.mkdir()
+        (not_a_skill / "README.md").write_text("not a skill\n", encoding="utf-8")
+        (not_a_skill / "util.py").write_text("x = 1\n", encoding="utf-8")
+        # A real slash command so the run installs something.
+        (fake_bundle / "objective-setting.md").write_text(
+            "# obj\n", encoding="utf-8"
+        )
+
+        rc = init_skills.install_skills(scope="project")
+        assert rc == 0
+
+        commands = project_root / ".claude" / "commands"
+        # The valid slash command installed.
+        assert (commands / "spotlights-objective-setting.md").is_file()
+        # The non-skill subdir was ignored: no prefixed dir, no raw dir.
+        assert not (commands / "spotlights-helpers").exists()
+        assert not (commands / "helpers").exists()
+
+        manifest = json.loads(
+            (project_root / ".spotlights" / "manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        for rel in manifest["files"]:
+            assert "helpers" not in rel
+
 
 class TestCliEntryPoint:
     def test_init_routed_via_main(self, fake_bundle, project_root):
