@@ -136,6 +136,51 @@ class TestInstallSkills:
         rc = init_skills.install_skills(scope="project")
         assert rc == 1
 
+    def test_installs_directory_skill_with_structure(self, fake_bundle, project_root):
+        skill = fake_bundle / "share-candidates"
+        (skill / "tests").mkdir(parents=True)
+        (skill / "SKILL.md").write_text("# share candidates\n", encoding="utf-8")
+        (skill / "build_bundle.py").write_text("print('hi')\n", encoding="utf-8")
+        (skill / "tests" / "test_build_bundle.py").write_text("def test_x():\n    pass\n", encoding="utf-8")
+
+        rc = init_skills.install_skills(scope="project")
+        assert rc == 0
+
+        base = project_root / ".claude" / "commands" / "spotlights-share-candidates"
+        assert (base / "SKILL.md").read_text(encoding="utf-8") == "# share candidates\n"
+        assert (base / "build_bundle.py").read_text(encoding="utf-8") == "print('hi')\n"
+        assert (base / "tests" / "test_build_bundle.py").is_file()
+
+        manifest = json.loads(
+            (project_root / ".spotlights" / "manifest.json").read_text(encoding="utf-8")
+        )
+        files = manifest["files"]
+        assert ".claude/commands/spotlights-share-candidates/SKILL.md" in files
+        assert ".claude/commands/spotlights-share-candidates/build_bundle.py" in files
+        assert ".claude/commands/spotlights-share-candidates/tests/test_build_bundle.py" in files
+        assert files[".claude/commands/spotlights-share-candidates/SKILL.md"] == _sha256_text(
+            "# share candidates\n"
+        )
+
+    def test_mixed_bundle_installs_both_kinds(self, fake_bundle, project_root):
+        (fake_bundle / "objective-setting.md").write_text("# obj\n", encoding="utf-8")
+        skill = fake_bundle / "share-candidates"
+        skill.mkdir()
+        (skill / "SKILL.md").write_text("# sc\n", encoding="utf-8")
+
+        rc = init_skills.install_skills(scope="project")
+        assert rc == 0
+
+        commands = project_root / ".claude" / "commands"
+        assert (commands / "spotlights-objective-setting.md").is_file()
+        assert (commands / "spotlights-share-candidates" / "SKILL.md").is_file()
+
+        manifest = json.loads(
+            (project_root / ".spotlights" / "manifest.json").read_text(encoding="utf-8")
+        )
+        assert ".claude/commands/spotlights-objective-setting.md" in manifest["files"]
+        assert ".claude/commands/spotlights-share-candidates/SKILL.md" in manifest["files"]
+
 
 class TestCliEntryPoint:
     def test_init_routed_via_main(self, fake_bundle, project_root):
