@@ -77,6 +77,7 @@ from spotlights_engine.modules_extractor.sharding import (
     covers_entire_skeleton,
     derive_enrich_shards,
     derive_review_shards,
+    has_several_source_roots,
     merge_fragments,
     owning_shard,
     validate_shard_depends_on,
@@ -655,7 +656,10 @@ def _stage3_enrich(
     if stage_dir is not None:
         stage_dir.mkdir(parents=True, exist_ok=True)
 
-    if config.enrich_sharding == "single":
+    # Several top-level source folders must always be enriched per-folder in
+    # parallel, never lumped into one monolithic pass — even when the caller
+    # asked for "single". A single top-level folder keeps today's single pass.
+    if config.enrich_sharding == "single" and not has_several_source_roots(skeleton):
         return _stage3_enrich_single(
             repo_path,
             repository,

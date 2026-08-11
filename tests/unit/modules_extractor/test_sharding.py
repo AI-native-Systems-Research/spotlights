@@ -35,6 +35,7 @@ from spotlights_engine.modules_extractor.sharding import (
     covers_entire_skeleton,
     derive_enrich_shards,
     derive_review_shards,
+    has_several_source_roots,
     merge_fragments,
     node_weight,
     owning_shard,
@@ -121,6 +122,22 @@ def test_shard_keys_are_artifact_safe_and_unique() -> None:
     keys = [s.key for s in plan.shards]
     assert keys == ["src__mypkg", "src__mypkg_2"]
     assert len(set(keys)) == len(keys)
+
+
+# ── The several-source-roots predicate ────────────────────────────────────
+
+
+def test_has_several_source_roots_keys_on_node_count() -> None:
+    """0/1 top-level nodes → single-source-root; >=2 → the multi-folder case."""
+    assert has_several_source_roots(_skel()) is False
+    assert has_several_source_roots(_skel(_node("pkg"))) is False
+    assert has_several_source_roots(_skel(_node("alpha"), _node("beta"))) is True
+    assert (
+        has_several_source_roots(
+            _skel(_node("alpha"), _node("beta"), _node("gamma"))
+        )
+        is True
+    )
 
 
 # ── Derivation: the size-gated split and its three gates ──────────────────

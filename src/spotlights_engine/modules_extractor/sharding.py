@@ -484,6 +484,12 @@ def covers_entire_skeleton(shard: EnrichShard, skeleton: Skeleton) -> bool:
     return shard.subtree.all_paths() == skeleton.all_paths()
 
 
+def has_several_source_roots(skeleton: Skeleton) -> bool:
+    """True when the source root has >=2 top-level source-bearing folders,
+    i.e. the multi-source-folder situation this change targets."""
+    return len(skeleton.nodes) >= 2
+
+
 # ── Shard ownership ───────────────────────────────────────────────────────
 
 
@@ -787,6 +793,7 @@ __all__ = [
     "covers_entire_skeleton",
     "derive_enrich_shards",
     "derive_review_shards",
+    "has_several_source_roots",
     "merge_fragments",
     "node_source_file_count",
     "node_weight",

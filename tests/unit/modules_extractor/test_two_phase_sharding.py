@@ -41,6 +41,7 @@ from spotlights_engine.modules_extractor.errors import (
 from spotlights_engine.modules_extractor.extractor import ExtractorConfig
 from spotlights_engine.modules_extractor.sharding import (
     derive_enrich_shards,
+    has_several_source_roots,
     merge_fragments,
 )
 from spotlights_engine.modules_extractor.skeleton import build_skeleton
@@ -410,6 +411,94 @@ def test_oversized_branch_runs_as_spine_plus_child_subshards(tmp_path, monkeypat
     assert [s.name for s in top.submodules] == ["a", "b", "light1"]
     # Review stays at top-level granularity: one call for the whole branch.
     assert codex.calls == ["pkg"]
+
+
+# ── Dispatch: several source folders override a `single` request ───────────
+
+
+def test_several_source_folders_force_the_sharded_path_even_in_single_mode(
+    tmp_path, monkeypatch
+) -> None:
+    """Two top-level folders + `enrich_sharding="single"` must still fan out
+    per-folder, never collapse into one monolithic pass."""
+    repo = _two_branch_repo(tmp_path / "repo")
+    artifacts = tmp_path / "run"
+    artifacts.mkdir()
+    # The predicate is what makes this the sharded case.
+    assert has_several_source_roots(build_skeleton(repo, "")) is True
+
+    claude = _ShardClaude(_decision(), TWO_BRANCH)
+    codex = _BranchCodex(lambda key: _codex_result(_OK))
+    run = _run(
+        repo, claude, codex, monkeypatch,
+        artifacts=artifacts, enrich_sharding="single",
+    )
+
+    # Merged to two top-level modules — not one lumped pass.
+    assert [m.name for m in run.project_tree.modules] == ["alpha", "beta"]
+    # One scoped call per branch; no monolithic whole-repository call.
+    assert claude.calls_for("alpha") == 1
+    assert claude.calls_for("beta") == 1
+
+    # The sharded path ran (`plan is not None` → shards.json exists), with two
+    # branch shards and no sub-sharding.
+    plan = json.loads((artifacts / "03_enrich" / "shards.json").read_text())
+    assert sorted(s["key"] for s in plan["shards"]) == ["alpha", "beta"]
+    assert plan["branch_roots"] == {"alpha": "alpha", "beta": "beta"}
+    assert all(not s["is_subshard"] and s["depth"] == 0 for s in plan["shards"])
+    assert not any("__spine" in s["key"] for s in plan["shards"])
+
+
+def test_auto_mode_on_two_branches_is_unchanged(tmp_path, monkeypatch) -> None:
+    """Regression guard (a): `enrich_sharding="auto"` still fans out per branch,
+    exactly as before this change."""
+    repo = _two_branch_repo(tmp_path / "repo")
+    artifacts = tmp_path / "run"
+    artifacts.mkdir()
+    claude = _ShardClaude(_decision(), TWO_BRANCH)
+    codex = _BranchCodex(lambda key: _codex_result(_OK))
+    run = _run(
+        repo, claude, codex, monkeypatch,
+        artifacts=artifacts, enrich_sharding="auto",
+    )
+
+    assert [m.name for m in run.project_tree.modules] == ["alpha", "beta"]
+    assert claude.calls_for("alpha") == 1
+    assert claude.calls_for("beta") == 1
+    plan = json.loads((artifacts / "03_enrich" / "shards.json").read_text())
+    assert sorted(s["key"] for s in plan["shards"]) == ["alpha", "beta"]
+
+
+def test_single_top_level_folder_in_single_mode_keeps_the_monolithic_pass(
+    tmp_path, monkeypatch
+) -> None:
+    """Regression guard (b): one top-level folder + `single` still takes
+    `_stage3_enrich_single` (predicate False), the monolithic whole-repository
+    pass — no per-folder sharding."""
+    repo = _spine_repo(tmp_path / "repo")
+    # A single top-level folder — the predicate is False, so `single` is honored.
+    assert has_several_source_roots(build_skeleton(repo, "")) is False
+
+    seen: dict = {}
+
+    def fake(**kwargs):
+        prompt = kwargs["prompt"]
+        if "whole_repository" in prompt:
+            seen["monolithic"] = True
+            return _result(_whole_pkg(), "sess-mono")
+        return _result(_decision(), "sess-root")
+
+    codex = _BranchCodex(lambda key: _codex_result(_OK))
+    _patch(monkeypatch, fake, codex)
+    run = run_two_phase_extraction(
+        repo,
+        config=ExtractorConfig(enrich_sharding="single"),
+        on_event=None,
+        artifacts_dir=None,
+    )
+    # The monolithic (single-pass) prompt was used, not a sharded fan-out.
+    assert seen.get("monolithic") is True
+    assert [m.name for m in run.project_tree.modules] == ["pkg"]
 
 
 # ── Executor bounds and determinism ───────────────────────────────────────
