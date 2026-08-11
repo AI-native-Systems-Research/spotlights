@@ -16,6 +16,7 @@ import pytest
 from spotlights_engine.modules_extractor.coverage import (
     CrossArtifactError,
     compute_coverage,
+    forced_repository_level_files,
     validate_enriched_tree,
 )
 from spotlights_engine.modules_extractor.skeleton import build_skeleton
@@ -196,6 +197,72 @@ def test_external_dependency_colliding_with_internal_qn_fails(tmp_path: Path) ->
         validate_enriched_tree(tree, tmp_path, repo, skel)
 
 
+def test_all_single_child_parents_reported_together(tmp_path: Path) -> None:
+    # Two clustered single-child parents in one tree. Rule 4 must name BOTH in a
+    # single error so the one bounded repair pass can collapse them together;
+    # reporting one-at-a-time exhausts the repair budget (the vllm quantization
+    # regression: transform/inc/quark each wrapped a lone schemes child).
+    _write(tmp_path / "pkg" / "core" / "engine.py")
+    _write(tmp_path / "pkg" / "core" / "runner.py")
+    _write(tmp_path / "pkg" / "core" / "left" / "l.py")
+    _write(tmp_path / "pkg" / "core" / "left" / "only" / "a.py")
+    _write(tmp_path / "pkg" / "core" / "right" / "r.py")
+    _write(tmp_path / "pkg" / "core" / "right" / "solo" / "b.py")
+    skel = build_skeleton(tmp_path, "pkg")
+    data = {
+        "modules": [
+            {
+                "name": "core",
+                "path": "pkg/core",
+                "description": "Core runtime.",
+                "depends_on": [],
+                "main_files": [{"path": "pkg/core/engine.py", "role": "Engine."}],
+                "submodules": [
+                    {
+                        "name": "left",
+                        "path": "pkg/core/left",
+                        "description": "Left branch.",
+                        "main_files": [{"path": "pkg/core/left/l.py", "role": "L."}],
+                        "submodules": [
+                            {
+                                "name": "only",
+                                "path": "pkg/core/left/only",
+                                "description": "Only child.",
+                                "main_files": [
+                                    {"path": "pkg/core/left/only/a.py", "role": "A."}
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "name": "right",
+                        "path": "pkg/core/right",
+                        "description": "Right branch.",
+                        "main_files": [{"path": "pkg/core/right/r.py", "role": "R."}],
+                        "submodules": [
+                            {
+                                "name": "solo",
+                                "path": "pkg/core/right/solo",
+                                "description": "Solo child.",
+                                "main_files": [
+                                    {"path": "pkg/core/right/solo/b.py", "role": "B."}
+                                ],
+                            }
+                        ],
+                    },
+                ],
+            }
+        ],
+        "folds": [],
+    }
+    tree = EnrichedTree.model_validate(data)
+    with pytest.raises(CrossArtifactError) as excinfo:
+        validate_enriched_tree(tree, tmp_path, _repository(), skel)
+    message = str(excinfo.value)
+    assert "pkg/core/left" in message
+    assert "pkg/core/right" in message
+
+
 def test_optional_fold_accepted_and_reported(tmp_path: Path) -> None:
     # Add an optional (non-required) single-file dir under core; fold it.
     _repo(tmp_path)
@@ -219,3 +286,38 @@ def test_optional_fold_accepted_and_reported(tmp_path: Path) -> None:
     assert "pkg/core/extra" in cov.optional_folded
     # It was optional, so folding it does not change the required set.
     assert "pkg/core/extra" not in cov.required
+
+
+# ── forced_repository_level_files ──────────────────────────────────────────
+
+
+def test_forced_files_at_repo_root() -> None:
+    # source_root == "": only files directly at the repo root are forced; the
+    # packaged tree under vllm/ is untouched. This is the vllm regression: a
+    # stray root-level script (build_vllm_ppc64le.sh) that the model may miss.
+    files = [
+        "build_rust.sh",
+        "build_vllm_ppc64le.sh",
+        "setup.py",
+        "use_existing_torch.py",
+        "vllm/__init__.py",
+        "vllm/core/engine.py",
+    ]
+    assert forced_repository_level_files("", files) == [
+        "build_rust.sh",
+        "build_vllm_ppc64le.sh",
+        "setup.py",
+        "use_existing_torch.py",
+    ]
+
+
+def test_forced_files_at_nonempty_root() -> None:
+    # source_root == "src": only files directly at src/ are forced; nested
+    # package files and files outside the root are not.
+    files = ["src/pkg/__init__.py", "src/pkg/a.py", "src/top.py", "tools/x.py"]
+    assert forced_repository_level_files("src", files) == ["src/top.py"]
+
+
+def test_forced_files_none_when_all_nested() -> None:
+    assert forced_repository_level_files("", ["vllm/core/x.py"]) == []
+    assert forced_repository_level_files("src", ["src/pkg/a.py"]) == []

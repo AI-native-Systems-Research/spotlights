@@ -59,9 +59,11 @@ source root you choose, so choosing it correctly is critical.
    - Exclusions form an antichain (none nested under another), cannot equal the
      repository root or the selected source root, and cannot contain the
      selected root. Each exclusion must cover at least one real source file.
-   - Every source file sitting directly at the selected root that cannot itself
-     be a directory module must be classified with `repository_level_file` (or
-     the decision fails).
+   - Source files sitting directly at the selected root cannot themselves be
+     directory modules. You should classify the ones you notice with
+     `repository_level_file`, but the orchestrator also injects this
+     classification deterministically for any it detects, so you do not need to
+     enumerate every one exhaustively.
 
 ## Output
 

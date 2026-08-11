@@ -53,6 +53,7 @@ from spotlights_engine.modules_extractor.coverage import (
     CoverageReport,
     CrossArtifactError,
     compute_coverage,
+    forced_repository_level_files,
     validate_enriched_tree,
     validate_source_root_decision,
 )
@@ -90,6 +91,7 @@ from spotlights_engine.modules_extractor.skeleton import (
 )
 from spotlights_engine.modules_extractor.stage_schemas import (
     EnrichedTree,
+    ExcludedSourcePath,
     ReviewArtifact,
     ReviewIssue,
     ReviewReport,
@@ -375,6 +377,59 @@ def run_two_phase_extraction(
 # ── Stage 1 ───────────────────────────────────────────────────────────────
 
 
+def _inject_forced_repository_level_files(
+    decision: SourceRootDecision, detected_source_files: list[str]
+) -> SourceRootDecision:
+    """Deterministically add the mechanically-forced `repository_level_file`
+    exclusions the Stage-1 model may have missed.
+
+    A source file sitting directly at the selected root can only ever be
+    excluded (the directory-only schema cannot represent it), so requiring the
+    model to enumerate every one is fragile — the real vLLM run failed because a
+    single root-level script (`build_vllm_ppc64le.sh`) was left unclassified.
+    We compute that forced set and merge in only the files not already covered
+    by an existing exclusion (the model's own classifications, and ancestor
+    directory exclusions, are preserved). Semantic exclusions stay the model's
+    job. The result is idempotent: files already excluded are never re-added.
+    """
+    source_root = decision.repository.source_root
+    forced = forced_repository_level_files(source_root, detected_source_files)
+    if not forced:
+        return decision
+
+    existing = {e.path for e in decision.excluded_source_paths}
+    covered_by_dir = [e.path for e in decision.excluded_source_paths]
+
+    def _already_covered(path: str) -> bool:
+        if path in existing:
+            return True
+        return any(path.startswith(ex + "/") for ex in covered_by_dir)
+
+    additions = [
+        ExcludedSourcePath(
+            path=path,
+            reason="repository_level_file",
+            explanation=(
+                "source file directly at the source root; the directory-only "
+                "module schema cannot represent it (auto-classified)"
+            ),
+        )
+        for path in forced
+        if not _already_covered(path)
+    ]
+    if not additions:
+        return decision
+
+    return decision.model_copy(
+        update={
+            "excluded_source_paths": [
+                *decision.excluded_source_paths,
+                *additions,
+            ]
+        }
+    )
+
+
 def _stage1_source_root(
     repo_path: Path,
     *,
@@ -429,7 +484,9 @@ def _stage1_source_root(
                 stage="source_root",
             )
 
-        decision = result.parsed
+        decision = _inject_forced_repository_level_files(
+            result.parsed, detected_source_files
+        )
         try:
             validate_source_root_decision(decision, repo_path, detected_source_files)
         except CrossArtifactError as exc:

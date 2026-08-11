@@ -110,6 +110,36 @@ def _is_ancestor(ancestor: str, descendant: str) -> bool:
 # ── Stage 1 — source-root decision validation ─────────────────────────────
 
 
+def forced_repository_level_files(
+    source_root: str, detected_source_files: list[str]
+) -> list[str]:
+    """Source files sitting *directly* at the selected root.
+
+    A file at the root of the modeled tree cannot itself be a directory module
+    (the schema forbids a module path equal to `source_root`, and a bare file
+    has no directory to represent it), so it can only ever be excluded as a
+    `repository_level_file`. That makes the set mechanically determined rather
+    than a judgment call: `validate_source_root_decision` *requires* each such
+    file to be excluded, so the extractor injects them deterministically instead
+    of trusting the Stage-1 model to enumerate every one.
+
+    Returned paths are sorted and repo-relative. Semantic exclusions (a tests,
+    docs, or benchmarks *directory*, or source outside a non-empty root) are not
+    included here — those remain the model's decision.
+    """
+    forced: list[str] = []
+    if source_root:
+        prefix = source_root + "/"
+        for f in detected_source_files:
+            if f.startswith(prefix) and "/" not in f[len(prefix):]:
+                forced.append(f)
+    else:
+        for f in detected_source_files:
+            if "/" not in f:
+                forced.append(f)
+    return sorted(forced)
+
+
 def validate_source_root_decision(
     decision: SourceRootDecision,
     repo_path: Path,
@@ -329,14 +359,24 @@ def validate_enriched_tree(
                 )
             owned_by[fpath] = module_path
 
-    # Rule 4: every parent has zero or ≥2 emitted children.
+    # Rule 4: every parent has zero or ≥2 emitted children. Report *all*
+    # offenders in one error — a subtree can carry several clustered
+    # single-child parents (e.g. organizational dirs each wrapping one child),
+    # and the single bounded repair pass can only fix what it is shown. Raising
+    # on the first offender would surface them one-per-attempt and exhaust the
+    # repair budget before the last is collapsed.
     exempt = rule4_exempt_paths or set()
-    for m in all_modules:
-        if len(m.submodules) == 1 and _norm(m.path) not in exempt:
-            raise CrossArtifactError(
-                f"module {_norm(m.path)!r} has a single child; collapse it "
-                "(a parent needs zero or ≥2 children)"
-            )
+    single_child = [
+        _norm(m.path)
+        for m in all_modules
+        if len(m.submodules) == 1 and _norm(m.path) not in exempt
+    ]
+    if single_child:
+        listed = ", ".join(repr(p) for p in single_child)
+        raise CrossArtifactError(
+            f"module(s) with a single child; collapse each "
+            f"(a parent needs zero or ≥2 children): {listed}"
+        )
 
     # Rule 5: dependencies.
     _validate_dependencies(
@@ -591,6 +631,7 @@ __all__ = [
     "CoverageReport",
     "CrossArtifactError",
     "compute_coverage",
+    "forced_repository_level_files",
     "validate_enriched_tree",
     "validate_source_root_decision",
 ]
