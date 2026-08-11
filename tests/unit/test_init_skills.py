@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 
 import pytest
 
@@ -141,7 +140,8 @@ class TestInstallSkills:
         (skill / "tests").mkdir(parents=True)
         (skill / "SKILL.md").write_text("# share candidates\n", encoding="utf-8")
         (skill / "build_bundle.py").write_text("print('hi')\n", encoding="utf-8")
-        (skill / "tests" / "test_build_bundle.py").write_text("def test_x():\n    pass\n", encoding="utf-8")
+        nested = skill / "tests" / "test_build_bundle.py"
+        nested.write_text("def test_x():\n    pass\n", encoding="utf-8")
 
         rc = init_skills.install_skills(scope="project")
         assert rc == 0
@@ -189,7 +189,8 @@ class TestInstallSkills:
         (skill / "build_bundle.py").write_text("x = 1\n", encoding="utf-8")
         (skill / "build_bundle.pyc").write_text("junk\n", encoding="utf-8")
         (skill / ".DS_Store").write_text("junk\n", encoding="utf-8")
-        (skill / "__pycache__" / "build_bundle.cpython-314.pyc").write_text("junk\n", encoding="utf-8")
+        pycache = skill / "__pycache__"
+        (pycache / "build_bundle.cpython-314.pyc").write_text("junk\n", encoding="utf-8")
         (skill / "tests" / "__pycache__" / "t.pyc").write_text("junk\n", encoding="utf-8")
 
         rc = init_skills.install_skills(scope="project")
