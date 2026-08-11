@@ -212,6 +212,92 @@ class TestInstallSkills:
             assert not rel.endswith(".pyc")
             assert not rel.endswith(".DS_Store")
 
+    def test_force_directory_skill_per_file_independence(
+        self, fake_bundle, project_root
+    ):
+        skill = fake_bundle / "share-candidates"
+        skill.mkdir()
+        (skill / "SKILL.md").write_text("v1 skill\n", encoding="utf-8")
+        (skill / "build_bundle.py").write_text("v1 script\n", encoding="utf-8")
+        assert init_skills.install_skills(scope="project") == 0
+
+        base = (
+            project_root
+            / ".claude"
+            / "commands"
+            / "spotlights-share-candidates"
+        )
+        # User edits the script but not the manifest.
+        (base / "build_bundle.py").write_text(
+            "user edited script\n", encoding="utf-8"
+        )
+
+        # Bundle upgrades both files.
+        (skill / "SKILL.md").write_text("v2 skill\n", encoding="utf-8")
+        (skill / "build_bundle.py").write_text("v2 script\n", encoding="utf-8")
+        assert init_skills.install_skills(scope="project", force=True) == 0
+
+        # Unedited file upgraded; edited file preserved.
+        assert (base / "SKILL.md").read_text(encoding="utf-8") == "v2 skill\n"
+        assert (base / "build_bundle.py").read_text(
+            encoding="utf-8"
+        ) == "user edited script\n"
+
+        manifest = json.loads(
+            (
+                project_root / ".spotlights" / "manifest.json"
+            ).read_text(encoding="utf-8")
+        )
+        files = manifest["files"]
+        assert (
+            files[
+                ".claude/commands/spotlights-share-candidates/SKILL.md"
+            ]
+            == _sha256_text("v2 skill\n")
+        )
+        # Preserved file keeps its ORIGINAL (v1) recorded hash so a future
+        # revert is upgradeable.
+        assert (
+            files[
+                ".claude/commands/spotlights-share-candidates/build_bundle.py"
+            ]
+            == _sha256_text("v1 script\n")
+        )
+
+    def test_force_ignores_unmanaged_file_in_skill_dir(
+        self, fake_bundle, project_root
+    ):
+        skill = fake_bundle / "share-candidates"
+        skill.mkdir()
+        (skill / "SKILL.md").write_text("v1\n", encoding="utf-8")
+        assert init_skills.install_skills(scope="project") == 0
+
+        base = (
+            project_root
+            / ".claude"
+            / "commands"
+            / "spotlights-share-candidates"
+        )
+        # User drops their own file into the installed skill dir
+        # (no manifest entry).
+        (base / "notes.md").write_text("my notes\n", encoding="utf-8")
+
+        (skill / "SKILL.md").write_text("v2\n", encoding="utf-8")
+        assert init_skills.install_skills(scope="project", force=True) == 0
+
+        assert (base / "SKILL.md").read_text(encoding="utf-8") == "v2\n"
+        assert (base / "notes.md").read_text(encoding="utf-8") == "my notes\n"
+
+        manifest = json.loads(
+            (
+                project_root / ".spotlights" / "manifest.json"
+            ).read_text(encoding="utf-8")
+        )
+        assert (
+            ".claude/commands/spotlights-share-candidates/notes.md"
+            not in manifest["files"]
+        )
+
 
 class TestCliEntryPoint:
     def test_init_routed_via_main(self, fake_bundle, project_root):
