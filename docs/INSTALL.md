@@ -15,7 +15,7 @@ source .venv/bin/activate
 
 ## Install the Spotlights skill
 
-The engine ships Claude Code slash commands (currently `/spotlights-objective-setting` and `/spotlights-sort-candidates`) as bundled markdown templates. They are not active until you install them into a Claude Code commands directory. Locally In the project:
+The engine ships Claude Code slash commands (currently `/spotlights-objective-setting`, `/spotlights-sort-candidates`, and `/spotlights-share-candidates`) as bundled markdown templates. They are not active until you install them into a Claude Code commands directory. Locally In the project:
 
 ```bash
 spotlights-engine init           # writes .claude/commands/spotlights-*.md
@@ -34,6 +34,7 @@ Open Claude Code in the same directory and the slash commands appear:
 ```
 /spotlights-objective-setting
 /spotlights-sort-candidates
+/spotlights-share-candidates
 ```
 
 ## Preflight with `doctor`

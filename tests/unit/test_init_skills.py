@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-from pathlib import Path
 
 import pytest
 
@@ -135,6 +134,200 @@ class TestInstallSkills:
         # Bundle directory exists but contains no .md files.
         rc = init_skills.install_skills(scope="project")
         assert rc == 1
+
+    def test_installs_directory_skill_with_structure(self, fake_bundle, project_root):
+        skill = fake_bundle / "share-candidates"
+        (skill / "tests").mkdir(parents=True)
+        (skill / "SKILL.md").write_text("# share candidates\n", encoding="utf-8")
+        (skill / "build_bundle.py").write_text("print('hi')\n", encoding="utf-8")
+        nested = skill / "tests" / "test_build_bundle.py"
+        nested.write_text("def test_x():\n    pass\n", encoding="utf-8")
+
+        rc = init_skills.install_skills(scope="project")
+        assert rc == 0
+
+        base = project_root / ".claude" / "commands" / "spotlights-share-candidates"
+        assert (base / "SKILL.md").read_text(encoding="utf-8") == "# share candidates\n"
+        assert (base / "build_bundle.py").read_text(encoding="utf-8") == "print('hi')\n"
+        assert (base / "tests" / "test_build_bundle.py").is_file()
+
+        manifest = json.loads(
+            (project_root / ".spotlights" / "manifest.json").read_text(encoding="utf-8")
+        )
+        files = manifest["files"]
+        assert ".claude/commands/spotlights-share-candidates/SKILL.md" in files
+        assert ".claude/commands/spotlights-share-candidates/build_bundle.py" in files
+        assert ".claude/commands/spotlights-share-candidates/tests/test_build_bundle.py" in files
+        assert files[".claude/commands/spotlights-share-candidates/SKILL.md"] == _sha256_text(
+            "# share candidates\n"
+        )
+
+    def test_mixed_bundle_installs_both_kinds(self, fake_bundle, project_root):
+        (fake_bundle / "objective-setting.md").write_text("# obj\n", encoding="utf-8")
+        skill = fake_bundle / "share-candidates"
+        skill.mkdir()
+        (skill / "SKILL.md").write_text("# sc\n", encoding="utf-8")
+
+        rc = init_skills.install_skills(scope="project")
+        assert rc == 0
+
+        commands = project_root / ".claude" / "commands"
+        assert (commands / "spotlights-objective-setting.md").is_file()
+        assert (commands / "spotlights-share-candidates" / "SKILL.md").is_file()
+
+        manifest = json.loads(
+            (project_root / ".spotlights" / "manifest.json").read_text(encoding="utf-8")
+        )
+        assert ".claude/commands/spotlights-objective-setting.md" in manifest["files"]
+        assert ".claude/commands/spotlights-share-candidates/SKILL.md" in manifest["files"]
+
+    def test_directory_skill_excludes_junk(self, fake_bundle, project_root):
+        skill = fake_bundle / "share-candidates"
+        (skill / "__pycache__").mkdir(parents=True)
+        (skill / "tests" / "__pycache__").mkdir(parents=True)
+        (skill / "SKILL.md").write_text("# sc\n", encoding="utf-8")
+        (skill / "build_bundle.py").write_text("x = 1\n", encoding="utf-8")
+        (skill / "build_bundle.pyc").write_text("junk\n", encoding="utf-8")
+        (skill / ".DS_Store").write_text("junk\n", encoding="utf-8")
+        pycache = skill / "__pycache__"
+        (pycache / "build_bundle.cpython-314.pyc").write_text("junk\n", encoding="utf-8")
+        (skill / "tests" / "__pycache__" / "t.pyc").write_text("junk\n", encoding="utf-8")
+
+        rc = init_skills.install_skills(scope="project")
+        assert rc == 0
+
+        base = project_root / ".claude" / "commands" / "spotlights-share-candidates"
+        assert (base / "SKILL.md").is_file()
+        assert (base / "build_bundle.py").is_file()
+        assert not (base / "build_bundle.pyc").exists()
+        assert not (base / ".DS_Store").exists()
+        assert not (base / "__pycache__").exists()
+        assert not (base / "tests").exists()  # tests/ held only __pycache__, nothing copied
+
+        manifest = json.loads(
+            (project_root / ".spotlights" / "manifest.json").read_text(encoding="utf-8")
+        )
+        for rel in manifest["files"]:
+            assert "__pycache__" not in rel
+            assert not rel.endswith(".pyc")
+            assert not rel.endswith(".DS_Store")
+
+    def test_force_directory_skill_per_file_independence(
+        self, fake_bundle, project_root
+    ):
+        skill = fake_bundle / "share-candidates"
+        skill.mkdir()
+        (skill / "SKILL.md").write_text("v1 skill\n", encoding="utf-8")
+        (skill / "build_bundle.py").write_text("v1 script\n", encoding="utf-8")
+        assert init_skills.install_skills(scope="project") == 0
+
+        base = (
+            project_root
+            / ".claude"
+            / "commands"
+            / "spotlights-share-candidates"
+        )
+        # User edits the script but not the manifest.
+        (base / "build_bundle.py").write_text(
+            "user edited script\n", encoding="utf-8"
+        )
+
+        # Bundle upgrades both files.
+        (skill / "SKILL.md").write_text("v2 skill\n", encoding="utf-8")
+        (skill / "build_bundle.py").write_text("v2 script\n", encoding="utf-8")
+        assert init_skills.install_skills(scope="project", force=True) == 0
+
+        # Unedited file upgraded; edited file preserved.
+        assert (base / "SKILL.md").read_text(encoding="utf-8") == "v2 skill\n"
+        assert (base / "build_bundle.py").read_text(
+            encoding="utf-8"
+        ) == "user edited script\n"
+
+        manifest = json.loads(
+            (
+                project_root / ".spotlights" / "manifest.json"
+            ).read_text(encoding="utf-8")
+        )
+        files = manifest["files"]
+        assert (
+            files[
+                ".claude/commands/spotlights-share-candidates/SKILL.md"
+            ]
+            == _sha256_text("v2 skill\n")
+        )
+        # Preserved file keeps its ORIGINAL (v1) recorded hash so a future
+        # revert is upgradeable.
+        assert (
+            files[
+                ".claude/commands/spotlights-share-candidates/build_bundle.py"
+            ]
+            == _sha256_text("v1 script\n")
+        )
+
+    def test_force_ignores_unmanaged_file_in_skill_dir(
+        self, fake_bundle, project_root
+    ):
+        skill = fake_bundle / "share-candidates"
+        skill.mkdir()
+        (skill / "SKILL.md").write_text("v1\n", encoding="utf-8")
+        assert init_skills.install_skills(scope="project") == 0
+
+        base = (
+            project_root
+            / ".claude"
+            / "commands"
+            / "spotlights-share-candidates"
+        )
+        # User drops their own file into the installed skill dir
+        # (no manifest entry).
+        (base / "notes.md").write_text("my notes\n", encoding="utf-8")
+
+        (skill / "SKILL.md").write_text("v2\n", encoding="utf-8")
+        assert init_skills.install_skills(scope="project", force=True) == 0
+
+        assert (base / "SKILL.md").read_text(encoding="utf-8") == "v2\n"
+        assert (base / "notes.md").read_text(encoding="utf-8") == "my notes\n"
+
+        manifest = json.loads(
+            (
+                project_root / ".spotlights" / "manifest.json"
+            ).read_text(encoding="utf-8")
+        )
+        assert (
+            ".claude/commands/spotlights-share-candidates/notes.md"
+            not in manifest["files"]
+        )
+
+    def test_subdir_without_skill_md_is_ignored(
+        self, fake_bundle, project_root
+    ):
+        # A subdirectory with files but no SKILL.md is NOT a directory skill.
+        not_a_skill = fake_bundle / "helpers"
+        not_a_skill.mkdir()
+        (not_a_skill / "README.md").write_text("not a skill\n", encoding="utf-8")
+        (not_a_skill / "util.py").write_text("x = 1\n", encoding="utf-8")
+        # A real slash command so the run installs something.
+        (fake_bundle / "objective-setting.md").write_text(
+            "# obj\n", encoding="utf-8"
+        )
+
+        rc = init_skills.install_skills(scope="project")
+        assert rc == 0
+
+        commands = project_root / ".claude" / "commands"
+        # The valid slash command installed.
+        assert (commands / "spotlights-objective-setting.md").is_file()
+        # The non-skill subdir was ignored: no prefixed dir, no raw dir.
+        assert not (commands / "spotlights-helpers").exists()
+        assert not (commands / "helpers").exists()
+
+        manifest = json.loads(
+            (project_root / ".spotlights" / "manifest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        for rel in manifest["files"]:
+            assert "helpers" not in rel
 
 
 class TestCliEntryPoint:

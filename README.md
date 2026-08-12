@@ -105,7 +105,8 @@ For LiteLLM gateway config and a quick response check, see [docs/agent-cli-setup
 | Skill | Purpose |
 |---|---|
 | `/spotlights-objective-setting` | Optional interview that helps you frame a sharp optimization objective and prints ready-to-paste `--objective`/`--hint` flags. You can also write those flags by hand. |
-| `/spotlights-sort-candidates` | Ranks a finished run's candidates by estimated impact. |
+| `/spotlights-sort-candidates` | Ranks a finished run's candidates by estimated impact, writing `sorted_candidates.md` (a summary table linking each candidate) and `sorted_candidates.json` under `<output-folder>/sorted/`. |
+| `/spotlights-share-candidates` | Packages the top-N candidates from `sorted_candidates.md` into a self-contained ZIP an external teammate can unzip and open by double-clicking `index.html` — no server, works offline. |
 
 <a id="quickstart"></a>
 ## Quickstart on a vLLM subset
@@ -163,6 +164,14 @@ spotlights-engine --include vllm/v1/kv_offload vllm/v1/attention/paged_kv ...
 ```
 
 Point it at `./spotlights-out/result.json` and it writes a ranked `./spotlights-out/sorted/sorted_candidates.md` (a summary table linking each candidate to its write-up) plus a machine-readable `./spotlights-out/sorted/sorted_candidates.json`.
+
+**6. Share the top candidates (optional).** Once a run is ranked, the bundled `/spotlights-share-candidates` slash command packages the top-N candidates into a self-contained ZIP an external teammate can unzip and open by double-clicking `index.html` — no server, works offline. In Claude Code:
+
+```
+/spotlights-share-candidates
+```
+
+It asks for the folder containing `sorted_candidates.md` (e.g. `./spotlights-out/sorted/`) and a top-N (default `5`), then writes a `share-bundle/` folder and a `share-candidates.zip` next to it. The bundle contains rendered HTML for each candidate plus the original markdown, with external references (arxiv, doi, docs) kept clickable and module breadcrumbs left as plain text.
 
 ## Signal sources & roadmap
 

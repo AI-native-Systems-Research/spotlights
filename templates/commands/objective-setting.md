@@ -161,7 +161,22 @@ spotlights-objectives finalize '{"proposal": <proposal JSON>, "session_id": "<uu
 spotlights-objectives finalize '{"proposal": <proposal JSON>, "session_id": "<uuid>", "approved_by": "<name>", "output_folder": "<root>"}'
 ```
 
-Report the full path of the saved file and confirm the objective is locked for this session. Then print the closing marker:
+Report the full path of the saved file and confirm the objective is locked for this session.
+
+### Print the ready-to-use engine flags
+
+After reporting the saved path, print a single copy-pasteable line the user can drop straight into a `spotlights-engine` invocation. Build it from the locked objective:
+
+- `--objective` — the target metric and direction as a natural-language goal (e.g. `"reduce the median TTFT and median TPOT"`).
+- `--hint` — one repeated flag per workload class in scope (e.g. `--hint "Agentic" --hint "Long context"`). For the Developer path, you may fold target components / notes into an extra hint if they sharpen the workload description.
+
+Present it in a fenced block so it's easy to copy, for example:
+
+```bash
+--objective "reduce the median TTFT and median TPOT" --hint "Agentic" --hint "Long context"
+```
+
+Then print the closing marker:
 
 > **--- Objective Setting complete. ---**
 
