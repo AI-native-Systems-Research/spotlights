@@ -1,0 +1,259 @@
+{
+  "cost": {
+    "amount_usd": 35.74978950000001,
+    "by_model": [
+      {
+        "amount_usd": 0.0,
+        "model": "aws/claude-opus-4-7",
+        "priced": false,
+        "priced_token_share": 0.1540570274193486,
+        "provider": "anthropic",
+        "rate_key": "anthropic:aws/claude-opus-4-7",
+        "role": "agent_proposals"
+      },
+      {
+        "amount_usd": 0.0,
+        "model": "aws/claude-opus-4-7",
+        "priced": false,
+        "priced_token_share": 0.08906709536473492,
+        "provider": "anthropic",
+        "rate_key": "anthropic:aws/claude-opus-4-7",
+        "role": "candidate_discovery"
+      },
+      {
+        "amount_usd": 0.0,
+        "model": "aws/claude-opus-4-7",
+        "priced": false,
+        "priced_token_share": 0.6269245807499418,
+        "provider": "anthropic",
+        "rate_key": "anthropic:aws/claude-opus-4-7",
+        "role": "proposal_from_finding_creator"
+      },
+      {
+        "amount_usd": 16.751879999999996,
+        "model": "codex",
+        "priced": true,
+        "priced_token_share": 0.05980423105676517,
+        "provider": "openai",
+        "rate_key": "openai:codex",
+        "role": "agent_proposals"
+      },
+      {
+        "amount_usd": 4.6117930000000005,
+        "model": "codex",
+        "priced": true,
+        "priced_token_share": 0.00917593001557235,
+        "provider": "openai",
+        "rate_key": "openai:codex",
+        "role": "deep_research"
+      },
+      {
+        "amount_usd": 14.3861165,
+        "model": "gpt-5.5",
+        "priced": true,
+        "priced_token_share": 0.06097113539363707,
+        "provider": "openai",
+        "rate_key": "openai:gpt-5.5",
+        "role": "candidate_discovery"
+      }
+    ],
+    "coverage": {
+      "priced_models": [
+        "openai:codex",
+        "openai:gpt-5.5"
+      ],
+      "unpriced_models": [
+        "anthropic:aws/claude-opus-4-7"
+      ]
+    },
+    "priced_token_share": 0.1299512964659746,
+    "rate_note": "rates applied: openai:codex (CLI-family fallback for Codex invocations whose stream did not emit a resolvable model id; same rate as openai:gpt-5.5 because gpt-5.5 is the model behind every codex invocation in this deployment. LiteLLM (azure) rate as of 2026-07-07: $2.50/MTok input, $15/MTok output, $0.50/MTok cache read; Codex has no cache-create bucket. Override for a different contract.); openai:gpt-5.5 (LiteLLM (azure) rate as of 2026-07-07: GPT-5.5 $2.50/MTok input, $15/MTok output, $0.50/MTok cache read; no cache-create bucket. Used when the Codex stream emits msg.model=gpt-5.5; identical rates to the openai:codex CLI-family fallback.); PARTIAL cost \u2014 no contracted rate for: anthropic:aws/claude-opus-4-7; 181 invocation(s) had an unresolved model id (priced by CLI-family fallback key when available)",
+    "source": "contracted-rate-table"
+  },
+  "date": "2026-08-11T19:35:36+00:00",
+  "external_cost": {
+    "amount_usd": 57.184186999999994,
+    "by_model": [
+      {
+        "amount_usd": 0.0,
+        "model": "aws/claude-opus-4-7",
+        "priced": false,
+        "priced_token_share": 0.1540570274193486,
+        "provider": "anthropic",
+        "rate_key": "anthropic:aws/claude-opus-4-7",
+        "role": "agent_proposals"
+      },
+      {
+        "amount_usd": 0.0,
+        "model": "aws/claude-opus-4-7",
+        "priced": false,
+        "priced_token_share": 0.08906709536473492,
+        "provider": "anthropic",
+        "rate_key": "anthropic:aws/claude-opus-4-7",
+        "role": "candidate_discovery"
+      },
+      {
+        "amount_usd": 0.0,
+        "model": "aws/claude-opus-4-7",
+        "priced": false,
+        "priced_token_share": 0.6269245807499418,
+        "provider": "anthropic",
+        "rate_key": "anthropic:aws/claude-opus-4-7",
+        "role": "proposal_from_finding_creator"
+      },
+      {
+        "amount_usd": 26.98792,
+        "model": "codex",
+        "priced": true,
+        "priced_token_share": 0.05980423105676517,
+        "provider": "openai",
+        "rate_key": "openai:codex",
+        "role": "agent_proposals"
+      },
+      {
+        "amount_usd": 8.591138,
+        "model": "codex",
+        "priced": true,
+        "priced_token_share": 0.00917593001557235,
+        "provider": "openai",
+        "rate_key": "openai:codex",
+        "role": "deep_research"
+      },
+      {
+        "amount_usd": 21.605128999999998,
+        "model": "gpt-5.5",
+        "priced": true,
+        "priced_token_share": 0.06097113539363707,
+        "provider": "openai",
+        "rate_key": "openai:gpt-5.5",
+        "role": "candidate_discovery"
+      }
+    ],
+    "coverage": {
+      "priced_models": [
+        "openai:codex",
+        "openai:gpt-5.5"
+      ],
+      "unpriced_models": [
+        "anthropic:aws/claude-opus-4-7"
+      ]
+    },
+    "priced_token_share": 0.1299512964659746,
+    "rate_note": "rates applied: openai:codex (CLI-family fallback for Codex invocations whose stream did not emit a resolvable model id; same rate as openai:gpt-5.5 because gpt-5.5 is the model behind every codex invocation in this deployment. Public OpenAI API list price for standard GPT-5.5: $5.00/MTok input, $30.00/MTok output, $0.50/MTok cached input; no cache-create bucket. GPT-5.5 long-context (>272K input tokens) and some regional endpoints have different rates, so override via SPOTLIGHTS_EXTERNAL_RATES_FILE if those apply.); openai:gpt-5.5 (Public OpenAI API list price for standard GPT-5.5: $5.00/MTok input, $30.00/MTok output, $0.50/MTok cached input; no cache-create bucket. Used when the Codex stream emits msg.model=gpt-5.5; identical rates to the openai:codex CLI-family fallback.); PARTIAL cost \u2014 no contracted rate for: anthropic:aws/claude-opus-4-7; 181 invocation(s) had an unresolved model id (priced by CLI-family fallback key when available)",
+    "source": "public-api-rate-table"
+  },
+  "models_used": [
+    {
+      "model": "aws/claude-opus-4-7",
+      "provider": "anthropic",
+      "role": "agent_proposals",
+      "usage": {
+        "cache_create": 4064996,
+        "cache_read": 36482881,
+        "input": 4470,
+        "output": 491572
+      }
+    },
+    {
+      "model": "aws/claude-opus-4-7",
+      "provider": "anthropic",
+      "role": "candidate_discovery",
+      "usage": {
+        "cache_create": 1610601,
+        "cache_read": 21833292,
+        "input": 16277,
+        "output": 269112
+      }
+    },
+    {
+      "model": "aws/claude-opus-4-7",
+      "provider": "anthropic",
+      "role": "proposal_from_finding_creator",
+      "usage": {
+        "cache_create": 27209248,
+        "cache_read": 138976984,
+        "input": 13439,
+        "output": 825762
+      }
+    },
+    {
+      "model": "codex",
+      "provider": "openai",
+      "role": "agent_proposals",
+      "usage": {
+        "cache_create": 0,
+        "cache_read": 13031680,
+        "input": 2662774,
+        "output": 238607
+      }
+    },
+    {
+      "model": "codex",
+      "provider": "openai",
+      "role": "deep_research",
+      "usage": {
+        "cache_create": 0,
+        "cache_read": 1264896,
+        "input": 1097362,
+        "output": 82396
+      }
+    },
+    {
+      "model": "gpt-5.5",
+      "provider": "openai",
+      "role": "candidate_discovery",
+      "usage": {
+        "cache_create": 0,
+        "cache_read": 14334208,
+        "input": 1714167,
+        "output": 195573
+      }
+    }
+  ],
+  "notes": "unpriced models excluded from cost: anthropic:aws/claude-opus-4-7; external: unpriced models excluded from cost: anthropic:aws/claude-opus-4-7",
+  "outputs": {
+    "candidates_path": "/Users/iklamer/ai-native-systems/tmp/spotlights/spotlights-out/index.md",
+    "module_status": {
+      "DEGRADED": 6,
+      "FAILED": 0,
+      "SKIPPED": 0,
+      "SUCCEEDED": 2
+    },
+    "num_candidates": 173
+  },
+  "run_id": "run-4b5859bcc6cc3ad1",
+  "spotlights": {
+    "commit_sha": "6c23650a2dd309648d1652145eb9f29fa2609206",
+    "config": {
+      "agent_proposals_hash": "29092cf24868d69d4e6e6c90f17323f6bf853fadb2acb6b455dcdf07b8b4bce0",
+      "deep_research_hash": "92e3780386e13d0c3f284f7d220c0110064ee3ada277a05d1436e4cd9f26f97e",
+      "discovery_hash": "4e752640482669c0b18a2daba11e75735bae261de4277be45ba35de474722db2",
+      "extractor_hash": "418bd7e04355644a7da15e2b7dedb99a5435a0d721b49424459fc385feccb379",
+      "module_filter": {
+        "include": [
+          "vllm/distributed/kv_transfer",
+          "vllm/multimodal",
+          "vllm/v1/attention",
+          "vllm/v1/core",
+          "vllm/v1/engine",
+          "vllm/v1/executor",
+          "vllm/v1/kv_offload",
+          "vllm/v1/worker"
+        ]
+      },
+      "proposal_from_finding_hash": "7da44bf7293a6aec9ba332e0bfd8f3bb1394cdb38ddbb240fe12e0f7eb9a4dd8"
+    },
+    "pipeline": "deep-research"
+  },
+  "target": {
+    "commit_sha": "83ad767eed3be3ee7f2df63be693bfaca5c7c922",
+    "objective": "reduce the median TTFT and median TPOT (Time Per Output Token)",
+    "repo_url": "https://github.com/vllm-project/vllm.git"
+  },
+  "timing": {
+    "accumulated_duration_s": 25655.45255166915,
+    "api_time_s": 70453.47157366884,
+    "wall_clock_s": 25656.74467020802
+  },
+  "total_tokens": 266420297
+}

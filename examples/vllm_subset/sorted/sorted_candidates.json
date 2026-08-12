@@ -1,0 +1,3816 @@
+{
+  "source_md": "spotlights-out/sorted/sorted_candidates.md",
+  "source_result": "spotlights-out/result.json",
+  "run_id": "run-4b5859bcc6cc3ad1",
+  "objective": "reduce the median TTFT and median TPOT (Time Per Output Token)",
+  "method": "listwise sub-agent judge",
+  "total_ranked": 173,
+  "candidates": [
+    {
+      "rank": 1,
+      "id": "cand-vllm_v1_attention-0002",
+      "module_qualified_name": "vllm/v1/attention",
+      "symbol": "FlashAttentionMetadataBuilder.build",
+      "impact": "high",
+      "score": 95,
+      "rationale": "FlashAttentionMetadataBuilder.build sits on the per-step metadata path for every decode token and every prefill; cascade-plan caching, coalesced H2D staging, and pipelined AOT scheduler-metadata comp\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/attention/backends/flash_attn.py",
+          "spans": [
+            {
+              "line_start": 479,
+              "line_end": 762,
+              "symbol": "FlashAttentionMetadataBuilder.build",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 2,
+      "id": "cand-vllm_v1_worker-0001",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "GPUModelRunner._prepare_inputs",
+      "impact": "high",
+      "score": 94,
+      "rationale": "GPUModelRunner._prepare_inputs is the largest steady per-step host cost on the legacy runner; the pure-decode fast path (skip np.repeat/cumsum/index_select when every request has one token) and H2D c\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/gpu_model_runner.py",
+          "spans": [
+            {
+              "line_start": 2001,
+              "line_end": 2323,
+              "symbol": "GPUModelRunner._prepare_inputs",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 3,
+      "id": "cand-vllm_v1_worker-0006",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "GPUModelRunner._bookkeeping_sync",
+      "impact": "high",
+      "score": 93,
+      "rationale": "_bookkeeping_sync's _to_list(sampled_token_ids) D2H is the largest post-sample host roundtrip on every decode step; pipelining the sync behind the next step or landing sampled tokens in pinned host b\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/gpu_model_runner.py",
+          "spans": [
+            {
+              "line_start": 3763,
+              "line_end": 3910,
+              "symbol": "GPUModelRunner._bookkeeping_sync",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 4,
+      "id": "cand-vllm_v1_worker-0027",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "AsyncOutput.get_output",
+      "impact": "high",
+      "score": 92,
+      "rationale": "AsyncOutput.get_output holds copy_event.synchronize plus tolist/per-row Python work that blocks every async decode step; eliminating the D2H stall lowers median TPOT and the fixes are unusually concr\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/gpu/async_utils.py",
+          "spans": [
+            {
+              "line_start": 32,
+              "line_end": 102,
+              "symbol": "AsyncOutput.get_output",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 5,
+      "id": "cand-vllm_v1_attention-0004",
+      "module_qualified_name": "vllm/v1/attention",
+      "symbol": "FlashInferMetadataBuilder.build",
+      "impact": "high",
+      "score": 91,
+      "rationale": "FlashInferMetadataBuilder.build is the per-step planning gate for FlashInfer users; plan caching keyed by CUDA-graph batch descriptor, coalesced H2D, and Triton-fused metadata prep are all directly o\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/attention/backends/flashinfer.py",
+          "spans": [
+            {
+              "line_start": 1119,
+              "line_end": 1520,
+              "symbol": "FlashInferMetadataBuilder.build",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 6,
+      "id": "cand-vllm_v1_core-0009",
+      "module_qualified_name": "vllm/v1/core",
+      "symbol": "Scheduler.schedule",
+      "impact": "high",
+      "score": 90,
+      "rationale": "Scheduler.schedule is on the CPU critical path of every decode step and every admission; at agentic concurrency the Python scheduler floor can dominate CPU-side TPOT, and prefix-length-ordered admiss\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/core/sched/scheduler.py",
+          "spans": [
+            {
+              "line_start": 426,
+              "line_end": 1248,
+              "symbol": "Scheduler.schedule",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 7,
+      "id": "cand-vllm_v1_attention-0008",
+      "module_qualified_name": "vllm/v1/attention",
+      "symbol": "unified_attention launch-parameter selection",
+      "impact": "high",
+      "score": 89,
+      "rationale": "Triton unified_attention launch parameters govern the dominant compute kernel for both prefill (TTFT) and decode (TPOT); per-shape autotuned buckets and occupancy-aware split-KV directly shift the me\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/attention/ops/triton_unified_attention.py",
+          "spans": [
+            {
+              "line_start": 784,
+              "line_end": 1189,
+              "symbol": "unified_attention launch-parameter selection",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 8,
+      "id": "cand-vllm_v1_executor-0001",
+      "module_qualified_name": "vllm/v1/executor",
+      "symbol": "MultiprocExecutor.collective_rpc",
+      "impact": "high",
+      "score": 88,
+      "rationale": "MultiprocExecutor.collective_rpc fires per execute_model/sample_tokens step; cached cloudpickle payloads, precompiled RPC descriptors, and a static Ray Compiled Graph for the steady-state control pla\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/executor/multiproc_executor.py",
+          "spans": [
+            {
+              "line_start": 365,
+              "line_end": 427,
+              "symbol": "MultiprocExecutor.collective_rpc",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 9,
+      "id": "cand-vllm_v1_worker-0023",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "GPUModelRunner.prepare_inputs",
+      "impact": "high",
+      "score": 87,
+      "rationale": "GPUModelRunner.prepare_inputs is the new runner's central per-step CPU/GPU preparation; coalescing H2D copies, removing seq_lens_cpu host sync, and precomputing metadata in a scheduler-side thread ov\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/gpu/model_runner.py",
+          "spans": [
+            {
+              "line_start": 971,
+              "line_end": 1149,
+              "symbol": "GPUModelRunner.prepare_inputs",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 10,
+      "id": "cand-vllm_v1_worker-0003",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "GPUModelRunner._prepare_input_ids",
+      "impact": "high",
+      "score": 86,
+      "rationale": "_prepare_input_ids sits on the async decode fast path with fixed per-step Python-list construction and four micro-copies; single-token multi-turn agent decode is exactly where this fixed overhead is \u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/gpu_model_runner.py",
+          "spans": [
+            {
+              "line_start": 1825,
+              "line_end": 1954,
+              "symbol": "GPUModelRunner._prepare_input_ids",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 11,
+      "id": "cand-vllm_v1_worker-0004",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "GPUModelRunner._calc_spec_decode_metadata",
+      "impact": "high",
+      "score": 84,
+      "rationale": "_calc_spec_decode_metadata builds spec-decode indices via five separate H2D copies plus a .tolist() sync every step; spec decode is a core TPOT lever, but demoted slightly vs shard because gains are \u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/gpu_model_runner.py",
+          "spans": [
+            {
+              "line_start": 2891,
+              "line_end": 2964,
+              "symbol": "GPUModelRunner._calc_spec_decode_metadata",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 12,
+      "id": "cand-vllm_v1_engine-0001",
+      "module_qualified_name": "vllm/v1/engine",
+      "symbol": "DPLBAsyncMPClient.get_core_engine_for_request",
+      "impact": "high",
+      "score": 83,
+      "rationale": "DPLB routing gates admission and per-engine KV pressure; prefix-affinity + P2C changes can materially lower median TTFT under multi-turn agentic bursts. Demoted below universal per-step levers becaus\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/engine/core_client.py",
+          "spans": [
+            {
+              "line_start": 1471,
+              "line_end": 1522,
+              "symbol": "DPLBAsyncMPClient.get_core_engine_for_request",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 13,
+      "id": "cand-vllm_v1_attention-0001",
+      "module_qualified_name": "vllm/v1/attention",
+      "symbol": "use_cascade_attention",
+      "impact": "high",
+      "score": 82,
+      "rationale": "use_cascade_attention routing is a fixed-gate branch between numerically equivalent attention kernels; long shared conversation prefixes are exactly the case where flipping to cascade cuts TTFT-domin\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/attention/backends/flash_attn.py",
+          "spans": [
+            {
+              "line_start": 1586,
+              "line_end": 1661,
+              "symbol": "use_cascade_attention",
+              "kind": "function"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 14,
+      "id": "cand-vllm_v1_engine-0005",
+      "module_qualified_name": "vllm/v1/engine",
+      "symbol": "OutputProcessor.process_outputs",
+      "impact": "high",
+      "score": 81,
+      "rationale": "OutputProcessor.process_outputs is the only full-batch Python loop over every emitted token; branch specialization plus batched DecodeStream.step directly cut frontend CPU per token, translating into\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/engine/output_processor.py",
+          "spans": [
+            {
+              "line_start": 589,
+              "line_end": 711,
+              "symbol": "OutputProcessor.process_outputs",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 15,
+      "id": "cand-vllm_v1_core-0006",
+      "module_qualified_name": "vllm/v1/core",
+      "symbol": "BlockHashToBlockMap and BlockPool.get_cached_block",
+      "impact": "high",
+      "score": 80,
+      "rationale": "BlockPool.get_cached_block runs on every prefix-cache probe, often hundreds per admission for long agent histories; split-map single-group fast path and precomputed group keys compress prefix-lookup \u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/core/block_pool.py",
+          "spans": [
+            {
+              "line_start": 33,
+              "line_end": 223,
+              "symbol": "BlockHashToBlockMap and BlockPool.get_cached_block",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 16,
+      "id": "cand-vllm_distributed_kv_transfer-0011",
+      "module_qualified_name": "vllm/distributed/kv_transfer",
+      "symbol": "HF3FSKVConnector._generate_block_hashes",
+      "impact": "high",
+      "score": 79,
+      "rationale": "HF3FSKVConnector._generate_block_hashes scales with prompt length on the TTFT-critical prefix lookup path; replacing stringified-list MD5 with XXH3 and caching chains cuts per-turn hashing when long \u2026",
+      "locations": [
+        {
+          "file": "vllm/distributed/kv_transfer/kv_connector/v1/hf3fs/hf3fs_connector.py",
+          "spans": [
+            {
+              "line_start": 955,
+              "line_end": 982,
+              "symbol": "HF3FSKVConnector._generate_block_hashes",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 17,
+      "id": "cand-vllm_v1_kv_offload-0009",
+      "module_qualified_name": "vllm/v1/kv_offload",
+      "symbol": "TieringOffloadingManager._initiate_promotion",
+      "impact": "high",
+      "score": 78,
+      "rationale": "TieringOffloadingManager._initiate_promotion controls how fast secondary hits become primary hits; batched prepare_write plus TinyLFU/S3-FIFO admission gates directly move TTFT on cache-hit turns and\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/kv_offload/tiering/manager.py",
+          "spans": [
+            {
+              "line_start": 410,
+              "line_end": 457,
+              "symbol": "TieringOffloadingManager._initiate_promotion",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 18,
+      "id": "cand-vllm_v1_worker-0019",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "UBatchWrapper._capture_ubatches and _run_ubatches",
+      "impact": "high",
+      "score": 77,
+      "rationale": "UBatchWrapper's capture/run implements DBO to overlap mixed prefill/decode; CUDA graph reuse and persistent worker threads cut per-forward overhead and improve overlap for exactly the non-uniform age\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/gpu_ubatch_wrapper.py",
+          "spans": [
+            {
+              "line_start": 212,
+              "line_end": 341,
+              "symbol": "UBatchWrapper._capture_ubatches and _run_ubatches",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 19,
+      "id": "cand-vllm_v1_worker-0011",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "BlockTable and MultiGroupBlockTable row mutation methods",
+      "impact": "high",
+      "score": 76,
+      "rationale": "BlockTable per-group row mutation runs O(active changes x KV groups) every step; batching row updates and copying only dirty rows removes repeated Python calls for hybrid/multi-group models. Visible \u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/block_table.py",
+          "spans": [
+            {
+              "line_start": 138,
+              "line_end": 355,
+              "symbol": "BlockTable and MultiGroupBlockTable row mutation methods",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 20,
+      "id": "cand-vllm_distributed_kv_transfer-0005",
+      "module_qualified_name": "vllm/distributed/kv_transfer",
+      "symbol": "NixlBaseConnectorScheduler.__init__ transfer policy defaults",
+      "impact": "high",
+      "score": 74,
+      "rationale": "NIXL pull-vs-recompute defaults determine per-turn TTFT on every remote-prefill hit; an EWMA-adjusted kv_recompute_threshold is well-founded and multi-turn agent prompts hit this decision constantly.\u2026",
+      "locations": [
+        {
+          "file": "vllm/distributed/kv_transfer/kv_connector/v1/nixl/base_scheduler.py",
+          "spans": [
+            {
+              "line_start": 70,
+              "line_end": 172,
+              "symbol": "NixlBaseConnectorScheduler.__init__ transfer policy defaults",
+              "kind": "config_block"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 21,
+      "id": "cand-vllm_v1_engine-0006",
+      "module_qualified_name": "vllm/v1/engine",
+      "symbol": "BaseIncrementalDetokenizer.update",
+      "impact": "high",
+      "score": 73,
+      "rationale": "BaseIncrementalDetokenizer.update is per-token frontend CPU work; batched DecodeStream, no-stop fast path, and Aho-Corasick stop matching cut Python cost on the TPOT path, but detokenization is usual\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/engine/detokenizer.py",
+          "spans": [
+            {
+              "line_start": 96,
+              "line_end": 143,
+              "symbol": "BaseIncrementalDetokenizer.update",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 22,
+      "id": "cand-vllm_v1_core-0001",
+      "module_qualified_name": "vllm/v1/core",
+      "symbol": "HybridKVCacheCoordinator.find_longest_cache_hit",
+      "impact": "high",
+      "score": 72,
+      "rationale": "HybridKVCacheCoordinator.find_longest_cache_hit is the central hybrid prefix-cache admission loop; reordering attention groups and length-only reconciliation cut TTFT for multi-turn resubmits. Impact\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/core/kv_cache_coordinator.py",
+          "spans": [
+            {
+              "line_start": 685,
+              "line_end": 817,
+              "symbol": "HybridKVCacheCoordinator.find_longest_cache_hit",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 23,
+      "id": "cand-vllm_v1_core-0007",
+      "module_qualified_name": "vllm/v1/core",
+      "symbol": "get_request_block_hasher.request_block_hasher",
+      "impact": "high",
+      "score": 70,
+      "rationale": "request_block_hasher scans hundreds/thousands of blocks synchronously before admission; LRU over completed block hash tuples and lifted extra-key invariants shave TTFT on long-context turns. Solid bu\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/core/kv_cache_utils.py",
+          "spans": [
+            {
+              "line_start": 685,
+              "line_end": 726,
+              "symbol": "get_request_block_hasher.request_block_hasher",
+              "kind": "function"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 24,
+      "id": "cand-vllm_distributed_kv_transfer-0006",
+      "module_qualified_name": "vllm/distributed/kv_transfer",
+      "symbol": "MultiConnector.get_num_new_matched_tokens",
+      "impact": "high",
+      "score": 68,
+      "rationale": "MultiConnector.get_num_new_matched_tokens selects where turn-2 KV loads from across tiers; a scored router replacing first-positive-wins can meaningfully move TTFT when GPU/CPU/remote/object connecto\u2026",
+      "locations": [
+        {
+          "file": "vllm/distributed/kv_transfer/kv_connector/v1/multi_connector.py",
+          "spans": [
+            {
+              "line_start": 385,
+              "line_end": 404,
+              "symbol": "MultiConnector.get_num_new_matched_tokens",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 25,
+      "id": "cand-vllm_v1_executor-0013",
+      "module_qualified_name": "vllm/v1/executor",
+      "symbol": "RayWorkerWrapper.execute_model_ray",
+      "impact": "high",
+      "score": 66,
+      "rationale": "execute_model_ray is the per-worker body of the Ray steady-state DAG; overlapping AsyncModelRunnerOutput D2H with the next channel return and eliminating per-step Python branching cut host overhead e\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/executor/ray_utils.py",
+          "spans": [
+            {
+              "line_start": 125,
+              "line_end": 177,
+              "symbol": "RayWorkerWrapper.execute_model_ray",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 26,
+      "id": "cand-vllm_v1_worker-0010",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "_compute_slot_mapping_kernel",
+      "impact": "high",
+      "score": 64,
+      "rationale": "_compute_slot_mapping_kernel's fixed 1024-lane per-request tile wastes lanes on one-token decodes; a 2D token-tile grid or one-token fast path shrinks kernel time on decode-heavy agent turns. Kernel \u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/block_table.py",
+          "spans": [
+            {
+              "line_start": 380,
+              "line_end": 442,
+              "symbol": "_compute_slot_mapping_kernel",
+              "kind": "kernel"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 27,
+      "id": "cand-vllm_v1_worker-0024",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "BlockTables.gather_block_tables and compute_slot_mappings",
+      "impact": "high",
+      "score": 62,
+      "rationale": "BlockTables.gather_block_tables + compute_slot_mappings run every step in the new runner with a fixed 1024 tile; decode-fused path mapping one request per lane cuts TPOT for one-token-per-request age\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/gpu/block_table.py",
+          "spans": [
+            {
+              "line_start": 136,
+              "line_end": 323,
+              "symbol": "BlockTables.gather_block_tables and compute_slot_mappings",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 28,
+      "id": "cand-vllm_v1_worker-0002",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "GPUModelRunner._update_states",
+      "impact": "high",
+      "score": 60,
+      "rationale": "_update_states runs before every legacy model step with Python cost scaling with active-request churn \u2014 matches multi-turn agent traffic. MRV2-style decoupled state and fused slot-swap admission redu\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/gpu_model_runner.py",
+          "spans": [
+            {
+              "line_start": 1233,
+              "line_end": 1607,
+              "symbol": "GPUModelRunner._update_states",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 29,
+      "id": "cand-vllm_v1_core-0002",
+      "module_qualified_name": "vllm/v1/core",
+      "symbol": "FullAttentionManager.find_longest_cache_hit",
+      "impact": "high",
+      "score": 58,
+      "rationale": "FullAttentionManager.find_longest_cache_hit runs on every admission; galloping search over chained-hash monotonicity plus per-step memoization cuts TTFT for the agentic workload. Gains are concentrat\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/core/single_type_kv_cache_manager.py",
+          "spans": [
+            {
+              "line_start": 682,
+              "line_end": 777,
+              "symbol": "FullAttentionManager.find_longest_cache_hit",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 30,
+      "id": "cand-vllm_distributed_kv_transfer-0001",
+      "module_qualified_name": "vllm/distributed/kv_transfer",
+      "symbol": "NixlBaseConnectorWorker._pop_done_transfers",
+      "impact": "high",
+      "score": 56,
+      "rationale": "NixlBaseConnectorWorker._pop_done_transfers is polled every decode step; notification-driven completion collapses O(in_flight * handles) probes into a single wait. Demoted vs shard because effect onl\u2026",
+      "locations": [
+        {
+          "file": "vllm/distributed/kv_transfer/kv_connector/v1/nixl/base_worker.py",
+          "spans": [
+            {
+              "line_start": 2210,
+              "line_end": 2255,
+              "symbol": "NixlBaseConnectorWorker._pop_done_transfers",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 31,
+      "id": "cand-vllm_v1_core-0012",
+      "module_qualified_name": "vllm/v1/core",
+      "symbol": "KVCacheManager.allocate_slots",
+      "impact": "high",
+      "score": 54,
+      "rationale": "KVCacheManager.allocate_slots is on the scheduler path for every capacity-needing request; removing the duplicate coordinator.get_num_blocks_to_allocate and reordering skipped-block removal shave sch\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/core/kv_cache_manager.py",
+          "spans": [
+            {
+              "line_start": 345,
+              "line_end": 566,
+              "symbol": "KVCacheManager.allocate_slots",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 32,
+      "id": "cand-vllm_v1_executor-0004",
+      "module_qualified_name": "vllm/v1/executor",
+      "symbol": "WorkerProc.enqueue_output/handle_output/async_output_busy_loop",
+      "impact": "high",
+      "score": 52,
+      "rationale": "WorkerProc async output handling is the host/device sync boundary for token materialization; overlapping D2H with next RPC and batch-draining the queue shorten token-visible latency. Overlaps signifi\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/executor/multiproc_executor.py",
+          "spans": [
+            {
+              "line_start": 961,
+              "line_end": 1006,
+              "symbol": "WorkerProc.enqueue_output/handle_output/async_output_busy_loop",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 33,
+      "id": "cand-vllm_v1_executor-0012",
+      "module_qualified_name": "vllm/v1/executor",
+      "symbol": "RayDistributedExecutor._compiled_ray_dag",
+      "impact": "high",
+      "score": 50,
+      "rationale": "Ray compiled-DAG topology and per-edge transport selection govern steady-state PP/TP comm overhead; TTFT gains from eager CGraph warmup are real but one-shot per model. Multi-node Ray deployment is a\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/executor/ray_executor.py",
+          "spans": [
+            {
+              "line_start": 527,
+              "line_end": 620,
+              "symbol": "RayDistributedExecutor._compiled_ray_dag",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 34,
+      "id": "cand-vllm_v1_worker-0028",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "GPUModelRunner.add_requests and update_requests",
+      "impact": "high",
+      "score": 48,
+      "rationale": "add_requests/update_requests loops are hit on new agent turns; vectorizing state deltas via scatter cuts TTFT admission overhead. High rf_count is 0 and gains are Python-loop micro-savings, which are\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/gpu/model_runner.py",
+          "spans": [
+            {
+              "line_start": 879,
+              "line_end": 954,
+              "symbol": "GPUModelRunner.add_requests and update_requests",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 35,
+      "id": "cand-vllm_distributed_kv_transfer-0002",
+      "module_qualified_name": "vllm/distributed/kv_transfer",
+      "symbol": "NixlPullConnectorWorker._read_blocks_for_req",
+      "impact": "high",
+      "score": 46,
+      "rationale": "NixlPullConnectorWorker._read_blocks_for_req batches per-rank READ posts on the pre-resume path; multi-turn reuse hits this on every remote-prefill cache hit but only on heterogeneous-TP NIXL disaggr\u2026",
+      "locations": [
+        {
+          "file": "vllm/distributed/kv_transfer/kv_connector/v1/nixl/pull_worker.py",
+          "spans": [
+            {
+              "line_start": 126,
+              "line_end": 223,
+              "symbol": "NixlPullConnectorWorker._read_blocks_for_req",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 36,
+      "id": "cand-vllm_v1_core-0004",
+      "module_qualified_name": "vllm/v1/core",
+      "symbol": "BlockPool.get_new_blocks",
+      "impact": "high",
+      "score": 44,
+      "rationale": "BlockPool.get_new_blocks funnels every slot allocation; fast-path eviction skip and batched BlockRemoved events accumulate under concurrency, but per-block savings are small in absolute terms compare\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/core/block_pool.py",
+          "spans": [
+            {
+              "line_start": 647,
+              "line_end": 677,
+              "symbol": "BlockPool.get_new_blocks",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 37,
+      "id": "cand-vllm_v1_kv_offload-0008",
+      "module_qualified_name": "vllm/v1/kv_offload",
+      "symbol": "TieringOffloadingManager.lookup",
+      "impact": "high",
+      "score": 42,
+      "rationale": "TieringOffloadingManager.lookup gates promotion scheduling; batching secondary probes cuts synchronous lookup delay when traffic hits non-primary tiers. Demoted because reach is bounded to configurat\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/kv_offload/tiering/manager.py",
+          "spans": [
+            {
+              "line_start": 311,
+              "line_end": 380,
+              "symbol": "TieringOffloadingManager.lookup",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 38,
+      "id": "cand-vllm_v1_executor-0007",
+      "module_qualified_name": "vllm/v1/executor",
+      "symbol": "RayDistributedExecutor._execute_dag",
+      "impact": "high",
+      "score": 40,
+      "rationale": "RayDistributedExecutor._execute_dag is the driver-side per-token blocking wait for Ray compiled-DAG; overlapping detach with ray.wait cuts TPOT but Ray backend + connector mode is a narrow slice, and\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/executor/ray_executor.py",
+          "spans": [
+            {
+              "line_start": 434,
+              "line_end": 468,
+              "symbol": "RayDistributedExecutor._execute_dag",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 39,
+      "id": "cand-vllm_multimodal-0001",
+      "module_qualified_name": "vllm/multimodal",
+      "symbol": "MultiModalHasher.serialize_item",
+      "impact": "high",
+      "score": 38,
+      "rationale": "MultiModalHasher.serialize_item hashing dominates TTFT for images/CUDA tensors before hit detection; GPU-side hashing and pooled pinned buffers are clean fixes but the workload is described as agenti\u2026",
+      "locations": [
+        {
+          "file": "vllm/multimodal/hasher.py",
+          "spans": [
+            {
+              "line_start": 53,
+              "line_end": 143,
+              "symbol": "MultiModalHasher.serialize_item",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 40,
+      "id": "cand-vllm_v1_engine-0003",
+      "module_qualified_name": "vllm/v1/engine",
+      "symbol": "EngineCore.step_with_batch_queue",
+      "impact": "medium",
+      "score": 35,
+      "rationale": "step_with_batch_queue owns PP drain-vs-fill policy; adaptive drain moves TTFT (first-output) and TPOT (bubble) \u2014 but only when PP batch queueing is enabled. Shard already flagged it medium impact; ra\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/engine/core.py",
+          "spans": [
+            {
+              "line_start": 621,
+              "line_end": 735,
+              "symbol": "EngineCore.step_with_batch_queue",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 41,
+      "id": "cand-vllm_v1_kv_offload-0018",
+      "module_qualified_name": "vllm/v1/kv_offload",
+      "symbol": "ServerRole.add_stored_blocks/on_fetch",
+      "impact": "high",
+      "score": 74,
+      "rationale": "P2P ServerRole matching gates how quickly peer-held KV reaches consumers on secondary hits; priority-aware first-block fast-path can replace prefill with peer fetch, directly moving TTFT for disaggre\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/kv_offload/tiering/p2p/session/server.py",
+          "spans": [
+            {
+              "line_start": 305,
+              "line_end": 390,
+              "symbol": "ServerRole.add_stored_blocks/on_fetch",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 42,
+      "id": "cand-vllm_v1_worker-0029",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "rejection_sample",
+      "impact": "high",
+      "score": 68,
+      "rationale": "rejection_sample is the spec-decode inner sampling kernel; persistent scratch tensors, autotuned tiling, and a greedy fast path directly reduce per-step launch/traffic overhead when spec decode is on\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/gpu/spec_decode/rejection_sampler_utils.py",
+          "spans": [
+            {
+              "line_start": 922,
+              "line_end": 1188,
+              "symbol": "rejection_sample",
+              "kind": "function"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 43,
+      "id": "cand-vllm_v1_attention-0011",
+      "module_qualified_name": "vllm/v1/attention",
+      "symbol": "split_decodes_and_prefills",
+      "impact": "medium",
+      "score": 70,
+      "rationale": "split_decodes_and_prefills is called every step by multiple metadata builders and does redundant CPU tensor materialization; numpy searchsorted on cumulative query_start_loc removes fixed overhead ea\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/attention/backends/utils.py",
+          "spans": [
+            {
+              "line_start": 635,
+              "line_end": 706,
+              "symbol": "split_decodes_and_prefills",
+              "kind": "function"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 44,
+      "id": "cand-vllm_distributed_kv_transfer-0003",
+      "module_qualified_name": "vllm/distributed/kv_transfer",
+      "symbol": "NixlBaseConnectorWorker._handshake_initiation_executor / _nixl_handshake",
+      "impact": "high",
+      "score": 74,
+      "rationale": "NIXL handshake gates the first remote KV read and pays remote_pp_size * target_tp_rank sequential RTTs; caching validated metadata and pipelining removes first-hit TTFT spikes recurring in disaggrega\u2026",
+      "locations": [
+        {
+          "file": "vllm/distributed/kv_transfer/kv_connector/v1/nixl/base_worker.py",
+          "spans": [
+            {
+              "line_start": 487,
+              "line_end": 724,
+              "symbol": "NixlBaseConnectorWorker._handshake_initiation_executor / _nixl_handshake",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 45,
+      "id": "cand-vllm_v1_attention-0006",
+      "module_qualified_name": "vllm/v1/attention",
+      "symbol": "fast_plan_decode",
+      "impact": "medium",
+      "score": 75,
+      "rationale": "fast_plan_decode is invoked every token on FlashInfer CUDA-graph decode; short-circuiting on unchanged batch descriptors and coalescing H2D copies removes steady-state per-step overhead that shows up\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/attention/backends/flashinfer.py",
+          "spans": [
+            {
+              "line_start": 2296,
+              "line_end": 2386,
+              "symbol": "fast_plan_decode",
+              "kind": "function"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 46,
+      "id": "cand-vllm_v1_kv_offload-0001",
+      "module_qualified_name": "vllm/v1/kv_offload",
+      "symbol": "ARCCachePolicy.evict",
+      "impact": "high",
+      "score": 72,
+      "rationale": "ARC evict policy controls recency/frequency balance for the primary KV tier; better victim selection raises hit rate for repeated agentic prefixes and cuts promotion stalls that show up as median TTF\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/kv_offload/cpu/policies/arc.py",
+          "spans": [
+            {
+              "line_start": 112,
+              "line_end": 170,
+              "symbol": "ARCCachePolicy.evict",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 47,
+      "id": "cand-vllm_multimodal-0004",
+      "module_qualified_name": "vllm/multimodal",
+      "symbol": "MultiModalBatchedField._reduce_data",
+      "impact": "high",
+      "score": 66,
+      "rationale": "MultiModalBatchedField._reduce_data allocates pinned buffers and stacks tensors on every multimodal prefill; pooling pinned outputs and eliding stack copies removes real host work from the TTFT path,\u2026",
+      "locations": [
+        {
+          "file": "vllm/multimodal/inputs.py",
+          "spans": [
+            {
+              "line_start": 513,
+              "line_end": 542,
+              "symbol": "MultiModalBatchedField._reduce_data",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 48,
+      "id": "cand-vllm_distributed_kv_transfer-0007",
+      "module_qualified_name": "vllm/distributed/kv_transfer",
+      "symbol": "OffloadingScheduler._lookup_complete_chunks",
+      "impact": "high",
+      "score": 67,
+      "rationale": "OffloadingScheduler._lookup_complete_chunks runs on every cache-eligible admission and long shared prefixes exercise it repeatedly; a step-level OffloadKey cache and probe reordering cut backend call\u2026",
+      "locations": [
+        {
+          "file": "vllm/distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py",
+          "spans": [
+            {
+              "line_start": 697,
+              "line_end": 868,
+              "symbol": "OffloadingScheduler._lookup_complete_chunks",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 49,
+      "id": "cand-vllm_v1_worker-0015",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "DP synchronization post-processing helpers",
+      "impact": "high",
+      "score": 73,
+      "rationale": "DP synchronization is a per-step latency floor when serving is scaled across ranks; batching scalar reads into a single host transfer and replacing the SUM all-reduce with MIN/MAX collectives reduces\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/dp_utils.py",
+          "spans": [
+            {
+              "line_start": 36,
+              "line_end": 161,
+              "symbol": "DP synchronization post-processing helpers",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 50,
+      "id": "cand-vllm_v1_worker-0030",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "DefaultModelState.prepare_attn",
+      "impact": "medium",
+      "score": 72,
+      "rationale": "prepare_attn runs every new-runner forward with .item() host syncs and per-step Python metadata walks; eliminating these directly reduces steady-state median TPOT.",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/gpu/model_states/default.py",
+          "spans": [
+            {
+              "line_start": 125,
+              "line_end": 185,
+              "symbol": "DefaultModelState.prepare_attn",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 51,
+      "id": "cand-vllm_v1_kv_offload-0013",
+      "module_qualified_name": "vllm/v1/kv_offload",
+      "symbol": "CachePolicyFactory built-in registrations",
+      "impact": "high",
+      "score": 70,
+      "rationale": "CachePolicyFactory adds workload-tuned sibling policies (S3-FIFO, TinyLFU, SIEVE) that can raise primary hit rate for shared agentic prefixes; high leverage but indirect and gated on config selection\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/kv_offload/cpu/policies/factory.py",
+          "spans": [
+            {
+              "line_start": 84,
+              "line_end": 90,
+              "symbol": "CachePolicyFactory built-in registrations",
+              "kind": "plugin_seam"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 52,
+      "id": "cand-vllm_v1_worker-0005",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "GPUModelRunner._build_attention_metadata",
+      "impact": "medium",
+      "score": 65,
+      "rationale": "_build_attention_metadata runs every step and repeats group-invariant work; making seq_lens_cpu optional and persisting FlashInfer-style planning shaves steady TPOT overhead. Impact bounded by the fa\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/gpu_model_runner.py",
+          "spans": [
+            {
+              "line_start": 2325,
+              "line_end": 2658,
+              "symbol": "GPUModelRunner._build_attention_metadata",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 53,
+      "id": "cand-vllm_v1_attention-0019",
+      "module_qualified_name": "vllm/v1/attention",
+      "symbol": "FlashInferMetadataBuilder fixed split policy",
+      "impact": "medium",
+      "score": 64,
+      "rationale": "FlashInferMetadataBuilder fixed split constants gate FlashInfer kernel partitioning for prefill and decode; occupancy-aware or page-aligned split policies improve latency across TPOT and TTFT, but th\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/attention/backends/flashinfer.py",
+          "spans": [
+            {
+              "line_start": 645,
+              "line_end": 652,
+              "symbol": "FlashInferMetadataBuilder fixed split policy",
+              "kind": "config_block"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 54,
+      "id": "cand-vllm_v1_engine-0004",
+      "module_qualified_name": "vllm/v1/engine",
+      "symbol": "AsyncLLM._run_output_handler.output_handler",
+      "impact": "high",
+      "score": 68,
+      "rationale": "AsyncLLM.output_handler processes every token delivered to clients; skipping empty-tail sleeps, batching aborts, and adapting yield chunking to queue pressure reduces frontend per-token overhead \u2014 mo\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/engine/async_llm.py",
+          "spans": [
+            {
+              "line_start": 684,
+              "line_end": 733,
+              "symbol": "AsyncLLM._run_output_handler.output_handler",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 55,
+      "id": "cand-vllm_v1_worker-0009",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "GPUModelRunner._determine_batch_execution_and_padding",
+      "impact": "medium",
+      "score": 70,
+      "rationale": "_determine_batch_execution_and_padding is per-step in DP-enabled deployments with a D2H scalar sync and redundant dispatch resolution; memoization/pinned-host removes recurring TPOT overhead when DP \u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/gpu_model_runner.py",
+          "spans": [
+            {
+              "line_start": 4025,
+              "line_end": 4137,
+              "symbol": "GPUModelRunner._determine_batch_execution_and_padding",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 56,
+      "id": "cand-vllm_v1_kv_offload-0014",
+      "module_qualified_name": "vllm/v1/kv_offload",
+      "symbol": "SecondaryTierFactory built-in registrations",
+      "impact": "high",
+      "score": 62,
+      "rationale": "SecondaryTierFactory is a broad extension surface with the highest rf_count (6), but the proposals describe registering new tier implementations rather than optimizing the hot path; benefit to median\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/kv_offload/tiering/factory.py",
+          "spans": [
+            {
+              "line_start": 103,
+              "line_end": 125,
+              "symbol": "SecondaryTierFactory built-in registrations",
+              "kind": "plugin_seam"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 57,
+      "id": "cand-vllm_v1_kv_offload-0006",
+      "module_qualified_name": "vllm/v1/kv_offload",
+      "symbol": "SingleDirectionOffloadingHandler.transfer_async",
+      "impact": "high",
+      "score": 65,
+      "rationale": "SingleDirectionOffloadingHandler.transfer_async runs per promoted block group on cache hits; precomputing descriptor templates and splitting large onloads directly reduces TTFT when offloaded prefixe\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/kv_offload/cpu/gpu_worker.py",
+          "spans": [
+            {
+              "line_start": 240,
+              "line_end": 417,
+              "symbol": "SingleDirectionOffloadingHandler.transfer_async",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 58,
+      "id": "cand-vllm_v1_worker-0007",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "GPUModelRunner.execute_model",
+      "impact": "medium",
+      "score": 68,
+      "rationale": "execute_model runs every step and hosts several small per-step Python costs; caching static backend properties and skipping seq-lens materialization gives modest but repeated TPOT wins in agentic dec\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/gpu_model_runner.py",
+          "spans": [
+            {
+              "line_start": 4259,
+              "line_end": 4620,
+              "symbol": "GPUModelRunner.execute_model",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 59,
+      "id": "cand-vllm_v1_attention-0003",
+      "module_qualified_name": "vllm/v1/attention",
+      "symbol": "FlashAttentionImpl._forward_with_dcp",
+      "impact": "medium",
+      "score": 66,
+      "rationale": "DCP forward runs in every attention layer when enabled, so occupancy-aware split and all-gather/attention overlap can move both TTFT and TPOT \u2014 but only when DCP is active, which is not implied by th\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/attention/backends/flash_attn.py",
+          "spans": [
+            {
+              "line_start": 1177,
+              "line_end": 1351,
+              "symbol": "FlashAttentionImpl._forward_with_dcp",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 60,
+      "id": "cand-vllm_v1_attention-0005",
+      "module_qualified_name": "vllm/v1/attention",
+      "symbol": "FlashInferMetadataBuilder._compute_flashinfer_kv_metadata",
+      "impact": "medium",
+      "score": 68,
+      "rationale": "FlashInfer metadata computation runs per step for decode/prefill/cascade with two H2D copies plus CPU cumsum; coalescing to a single pinned staging buffer reduces per-step overhead, directly moving d\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/attention/backends/flashinfer.py",
+          "spans": [
+            {
+              "line_start": 1062,
+              "line_end": 1117,
+              "symbol": "FlashInferMetadataBuilder._compute_flashinfer_kv_metadata",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 61,
+      "id": "cand-vllm_v1_kv_offload-0003",
+      "module_qualified_name": "vllm/v1/kv_offload",
+      "symbol": "LRUCachePolicy.evict",
+      "impact": "medium",
+      "score": 66,
+      "rationale": "Pure-recency LRU can prematurely evict shared agentic prefixes; prefix-aware or frequency-augmented eviction raises primary hit rate, reducing promotion stalls that hit TTFT/TPOT.",
+      "locations": [
+        {
+          "file": "vllm/v1/kv_offload/cpu/policies/lru.py",
+          "spans": [
+            {
+              "line_start": 56,
+              "line_end": 78,
+              "symbol": "LRUCachePolicy.evict",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 62,
+      "id": "cand-vllm_multimodal-0006",
+      "module_qualified_name": "vllm/multimodal",
+      "symbol": "_can_batch_mm_items/_batch_mm_items/group_and_batch_mm_items/group_and_batch_mm_kwargs",
+      "impact": "high",
+      "score": 62,
+      "rationale": "group_and_batch_mm_items runs on every multimodal prefill and its Python overhead scales with items per batch. Single-pass streaming with cached compatibility signatures shaves TTFT for multi-item mu\u2026",
+      "locations": [
+        {
+          "file": "vllm/multimodal/utils.py",
+          "spans": [
+            {
+              "line_start": 170,
+              "line_end": 294,
+              "symbol": "_can_batch_mm_items/_batch_mm_items/group_and_batch_mm_items/group_and_batch_mm_kwargs",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 63,
+      "id": "cand-vllm_v1_kv_offload-0004",
+      "module_qualified_name": "vllm/v1/kv_offload",
+      "symbol": "_select_swap_blocks_fn",
+      "impact": "high",
+      "score": 60,
+      "rationale": "CPU-to-GPU swap dispatch selects between DMA and Triton; batch-size-aware dispatch and hybrid paths for mixed page-size groups raise transfer bandwidth on the promotion critical path, cutting TTFT st\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/kv_offload/cpu/gpu_worker.py",
+          "spans": [
+            {
+              "line_start": 35,
+              "line_end": 58,
+              "symbol": "_select_swap_blocks_fn",
+              "kind": "function"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 64,
+      "id": "cand-vllm_v1_worker-0017",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "EncoderCudaGraphManager budget generation and lookup",
+      "impact": "high",
+      "score": 62,
+      "rationale": "Encoder CUDA-graph budgets gate multimodal TTFT on screenshot/image turns common in agentic workloads; workload-adaptive budget ladders reduce eager fallback and padding waste \u2014 impact contingent on \u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/encoder_cudagraph.py",
+          "spans": [
+            {
+              "line_start": 190,
+              "line_end": 296,
+              "symbol": "EncoderCudaGraphManager budget generation and lookup",
+              "kind": "config_block"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 65,
+      "id": "cand-vllm_v1_attention-0022",
+      "module_qualified_name": "vllm/v1/attention",
+      "symbol": "resolve_seq_and_query_len / find_seq_idx",
+      "impact": "medium",
+      "score": 65,
+      "rationale": "find_seq_idx binary search runs per Triton attention program plus reduce_segments; precomputing q-block-to-sequence metadata removes repeated per-program work on decode-heavy agentic batches, chippin\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/attention/ops/triton_attention_helpers.py",
+          "spans": [
+            {
+              "line_start": 44,
+              "line_end": 106,
+              "symbol": "resolve_seq_and_query_len / find_seq_idx",
+              "kind": "function"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 66,
+      "id": "cand-vllm_v1_engine-0010",
+      "module_qualified_name": "vllm/v1/engine",
+      "symbol": "DPEngineCoreProc._should_throttle_prefills",
+      "impact": "medium",
+      "score": 60,
+      "rationale": "_should_throttle_prefills gates DP prefill admission; load-aware or progress-informed policies can move TTFT under bursty agentic arrivals. Effect confined to DP deployments and bounded by the existi\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/engine/core.py",
+          "spans": [
+            {
+              "line_start": 2086,
+              "line_end": 2093,
+              "symbol": "DPEngineCoreProc._should_throttle_prefills",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 67,
+      "id": "cand-vllm_distributed_kv_transfer-0021",
+      "module_qualified_name": "vllm/distributed/kv_transfer",
+      "symbol": "LookupKeyClient.lookup",
+      "impact": "medium",
+      "score": 64,
+      "rationale": "LookupKeyClient.lookup with REQ+single-thread serializes prefix lookups behind one lane; DEALER multiplexing or step-batched RPC directly parallelizes TTFT-critical lookups under concurrent turns.",
+      "locations": [
+        {
+          "file": "vllm/distributed/kv_transfer/kv_connector/v1/mooncake/store/worker.py",
+          "spans": [
+            {
+              "line_start": 1989,
+              "line_end": 2028,
+              "symbol": "LookupKeyClient.lookup",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 68,
+      "id": "cand-vllm_v1_core-0008",
+      "module_qualified_name": "vllm/v1/core",
+      "symbol": "FreeKVCacheBlockQueue",
+      "impact": "medium",
+      "score": 57,
+      "rationale": "FreeKVCacheBlockQueue is touched on every allocate/free/touch and already exists to reduce Python overhead; further reductions (intrusive sidecar arrays, batched touch removal) only bound scheduler o\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/core/kv_cache_utils.py",
+          "spans": [
+            {
+              "line_start": 184,
+              "line_end": 427,
+              "symbol": "FreeKVCacheBlockQueue",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 69,
+      "id": "cand-vllm_v1_attention-0009",
+      "module_qualified_name": "vllm/v1/attention",
+      "symbol": "TritonAttentionMetadataBuilder 2D/3D tuning constants",
+      "impact": "medium",
+      "score": 62,
+      "rationale": "Triton 2D/3D switch threshold + segment count govern SM utilization for small-batch decode common in agent serving; occupancy-aware tuning is a concrete TPOT lever but scoped to Triton backend and sm\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/attention/backends/triton_attn.py",
+          "spans": [
+            {
+              "line_start": 54,
+              "line_end": 175,
+              "symbol": "TritonAttentionMetadataBuilder 2D/3D tuning constants",
+              "kind": "config_block"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 70,
+      "id": "cand-vllm_v1_engine-0015",
+      "module_qualified_name": "vllm/v1/engine",
+      "symbol": "EngineCore.step",
+      "impact": "medium",
+      "score": 60,
+      "rationale": "EngineCore.step is the non-pipeline scheduling boundary paid once per decode iteration; overlapping abort/sampling work with GPU execute reduces per-step host overhead, but model execution dominates \u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/engine/core.py",
+          "spans": [
+            {
+              "line_start": 580,
+              "line_end": 610,
+              "symbol": "EngineCore.step",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 71,
+      "id": "cand-vllm_distributed_kv_transfer-0012",
+      "module_qualified_name": "vllm/distributed/kv_transfer",
+      "symbol": "MooncakeConnectorWorker._build_transfer_params",
+      "impact": "high",
+      "score": 62,
+      "rationale": "Mooncake transfer descriptor coalescing reduces RDMA initiation on the turn-2 KV fetch path; TTFT gain is real for P/D reuse but confined to Mooncake deployments.",
+      "locations": [
+        {
+          "file": "vllm/distributed/kv_transfer/kv_connector/v1/mooncake/mooncake_connector.py",
+          "spans": [
+            {
+              "line_start": 1424,
+              "line_end": 1614,
+              "symbol": "MooncakeConnectorWorker._build_transfer_params",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 72,
+      "id": "cand-vllm_distributed_kv_transfer-0015",
+      "module_qualified_name": "vllm/distributed/kv_transfer",
+      "symbol": "OffloadingScheduler.update_state_after_alloc load-job construction",
+      "impact": "high",
+      "score": 58,
+      "rationale": "OffloadingScheduler.update_state_after_alloc load-job construction sits between allocator and worker for every offloaded prefix hit before resume. Vectorizing group_blocks walks trims TTFT on the mul\u2026",
+      "locations": [
+        {
+          "file": "vllm/distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py",
+          "spans": [
+            {
+              "line_start": 993,
+              "line_end": 1101,
+              "symbol": "OffloadingScheduler.update_state_after_alloc load-job construction",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 73,
+      "id": "cand-vllm_v1_engine-0009",
+      "module_qualified_name": "vllm/v1/engine",
+      "symbol": "EngineCoreProc._process_engine_step",
+      "impact": "medium",
+      "score": 55,
+      "rationale": "EngineCoreProc._process_engine_step's 1 ms fixed sleep bounds how quickly WAITING_FOR_REMOTE_KVS requests are reconsidered; event-driven wakeups shave that floor from TTFT for remote-KV/prefix-cache \u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/engine/core.py",
+          "spans": [
+            {
+              "line_start": 1429,
+              "line_end": 1446,
+              "symbol": "EngineCoreProc._process_engine_step",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 74,
+      "id": "cand-vllm_distributed_kv_transfer-0013",
+      "module_qualified_name": "vllm/distributed/kv_transfer",
+      "symbol": "MooncakeConnectorWorker.__init__ sender pool sizing",
+      "impact": "high",
+      "score": 60,
+      "rationale": "Mooncake sender pool sizing controls producer send concurrency for remote KV; adaptive sizing under many concurrent turn-2 fetches can reduce TTFT tails but is scoped to Mooncake-backed disaggregated\u2026",
+      "locations": [
+        {
+          "file": "vllm/distributed/kv_transfer/kv_connector/v1/mooncake/mooncake_connector.py",
+          "spans": [
+            {
+              "line_start": 921,
+              "line_end": 988,
+              "symbol": "MooncakeConnectorWorker.__init__ sender pool sizing",
+              "kind": "config_block"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 75,
+      "id": "cand-vllm_distributed_kv_transfer-0019",
+      "module_qualified_name": "vllm/distributed/kv_transfer",
+      "symbol": "NixlBaseConnectorWorker.sync_recved_kv_to_device / save_kv_to_host",
+      "impact": "medium",
+      "score": 56,
+      "rationale": "sync_recved_kv_to_device sits directly before request resume for host-buffer NIXL loads, so batching copy_blocks and moving to a dedicated stream can move TTFT \u2014 but only when the host-buffer mode is\u2026",
+      "locations": [
+        {
+          "file": "vllm/distributed/kv_transfer/kv_connector/v1/nixl/base_worker.py",
+          "spans": [
+            {
+              "line_start": 1869,
+              "line_end": 1917,
+              "symbol": "NixlBaseConnectorWorker.sync_recved_kv_to_device / save_kv_to_host",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 76,
+      "id": "cand-vllm_v1_attention-0025",
+      "module_qualified_name": "vllm/v1/attention",
+      "symbol": "Triton MLA decode split policy",
+      "impact": "medium",
+      "score": 55,
+      "rationale": "Triton MLA num_kv_splits policy trades parallelism vs reduction overhead every decode step for MLA models; occupancy/seq-len-aware splits improve median TPOT for MLA agent serving, but scoped to the \u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/attention/backends/mla/triton_mla.py",
+          "spans": [
+            {
+              "line_start": 35,
+              "line_end": 47,
+              "symbol": "Triton MLA decode split policy",
+              "kind": "config_block"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 77,
+      "id": "cand-vllm_v1_core-0021",
+      "module_qualified_name": "vllm/v1/core",
+      "symbol": "SlidingWindowManager.reachable_block_mask",
+      "impact": "medium",
+      "score": 53,
+      "rationale": "SlidingWindowManager.reachable_block_mask affects retention policy and therefore future-turn hit rate; better tail scoring lowers follow-up-turn TTFT but the effect is amortized across turns and medi\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/core/single_type_kv_cache_manager.py",
+          "spans": [
+            {
+              "line_start": 996,
+              "line_end": 1055,
+              "symbol": "SlidingWindowManager.reachable_block_mask",
+              "kind": "config_block"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 78,
+      "id": "cand-vllm_v1_engine-0002",
+      "module_qualified_name": "vllm/v1/engine",
+      "symbol": "DPEngineCoreProc._has_global_unfinished_reqs",
+      "impact": "medium",
+      "score": 58,
+      "rationale": "The 32-step DP finish-sync cadence can add up to 31 steps of wave-end wait; adaptive or event-driven sync trims tail TTFT/TPOT gaps for short bursty agentic waves, but median gain depends on wave sha\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/engine/core.py",
+          "spans": [
+            {
+              "line_start": 2165,
+              "line_end": 2182,
+              "symbol": "DPEngineCoreProc._has_global_unfinished_reqs",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 79,
+      "id": "cand-vllm_distributed_kv_transfer-0020",
+      "module_qualified_name": "vllm/distributed/kv_transfer",
+      "symbol": "AsyncOperationManager._handle_load_task",
+      "impact": "medium",
+      "score": 58,
+      "rationale": "HF3FS load-task blocking stream sync gates prefix-hit resumption; polling with events and pre-registered pinned staging reduces turn-2 TTFT for HF3FS-backed reuse but only when that backend is config\u2026",
+      "locations": [
+        {
+          "file": "vllm/distributed/kv_transfer/kv_connector/v1/hf3fs/hf3fs_connector.py",
+          "spans": [
+            {
+              "line_start": 354,
+              "line_end": 410,
+              "symbol": "AsyncOperationManager._handle_load_task",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 80,
+      "id": "cand-vllm_v1_core-0010",
+      "module_qualified_name": "vllm/v1/core",
+      "symbol": "Scheduler._make_cached_request_data",
+      "impact": "medium",
+      "score": 55,
+      "rationale": "_make_cached_request_data runs once per non-empty scheduler step and scales with active requests; pre-sizing buffers and skipping empty KV updates lowers the TPOT floor at high concurrency but per-re\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/core/sched/scheduler.py",
+          "spans": [
+            {
+              "line_start": 1405,
+              "line_end": 1462,
+              "symbol": "Scheduler._make_cached_request_data",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 81,
+      "id": "cand-vllm_v1_engine-0018",
+      "module_qualified_name": "vllm/v1/engine",
+      "symbol": "EngineCoreProc.process_output_sockets",
+      "impact": "medium",
+      "score": 56,
+      "rationale": "process_output_sockets is on the observable token transport path; coalescing and buffer reclamation trim frontend overhead touching TPOT, but the effect is smaller than in-runner work.",
+      "locations": [
+        {
+          "file": "vllm/v1/engine/core.py",
+          "spans": [
+            {
+              "line_start": 1737,
+              "line_end": 1821,
+              "symbol": "EngineCoreProc.process_output_sockets",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 82,
+      "id": "cand-vllm_v1_engine-0007",
+      "module_qualified_name": "vllm/v1/engine",
+      "symbol": "check_stop_strings",
+      "impact": "medium",
+      "score": 50,
+      "rationale": "check_stop_strings runs after every decoded chunk; agentic clients with many tool/chat delimiters pay O(num_stops * suffix_window). Aho-Corasick/first-char prefilter cuts frontend CPU on TPOT, but sa\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/engine/detokenizer.py",
+          "spans": [
+            {
+              "line_start": 310,
+              "line_end": 362,
+              "symbol": "check_stop_strings",
+              "kind": "function"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 83,
+      "id": "cand-vllm_v1_executor-0014",
+      "module_qualified_name": "vllm/v1/executor",
+      "symbol": "AsyncOutputFuture.result/UniProcExecutor.collective_rpc",
+      "impact": "medium",
+      "score": 50,
+      "rationale": "UniProcExecutor collective_rpc/AsyncOutputFuture.result is per-step but only for single-process serving; removing list wrapping and blocking get_output reduces TPOT overhead, though multi-turn agenti\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/executor/uniproc_executor.py",
+          "spans": [
+            {
+              "line_start": 26,
+              "line_end": 106,
+              "symbol": "AsyncOutputFuture.result/UniProcExecutor.collective_rpc",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 84,
+      "id": "cand-vllm_distributed_kv_transfer-0009",
+      "module_qualified_name": "vllm/distributed/kv_transfer",
+      "symbol": "kv_cache_scatter_kernel / kv_cache_gather_kernel and wrappers",
+      "impact": "medium",
+      "score": 50,
+      "rationale": "HF3FS gather/scatter kernel autotuning and launch fusion reduce per-block promotion latency; only relevant to the HF3FS reuse path, which caps applicability to that workload configuration.",
+      "locations": [
+        {
+          "file": "vllm/distributed/kv_transfer/kv_connector/v1/hf3fs/utils/gather_scatter_helper.py",
+          "spans": [
+            {
+              "line_start": 9,
+              "line_end": 247,
+              "symbol": "kv_cache_scatter_kernel / kv_cache_gather_kernel and wrappers",
+              "kind": "kernel"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 85,
+      "id": "cand-vllm_v1_engine-0011",
+      "module_qualified_name": "vllm/v1/engine",
+      "symbol": "DPAsyncMPClient._ensure_stats_update_task.run_engine_stats_update_task",
+      "impact": "medium",
+      "score": 57,
+      "rationale": "DP load-balancer stats freshness/smoothness affects DPLBAsyncMPClient routing; EWMA/hysteresis improvements reduce misroutes and tail TTFT in DP agentic bursts but the median effect is smaller.",
+      "locations": [
+        {
+          "file": "vllm/v1/engine/core_client.py",
+          "spans": [
+            {
+              "line_start": 1305,
+              "line_end": 1408,
+              "symbol": "DPAsyncMPClient._ensure_stats_update_task.run_engine_stats_update_task",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 86,
+      "id": "cand-vllm_v1_worker-0012",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "preprocess_mamba",
+      "impact": "high",
+      "score": 48,
+      "rationale": "preprocess_mamba is per-step and vectorization removes O(num_reqs x layer-groups) Python work, but the impact is gated by whether the served model is a hybrid Mamba/SSM architecture; strong within th\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/mamba_utils.py",
+          "spans": [
+            {
+              "line_start": 1038,
+              "line_end": 1142,
+              "symbol": "preprocess_mamba",
+              "kind": "function"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 87,
+      "id": "cand-vllm_v1_engine-0016",
+      "module_qualified_name": "vllm/v1/engine",
+      "symbol": "InputProcessor.process_inputs",
+      "impact": "medium",
+      "score": 55,
+      "rationale": "InputProcessor.process_inputs is per-request TTFT overhead for every new turn; fast-pathing pre-rendered EngineInput and deferring multimodal materialization is concrete but touches only new-turn adm\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/engine/input_processor.py",
+          "spans": [
+            {
+              "line_start": 244,
+              "line_end": 389,
+              "symbol": "InputProcessor.process_inputs",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 88,
+      "id": "cand-vllm_v1_engine-0017",
+      "module_qualified_name": "vllm/v1/engine",
+      "symbol": "RequestOutputCollector.put/get_nowait/get",
+      "impact": "medium",
+      "score": 48,
+      "rationale": "RequestOutputCollector is the AsyncLLM streaming handoff for every token batch; a lazy Future replacing asyncio.Event trims frontend event churn under many concurrent short generations. Improves fron\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/engine/output_processor.py",
+          "spans": [
+            {
+              "line_start": 62,
+              "line_end": 96,
+              "symbol": "RequestOutputCollector.put/get_nowait/get",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 89,
+      "id": "cand-vllm_v1_worker-0026",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "sync_cudagraph_and_dp_padding",
+      "impact": "medium",
+      "score": 48,
+      "rationale": "sync_cudagraph_and_dp_padding adds per-step CPU coordination in DP serving; packed collectives and idle-rank skipping trim scalar sync but the CPU-side floor is smaller than the sibling DP sync helpe\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/gpu/dp_utils.py",
+          "spans": [
+            {
+              "line_start": 16,
+              "line_end": 83,
+              "symbol": "sync_cudagraph_and_dp_padding",
+              "kind": "function"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 90,
+      "id": "cand-vllm_v1_core-0020",
+      "module_qualified_name": "vllm/v1/core",
+      "symbol": "BlockPool.cache_full_blocks",
+      "impact": "medium",
+      "score": 55,
+      "rationale": "cache_full_blocks per-block insertion runs when finalized tokens are cached and shapes future prefix hit availability; fusing hash-insert with events reduces scheduler overhead and improves reuse-dri\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/core/block_pool.py",
+          "spans": [
+            {
+              "line_start": 225,
+              "line_end": 342,
+              "symbol": "BlockPool.cache_full_blocks",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 91,
+      "id": "cand-vllm_v1_kv_offload-0015",
+      "module_qualified_name": "vllm/v1/kv_offload",
+      "symbol": "FileSystemTierManager.submit_store/submit_load",
+      "impact": "medium",
+      "score": 46,
+      "rationale": "FileSystemTierManager chunking and coalescing improve promotion latency on FS-backed reuse and are on the TTFT path when spill goes to disk; the benefit is real but only for deployments that actually\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/kv_offload/tiering/fs/manager.py",
+          "spans": [
+            {
+              "line_start": 217,
+              "line_end": 267,
+              "symbol": "FileSystemTierManager.submit_store/submit_load",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 92,
+      "id": "cand-vllm_v1_attention-0023",
+      "module_qualified_name": "vllm/v1/attention",
+      "symbol": "FlexAttentionMetadata._build_block_mask_direct",
+      "impact": "medium",
+      "score": 52,
+      "rationale": "FlexAttention _build_block_mask_direct can dominate small-batch decode metadata cost; TPOT gain is meaningful but limited to the Flex backend rather than the default agentic serving stack.",
+      "locations": [
+        {
+          "file": "vllm/v1/attention/backends/flex_attention.py",
+          "spans": [
+            {
+              "line_start": 692,
+              "line_end": 822,
+              "symbol": "FlexAttentionMetadata._build_block_mask_direct",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 93,
+      "id": "cand-vllm_v1_executor-0008",
+      "module_qualified_name": "vllm/v1/executor",
+      "symbol": "FutureWrapper.result",
+      "impact": "medium",
+      "score": 46,
+      "rationale": "FutureWrapper.result sits on the async Ray decode completion path with a sequential detach loop; ray.wait-based overlap helps TPOT under connectors/multi-output but non-connector single-output cases \u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/executor/ray_utils.py",
+          "spans": [
+            {
+              "line_start": 250,
+              "line_end": 272,
+              "symbol": "FutureWrapper.result",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 94,
+      "id": "cand-vllm_v1_executor-0015",
+      "module_qualified_name": "vllm/v1/executor",
+      "symbol": "RayDistributedExecutor._init_workers_ray",
+      "impact": "high",
+      "score": 52,
+      "rationale": "Ray placement/rank layout is initialization code, but topology-aware TP intra-node / PP cross-node choices reduce cross-node transport per token step; steady-state TPOT gain is real but bounded to mu\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/executor/ray_executor.py",
+          "spans": [
+            {
+              "line_start": 143,
+              "line_end": 379,
+              "symbol": "RayDistributedExecutor._init_workers_ray",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 95,
+      "id": "cand-vllm_v1_engine-0012",
+      "module_qualified_name": "vllm/v1/engine",
+      "symbol": "RequestState.make_request_output",
+      "impact": "medium",
+      "score": 46,
+      "rationale": "make_request_output is allocated per request per output-processing step; hoisting FINAL_ONLY gating and deferring text decoding lowers frontend TPOT for many short concurrent generations, but constan\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/engine/output_processor.py",
+          "spans": [
+            {
+              "line_start": 276,
+              "line_end": 340,
+              "symbol": "RequestState.make_request_output",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 96,
+      "id": "cand-vllm_v1_executor-0006",
+      "module_qualified_name": "vllm/v1/executor",
+      "symbol": "detach_zero_copy_from_model_runner_output",
+      "impact": "medium",
+      "score": 46,
+      "rationale": "detach_zero_copy_from_model_runner_output is on the Ray output critical path but only bites when logprobs or routed_experts are requested; conditional agentic gains for Ray backends make this a mid-t\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/executor/ray_utils.py",
+          "spans": [
+            {
+              "line_start": 198,
+              "line_end": 247,
+              "symbol": "detach_zero_copy_from_model_runner_output",
+              "kind": "function"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 97,
+      "id": "cand-vllm_v1_attention-0012",
+      "module_qualified_name": "vllm/v1/attention",
+      "symbol": "make_local_attention_virtual_batches",
+      "impact": "medium",
+      "score": 50,
+      "rationale": "make_local_attention_virtual_batches runs per step for local-attention Gemma models; coalescing four H2D uploads cuts CPU/H2D overhead but the win is scoped to that model family.",
+      "locations": [
+        {
+          "file": "vllm/v1/attention/backends/utils.py",
+          "spans": [
+            {
+              "line_start": 348,
+              "line_end": 491,
+              "symbol": "make_local_attention_virtual_batches",
+              "kind": "function"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 98,
+      "id": "cand-vllm_v1_core-0016",
+      "module_qualified_name": "vllm/v1/core",
+      "symbol": "BlockHashListWithBlockSize",
+      "impact": "medium",
+      "score": 45,
+      "rationale": "BlockHashListWithBlockSize view overhead only bites hybrid models with mismatched block sizes; a strided-slice backing removes per-access attribute walks on prefix-lookup hot code, modestly reducing \u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/core/kv_cache_utils.py",
+          "spans": [
+            {
+              "line_start": 2229,
+              "line_end": 2299,
+              "symbol": "BlockHashListWithBlockSize",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 99,
+      "id": "cand-vllm_v1_kv_offload-0017",
+      "module_qualified_name": "vllm/v1/kv_offload",
+      "symbol": "ObjectStoreSecondaryTierManager._submit_transfer/_poll_active_transfers",
+      "impact": "medium",
+      "score": 50,
+      "rationale": "Object-store transfer submission/polling reduces secondary promotion delay before TTFT; helpful for cross-turn reuse but bounded by intrinsic network/object-store latency, indirect effect on median.",
+      "locations": [
+        {
+          "file": "vllm/v1/kv_offload/tiering/obj/manager.py",
+          "spans": [
+            {
+              "line_start": 217,
+              "line_end": 345,
+              "symbol": "ObjectStoreSecondaryTierManager._submit_transfer/_poll_active_transfers",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 100,
+      "id": "cand-vllm_multimodal-0019",
+      "module_qualified_name": "vllm/multimodal",
+      "symbol": "MultiModalBudget._get_max_items",
+      "impact": "medium",
+      "score": 45,
+      "rationale": "MultiModalBudget._get_max_items sets encoder-work admission ceilings; cache-aware and p95-driven sizing can reduce queueing-induced TTFT but only in multimodal-heavy mixes that the hint does not expl\u2026",
+      "locations": [
+        {
+          "file": "vllm/multimodal/encoder_budget.py",
+          "spans": [
+            {
+              "line_start": 147,
+              "line_end": 187,
+              "symbol": "MultiModalBudget._get_max_items",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 101,
+      "id": "cand-vllm_v1_engine-0014",
+      "module_qualified_name": "vllm/v1/engine",
+      "symbol": "DPCoordinator.run polling/publish loop",
+      "impact": "medium",
+      "score": 44,
+      "rationale": "DPCoordinator publish cadence controls DP routing snapshot freshness; adaptive/event-driven publication reduces stale-load misrouting TTFT in bursty DP serving, but only when data-parallel coordinati\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/engine/coordinator.py",
+          "spans": [
+            {
+              "line_start": 257,
+              "line_end": 283,
+              "symbol": "DPCoordinator.run polling/publish loop",
+              "kind": "loop"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 102,
+      "id": "cand-vllm_v1_core-0013",
+      "module_qualified_name": "vllm/v1/core",
+      "symbol": "SingleTypeKVCacheManager.get_num_blocks_to_allocate",
+      "impact": "medium",
+      "score": 48,
+      "rationale": "get_num_blocks_to_allocate can be called twice per waiting request in full_sequence_must_fit; memoizing the evictable scan trims admission overhead on TTFT, but gains are modest per turn.",
+      "locations": [
+        {
+          "file": "vllm/v1/core/single_type_kv_cache_manager.py",
+          "spans": [
+            {
+              "line_start": 144,
+              "line_end": 230,
+              "symbol": "SingleTypeKVCacheManager.get_num_blocks_to_allocate",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 103,
+      "id": "cand-vllm_v1_worker-0025",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "StagedWriteTensor and FusedStagedWriter apply path",
+      "impact": "medium",
+      "score": 46,
+      "rationale": "StagedWriteTensor/FusedStagedWriter apply path scales with request churn and KV groups; persistent pinned/UVA ring buffers eliminate list rebuilds and a sync H2D. Real gains on admission/resume churn\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/gpu/buffer_utils.py",
+          "spans": [
+            {
+              "line_start": 128,
+              "line_end": 310,
+              "symbol": "StagedWriteTensor and FusedStagedWriter apply path",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 104,
+      "id": "cand-vllm_v1_attention-0021",
+      "module_qualified_name": "vllm/v1/attention",
+      "symbol": "AttentionMetadataBuilder._init_reorder_batch_threshold",
+      "impact": "medium",
+      "score": 48,
+      "rationale": "Reorder-batch threshold routes short-extend/spec tokens between decode and prefill kernels; better routing keeps efficient decode kernels active, but effect is second-order relative to kernel-level t\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/attention/backend.py",
+          "spans": [
+            {
+              "line_start": 659,
+              "line_end": 689,
+              "symbol": "AttentionMetadataBuilder._init_reorder_batch_threshold",
+              "kind": "config_block"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 105,
+      "id": "cand-vllm_v1_worker-0020",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "maybe_create_ubatch_slices",
+      "impact": "medium",
+      "score": 44,
+      "rationale": "maybe_create_ubatch_slices governs DBO split points; compute-cost-weighted splitting improves overlap on mixed prefill/decode agent batches but the benefit is second-order and DBO must be enabled.",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/ubatch_utils.py",
+          "spans": [
+            {
+              "line_start": 63,
+              "line_end": 114,
+              "symbol": "maybe_create_ubatch_slices",
+              "kind": "function"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 106,
+      "id": "cand-vllm_v1_worker-0013",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "postprocess_mamba_fused_kernel",
+      "impact": "high",
+      "score": 42,
+      "rationale": "postprocess_mamba_fused_kernel tiling improvements shave hybrid Mamba spec-decode TPOT via reduced state-copy time; net effect is scoped to hybrid Mamba plus speculative decoding, so impact per-run i\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/mamba_utils.py",
+          "spans": [
+            {
+              "line_start": 154,
+              "line_end": 277,
+              "symbol": "postprocess_mamba_fused_kernel",
+              "kind": "kernel"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 107,
+      "id": "cand-vllm_v1_attention-0010",
+      "module_qualified_name": "vllm/v1/attention",
+      "symbol": "reorder_batch_to_split_decodes_and_prefills",
+      "impact": "medium",
+      "score": 45,
+      "rationale": "reorder_batch_to_split_decodes_and_prefills runs every scheduler step; two-pointer minimum-swap and no-reorder fast paths reduce per-step overhead when agent traffic alternates decode and short exten\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/attention/backends/utils.py",
+          "spans": [
+            {
+              "line_start": 736,
+              "line_end": 813,
+              "symbol": "reorder_batch_to_split_decodes_and_prefills",
+              "kind": "function"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 108,
+      "id": "cand-vllm_v1_core-0023",
+      "module_qualified_name": "vllm/v1/core",
+      "symbol": "ChunkedLocalAttentionManager.find_longest_cache_hit",
+      "impact": "medium",
+      "score": 46,
+      "rationale": "ChunkedLocalAttentionManager.find_longest_cache_hit avoids large null-list materialization on admission; TTFT-relevant but scoped to chunked-local models.",
+      "locations": [
+        {
+          "file": "vllm/v1/core/single_type_kv_cache_manager.py",
+          "spans": [
+            {
+              "line_start": 1101,
+              "line_end": 1198,
+              "symbol": "ChunkedLocalAttentionManager.find_longest_cache_hit",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 109,
+      "id": "cand-vllm_v1_kv_offload-0012",
+      "module_qualified_name": "vllm/v1/kv_offload",
+      "symbol": "CPUOffloadingManager.prepare_store",
+      "impact": "medium",
+      "score": 45,
+      "rationale": "CPU prepare_store admission improves future primary hit rate and reduces all-or-nothing store failures; complementary to eviction policy but effect on median TTFT/TPOT is indirect and multi-turn-cach\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/kv_offload/cpu/manager.py",
+          "spans": [
+            {
+              "line_start": 166,
+              "line_end": 236,
+              "symbol": "CPUOffloadingManager.prepare_store",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 110,
+      "id": "cand-vllm_v1_attention-0020",
+      "module_qualified_name": "vllm/v1/attention",
+      "symbol": "compute_mm_prefix_range_tensor",
+      "impact": "medium",
+      "score": 43,
+      "rationale": "compute_mm_prefix_range_tensor is per-step multimodal prefill work with padded H2D uploads; a jagged CSR layout and pinned staging cut CPU list work on multimodal turns only.",
+      "locations": [
+        {
+          "file": "vllm/v1/attention/backends/utils.py",
+          "spans": [
+            {
+              "line_start": 49,
+              "line_end": 75,
+              "symbol": "compute_mm_prefix_range_tensor",
+              "kind": "function"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 111,
+      "id": "cand-vllm_distributed_kv_transfer-0014",
+      "module_qualified_name": "vllm/distributed/kv_transfer",
+      "symbol": "HF3FSKVConnector._gather_or_scatter_kv_caches",
+      "impact": "medium",
+      "score": 44,
+      "rationale": "HF3FS gather/scatter batching reduces per-block kernel launches on turn-2 fetch; helpful for HF3FS deployments but the win depends on many small blocks and doesn't touch the common non-HF3FS path.",
+      "locations": [
+        {
+          "file": "vllm/distributed/kv_transfer/kv_connector/v1/hf3fs/hf3fs_connector.py",
+          "spans": [
+            {
+              "line_start": 984,
+              "line_end": 1005,
+              "symbol": "HF3FSKVConnector._gather_or_scatter_kv_caches",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 112,
+      "id": "cand-vllm_v1_attention-0015",
+      "module_qualified_name": "vllm/v1/attention",
+      "symbol": "_make_mm_prefix_mask_mod",
+      "impact": "medium",
+      "score": 44,
+      "rationale": "_make_mm_prefix_mask_mod runs inside FA4 prefill blocks for multimodal prompts; precomputing full/partial KV block metadata skips per-element masking on fully-included blocks, helping image-heavy TTF\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/attention/backends/flash_attn.py",
+          "spans": [
+            {
+              "line_start": 1424,
+              "line_end": 1530,
+              "symbol": "_make_mm_prefix_mask_mod",
+              "kind": "function"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 113,
+      "id": "cand-vllm_distributed_kv_transfer-0018",
+      "module_qualified_name": "vllm/distributed/kv_transfer",
+      "symbol": "NixlBaseConnectorWorker._compute_desc_ids",
+      "impact": "medium",
+      "score": 40,
+      "rationale": "_compute_desc_ids pays per remote-prefill transfer setup; fused numpy or contiguous-range paths cut Python allocation, but the cost is a small fraction of NIXL transfer time and only shows up for HMA\u2026",
+      "locations": [
+        {
+          "file": "vllm/distributed/kv_transfer/kv_connector/v1/nixl/base_worker.py",
+          "spans": [
+            {
+              "line_start": 93,
+              "line_end": 161,
+              "symbol": "NixlBaseConnectorWorker._compute_desc_ids",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 114,
+      "id": "cand-vllm_v1_core-0005",
+      "module_qualified_name": "vllm/v1/core",
+      "symbol": "BlockPool.free_blocks",
+      "impact": "medium",
+      "score": 44,
+      "rationale": "free_blocks retention ordering affects future prefix-cache hit rate; better retention helps follow-up-turn TTFT, but the loop itself is small and the mechanism is one policy signal among many governi\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/core/block_pool.py",
+          "spans": [
+            {
+              "line_start": 719,
+              "line_end": 742,
+              "symbol": "BlockPool.free_blocks",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 115,
+      "id": "cand-vllm_v1_worker-0008",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "GPUModelRunner._calc_mrope_positions",
+      "impact": "medium",
+      "score": 41,
+      "rationale": "_calc_mrope_positions is a per-request per-step loop on M-RoPE multimodal models; vectorizing helps multimodal TPOT/TTFT only when those models are being served.",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/gpu_model_runner.py",
+          "spans": [
+            {
+              "line_start": 2795,
+              "line_end": 2842,
+              "symbol": "GPUModelRunner._calc_mrope_positions",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 116,
+      "id": "cand-vllm_v1_core-0022",
+      "module_qualified_name": "vllm/v1/core",
+      "symbol": "MambaManager.reachable_block_mask",
+      "impact": "medium",
+      "score": 42,
+      "rationale": "Mamba retention_interval affects long-context reuse for Mamba models; retention improvements matter but are scoped to Mamba/hybrid deployments rather than the default agentic serving stack.",
+      "locations": [
+        {
+          "file": "vllm/v1/core/single_type_kv_cache_manager.py",
+          "spans": [
+            {
+              "line_start": 1359,
+              "line_end": 1414,
+              "symbol": "MambaManager.reachable_block_mask",
+              "kind": "config_block"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 117,
+      "id": "cand-vllm_distributed_kv_transfer-0004",
+      "module_qualified_name": "vllm/distributed/kv_transfer",
+      "symbol": "_PUSH_WRITER_POLL_INTERVAL_MS",
+      "impact": "medium",
+      "score": 42,
+      "rationale": "_PUSH_WRITER_POLL_INTERVAL_MS is 1 ms and adds a bounded per-turn wait in push-mode NIXL; notification-driven wakeups remove that floor for turn-2 TTFT, but the absolute magnitude is small.",
+      "locations": [
+        {
+          "file": "vllm/distributed/kv_transfer/kv_connector/v1/nixl/push_worker.py",
+          "spans": [
+            {
+              "line_start": 70,
+              "line_end": 74,
+              "symbol": "_PUSH_WRITER_POLL_INTERVAL_MS",
+              "kind": "config_block"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 118,
+      "id": "cand-vllm_v1_worker-0031",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "MambaHybridModelState.preprocess_state",
+      "impact": "medium",
+      "score": 39,
+      "rationale": "MambaHybridModelState.preprocess_state amortization and fused-precopy fusion save decode-step launches, but the benefit is again limited to hybrid Mamba workloads and largely overlaps with the earlie\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/gpu/model_states/mamba_hybrid.py",
+          "spans": [
+            {
+              "line_start": 160,
+              "line_end": 207,
+              "symbol": "MambaHybridModelState.preprocess_state",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 119,
+      "id": "cand-vllm_v1_executor-0002",
+      "module_qualified_name": "vllm/v1/executor",
+      "symbol": "FutureWrapper.result",
+      "impact": "medium",
+      "score": 42,
+      "rationale": "FutureWrapper.result drain loop only shows up for callers using non_block futures; polling all rank queues in one pass helps async decode sync but scope is narrower than collective_rpc.",
+      "locations": [
+        {
+          "file": "vllm/v1/executor/multiproc_executor.py",
+          "spans": [
+            {
+              "line_start": 88,
+              "line_end": 105,
+              "symbol": "FutureWrapper.result",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 120,
+      "id": "cand-vllm_v1_attention-0013",
+      "module_qualified_name": "vllm/v1/attention",
+      "symbol": "fill_mm_prefix_query_ranges",
+      "impact": "medium",
+      "score": 40,
+      "rationale": "fill_mm_prefix_query_ranges runs on multimodal prefill/extend steps in the Triton backend; caching resolved spans avoids the O(num_actual_tokens) fill, but the workload trigger is narrow.",
+      "locations": [
+        {
+          "file": "vllm/v1/attention/backends/utils.py",
+          "spans": [
+            {
+              "line_start": 78,
+              "line_end": 146,
+              "symbol": "fill_mm_prefix_query_ranges",
+              "kind": "function"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 121,
+      "id": "cand-vllm_multimodal-0017",
+      "module_qualified_name": "vllm/multimodal",
+      "symbol": "PyNvVideoCodecVideoBackendMixin._decode_to_pinned_host",
+      "impact": "medium",
+      "score": 37,
+      "rationale": "PyNvVideoCodecVideoBackendMixin._decode_to_pinned_host lowers NVDEC decode+D2H latency via pinned buffer pooling and stream pipelining, but only benefits video-ingesting multi-turn workloads and is o\u2026",
+      "locations": [
+        {
+          "file": "vllm/multimodal/video.py",
+          "spans": [
+            {
+              "line_start": 795,
+              "line_end": 839,
+              "symbol": "PyNvVideoCodecVideoBackendMixin._decode_to_pinned_host",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 122,
+      "id": "cand-vllm_v1_core-0003",
+      "module_qualified_name": "vllm/v1/core",
+      "symbol": "SlidingWindowManager.find_longest_cache_hit",
+      "impact": "medium",
+      "score": 42,
+      "rationale": "SlidingWindowManager.find_longest_cache_hit reverse-scan is O(max_num_blocks) with a known asymptotic win to O(max_num_blocks/K + K); helps SWA admission TTFT but confined to SWA/SWA-hybrid models.",
+      "locations": [
+        {
+          "file": "vllm/v1/core/single_type_kv_cache_manager.py",
+          "spans": [
+            {
+              "line_start": 897,
+              "line_end": 993,
+              "symbol": "SlidingWindowManager.find_longest_cache_hit",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 123,
+      "id": "cand-vllm_v1_kv_offload-0010",
+      "module_qualified_name": "vllm/v1/kv_offload",
+      "symbol": "AsyncLookupManager._worker",
+      "impact": "medium",
+      "score": 40,
+      "rationale": "AsyncLookupManager batching/dedup shortens the retry window before promotion, tightening TTFT tail; median gain is bounded by tier backend latency and depends on secondary-hit frequency.",
+      "locations": [
+        {
+          "file": "vllm/v1/kv_offload/tiering/async_lookup.py",
+          "spans": [
+            {
+              "line_start": 214,
+              "line_end": 249,
+              "symbol": "AsyncLookupManager._worker",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 124,
+      "id": "cand-vllm_v1_executor-0016",
+      "module_qualified_name": "vllm/v1/executor",
+      "symbol": "RayExecutorV2._init_executor",
+      "impact": "medium",
+      "score": 40,
+      "rationale": "RayExecutorV2._init_executor is mostly startup code affecting TTFT only during bring-up; the MessageQueue locality does bleed into TPOT for multi-node MQ deployments, but single-node runs see little \u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/executor/ray_executor_v2.py",
+          "spans": [
+            {
+              "line_start": 304,
+              "line_end": 478,
+              "symbol": "RayExecutorV2._init_executor",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 125,
+      "id": "cand-vllm_multimodal-0002",
+      "module_qualified_name": "vllm/multimodal",
+      "symbol": "MultiModalHasher.iter_item_to_bytes/hash_kwargs",
+      "impact": "medium",
+      "score": 38,
+      "rationale": "MultiModalHasher runs on cache-key construction; batching hasher updates and iterative traversal shave overhead but savings are far smaller than avoiding tensor copies and only visible on cache hits.",
+      "locations": [
+        {
+          "file": "vllm/multimodal/hasher.py",
+          "spans": [
+            {
+              "line_start": 145,
+              "line_end": 179,
+              "symbol": "MultiModalHasher.iter_item_to_bytes/hash_kwargs",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 126,
+      "id": "cand-vllm_multimodal-0018",
+      "module_qualified_name": "vllm/multimodal",
+      "symbol": "@VIDEO_LOADER_REGISTRY.register(\"opencv\")",
+      "impact": "high",
+      "score": 36,
+      "rationale": "Alternative VIDEO_LOADER_REGISTRY backends can cut per-clip encoder FLOPs by sampling fewer frames, potentially large TTFT wins for long-clip video prompts, but the objective's workload hint doesn't \u2026",
+      "locations": [
+        {
+          "file": "vllm/multimodal/video.py",
+          "spans": [
+            {
+              "line_start": 986,
+              "line_end": 986,
+              "symbol": "@VIDEO_LOADER_REGISTRY.register(\"opencv\")",
+              "kind": "plugin_seam"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 127,
+      "id": "cand-vllm_distributed_kv_transfer-0008",
+      "module_qualified_name": "vllm/distributed/kv_transfer",
+      "symbol": "OffloadingScheduler._build_store_jobs",
+      "impact": "medium",
+      "score": 38,
+      "rationale": "OffloadingScheduler._build_store_jobs adds per-step CPU cost that scales with active requests; batching prepare_store trims scheduler overhead but the win is small vs runner-side hot paths.",
+      "locations": [
+        {
+          "file": "vllm/distributed/kv_transfer/kv_connector/v1/offloading/scheduler.py",
+          "spans": [
+            {
+              "line_start": 1248,
+              "line_end": 1441,
+              "symbol": "OffloadingScheduler._build_store_jobs",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 128,
+      "id": "cand-vllm_multimodal-0020",
+      "module_qualified_name": "vllm/multimodal",
+      "symbol": "BaseMultiModalField.reduce_data",
+      "impact": "medium",
+      "score": 40,
+      "rationale": "BaseMultiModalField.reduce_data does repeated list/set/traversal work per field per grouped prefill; a fused single-pass path is a clean CPU win but small in absolute TTFT terms and multimodal-only.",
+      "locations": [
+        {
+          "file": "vllm/multimodal/inputs.py",
+          "spans": [
+            {
+              "line_start": 462,
+              "line_end": 494,
+              "symbol": "BaseMultiModalField.reduce_data",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 129,
+      "id": "cand-vllm_multimodal-0022",
+      "module_qualified_name": "vllm/multimodal",
+      "symbol": "MultiModalKwargsItems.from_hf_inputs",
+      "impact": "medium",
+      "score": 37,
+      "rationale": "from_hf_inputs churns Python objects per modality item; transposed assembly reduces cache-miss TTFT for multimodal prompts but is narrow and constant-factor.",
+      "locations": [
+        {
+          "file": "vllm/multimodal/inputs.py",
+          "spans": [
+            {
+              "line_start": 964,
+              "line_end": 998,
+              "symbol": "MultiModalKwargsItems.from_hf_inputs",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 130,
+      "id": "cand-vllm_v1_engine-0013",
+      "module_qualified_name": "vllm/v1/engine",
+      "symbol": "LogprobsProcessor._update_sample_logprobs",
+      "impact": "medium",
+      "score": 38,
+      "rationale": "LogprobsProcessor per-token conversion cost is real but only paid when logprobs are enabled; TPOT gain is conditional on request-level flags rather than baseline agentic traffic.",
+      "locations": [
+        {
+          "file": "vllm/v1/engine/logprobs.py",
+          "spans": [
+            {
+              "line_start": 69,
+              "line_end": 119,
+              "symbol": "LogprobsProcessor._update_sample_logprobs",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 131,
+      "id": "cand-vllm_distributed_kv_transfer-0016",
+      "module_qualified_name": "vllm/distributed/kv_transfer",
+      "symbol": "MoRIIOConnectorWorker._read_blocks",
+      "impact": "medium",
+      "score": 34,
+      "rationale": "MoRIIOConnectorWorker._read_blocks batching helps remote-prefill TTFT on MoRIIO READ mode; impact is real but the connector is niche, and NIXL-based paths dominate most disaggregated deployments.",
+      "locations": [
+        {
+          "file": "vllm/distributed/kv_transfer/kv_connector/v1/moriio/moriio_connector.py",
+          "spans": [
+            {
+              "line_start": 2541,
+              "line_end": 2640,
+              "symbol": "MoRIIOConnectorWorker._read_blocks",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 132,
+      "id": "cand-vllm_v1_worker-0016",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "KVBlockZeroer",
+      "impact": "medium",
+      "score": 40,
+      "rationale": "KVBlockZeroer segment-aware tiling shaves wasted programs during new-turn allocation; helps TTFT/tail when page sizes vary across cache segments, but allocation-time cost isn't a dominant term for st\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/utils.py",
+          "spans": [
+            {
+              "line_start": 47,
+              "line_end": 241,
+              "symbol": "KVBlockZeroer",
+              "kind": "config_block"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 133,
+      "id": "cand-vllm_v1_worker-0022",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "copy_kv_cache_blocks_inplace",
+      "impact": "medium",
+      "score": 36,
+      "rationale": "copy_kv_cache_blocks_inplace fusion saves launches during promotion/copy, but the copy path isn't every step and the raw cost is small relative to input prep and attention.",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/utils.py",
+          "spans": [
+            {
+              "line_start": 565,
+              "line_end": 601,
+              "symbol": "copy_kv_cache_blocks_inplace",
+              "kind": "function"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 134,
+      "id": "cand-vllm_v1_kv_offload-0011",
+      "module_qualified_name": "vllm/v1/kv_offload",
+      "symbol": "DualQueueThreadPool._worker",
+      "impact": "medium",
+      "score": 36,
+      "rationale": "DualQueueThreadPool._worker governs FS-tier read/write balance; slack-aware scheduling helps load-burst TTFT but the FS bandwidth ceiling bounds gains and the path is optional.",
+      "locations": [
+        {
+          "file": "vllm/v1/kv_offload/tiering/fs/thread_pool.py",
+          "spans": [
+            {
+              "line_start": 153,
+              "line_end": 180,
+              "symbol": "DualQueueThreadPool._worker",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 135,
+      "id": "cand-vllm_v1_kv_offload-0007",
+      "module_qualified_name": "vllm/v1/kv_offload",
+      "symbol": "compute_sub_block_ptrs",
+      "impact": "medium",
+      "score": 35,
+      "rationale": "compute_sub_block_ptrs eliminates small per-call materialization inside transfer submission; ceiling bounded by surrounding scheduling and memcpy cost, so effect on TTFT is minor.",
+      "locations": [
+        {
+          "file": "vllm/v1/kv_offload/cpu/gpu_worker.py",
+          "spans": [
+            {
+              "line_start": 73,
+              "line_end": 120,
+              "symbol": "compute_sub_block_ptrs",
+              "kind": "function"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 136,
+      "id": "cand-vllm_v1_executor-0003",
+      "module_qualified_name": "vllm/v1/executor",
+      "symbol": "WorkerProc.worker_busy_loop",
+      "impact": "medium",
+      "score": 34,
+      "rationale": "worker_busy_loop dispatch overhead is real per step but small relative to model execution and queue transport; specializing the dispatch gives a thin TPOT gain concentrated in short-generation regime\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/executor/multiproc_executor.py",
+          "spans": [
+            {
+              "line_start": 1008,
+              "line_end": 1033,
+              "symbol": "WorkerProc.worker_busy_loop",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 137,
+      "id": "cand-vllm_v1_kv_offload-0002",
+      "module_qualified_name": "vllm/v1/kv_offload",
+      "symbol": "ARCCachePolicy.touch",
+      "impact": "medium",
+      "score": 33,
+      "rationale": "ARCCachePolicy.touch tuning influences future eviction targets and therefore primary-cache hit rate, but the connection to median TTFT/TPOT is indirect and capped by downstream eviction decisions and\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/kv_offload/cpu/policies/arc.py",
+          "spans": [
+            {
+              "line_start": 75,
+              "line_end": 101,
+              "symbol": "ARCCachePolicy.touch",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 138,
+      "id": "cand-vllm_distributed_kv_transfer-0017",
+      "module_qualified_name": "vllm/distributed/kv_transfer",
+      "symbol": "MooncakeStoreWorker.lookup",
+      "impact": "medium",
+      "score": 40,
+      "rationale": "MooncakeStoreWorker.lookup adds Python key expansion cost on every prefix-hit lookup; skipping redundant find_longest_cache_hit passes trims TTFT for Mooncake-backed multi-turn prompts, but backend-s\u2026",
+      "locations": [
+        {
+          "file": "vllm/distributed/kv_transfer/kv_connector/v1/mooncake/store/worker.py",
+          "spans": [
+            {
+              "line_start": 1760,
+              "line_end": 1863,
+              "symbol": "MooncakeStoreWorker.lookup",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 139,
+      "id": "cand-vllm_multimodal-0003",
+      "module_qualified_name": "vllm/multimodal",
+      "symbol": "nested_tensors_equal",
+      "impact": "medium",
+      "score": 36,
+      "rationale": "nested_tensors_equal is called during multimodal batching; storage-identity short-circuits avoid CUDA-syncing torch.equal calls, but effect is confined to prefill batching with repeated shared fields.",
+      "locations": [
+        {
+          "file": "vllm/multimodal/inputs.py",
+          "spans": [
+            {
+              "line_start": 232,
+              "line_end": 286,
+              "symbol": "nested_tensors_equal",
+              "kind": "function"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 140,
+      "id": "cand-vllm_v1_worker-0021",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "WorkspaceManager._ensure_workspace_size",
+      "impact": "medium",
+      "score": 33,
+      "rationale": "WorkspaceManager growth policy is a tail-latency lever (avoiding empty_cache reallocation stalls on long tool-response prefills), not a median TPOT driver in steady state.",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/workspace.py",
+          "spans": [
+            {
+              "line_start": 119,
+              "line_end": 191,
+              "symbol": "WorkspaceManager._ensure_workspace_size",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 141,
+      "id": "cand-vllm_distributed_kv_transfer-0010",
+      "module_qualified_name": "vllm/distributed/kv_transfer",
+      "symbol": "KVConnectorFactory.register_connector registrations",
+      "impact": "medium",
+      "score": 40,
+      "rationale": "The KVConnectorFactory registry itself is cold; rf_count=9 reflects proposal breadth but the seam is a plumbing point, not a hot loop. Direct TTFT/TPOT movement depends entirely on which connector va\u2026",
+      "locations": [
+        {
+          "file": "vllm/distributed/kv_transfer/kv_connector/factory.py",
+          "spans": [
+            {
+              "line_start": 152,
+              "line_end": 242,
+              "symbol": "KVConnectorFactory.register_connector registrations",
+              "kind": "plugin_seam"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 142,
+      "id": "cand-vllm_multimodal-0026",
+      "module_qualified_name": "vllm/multimodal",
+      "symbol": "PyNvVideoCodecVideoBackendMixin.decode_frames_pynvvideocodec",
+      "impact": "medium",
+      "score": 32,
+      "rationale": "Removing per-request temp-file staging in PyNvVideoCodec avoidance is a clear TTFT win for repeated video ingestion, but video is not the described workload, so the score reflects narrow applicabilit\u2026",
+      "locations": [
+        {
+          "file": "vllm/multimodal/video.py",
+          "spans": [
+            {
+              "line_start": 842,
+              "line_end": 875,
+              "symbol": "PyNvVideoCodecVideoBackendMixin.decode_frames_pynvvideocodec",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 143,
+      "id": "cand-vllm_v1_worker-0014",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "stage_postprocess_inputs_to_gpu",
+      "impact": "medium",
+      "score": 32,
+      "rationale": "Mamba postprocess H2D coalescing helps hybrid spec-decode workloads; TPOT gain is real but confined to that model/decoding path.",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/mamba_utils.py",
+          "spans": [
+            {
+              "line_start": 1246,
+              "line_end": 1292,
+              "symbol": "stage_postprocess_inputs_to_gpu",
+              "kind": "function"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 144,
+      "id": "cand-vllm_v1_executor-0011",
+      "module_qualified_name": "vllm/v1/executor",
+      "symbol": "Executor.get_class",
+      "impact": "medium",
+      "score": 34,
+      "rationale": "Executor.get_class is a selector, not a hot path; it enables alternative executor topologies rather than performing the optimization itself, so impact is indirect and gated on downstream implementati\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/executor/abstract.py",
+          "spans": [
+            {
+              "line_start": 50,
+              "line_end": 92,
+              "symbol": "Executor.get_class",
+              "kind": "plugin_seam"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 145,
+      "id": "cand-vllm_multimodal-0005",
+      "module_qualified_name": "vllm/multimodal",
+      "symbol": "MultiModalFlatField._reduce_data",
+      "impact": "medium",
+      "score": 30,
+      "rationale": "MultiModalFlatField._reduce_data reduces per-item slice-assign overhead for variable-length audio/video features; TTFT gain only for multimodal requests, no effect on text-only agent turns.",
+      "locations": [
+        {
+          "file": "vllm/multimodal/inputs.py",
+          "spans": [
+            {
+              "line_start": 569,
+              "line_end": 649,
+              "symbol": "MultiModalFlatField._reduce_data",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 146,
+      "id": "cand-vllm_multimodal-0024",
+      "module_qualified_name": "vllm/multimodal",
+      "symbol": "PyNvVideoCodecVideoBackendMixin._configure_decoder_slots/_borrow_decoder_slot",
+      "impact": "medium",
+      "score": 38,
+      "rationale": "PyNvVideoCodec decoder-slot admission (LIFO wait loop, cond.notify) affects concurrent video prefill overlap; FIFO/priority queues and per-device sharding help TTFT tails but only when NVDEC contenti\u2026",
+      "locations": [
+        {
+          "file": "vllm/multimodal/video.py",
+          "spans": [
+            {
+              "line_start": 689,
+              "line_end": 745,
+              "symbol": "PyNvVideoCodecVideoBackendMixin._configure_decoder_slots/_borrow_decoder_slot",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 147,
+      "id": "cand-vllm_v1_attention-0024",
+      "module_qualified_name": "vllm/v1/attention",
+      "symbol": "get_kernel_options",
+      "impact": "medium",
+      "score": 30,
+      "rationale": "FlexAttention BLOCK_M/BLOCK_N tuning can shift compiled kernel occupancy for TTFT prefills and repeated decode, but the effect is scoped to Flex backend and depends on device/shape.",
+      "locations": [
+        {
+          "file": "vllm/v1/attention/backends/flex_attention.py",
+          "spans": [
+            {
+              "line_start": 1422,
+              "line_end": 1483,
+              "symbol": "get_kernel_options",
+              "kind": "function"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 148,
+      "id": "cand-vllm_v1_worker-0018",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "EncoderCudaGraphManager._execute_local",
+      "impact": "medium",
+      "score": 30,
+      "rationale": "EncoderCudaGraphManager packing moves near-budget encoder batches from eager to cudagraph, cutting multimodal TTFT; scoped to mixed-modality agent turns, so limited relevance to the described text-he\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/encoder_cudagraph.py",
+          "spans": [
+            {
+              "line_start": 360,
+              "line_end": 451,
+              "symbol": "EncoderCudaGraphManager._execute_local",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 149,
+      "id": "cand-vllm_v1_core-0011",
+      "module_qualified_name": "vllm/v1/core",
+      "symbol": "Scheduler._mamba_block_aligned_split",
+      "impact": "medium",
+      "score": 28,
+      "rationale": "Mamba block-aligned split is scoped strictly to hybrid-Mamba align-mode models; potentially meaningful TTFT/TPOT for those workloads but a small slice of agentic serving overall.",
+      "locations": [
+        {
+          "file": "vllm/v1/core/sched/scheduler.py",
+          "spans": [
+            {
+              "line_start": 349,
+              "line_end": 424,
+              "symbol": "Scheduler._mamba_block_aligned_split",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 150,
+      "id": "cand-vllm_v1_core-0019",
+      "module_qualified_name": "vllm/v1/core",
+      "symbol": "MambaManager.find_longest_cache_hit",
+      "impact": "medium",
+      "score": 32,
+      "rationale": "MambaManager.find_longest_cache_hit accelerates admission cache-hit lookup but only for Mamba/hybrid models; agentic workloads on the mainstream attention family will not exercise this path.",
+      "locations": [
+        {
+          "file": "vllm/v1/core/single_type_kv_cache_manager.py",
+          "spans": [
+            {
+              "line_start": 1280,
+              "line_end": 1356,
+              "symbol": "MambaManager.find_longest_cache_hit",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 151,
+      "id": "cand-vllm_multimodal-0010",
+      "module_qualified_name": "vllm/multimodal",
+      "symbol": "find_split_point",
+      "impact": "medium",
+      "score": 26,
+      "rationale": "Vectorizing find_split_point cuts audio preprocessing wall time on TTFT, but only for voice-agent/ASR workloads and not the described general multi-turn agentic path.",
+      "locations": [
+        {
+          "file": "vllm/multimodal/audio.py",
+          "spans": [
+            {
+              "line_start": 400,
+              "line_end": 447,
+              "symbol": "find_split_point",
+              "kind": "function"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 152,
+      "id": "cand-vllm_v1_engine-0008",
+      "module_qualified_name": "vllm/v1/engine",
+      "symbol": "LogprobsProcessor._update_prompt_logprobs",
+      "impact": "medium",
+      "score": 36,
+      "rationale": "LogprobsProcessor._update_prompt_logprobs is a per-position Python loop paid only when prompt_logprobs is enabled; gated feature limits reach, and per-token savings are small even when active.",
+      "locations": [
+        {
+          "file": "vllm/v1/engine/logprobs.py",
+          "spans": [
+            {
+              "line_start": 121,
+              "line_end": 187,
+              "symbol": "LogprobsProcessor._update_prompt_logprobs",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 153,
+      "id": "cand-vllm_v1_worker-0032",
+      "module_qualified_name": "vllm/v1/worker",
+      "symbol": "RopeState.prepare_positions and _prepare_rope_positions_kernel",
+      "impact": "medium",
+      "score": 29,
+      "rationale": "RopeState.prepare_positions removes wasted lanes on one-token decode for M-RoPE/XD-RoPE; only helps multimodal RoPE workloads and gains are small relative to the full decode step.",
+      "locations": [
+        {
+          "file": "vllm/v1/worker/gpu/mm/rope.py",
+          "spans": [
+            {
+              "line_start": 110,
+              "line_end": 214,
+              "symbol": "RopeState.prepare_positions and _prepare_rope_positions_kernel",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 154,
+      "id": "cand-vllm_multimodal-0023",
+      "module_qualified_name": "vllm/multimodal",
+      "symbol": "BaseMultiModalReceiverCache.get_and_update_features",
+      "impact": "medium",
+      "score": 26,
+      "rationale": "Encoder-cache get_and_update_features deduplication reduces Python overhead on multimodal ingress; effect on TTFT only for multimodal-heavy agent batches, small per-call work.",
+      "locations": [
+        {
+          "file": "vllm/multimodal/cache.py",
+          "spans": [
+            {
+              "line_start": 589,
+              "line_end": 608,
+              "symbol": "BaseMultiModalReceiverCache.get_and_update_features",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 155,
+      "id": "cand-vllm_v1_kv_offload-0005",
+      "module_qualified_name": "vllm/v1/kv_offload",
+      "symbol": "NUM_SMS/THRESHOLD_BYTES/MIN_N",
+      "impact": "medium",
+      "score": 30,
+      "rationale": "Tuning NUM_SMS/THRESHOLD_BYTES/MIN_N adjusts CPU-to-GPU Triton swap crossover on non-H100 links; strictly a tuning knob for the promotion path chosen by _select_swap_blocks_fn.",
+      "locations": [
+        {
+          "file": "vllm/v1/kv_offload/cpu/swap_blocks_triton.py",
+          "spans": [
+            {
+              "line_start": 12,
+              "line_end": 21,
+              "symbol": "NUM_SMS/THRESHOLD_BYTES/MIN_N",
+              "kind": "config_block"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 156,
+      "id": "cand-vllm_multimodal-0008",
+      "module_qualified_name": "vllm/multimodal",
+      "symbol": "MultiModalCache.get_leaf_size/get_item_size",
+      "impact": "medium",
+      "score": 24,
+      "rationale": "MultiModalCache size accounting runs on cache inserts/evictions; touches TTFT for new-media cache misses but only in multimodal workloads and with small per-operation savings.",
+      "locations": [
+        {
+          "file": "vllm/multimodal/cache.py",
+          "spans": [
+            {
+              "line_start": 98,
+              "line_end": 139,
+              "symbol": "MultiModalCache.get_leaf_size/get_item_size",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 157,
+      "id": "cand-vllm_multimodal-0021",
+      "module_qualified_name": "vllm/multimodal",
+      "symbol": "MultiModalGPUMemoryPool.acquire/_release",
+      "impact": "medium",
+      "score": 27,
+      "rationale": "MultiModalGPUMemoryPool admission scheduling cuts thundering-herd wakeups for concurrent video ingress, improving tail more than median and only when video traffic is bursty; small median TTFT effect\u2026",
+      "locations": [
+        {
+          "file": "vllm/multimodal/gpu_ipc_memory.py",
+          "spans": [
+            {
+              "line_start": 54,
+              "line_end": 110,
+              "symbol": "MultiModalGPUMemoryPool.acquire/_release",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 158,
+      "id": "cand-vllm_v1_kv_offload-0016",
+      "module_qualified_name": "vllm/v1/kv_offload",
+      "symbol": "batch_store_block/batch_load_block",
+      "impact": "medium",
+      "score": 36,
+      "rationale": "batch_store_block/batch_load_block for FS-tier offload sees Python fallback loops parallelized with a ThreadPoolExecutor. Only activates when reused prefixes spill past CPU primary memory, and even t\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/kv_offload/tiering/fs/io.py",
+          "spans": [
+            {
+              "line_start": 168,
+              "line_end": 222,
+              "symbol": "batch_store_block/batch_load_block",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 159,
+      "id": "cand-vllm_multimodal-0027",
+      "module_qualified_name": "vllm/multimodal",
+      "symbol": "DeepStreamVideoBackendMixin.decode_indices",
+      "impact": "medium",
+      "score": 28,
+      "rationale": "DeepStream decode_indices affects video TTFT on deployments using that backend; pinned buffers and stream-aware handles reduce blocking D2H but the trigger workload is very narrow.",
+      "locations": [
+        {
+          "file": "vllm/multimodal/video.py",
+          "spans": [
+            {
+              "line_start": 929,
+              "line_end": 983,
+              "symbol": "DeepStreamVideoBackendMixin.decode_indices",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 160,
+      "id": "cand-vllm_multimodal-0007",
+      "module_qualified_name": "vllm/multimodal",
+      "symbol": "PlaceholderRange.embeds_cumsum/extract_embeds_range",
+      "impact": "medium",
+      "score": 24,
+      "rationale": "PlaceholderRange cumsum/extract avoids small tensor ops on placeholder masks; only exercised by multi-image prompts, and each call is already tiny.",
+      "locations": [
+        {
+          "file": "vllm/multimodal/inputs.py",
+          "spans": [
+            {
+              "line_start": 150,
+              "line_end": 205,
+              "symbol": "PlaceholderRange.embeds_cumsum/extract_embeds_range",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 161,
+      "id": "cand-vllm_multimodal-0009",
+      "module_qualified_name": "vllm/multimodal",
+      "symbol": "ShmObjectStoreSenderCache.get_and_update_item/remove_dangling_items",
+      "impact": "medium",
+      "score": 34,
+      "rationale": "ShmObjectStoreSenderCache.remove_dangling_items O(N) prune bursts create TTFT outliers under long-running churn; incremental cursor-based pruning smooths tails rather than shifts the median much.",
+      "locations": [
+        {
+          "file": "vllm/multimodal/cache.py",
+          "spans": [
+            {
+              "line_start": 488,
+              "line_end": 565,
+              "symbol": "ShmObjectStoreSenderCache.get_and_update_item/remove_dangling_items",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 162,
+      "id": "cand-vllm_multimodal-0011",
+      "module_qualified_name": "vllm/multimodal",
+      "symbol": "resample_audio_pyav",
+      "impact": "medium",
+      "score": 25,
+      "rationale": "resample_audio_pyav single-pass multi-channel resample cuts audio ingress CPU, but audio isn't the target workload and per-call setup is a small fraction of overall TTFT.",
+      "locations": [
+        {
+          "file": "vllm/multimodal/audio.py",
+          "spans": [
+            {
+              "line_start": 174,
+              "line_end": 229,
+              "symbol": "resample_audio_pyav",
+              "kind": "function"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 163,
+      "id": "cand-vllm_multimodal-0025",
+      "module_qualified_name": "vllm/multimodal",
+      "symbol": "reserve_mm_ipc_gpu_memory",
+      "impact": "medium",
+      "score": 22,
+      "rationale": "mm_ipc_gpu_memory reservation trades KV headroom vs decode concurrency for video deployments; effect on TTFT/TPOT is real but tied to video-heavy configurations, not the stated workload.",
+      "locations": [
+        {
+          "file": "vllm/multimodal/gpu_ipc_memory.py",
+          "spans": [
+            {
+              "line_start": 155,
+              "line_end": 257,
+              "symbol": "reserve_mm_ipc_gpu_memory",
+              "kind": "function"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 164,
+      "id": "cand-vllm_multimodal-0012",
+      "module_qualified_name": "vllm/multimodal",
+      "symbol": "OpenCVVideoBackendMixin._read_frames_with_recovery",
+      "impact": "medium",
+      "score": 26,
+      "rationale": "OpenCV frame-read recovery loop is preprocessing overhead confined to sampled video prompts; keyframe seek reduces CPU cost but does not touch the mainline agentic decode/prefill critical path.",
+      "locations": [
+        {
+          "file": "vllm/multimodal/video.py",
+          "spans": [
+            {
+              "line_start": 328,
+              "line_end": 432,
+              "symbol": "OpenCVVideoBackendMixin._read_frames_with_recovery",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 165,
+      "id": "cand-vllm_multimodal-0014",
+      "module_qualified_name": "vllm/multimodal",
+      "symbol": "PyAVVideoBackendMixin.decode_frames",
+      "impact": "medium",
+      "score": 22,
+      "rationale": "PyAV video decode seek/GOP coalescing reduces preprocessing wall time for video ingress; TTFT gain only for video-heavy requests, off the multi-turn text agent hot path.",
+      "locations": [
+        {
+          "file": "vllm/multimodal/video.py",
+          "spans": [
+            {
+              "line_start": 547,
+              "line_end": 590,
+              "symbol": "PyAVVideoBackendMixin.decode_frames",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 166,
+      "id": "cand-vllm_multimodal-0015",
+      "module_qualified_name": "vllm/multimodal",
+      "symbol": "PYNVVIDEOCODEC_* module-level constants",
+      "impact": "medium",
+      "score": 20,
+      "rationale": "PyNvVideoCodec reservation constants affect NVDEC slot counts and KV headroom for video bursts; scope is narrow (NVDEC deployments) and it is a policy-constant tune with weak evidence.",
+      "locations": [
+        {
+          "file": "vllm/multimodal/video.py",
+          "spans": [
+            {
+              "line_start": 217,
+              "line_end": 224,
+              "symbol": "PYNVVIDEOCODEC_* module-level constants",
+              "kind": "config_block"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 167,
+      "id": "cand-vllm_v1_core-0014",
+      "module_qualified_name": "vllm/v1/core",
+      "symbol": "MambaManager.allocate_new_blocks",
+      "impact": "medium",
+      "score": 32,
+      "rationale": "MambaManager.allocate_new_blocks reuse policy affects TPOT/follow-up TTFT for Mamba align-mode models only; recycling speculative blocks and lazy allocation help, but model-scope narrow.",
+      "locations": [
+        {
+          "file": "vllm/v1/core/single_type_kv_cache_manager.py",
+          "spans": [
+            {
+              "line_start": 1532,
+              "line_end": 1651,
+              "symbol": "MambaManager.allocate_new_blocks",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 168,
+      "id": "cand-vllm_v1_kv_offload-0019",
+      "module_qualified_name": "vllm/v1/kv_offload",
+      "symbol": "ServerRole.serve_external_requests/_process_inbound_lookup",
+      "impact": "medium",
+      "score": 24,
+      "rationale": "P2P ServerRole lookup batching helps peer-cache-hit TTFT via earlier LookupResp emission, but the effect is bounded by scheduler-step cadence and only matters for symmetric P2P deployments, which are\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/kv_offload/tiering/p2p/session/server.py",
+          "spans": [
+            {
+              "line_start": 449,
+              "line_end": 665,
+              "symbol": "ServerRole.serve_external_requests/_process_inbound_lookup",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 169,
+      "id": "cand-vllm_v1_attention-0014",
+      "module_qualified_name": "vllm/v1/attention",
+      "symbol": "get_dcp_local_seq_lens",
+      "impact": "low",
+      "score": 22,
+      "rationale": "get_dcp_local_seq_lens is per-DCP-metadata-build scalar arithmetic and small allocation; caching rank_offsets is real but per-call cost is tiny and DCP must be enabled, so impact on median TTFT/TPOT \u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/attention/backends/utils.py",
+          "spans": [
+            {
+              "line_start": 958,
+              "line_end": 995,
+              "symbol": "get_dcp_local_seq_lens",
+              "kind": "function"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 170,
+      "id": "cand-vllm_multimodal-0016",
+      "module_qualified_name": "vllm/multimodal",
+      "symbol": "DeepStreamVideoBackendMixin._get_pool",
+      "impact": "low",
+      "score": 18,
+      "rationale": "DeepStream pool sizing only affects DeepStream video deployments; narrow scope and unrelated to the multi-turn text agentic hot path implied by the workload hint.",
+      "locations": [
+        {
+          "file": "vllm/multimodal/video.py",
+          "spans": [
+            {
+              "line_start": 897,
+              "line_end": 926,
+              "symbol": "DeepStreamVideoBackendMixin._get_pool",
+              "kind": "region"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 171,
+      "id": "cand-vllm_v1_attention-0016",
+      "module_qualified_name": "vllm/v1/attention",
+      "symbol": "FlashInferMetadataBuilder._get_workspace_buffer",
+      "impact": "low",
+      "score": 18,
+      "rationale": "FlashInfer workspace sizing mainly touches TTFT outliers on long prefills rather than median latency; self-labeled low impact and no supporting research-finding proposals.",
+      "locations": [
+        {
+          "file": "vllm/v1/attention/backends/flashinfer.py",
+          "spans": [
+            {
+              "line_start": 940,
+              "line_end": 963,
+              "symbol": "FlashInferMetadataBuilder._get_workspace_buffer",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 172,
+      "id": "cand-vllm_v1_core-0015",
+      "module_qualified_name": "vllm/v1/core",
+      "symbol": "KVCacheCoordinator.get_num_blocks_to_allocate",
+      "impact": "low",
+      "score": 24,
+      "rationale": "KVCacheCoordinator.get_num_blocks_to_allocate is called twice per waiting request in admission but absolute cost is tiny; useful as part of broader admission-loop tuning, not a standalone TTFT mover.",
+      "locations": [
+        {
+          "file": "vllm/v1/core/kv_cache_coordinator.py",
+          "spans": [
+            {
+              "line_start": 130,
+              "line_end": 190,
+              "symbol": "KVCacheCoordinator.get_num_blocks_to_allocate",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "rank": 173,
+      "id": "cand-vllm_v1_executor-0009",
+      "module_qualified_name": "vllm/v1/executor",
+      "symbol": "RayDistributedExecutor.collective_rpc",
+      "impact": "low",
+      "score": 20,
+      "rationale": "RayDistributedExecutor.collective_rpc is off the steady-state decode path (Ray uses compiled DAG); improvements only touch startup, warmup, and occasional control RPCs, so median TTFT/TPOT movement i\u2026",
+      "locations": [
+        {
+          "file": "vllm/v1/executor/ray_executor.py",
+          "spans": [
+            {
+              "line_start": 470,
+              "line_end": 495,
+              "symbol": "RayDistributedExecutor.collective_rpc",
+              "kind": "method"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
