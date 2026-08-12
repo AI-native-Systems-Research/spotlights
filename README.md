@@ -47,15 +47,15 @@ Discovery runs in two directions. The primary, live direction starts from the sy
 
 Spotlights writes a browsable tree of Markdown. Each candidate is a full write-up — the current approach, why it matters for your goal, and concrete proposals grounded in the code and the literature. A real candidate from the checked-in example run (`examples/vllm_subset/`):
 
-> **`ARCCachePolicy.evict`** — `vllm/v1/kv_offload/cpu/policies/arc.py` (lines 97–156) · estimated impact: **medium**
+> **[`LRUCachePolicy.evict`](examples/vllm_subset/modules/vllm_v1_kv_offload/LRUCachePolicy.evict__cand-vllm_v1_kv_offload-0003.md)** — `vllm/v1/kv_offload/cpu/policies/lru.py` (lines 56–78) · estimated impact: **medium**
 >
-> **Description.** ARC eviction routine that atomically selects n victims, choosing T1 or T2 from the adaptive target, skipping protected/ref-counted entries, moving selected keys to ghost lists.
+> **Description.** LRU batch eviction that scans evictable blocks from the oldest end, skipping protected keys until n victims are collected.
 >
-> **Why it matters.** Large CPU offload pools and burst stores put this scan on the scheduler `prepare_store` path. Faster victim selection reduces scheduler stalls, improving TPOT when many requests are storing new KV blocks while old blocks are still protected.
+> **Why it matters.** Agentic multi-turn workloads reuse prompt/prefix blocks across turns, and pure recency evicts them too aggressively. Better victim scoring raises primary-tier hit rate and cuts promotion stalls that affect median TTFT.
 >
-> **Proposal — Add an S3-FIFO probationary filter in front of ARC** to cut eviction scan cost on one-hit KV blocks.
+> **Proposal — Add an S3-FIFO cache policy as an alternative to pure-recency LRU** to protect hot multi-turn prefixes from one-hit block churn.
 >
-> Grounded in *FIFO Queues are All You Need for Cache Eviction* (<https://jasony.me/publication/sosp23-s3fifo.pdf>): a small probationary FIFO filters most one-hit blocks before they reach T1/T2, preserving ARC's adaptive partitioning for the reusable prefixes that matter.
+> Grounded in *FIFO Queues are All You Need for Cache Eviction* (<https://s3fifo.com/blog/2023/08/01/fifo-queues-are-all-you-need-for-cache-eviction/>): a small probationary FIFO demotes one-hit blocks before they pollute the main region, while a ghost FIFO detects returning prefixes and promotes them on the next store — preserving `CachePolicy`'s API and atomic evict contract.
 
 On disk:
 
@@ -63,10 +63,14 @@ On disk:
 spotlights-out/
   index.md                          # repo-level summary, one row per module
   result.json                       # full structured run output
+  run_manifest.json                 # copy of the public run manifest (see artifacts/ below)
   modules/
     vllm_v1_kv_offload.md           # module page: candidates table
     vllm_v1_kv_offload/
-      <symbol-slug>__<candidate-id>.md   # full per-candidate write-up + proposals
+      <symbol-slug>__cand-<module>-NNNN.md   # per-candidate write-up + proposals
+  sorted/                           # written by /spotlights-sort-candidates
+    sorted_candidates.md            # ranked table linking each candidate
+    sorted_candidates.json          # machine-readable ranking
 artifacts/
   spotlights_manager/               # checkpoints, raw transcripts (resumable)
     run_manifest.json               # provenance, token usage, and rate-table cost
@@ -85,7 +89,7 @@ Browse the full rendered run under [`examples/vllm_subset/`](examples/vllm_subse
 | [Codex](https://github.com/openai/codex) | `curl -fsSL https://chatgpt.com/codex/install.sh \| sh` | `module_deep_research`, Codex executors (steps 2, 5) |
 
 > [!TIP]
-> Tested and recommended models: **Opus 4.8** for Claude Code and **GPT-5.5** for Codex.
+> Tested and recommended models: **Opus 4.7** for Claude Code and **GPT-5.5** for Codex.
 
 For LiteLLM gateway config and a quick response check, see [docs/agent-cli-setup.md](docs/agent-cli-setup.md).
 
