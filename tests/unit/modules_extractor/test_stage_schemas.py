@@ -3,7 +3,8 @@
 The stage models are deliberately stricter than the public `ProjectTree`:
 they forbid extra fields (including extras nested in the raw `Repository`, and
 `depends_on` on any module or submodule), bound descriptions/roles, and require
-1-5 unique `main_files`.
+at most 5 unique `main_files` (the ≥1 half is filesystem-dependent and lives in
+`validate_enriched_tree`).
 """
 
 from __future__ import annotations
@@ -87,10 +88,16 @@ def test_submodule_rejects_depends_on() -> None:
 
 
 def test_main_files_bounds_enforced() -> None:
-    with pytest.raises(ValidationError, match="1.5"):
+    six = [{"path": f"pkg/core/f{i}.py", "role": "F."} for i in range(6)]
+    with pytest.raises(ValidationError, match="at most 5"):
         EnrichedTree.model_validate(
-            {"modules": [_min_top_module(main_files=[])], "folds": []}
+            {"modules": [_min_top_module(main_files=six)], "folds": []}
         )
+    # An empty list parses: only the filesystem can tell a pure container
+    # directory (legally cites nothing) from a module that just didn't cite.
+    EnrichedTree.model_validate(
+        {"modules": [_min_top_module(main_files=[])], "folds": []}
+    )
     dup = [
         {"path": "pkg/core/a.py", "role": "A."},
         {"path": "pkg/core/a.py", "role": "A again."},

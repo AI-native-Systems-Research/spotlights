@@ -81,6 +81,10 @@ def _shard_scope_rules(scope: dict[str, Any]) -> str:
             "- Do **not** choose any `main_files` entry that lives under them — "
             "those files belong to modules another shard emits, and claiming one "
             "invalidates the whole result.",
+            f"- If that leaves `{root}` with no file of its own to cite (it is a "
+            "pure container of sub-directories), give it `\"main_files\": []`. "
+            "That is correct here — do not reach into a removed subtree, and do "
+            "not fold anything just to have something to cite.",
             f"- `{root}`'s `source_child_count` counts those removed children, so "
             "it will be larger than the `children` actually present above. That "
             "is expected.",

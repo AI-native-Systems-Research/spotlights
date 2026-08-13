@@ -31,6 +31,10 @@ from spotlights_engine.schemas.project import (
     Repository,
 )
 
+# How many Rule 3/4 violations one error message may list before it summarizes
+# the rest. See the end of `validate_enriched_tree`.
+_MAX_REPORTED_PROBLEMS = 20
+
 
 class CrossArtifactError(ValueError):
     """A cross-artifact (filesystem/shape/fold) validation failure.
@@ -129,6 +133,22 @@ def _dir_has_direct_source_file(repo_path: Path, module_path: str) -> bool:
         and is_source_file(entry.name)
         for entry in entries
     )
+
+
+def _dir_has_direct_file(repo_path: Path, module_path: str) -> bool:
+    """True when the module's own directory holds ≥1 direct non-symlink file of
+    any extension.
+
+    False means a *pure container* directory — only sub-directories, like a Go
+    `cmd/` or a namespace package — which is the one shape allowed to cite no
+    `main_files` at all: everything under it is owned by a child.
+    """
+    d = repo_path / module_path
+    try:
+        entries = list(d.iterdir())
+    except (OSError, NotADirectoryError):
+        return False
+    return any(entry.is_file() and not entry.is_symlink() for entry in entries)
 
 
 def _is_ancestor(ancestor: str, descendant: str) -> bool:
@@ -291,6 +311,13 @@ def validate_enriched_tree(
 
     _check_object_tree_matches_physical(provisional)
 
+    # Rules 3 and 4 are collected, not raised one at a time: they constrain the
+    # same choice (which directories to emit and what each one cites), so a tree
+    # that violates both must be shown both. A repair told only about Rule 3
+    # rearranges the emitted set, trips Rule 4, and burns the single bounded
+    # repair pass on half a fix.
+    problems: list[str] = []
+
     # Rule 3: main_files.
     owned_by: dict[str, str] = {}
     emitted_set = set(emitted_paths)
@@ -301,6 +328,19 @@ def validate_enriched_tree(
         # own real non-symlink files of any extension. A directory that *does*
         # hold source keeps the strict source-extension gate.
         allow_any_file = not _dir_has_direct_source_file(repo_path, module_path)
+        if not main_files:
+            # A pure container directory — one holding no direct file at all,
+            # only sub-directories (a Go `cmd/`, a namespace package) — has
+            # nothing of its own to cite: every file beneath it belongs to a
+            # child. Requiring ≥1 main_file there is unsatisfiable as soon as it
+            # emits its children, and the only escape would be to fold real
+            # structure away. So it, and only it, may cite nothing.
+            if _dir_has_direct_file(repo_path, module_path):
+                problems.append(
+                    f"module {module_path!r} cites no main_files, but its "
+                    "directory holds direct files; cite 1–5 of them"
+                )
+            continue
         for f in main_files:
             fpath = f.path
             if not fpath.startswith(module_path + "/") and not (
@@ -308,30 +348,35 @@ def validate_enriched_tree(
             ):
                 # main file must live under the module directory
                 if not (fpath == module_path or fpath.startswith(module_path + "/")):
-                    raise CrossArtifactError(
+                    problems.append(
                         f"main_file {fpath!r} is not under module {module_path!r}"
                     )
+                    continue
             if allow_any_file:
                 if not _is_real_file(repo_path, fpath):
-                    raise CrossArtifactError(
+                    problems.append(
                         f"main_file {fpath!r} is not a real non-symlink file"
                     )
+                    continue
             elif not _is_real_source_file(repo_path, fpath):
-                raise CrossArtifactError(
+                problems.append(
                     f"main_file {fpath!r} is not a real non-symlink source file"
                 )
+                continue
             # Not owned by a separately emitted descendant module.
             owner = _nearest_emitted_owner(fpath, emitted_set)
             if owner != module_path:
-                raise CrossArtifactError(
+                problems.append(
                     f"main_file {fpath!r} belongs to emitted descendant "
                     f"{owner!r}, not {module_path!r}"
                 )
+                continue
             if fpath in owned_by:
-                raise CrossArtifactError(
+                problems.append(
                     f"main_file {fpath!r} claimed by both {owned_by[fpath]!r} "
                     f"and {module_path!r}"
                 )
+                continue
             owned_by[fpath] = module_path
 
     # Rule 4: every parent has zero or ≥2 emitted children. Report *all*
@@ -348,10 +393,21 @@ def validate_enriched_tree(
     ]
     if single_child:
         listed = ", ".join(repr(p) for p in single_child)
-        raise CrossArtifactError(
+        problems.append(
             f"module(s) with a single child; collapse each "
             f"(a parent needs zero or ≥2 children): {listed}"
         )
+
+    if problems:
+        # Capped: the message is fed back verbatim as the repair prompt, and a
+        # wholesale-broken tree would otherwise blow that budget listing every
+        # offending file. The first _MAX_REPORTED are enough to characterize it.
+        shown = problems[:_MAX_REPORTED_PROBLEMS]
+        extra = len(problems) - len(shown)
+        message = "; ".join(shown)
+        if extra:
+            message += f"; (and {extra} more violation(s))"
+        raise CrossArtifactError(message)
 
     # Rules 6–8: folds.
     _validate_folds(enriched, repo_path, skeleton, provisional, emitted_set)

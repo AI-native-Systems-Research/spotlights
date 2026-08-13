@@ -288,6 +288,132 @@ def test_passthrough_fold_evidence_need_not_be_in_main_files(tmp_path: Path) -> 
     assert "pkg/core/fla" in cov.folded
 
 
+def _container_repo(tmp_path: Path) -> Path:
+    """The llm-d-router `cmd/` layout: a directory holding only sub-directories."""
+    _write(tmp_path / "cmd" / "epp" / "main.go")
+    _write(tmp_path / "cmd" / "epp" / "runner" / "run.go")
+    _write(tmp_path / "cmd" / "epp" / "runner" / "health.go")
+    _write(tmp_path / "cmd" / "pd_sidecar" / "main.go")
+    return tmp_path
+
+
+def _container_tree() -> dict:
+    return {
+        "modules": [
+            {
+                "name": "cmd",
+                "path": "cmd",
+                "description": "Command entrypoints.",
+                "main_files": [],
+                "submodules": [
+                    {
+                        "name": "epp",
+                        "path": "cmd/epp",
+                        "description": "Endpoint-picker binary.",
+                        "main_files": [
+                            {"path": "cmd/epp/main.go", "role": "Entrypoint."},
+                            {"path": "cmd/epp/runner/run.go", "role": "Runner (folded)."},
+                        ],
+                    },
+                    {
+                        "name": "pd_sidecar",
+                        "path": "cmd/pd_sidecar",
+                        "description": "Prefill/decode sidecar binary.",
+                        "main_files": [
+                            {"path": "cmd/pd_sidecar/main.go", "role": "Entrypoint."}
+                        ],
+                    },
+                ],
+            }
+        ],
+        "folds": [
+            {
+                "path": "cmd/epp/runner",
+                "into": "cmd/epp",
+                "reason": "single cohesive run unit",
+                "evidence_files": ["cmd/epp/runner/run.go"],
+            }
+        ],
+    }
+
+
+def test_pure_container_module_may_cite_no_main_files(tmp_path: Path) -> None:
+    # The llm-d-router `cmd/` regression. `cmd/` holds no file at all, only
+    # `epp/` and `pd-sidecar/`. Once both children are emitted, every candidate
+    # main_file belongs to an emitted descendant, so Rule 3 is unsatisfiable and
+    # the only escapes were an illegal tree or folding both real binaries away.
+    # A pure container may therefore cite nothing.
+    _container_repo(tmp_path)
+    skel = build_skeleton(tmp_path, "")
+    repo = Repository(name="r", summary="s", source_root="")
+    tree = EnrichedTree.model_validate(_container_tree())
+    validate_enriched_tree(tree, tmp_path, repo, skel)
+    cov = compute_coverage(tree, skel)
+    assert cov.ok
+    assert "cmd/epp" in cov.emitted
+    assert "cmd/pd_sidecar" in cov.emitted
+    assert "cmd/epp/runner" in cov.folded
+
+
+def test_container_module_citing_a_childs_file_still_fails(tmp_path: Path) -> None:
+    # The exemption is "cite nothing", not "cite a child's file": ownership of a
+    # file stays with the deepest emitted module that contains it.
+    _container_repo(tmp_path)
+    skel = build_skeleton(tmp_path, "")
+    repo = Repository(name="r", summary="s", source_root="")
+    data = _container_tree()
+    data["modules"][0]["main_files"] = [
+        {"path": "cmd/epp/main.go", "role": "Entrypoint."}
+    ]
+    tree = EnrichedTree.model_validate(data)
+    with pytest.raises(CrossArtifactError, match="belongs to emitted descendant"):
+        validate_enriched_tree(tree, tmp_path, repo, skel)
+
+
+def test_module_owning_files_must_still_cite_main_files(tmp_path: Path) -> None:
+    # A module whose directory does hold direct files may not cite none —
+    # the pydantic bound moved to the cross-artifact validator, it did not go.
+    _repo(tmp_path)
+    skel = build_skeleton(tmp_path, "pkg")
+    data = _full_tree()
+    data["modules"][0]["submodules"][0]["main_files"] = []
+    tree = EnrichedTree.model_validate(data)
+    with pytest.raises(CrossArtifactError, match="cites no main_files"):
+        validate_enriched_tree(tree, tmp_path, _repository(), skel)
+
+
+def test_main_file_and_single_child_violations_reported_together(
+    tmp_path: Path,
+) -> None:
+    # Rules 3 and 4 constrain the same choice, so one repair must see both: the
+    # llm-d-router failure was a repair told only about Rule 3, which rearranged
+    # the emitted set, tripped Rule 4, and had no attempt left to fix it.
+    _repo(tmp_path)
+    _write(tmp_path / "pkg" / "core" / "kv_offload" / "deep" / "d1.py")
+    _write(tmp_path / "pkg" / "core" / "kv_offload" / "deep" / "d2.py")
+    skel = build_skeleton(tmp_path, "pkg")
+    data = _full_tree()
+    # Rule 3 offender: core cites a file owned by its emitted scheduler child.
+    data["modules"][0]["main_files"].append(
+        {"path": "pkg/core/scheduler/s2.py", "role": "S2."}
+    )
+    # Rule 4 offender: kv_offload emits exactly one child.
+    data["modules"][0]["submodules"][0]["submodules"] = [
+        {
+            "name": "deep",
+            "path": "pkg/core/kv_offload/deep",
+            "description": "Deep offload.",
+            "main_files": [{"path": "pkg/core/kv_offload/deep/d1.py", "role": "D1."}],
+        }
+    ]
+    tree = EnrichedTree.model_validate(data)
+    with pytest.raises(CrossArtifactError) as excinfo:
+        validate_enriched_tree(tree, tmp_path, _repository(), skel)
+    message = str(excinfo.value)
+    assert "belongs to emitted descendant" in message
+    assert "single child" in message
+
+
 def test_all_single_child_parents_reported_together(tmp_path: Path) -> None:
     # Two clustered single-child parents in one tree. Rule 4 must name BOTH in a
     # single error so the one bounded repair pass can collapse them together;

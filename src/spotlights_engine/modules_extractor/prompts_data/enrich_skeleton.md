@@ -45,11 +45,19 @@ Inspect the repository source and emit a strict `EnrichedTree`:
 
 - Describe each emitted module/submodule from the actual code.
 - Choose 1–5 `main_files` per module — real, non-symlink source files under that
-  module's directory, not owned by a separately emitted descendant. Exception:
-  when the module's own directory holds NO direct source-code file (e.g. a
-  `docker/` of Dockerfiles + `.hcl` + `.json` whose only real source sits in a
-  child), cite that directory's most representative real files of any extension
-  (a Dockerfile, a build/config file) instead.
+  module's directory, not owned by a separately emitted descendant. Two
+  exceptions:
+  - When the module's own directory holds NO direct source-code file (e.g. a
+    `docker/` of Dockerfiles + `.hcl` + `.json` whose only real source sits in a
+    child), cite that directory's most representative real files of any
+    extension (a Dockerfile, a build/config file) instead.
+  - When the module's own directory holds **no direct file at all** — a pure
+    container of sub-directories, such as a Go `cmd/` or a namespace package —
+    and you emit its children as submodules, every file beneath it belongs to a
+    child, so give it `"main_files": []`. Do NOT cite a child's file, and do NOT
+    fold real children away just to have something to cite. If instead you fold
+    a child into such a container, that fold's evidence file goes in
+    `main_files` as usual.
 - Record fold decisions.
 
 ### Coverage rules (hard)
@@ -83,7 +91,8 @@ Inspect the repository source and emit a strict `EnrichedTree`:
 - **LEAF** — one cohesive submodule; no `submodules` key.
 - **SPLIT** — a directory with 2+ real nested source-bearing child directories,
   each its own logical unit. A parent has zero or ≥2 children, never exactly
-  one. `main_files` on a parent lists the parent's own files, not a child's.
+  one. `main_files` on a parent lists the parent's own files, not a child's — a
+  parent that owns no file of its own lists `[]` (see the exception above).
   - Physical-path guard: every child `path` must be a real nested directory
     under the parent. Never split a directory into conceptual children that
     reuse the parent path.
@@ -130,5 +139,6 @@ Return ONLY this JSON, no markdown fences, no commentary:
 - All paths are repo-relative POSIX, no leading "./" or "/", no "..".
 - `name` must match `^[a-z][a-z0-9_]*$` and equal the normalized basename of
   `path`.
-- `main_files` is required, 1–5 unique entries, on every module and submodule.
+- `main_files` is required on every module and submodule: 1–5 unique entries,
+  or `[]` only for a pure container directory that holds no direct file at all.
 - Output valid JSON, parseable by `JSON.parse` — no trailing commas, no comments.

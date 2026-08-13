@@ -4,10 +4,11 @@ Everything here is pure Python — no Claude, no Codex. The few tests that need 
 filesystem build a tiny synthetic repo, because `validate_enriched_tree` checks
 paths against the real filesystem.
 
-The fixtures deliberately encode the three traps that splitting a branch
-creates (single-child spine, spine `main_file` under a promoted child, spine
-with no legal `main_file`), since those are the failure modes that the pure
-Python merge and the repair-less Stage 5 cannot recover from.
+The fixtures deliberately encode the two traps that splitting a branch creates
+(single-child spine, spine `main_file` under a promoted child), since those are
+the failure modes that the pure Python merge and the repair-less Stage 5 cannot
+recover from. A third — a spine root with no file of its own to cite — is not a
+trap any more: such a root cites nothing.
 """
 
 from __future__ import annotations
@@ -26,7 +27,6 @@ from spotlights_engine.modules_extractor.errors import ExtractorValidationError
 from spotlights_engine.modules_extractor.extractor import ExtractorConfig
 from spotlights_engine.modules_extractor.sharding import (
     NOT_SPLIT_BELOW_THRESHOLD,
-    NOT_SPLIT_NO_DIRECT_FILE,
     NOT_SPLIT_ONE_PROMOTABLE,
     NOT_SPLIT_TOP_LEVEL_ONLY,
     EnrichShard,
@@ -222,22 +222,26 @@ def test_branch_with_one_promotable_child_is_not_split() -> None:
     assert plan.not_split_reasons["pkg"] == NOT_SPLIT_ONE_PROMOTABLE
 
 
-def test_namespace_only_branch_root_is_not_split() -> None:
-    """The main_files split gate: the spine would have no legal `main_file`."""
+def test_namespace_only_branch_root_is_split() -> None:
+    """A namespace-only root (a Go `pkg/`) is splittable like any other.
+
+    It was refused while a spine had to cite ≥1 `main_file` it owned; Rule 3 now
+    lets a pure container cite none, so the largest branch in a typical Go repo
+    is no longer pinned to a single monolithic enrichment call.
+    """
     plan = derive_enrich_shards(
         _skel(_heavy_branch(rep=[])),
         _cfg(enrich_subshard_threshold=4, enrich_subshard_child_min=2),
     )
-    assert [s.key for s in plan.shards] == ["pkg"]
-    assert plan.not_split_reasons["pkg"] == NOT_SPLIT_NO_DIRECT_FILE
+    assert "pkg__spine" in {s.key for s in plan.shards}
+    assert "pkg" not in plan.not_split_reasons
 
 
-def test_init_only_root_is_split_because_the_predicate_keys_on_representative_files() -> None:
+def test_init_only_root_is_split() -> None:
     """`direct_source_file_count == 0` but `representative_files != []`.
 
-    `__init__.py` is a real source file and satisfies Rule 3, so a namespace
-    package carrying only `__init__.py` is still splittable — proving the gate
-    keys on `representative_files`, not on the init-excluding count.
+    A namespace package carrying only `__init__.py` splits — as it did before
+    the no-direct-source-file gate was removed.
     """
     branch = _heavy_branch()
     branch = branch.model_copy(
@@ -422,7 +426,12 @@ def _mod(path: str, *, subs=(), files=None) -> dict:
         "name": path.rsplit("/", 1)[-1],
         "path": path,
         "description": f"Module {path}.",
-        "main_files": files or [{"path": f"{path}/main.py", "role": "Entry."}],
+        # `files=[]` is meaningful (a pure container cites nothing), so only a
+        # missing argument takes the default.
+        "main_files": (
+            files if files is not None
+            else [{"path": f"{path}/main.py", "role": "Entry."}]
+        ),
         "submodules": list(subs),
     }
 
@@ -654,12 +663,12 @@ def test_shards_partition_the_inventory_exhaustively_and_disjointly(seed: int) -
         assert found is not None and found.key == owner_of[path]
 
     # No split may produce a single-child spine (Stage-5 Rule 4 would reject the
-    # merged tree with no possible recovery) or a spine with no legal main_file.
+    # merged tree with no possible recovery). A spine whose root owns no source
+    # file of its own is fine: it cites nothing.
     for shard in plan.shards:
         if shard.promoted_children:
             assert shard.owns_root
             assert len(shard.promoted_children) >= 2
-            assert shard.subtree.nodes[0].representative_files
         assert shard.depth <= config.enrich_subshard_max_depth
     assert len({s.key for s in plan.shards}) == len(plan.shards)
     assert len(plan.shards) <= max(config.enrich_max_shards, len(skeleton.nodes))
@@ -929,12 +938,13 @@ def test_spine_main_file_under_a_promoted_child_is_fatal_after_the_merge(tmp_pat
         validate_spine_main_files(spine, bad)
 
 
-def test_a_split_namespace_root_would_have_no_legal_main_file(tmp_path) -> None:
-    """Proof the `representative_files` gate closes a real trap.
+def test_a_split_namespace_root_cites_nothing_and_survives_the_merge(tmp_path) -> None:
+    """A branch root owning no direct source file is splittable end to end.
 
-    Force the split of a branch root that owns no direct source file: every file
-    in the branch is then owned by an emitted promoted child, so no `main_files`
-    choice satisfies both `_check_main_files` (≥1 entry) and Rule 3.
+    Every file in the branch belongs to an emitted promoted child, so the spine's
+    only legal answer is to cite nothing — and it must stay legal through the
+    merge, where those children *are* emitted. Citing one of their files instead
+    is still the fatal shape `validate_spine_main_files` catches.
     """
     repo = tmp_path
     _write(repo / "pkg" / "a" / "a1.py")
@@ -942,20 +952,38 @@ def test_a_split_namespace_root_would_have_no_legal_main_file(tmp_path) -> None:
     _write(repo / "pkg" / "b" / "b1.py")
     _write(repo / "pkg" / "b" / "b2.py")
     skeleton = build_skeleton(repo, "")
-    root = skeleton.nodes[0]
-    assert root.representative_files == []  # a pure namespace directory
+    assert skeleton.nodes[0].representative_files == []  # a pure container
 
-    # Derivation refuses the split...
     plan = derive_enrich_shards(skeleton, _cfg(**SPINE_CFG))
-    assert [s.key for s in plan.shards] == ["pkg"]
-    assert plan.not_split_reasons["pkg"] == NOT_SPLIT_NO_DIRECT_FILE
+    spine = next(s for s in plan.shards if s.key == "pkg__spine")
+    a = next(s for s in plan.shards if s.key == "pkg__a")
+    b = next(s for s in plan.shards if s.key == "pkg__b")
+    assert spine.promoted_children == ["pkg/a", "pkg/b"]
 
-    # ...and this is why: every candidate main file belongs to an emitted child.
-    forced = _frag(
-        _mod("pkg", subs=[
-            _sub("pkg/a", files=[{"path": "pkg/a/a1.py", "role": "A1."}]),
-            _sub("pkg/b", files=[{"path": "pkg/b/b1.py", "role": "B1."}]),
-        ], files=[{"path": "pkg/a/a2.py", "role": "Anything at all."}])
+    empty_spine = _frag(_mod("pkg", files=[]))
+    children = [
+        (a, _frag(_mod("pkg/a", files=[{"path": "pkg/a/a1.py", "role": "A1."}]))),
+        (b, _frag(_mod("pkg/b", files=[{"path": "pkg/b/b1.py", "role": "B1."}]))),
+    ]
+
+    # Legal in the spine's own subtree...
+    validate_enriched_tree(
+        empty_spine,
+        repo,
+        _repository(),
+        spine.subtree,
+        rule4_exempt_paths={spine.root_path},
     )
-    with pytest.raises(CrossArtifactError, match="belongs to emitted descendant"):
-        validate_enriched_tree(forced, repo, _repository(), skeleton)
+    validate_spine_main_files(spine, empty_spine)
+
+    # ...and legal after the merge, with full coverage.
+    merged = merge_fragments(
+        [(spine, empty_spine), *children], skeleton=skeleton, plan=plan
+    )
+    validate_enriched_tree(merged, repo, _repository(), skeleton)
+    assert compute_coverage(merged, skeleton).missing == []
+
+    # Reaching into a promoted child instead is still rejected.
+    grabby = _frag(_mod("pkg", files=[{"path": "pkg/a/a2.py", "role": "Not mine."}]))
+    with pytest.raises(CrossArtifactError, match="promoted child"):
+        validate_spine_main_files(spine, grabby)

@@ -8,8 +8,10 @@ than the public `ProjectTree`/`Module` schema:
   than duplicating its fields, and rejects unknown repository keys.
 - `Skeleton`/`SkeletonNode` (Stage 2) are the deterministic inventory.
 - `EnrichedTree` and friends (Stage 3) forbid extra fields, require non-empty
-  bounded descriptions, and 1–5 unique `main_files` — none of which the public
-  `Module` model enforces.
+  bounded descriptions, and at most 5 unique `main_files` — none of which the
+  public `Module` model enforces. The matching *lower* bound of 1 lives in
+  `coverage.validate_enriched_tree`, which can see the filesystem and so can
+  exempt a pure container directory that owns no file of its own.
 
 The public serialized `ProjectTree` schema is unchanged; Stage 5 converts an
 `EnrichedTree` back into `ProjectTree` dicts via `modules_as_project_tree_dicts`.
@@ -191,9 +193,15 @@ def _default_name_from_path(data: Any) -> Any:
 
 
 def _check_main_files(main_files: list[EnrichedFile]) -> None:
-    if not 1 <= len(main_files) <= 5:
+    # The upper bound is structural and enforced here; the lower bound is not,
+    # because it depends on the filesystem. A *pure container* directory (only
+    # sub-directories — a Go `cmd/`, a namespace package) has no file of its own
+    # to cite once its children are emitted, so it legally cites none.
+    # `validate_enriched_tree` holds every other module to ≥1, where it can see
+    # the directory and say so precisely.
+    if len(main_files) > 5:
         raise ValueError(
-            f"main_files must have 1–5 entries, got {len(main_files)}"
+            f"main_files must have at most 5 entries, got {len(main_files)}"
         )
     paths = [f.path for f in main_files]
     if len(set(paths)) != len(paths):

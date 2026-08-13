@@ -15,10 +15,11 @@ concatenation + re-parenting, and the merged tree is handed to the **unchanged**
 `validate_enriched_tree` / `compute_coverage` in Stage 5. Sharding changes only
 how the tree is *produced*, never how it is *validated*.
 
-Three traps are created by splitting a branch — a single-child spine, a spine
-`main_file` that lands under a promoted child, and a spine with no legal
-`main_file` at all — and each is closed here at derivation or shard-validation
-time, because the merge is pure Python and Stage 5 has no repair.
+Two traps are created by splitting a branch — a single-child spine, and a spine
+`main_file` that lands under a promoted child — and each is closed here at
+derivation or shard-validation time, because the merge is pure Python and
+Stage 5 has no repair. (A third, a spine with no legal `main_file` at all, is
+closed at the source: Rule 3 lets a pure container directory cite none.)
 """
 
 from __future__ import annotations
@@ -53,7 +54,6 @@ NOT_SPLIT_TOP_LEVEL_ONLY = "top_level_only_mode"
 NOT_SPLIT_BELOW_THRESHOLD = "below_subshard_threshold"
 NOT_SPLIT_MAX_DEPTH = "max_subshard_depth_reached"
 NOT_SPLIT_ONE_PROMOTABLE = "fewer_than_two_promotable_children"
-NOT_SPLIT_NO_DIRECT_FILE = "branch_root_owns_no_direct_source_file"
 NOT_SPLIT_BUDGET = "shard_budget_exhausted"
 
 
@@ -284,11 +284,18 @@ def _refuse_split_reason(
 ) -> str | None:
     """Why `node` must not be split, or None when all gates pass.
 
-    Two of the three gates are hard **correctness** requirements, not tuning:
-    a split with fewer than two promotable children deterministically produces a
-    single-child spine that Stage-5 Rule 4 rejects unrecoverably, and a split of
-    a root owning no direct source file produces a spine with no legal
-    `main_file` at all.
+    One gate is a hard **correctness** requirement, not tuning: a split with
+    fewer than two promotable children deterministically produces a single-child
+    spine that Stage-5 Rule 4 rejects unrecoverably.
+
+    A root owning no direct source file used to be refused here as well, because
+    its spine had no legal `main_file`: every file in the branch belongs to an
+    emitted promoted child. Rule 3 now exempts a *pure container* directory — one
+    holding no direct file at all — from citing anything, and a root that holds
+    non-source files (a `docker/` of Dockerfiles) may cite those, so every such
+    spine has a legal answer and the gate is gone. It was the one thing keeping
+    the typical Go `pkg/` — often a repo's largest branch by far — from being
+    sub-sharded at all.
     """
     if depth + 1 > config.enrich_subshard_max_depth:
         return NOT_SPLIT_MAX_DEPTH
@@ -296,12 +303,6 @@ def _refuse_split_reason(
         return NOT_SPLIT_BELOW_THRESHOLD
     if len(_promotable(node, config.enrich_subshard_child_min)) < 2:
         return NOT_SPLIT_ONE_PROMOTABLE
-    # `representative_files` (not `direct_source_file_count`) is the right
-    # predicate: it is built from `direct_all_source_files`, so a namespace
-    # package carrying only `__init__.py` still qualifies — and `__init__.py`
-    # is a source file that satisfies Rule 3.
-    if not node.representative_files:
-        return NOT_SPLIT_NO_DIRECT_FILE
     if budget.remaining < 2:
         return NOT_SPLIT_BUDGET
     return None
@@ -720,7 +721,6 @@ __all__ = [
     "NOT_SPLIT_BELOW_THRESHOLD",
     "NOT_SPLIT_BUDGET",
     "NOT_SPLIT_MAX_DEPTH",
-    "NOT_SPLIT_NO_DIRECT_FILE",
     "NOT_SPLIT_ONE_PROMOTABLE",
     "NOT_SPLIT_TOP_LEVEL_ONLY",
     "EnrichShard",
