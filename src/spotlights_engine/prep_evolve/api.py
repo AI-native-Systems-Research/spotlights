@@ -1,14 +1,14 @@
 """Stage C: `prep_evolve(input, config) -> PrepEvolveResult`.
 
 Orchestrates extract → validate → render → materialize. The materializer is one
-central writer: a bundle dir is refused unless `--force` is set, and with
-`--force` every generated file is overwritten. Besides each evolver's native
-config it emits a single shared `README.md`.
+central writer: it always writes generated files, overwriting existing ones. The
+orchestrator decides whether to skip an existing bundle (skipped unless
+`--force`). Besides each evolver's native config it emits a single shared
+`README.md`.
 """
 
 from __future__ import annotations
 
-import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -21,18 +21,21 @@ from spotlights_engine.prep_evolve.adapters import (
 from spotlights_engine.prep_evolve.adapters.base import GeneratedFile
 from spotlights_engine.prep_evolve.errors import (
     BundleExistsError,
+    PrepEvolveError,
     ScopeError,
+    SelectionError,
     UnsupportedEvolverError,
 )
 from spotlights_engine.prep_evolve.extract import Direction, Scope, build_spec, infer_direction
 from spotlights_engine.prep_evolve.resolve import (
+    find_candidate,
+    iter_candidates,
+    load_ranking,
     load_result,
-    resolve_candidate,
-    resolve_candidates,
     resolve_findings,
     resolve_module,
-    resolve_module_run,
     resolve_repo_path,
+    resolve_result_location,
 )
 from spotlights_engine.prep_evolve.spec import EvolveSpec, Target
 from spotlights_engine.prep_evolve.templates import render_template
@@ -42,19 +45,19 @@ from spotlights_engine.prep_evolve.validate_target import (
     validate_candidate_target,
     validate_scope_file,
 )
+from spotlights_engine.utils.id_helpers import slug_for
 from spotlights_engine.utils.schema_compat import primary_file
-
-_BUNDLE_SEGMENT_RE = re.compile(r"[^A-Za-z0-9._-]+")
 
 
 class PrepEvolveInput(BaseModel):
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
     result: Path
-    module: str  # slash-form qn
-    candidate: str
     evolver: str
-    out: Path
+    module: str | None = None  # slash-form qn; inferred from candidate when omitted
+    candidate: str | None = None  # omit to process every candidate in result.json
+    out: Path | None = None  # base dir; defaults to the run directory
+    top_n: int | None = Field(default=None, ge=1)  # sorted sources only; None = all
     index: Path | None = None
     repo: str | None = None
     scope: Scope = "candidate"
@@ -82,6 +85,8 @@ class SkippedEvolver(BaseModel):
 
     evolver: str
     reason: str
+    candidate_id: str | None = None
+    module_qualified_name: str | None = None
 
 
 class PrepEvolveResult(BaseModel):
@@ -96,26 +101,9 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _path_segment(value: str, default: str) -> str:
-    segment = _BUNDLE_SEGMENT_RE.sub("_", value).strip("._-")
-    return segment or default
-
-
-def _bundle_dir_name(spec: EvolveSpec, evolver: str) -> str:
-    # Collapse path separators and other unsafe characters so the bundle is a
-    # single directory, not a nested or escapable path.
-    repo_seg = _path_segment(spec.run.repo_name, "repo")
-    module_seg = _path_segment(spec.module.qualified_name, "module")
-    candidate_seg = _path_segment(_candidate_id(spec), "candidate")
-    evolver_seg = _path_segment(evolver, "evolver")
-    return f"{repo_seg}__{module_seg}__{candidate_seg}__{evolver_seg}"
-
-
-def _candidate_id(spec: EvolveSpec) -> str:
-    for t in spec.targets:
-        if t.scope_kind == "candidate" and t.candidate_id:
-            return t.candidate_id
-    return "candidate"
+def _bundle_dir(base: Path, qn: str, candidate_id: str, evolver: str) -> Path:
+    """Nested bundle path mirroring the modules/ tree: evolve/<slug>/<cand>/<evolver>/."""
+    return base / "evolve" / slug_for(qn) / candidate_id / evolver
 
 
 def prep_evolve(input: PrepEvolveInput, config: PrepEvolveConfig | None = None) -> PrepEvolveResult:
@@ -133,19 +121,16 @@ def prep_evolve(input: PrepEvolveInput, config: PrepEvolveConfig | None = None) 
             "skydiscover, coral, nous, agentic-strategy-evolution, all"
         ) from exc
 
-    # 1. load result.
-    loaded = load_result(input.result)
+    # 1. locate + load result.
+    location = resolve_result_location(input.result)
+    loaded = load_result(location.result_json)
 
-    # 2. resolve repo path.
-    repo_path = resolve_repo_path(input.repo, input.index)
+    # 2. resolve repo path (explicit --repo/--index win over the run dir's index.md).
+    repo_path = resolve_repo_path(input.repo, input.index or location.index)
     ensure_repo_dir(repo_path)
 
-    # 3. resolve module run + candidate.
-    module = resolve_module(loaded.project_tree, input.module)
-    run = resolve_module_run(loaded, input.module)
-    candidates = resolve_candidates(run, input.module)
-    candidate = resolve_candidate(candidates, input.candidate)
-    findings = resolve_findings(run, input.module)
+    # 3. output base: --out, else the run directory.
+    base = input.out or location.run_dir
 
     # 4. scope guard (single-evolver requests fail loudly; `all` skips+warns).
     if input.scope == "module-main-files":
@@ -163,27 +148,99 @@ def prep_evolve(input: PrepEvolveInput, config: PrepEvolveConfig | None = None) 
                 )
             )
 
-    # 5. live-target validation (before any render/write).
-    validated = validate_candidate_target(repo_path, candidate)
-    for t_file in (
-        {mf.path for mf in module.main_files} if input.scope == "module-main-files" else set()
-    ):
-        if t_file != primary_file(candidate):
-            validate_scope_file(repo_path, t_file)
-
-    revision = capture_revision(repo_path, captured_at)
-
+    # 5. direction (run-wide; warn once).
     direction = input.direction or infer_direction(loaded.context.objective)
     if input.direction is None:
         warnings.append(
             f"direction inferred as {direction!r} from the objective; pass --direction to override"
         )
 
+    # 6. build the selection.
+    #    - explicit --candidate → that one (top_n/ranking ignored)
+    #    - sorted source        → ranked ids (top-N cut), each resolved in result.json
+    #    - plain batch          → every candidate in document order
+    batch = input.candidate is None
+    if not batch:
+        sel = find_candidate(loaded, input.candidate)
+        if input.module is not None and input.module != sel.qn:
+            raise SelectionError(
+                f"--module {input.module!r} does not match candidate "
+                f"{input.candidate!r}, which is in module {sel.qn!r}; omit --module"
+            )
+        selections = [sel]
+    elif location.ranking is not None:
+        ranked_ids = load_ranking(location.ranking)
+        if input.top_n is not None:
+            ranked_ids = ranked_ids[: input.top_n]
+        selections = []
+        for cid in ranked_ids:
+            try:
+                selections.append(find_candidate(loaded, cid))
+            except SelectionError as exc:
+                skipped.append(
+                    SkippedEvolver(evolver=input.evolver, reason=str(exc), candidate_id=cid)
+                )
+    else:
+        if input.top_n is not None:
+            raise SelectionError(
+                "--top-n requires a ranked source; point --result at a sorted/ "
+                "directory or a sorted_candidates.json (a plain result.json has no ranking)"
+            )
+        selections = iter_candidates(loaded)
+
+    # 7. process each selection.
+    bundles: list[BundleResult] = []
+    for sel in selections:
+        try:
+            b, s = _process_candidate(
+                sel, loaded, repo_path, base, evolver_keys, input, captured_at, direction, batch
+            )
+            bundles.extend(b)
+            skipped.extend(s)
+        except PrepEvolveError as exc:
+            if not batch:
+                raise
+            skipped.append(
+                SkippedEvolver(
+                    evolver=input.evolver,
+                    reason=str(exc),
+                    candidate_id=sel.candidate.id,
+                    module_qualified_name=sel.qn,
+                )
+            )
+
+    return PrepEvolveResult(bundles=bundles, warnings=warnings, skipped=skipped)
+
+
+def _process_candidate(
+    sel,
+    loaded,
+    repo_path: Path,
+    base: Path,
+    evolver_keys: list[str],
+    input: PrepEvolveInput,
+    captured_at: str,
+    direction: Direction,
+    batch: bool,
+) -> tuple[list[BundleResult], list[SkippedEvolver]]:
+    """Render + materialize every requested evolver bundle for one candidate."""
+    module = resolve_module(loaded.project_tree, sel.qn)
+    findings = resolve_findings(sel.run, sel.qn)
+
+    # live-target validation (raises StalenessError; caught per-candidate in batch).
+    validated = validate_candidate_target(repo_path, sel.candidate)
+    for t_file in (
+        {mf.path for mf in module.main_files} if input.scope == "module-main-files" else set()
+    ):
+        if t_file != primary_file(sel.candidate):
+            validate_scope_file(repo_path, t_file)
+
+    revision = capture_revision(repo_path, captured_at)
     spec = build_spec(
         loaded=loaded,
         module=module,
-        qn=input.module,
-        candidate=candidate,
+        qn=sel.qn,
+        candidate=sel.candidate,
         findings=findings,
         repo_path=str(repo_path),
         validated=validated,
@@ -192,33 +249,45 @@ def prep_evolve(input: PrepEvolveInput, config: PrepEvolveConfig | None = None) 
         direction=direction,
     )
 
-    # Render + materialize per evolver.
     bundles: list[BundleResult] = []
+    skips: list[SkippedEvolver] = []
     for key in evolver_keys:
         adapter = build_adapter(key, input.model)
         ok, reason = adapter.supports(spec)
         if not ok:
-            if input.evolver == "all":
-                skipped.append(SkippedEvolver(evolver=key, reason=reason))
+            # Batch and `--evolver all` skip incompatible candidates; a single,
+            # explicit evolver request fails loudly (spec §5).
+            if batch or input.evolver == "all":
+                skips.append(
+                    SkippedEvolver(
+                        evolver=key,
+                        reason=reason,
+                        candidate_id=sel.candidate.id,
+                        module_qualified_name=sel.qn,
+                    )
+                )
                 continue
             raise UnsupportedEvolverError(f"{key} cannot run this selection: {reason}")
 
+        bundle_path = _bundle_dir(base, sel.qn, sel.candidate.id, key)
+        if bundle_path.exists() and not input.force:
+            skips.append(
+                SkippedEvolver(
+                    evolver=key,
+                    reason="bundle already exists (use --force to overwrite)",
+                    candidate_id=sel.candidate.id,
+                    module_qualified_name=sel.qn,
+                )
+            )
+            continue
+
         native_files = adapter.render(spec)
-        # Minimal bundles (e.g. nous: a single self-contained campaign.yaml) are
-        # just their native config — no shared README.
         minimal = getattr(adapter, "minimal_bundle", False)
         all_files = native_files if minimal else native_files + _always_emitted(spec, key)
-        bundle_path = input.out / _bundle_dir_name(spec, key)
-        written = _materialize(bundle_path, all_files, force=input.force)
-        bundles.append(
-            BundleResult(
-                evolver=key,
-                path=str(bundle_path),
-                files=sorted(written),
-            )
-        )
+        written = _materialize(bundle_path, all_files)
+        bundles.append(BundleResult(evolver=key, path=str(bundle_path), files=sorted(written)))
 
-    return PrepEvolveResult(bundles=bundles, warnings=warnings, skipped=skipped)
+    return bundles, skips
 
 
 # --- always-emitted files -------------------------------------------------
@@ -283,24 +352,13 @@ def _always_emitted(spec: EvolveSpec, evolver: str) -> list[GeneratedFile]:
 # --- materialization / writer --------------------------------------------
 
 
-def _materialize(
-    bundle_path: Path,
-    files: list[GeneratedFile],
-    *,
-    force: bool,
-) -> list[str]:
-    """Write `files` into `bundle_path`.
+def _materialize(bundle_path: Path, files: list[GeneratedFile]) -> list[str]:
+    """Write `files` into `bundle_path`, overwriting existing files.
 
-    The bundle is a flat set of generator-owned files. An existing bundle dir is
-    refused unless `--force` is set; with `--force` every file is overwritten.
-    Returns the bundle-relative paths written.
+    The bundle is a flat set of generator-owned files. Existing-bundle handling
+    (skip vs overwrite) is decided by the caller; this writer always writes.
+    Path-escaping generated paths are rejected before any write.
     """
-    if bundle_path.exists() and not force:
-        raise BundleExistsError(
-            f"bundle dir already exists: {bundle_path}. Re-run with --force to "
-            "overwrite generated files."
-        )
-
     bundle_root = bundle_path.resolve()
     destinations = [(gf, _generated_destination(bundle_path, bundle_root, gf.path)) for gf in files]
 
