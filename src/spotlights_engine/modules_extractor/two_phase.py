@@ -99,7 +99,11 @@ from spotlights_engine.modules_extractor.stage_schemas import (
     Skeleton,
     SourceRootDecision,
 )
-from spotlights_engine.schemas.project import ProjectTree, _qualified_name
+from spotlights_engine.schemas.project import (
+    ProjectTree,
+    Repository,
+    _qualified_name,
+)
 
 if TYPE_CHECKING:
     from spotlights_engine.modules_extractor.extractor import ExtractorConfig
@@ -315,6 +319,16 @@ def run_two_phase_extraction(
     # ── Stage 2 — deterministic skeleton ──────────────────────────────────
     skeleton = _stage2_skeleton(
         repo_path, decision, base=base, on_event=on_event
+    )
+
+    # Reconcile Stage-1 externals against the authoritative top-level module
+    # vocabulary the skeleton just fixed. When a repo has a real top-level
+    # directory whose name also happens to be a build tool the LLM listed as
+    # an external (vllm's `cmake/` folder vs. the `cmake` build tool), the two
+    # names collide. The emitted module wins — drop the colliding external so
+    # the cross-artifact validator never aborts the whole run over it.
+    repository = _prune_colliding_externals(
+        repository, skeleton, on_event=on_event
     )
 
     # ── Stage 3 — enrichment + coverage gate ──────────────────────────────
@@ -815,6 +829,39 @@ def _top_level_qns(skeleton: Skeleton) -> list[str]:
     return sorted(
         _qualified_name(n.path, skeleton.source_root) for n in skeleton.nodes
     )
+
+
+def _prune_colliding_externals(
+    repository: Repository,
+    skeleton: Skeleton,
+    *,
+    on_event: Callable[[str], None] | None,
+) -> Repository:
+    """Drop any external dependency whose name collides with an emitted
+    top-level module's qualified name.
+
+    Such a collision is otherwise fatal in the cross-artifact validator
+    (`_validate_dependencies`), which forbids the same name being both an
+    emitted module and an external because a `depends_on` reference to it
+    would be ambiguous. When a repo has a genuine top-level directory that
+    merely shares a name with a build tool the LLM listed as external (e.g.
+    vllm's `cmake/` folder vs. the `cmake` build tool), the emitted module is
+    the real, source-bearing artifact and wins; the stray external is pruned
+    so a whole extraction is not aborted over it.
+    """
+    collisions = set(_top_level_qns(skeleton))
+    kept = [d for d in repository.external_dependencies if d not in collisions]
+    dropped = [d for d in repository.external_dependencies if d in collisions]
+    if not dropped:
+        return repository
+    notify(
+        on_event,
+        "extractor: dropping external dependenc"
+        + ("y " if len(dropped) == 1 else "ies ")
+        + ", ".join(sorted(dropped))
+        + " (collides with emitted top-level module)",
+    )
+    return repository.model_copy(update={"external_dependencies": kept})
 
 
 def _scope_dict(shard: EnrichShard) -> dict[str, Any]:

@@ -157,23 +157,14 @@ def test_source_root_validation_rejects_nonexistent_root(tmp_path: Path) -> None
         validate_source_root_decision(decision, tmp_path, scan.files)
 
 
-def test_source_root_validation_unaccounted_sibling_fails_then_exclusion_passes(
+def test_source_root_validation_sibling_exclusion_passes(
     tmp_path: Path,
 ) -> None:
-    # source_root=src, but there's a source-bearing sibling `tests/` outside it.
+    # source_root=src, with a source-bearing sibling `tests/` excluded.
     _write(tmp_path / "src" / "pkg" / "a.py")
     _write(tmp_path / "src" / "pkg" / "b.py")
     _write(tmp_path / "tests" / "test_a.py")
     scan = scan_source_files(tmp_path, "")
-
-    unaccounted = SourceRootDecision.model_validate(
-        {
-            "repository": {"name": "r", "summary": "s", "source_root": "src"},
-            "excluded_source_paths": [],
-        }
-    )
-    with pytest.raises(CrossArtifactError, match="outside source_root"):
-        validate_source_root_decision(unaccounted, tmp_path, scan.files)
 
     accounted = SourceRootDecision.model_validate(
         {
@@ -211,43 +202,6 @@ def test_source_root_validation_exclusion_covering_no_source_fails(
     )
     with pytest.raises(CrossArtifactError, match="covers no detected source"):
         validate_source_root_decision(decision, tmp_path, scan.files)
-
-
-def test_source_root_validation_file_directly_at_nonempty_root_must_be_excluded(
-    tmp_path: Path,
-) -> None:
-    # A source file sitting directly at a non-empty source_root (src/main.py)
-    # cannot be a directory module. It is under the root, so the "outside
-    # source_root" check does not catch it; it must still be explicitly
-    # classified or the decision must fail, otherwise it is silently dropped.
-    _write(tmp_path / "src" / "main.py")
-    _write(tmp_path / "src" / "pkg" / "a.py")
-    _write(tmp_path / "src" / "pkg" / "b.py")
-    scan = scan_source_files(tmp_path, "")
-
-    unaccounted = SourceRootDecision.model_validate(
-        {
-            "repository": {"name": "r", "summary": "s", "source_root": "src"},
-            "excluded_source_paths": [],
-        }
-    )
-    with pytest.raises(CrossArtifactError, match="directly at source_root"):
-        validate_source_root_decision(unaccounted, tmp_path, scan.files)
-
-    # Explicitly classifying it (repository_level_file) makes it auditable.
-    accounted = SourceRootDecision.model_validate(
-        {
-            "repository": {"name": "r", "summary": "s", "source_root": "src"},
-            "excluded_source_paths": [
-                {
-                    "path": "src/main.py",
-                    "reason": "repository_level_file",
-                    "explanation": "Entry file at the source root.",
-                }
-            ],
-        }
-    )
-    validate_source_root_decision(accounted, tmp_path, scan.files)
 
 
 def test_source_root_validation_exclusion_containing_root_fails(

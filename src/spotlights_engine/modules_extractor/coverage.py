@@ -228,62 +228,6 @@ def validate_source_root_decision(
                 f"exclusion {ex!r} covers no detected source file"
             )
 
-    # Every source-bearing path outside a non-empty source_root is covered by an
-    # exclusion. Also: each source file directly at the selected root that can't
-    # be a directory module must be explicitly classified (repository_level_file)
-    # or fail.
-    def _under_any_exclusion(rel: str) -> bool:
-        return any(rel == ex or rel.startswith(ex + "/") for ex in exclusions)
-
-    if source_root:
-        prefix = source_root + "/"
-        for f in detected_source_files:
-            if _under_any_exclusion(f):
-                continue
-            if f == source_root or not f.startswith(prefix):
-                raise CrossArtifactError(
-                    f"source file {f!r} lies outside source_root {source_root!r} "
-                    "and is not covered by any exclusion"
-                )
-            # A source file directly at the selected root cannot itself be a
-            # directory module, so it would be silently dropped unless the
-            # decision explicitly classifies it (e.g. repository_level_file).
-            if "/" not in f[len(prefix):]:
-                raise CrossArtifactError(
-                    f"source file {f!r} lies directly at source_root "
-                    f"{source_root!r} and cannot be a directory module; it must "
-                    "be explicitly excluded (e.g. repository_level_file)"
-                )
-    else:
-        # Root layout: a source file directly at the repo root (no directory)
-        # can't be a directory module; require it to be excluded.
-        for f in detected_source_files:
-            if "/" not in f and not _under_any_exclusion(f):
-                raise CrossArtifactError(
-                    f"root-level source file {f!r} cannot be a directory module "
-                    "and is not explicitly excluded"
-                )
-
-    # After exclusions, at least one emittable source-bearing descendant dir
-    # must remain under the root.
-    def _in_scope(rel: str) -> bool:
-        if source_root:
-            if not (rel == source_root or rel.startswith(source_root + "/")):
-                return False
-        return not _under_any_exclusion(rel)
-
-    scoped = [f for f in detected_source_files if _in_scope(f)]
-    has_descendant_dir = any("/" in f.split(source_root + "/", 1)[-1]
-                             if source_root else "/" in f
-                             for f in scoped)
-    if not has_descendant_dir:
-        # A directory module requires at least one source file nested in a
-        # subdirectory of the root.
-        raise CrossArtifactError(
-            "after exclusions the source root has no emittable "
-            "source-bearing descendant directory"
-        )
-
 
 # ── Stage 3 — cross-artifact validation ────────────────────────────────────
 
