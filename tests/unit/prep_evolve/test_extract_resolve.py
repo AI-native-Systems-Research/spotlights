@@ -205,3 +205,95 @@ def test_resolve_repo_path_repo_wins(tmp_path: Path) -> None:
 def test_resolve_repo_path_none_resolves(tmp_path: Path) -> None:
     with pytest.raises(RepoResolutionError):
         resolve_repo_path(None, None)
+
+
+from spotlights_engine.prep_evolve.resolve import resolve_result_location
+
+
+def test_resolve_location_run_directory(tmp_path: Path) -> None:
+    fx.write_result(tmp_path)
+    fx.write_index(tmp_path, tmp_path)
+    loc = resolve_result_location(tmp_path)
+    assert loc.result_json == tmp_path / "result.json"
+    assert loc.run_dir == tmp_path
+    assert loc.index == tmp_path / "index.md"
+    assert loc.ranking is None
+
+
+def test_resolve_location_result_json_file(tmp_path: Path) -> None:
+    rj = fx.write_result(tmp_path)
+    loc = resolve_result_location(rj)
+    assert loc.result_json == rj
+    assert loc.run_dir == tmp_path
+    assert loc.index is None
+    assert loc.ranking is None
+
+
+def test_resolve_location_arbitrary_file_is_result_json(tmp_path: Path) -> None:
+    # A non-standard filename is still treated as the result.json itself.
+    payload = fx.make_result_dict()
+    rj = tmp_path / "custom_result.json"
+    rj.write_text(__import__("json").dumps(payload), encoding="utf-8")
+    loc = resolve_result_location(rj)
+    assert loc.result_json == rj
+    assert loc.run_dir == tmp_path
+
+
+def test_resolve_location_index_md(tmp_path: Path) -> None:
+    fx.write_result(tmp_path)
+    index = fx.write_index(tmp_path, tmp_path)
+    loc = resolve_result_location(index)
+    assert loc.result_json == tmp_path / "result.json"
+    assert loc.run_dir == tmp_path
+    assert loc.index == index
+    assert loc.ranking is None
+
+
+def test_resolve_location_sorted_dir(tmp_path: Path) -> None:
+    fx.write_result(tmp_path)
+    sorted_dir = fx.write_sorted(tmp_path, ["cand-v1_attention-0002"])
+    loc = resolve_result_location(sorted_dir)
+    assert loc.result_json == tmp_path / "result.json"
+    assert loc.run_dir == tmp_path
+    assert loc.ranking == sorted_dir / "sorted_candidates.json"
+
+
+def test_resolve_location_sorted_json_file(tmp_path: Path) -> None:
+    fx.write_result(tmp_path)
+    sorted_dir = fx.write_sorted(tmp_path, ["cand-v1_attention-0002"])
+    loc = resolve_result_location(sorted_dir / "sorted_candidates.json")
+    assert loc.result_json == tmp_path / "result.json"
+    assert loc.run_dir == tmp_path
+    assert loc.ranking == sorted_dir / "sorted_candidates.json"
+
+
+def test_resolve_location_sorted_md_file(tmp_path: Path) -> None:
+    fx.write_result(tmp_path)
+    sorted_dir = fx.write_sorted(tmp_path, ["cand-v1_attention-0002"])
+    loc = resolve_result_location(sorted_dir / "sorted_candidates.md")
+    assert loc.ranking == sorted_dir / "sorted_candidates.json"
+    assert loc.run_dir == tmp_path
+
+
+def test_resolve_location_sorted_md_without_json(tmp_path: Path) -> None:
+    fx.write_result(tmp_path)
+    sorted_dir = fx.write_sorted(tmp_path, ["cand-v1_attention-0002"], md=True)
+    (sorted_dir / "sorted_candidates.json").unlink()
+    with pytest.raises(SelectionError):
+        resolve_result_location(sorted_dir / "sorted_candidates.md")
+
+
+def test_resolve_location_dir_without_artifacts(tmp_path: Path) -> None:
+    with pytest.raises(SelectionError):
+        resolve_result_location(tmp_path)  # empty dir
+
+
+def test_resolve_location_index_without_result_json(tmp_path: Path) -> None:
+    index = fx.write_index(tmp_path, tmp_path)  # no result.json alongside
+    with pytest.raises(SelectionError):
+        resolve_result_location(index)
+
+
+def test_resolve_location_missing_path(tmp_path: Path) -> None:
+    with pytest.raises(SelectionError):
+        resolve_result_location(tmp_path / "nope")

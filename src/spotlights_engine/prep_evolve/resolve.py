@@ -43,6 +43,20 @@ class LoadedResult:
     module_runs_raw: dict[str, dict]
 
 
+@dataclass
+class ResultLocation:
+    """Where a run's artifacts live, resolved from any accepted `--result` form.
+
+    `ranking` is the `sorted_candidates.json` when `--result` pointed at a sorted
+    source (a `sorted/` dir or a `sorted_candidates.{json,md}`), else `None`.
+    """
+
+    result_json: Path
+    run_dir: Path
+    index: Path | None
+    ranking: Path | None
+
+
 def load_result(path: Path) -> LoadedResult:
     """Parse `result.json` into a `LoadedResult`.
 
@@ -207,8 +221,71 @@ def resolve_repo_path(
     return path.resolve()
 
 
+def _require_ranking(sorted_dir: Path) -> Path:
+    ranking = sorted_dir / "sorted_candidates.json"
+    if not ranking.is_file():
+        raise SelectionError(
+            f"{sorted_dir} has no sorted_candidates.json to read the ranking from"
+        )
+    return ranking
+
+
+def resolve_result_location(result: Path) -> ResultLocation:
+    """Resolve `--result` (any run artifact) into result.json/run dir/index/ranking.
+
+    Accepts a run directory, a `result.json` (or any other file, treated as the
+    result.json itself), an `index.md`, a `sorted/` directory, or a
+    `sorted_candidates.{json,md}`. Sorted sources live one level below the run
+    dir, so the run dir is resolved by going up; the candidate *data* is always
+    read from `result.json` regardless (a ranking only orders/filters it).
+    """
+    result = Path(result).expanduser()
+    ranking: Path | None = None
+    result_json_override: Path | None = None  # set when --result IS the result.json
+
+    if result.is_dir():
+        if (result / "result.json").is_file():
+            run_dir = result
+        elif (result / "sorted_candidates.json").is_file() or (
+            result / "sorted_candidates.md"
+        ).is_file():
+            run_dir = result.parent
+            ranking = _require_ranking(result)
+        else:
+            raise SelectionError(
+                f"directory has no result.json or sorted_candidates.json: {result}"
+            )
+    elif result.is_file():
+        if result.name == "index.md":
+            run_dir = result.parent
+        elif result.name == "sorted_candidates.json":
+            run_dir = result.parent.parent
+            ranking = result
+        elif result.name == "sorted_candidates.md":
+            run_dir = result.parent.parent
+            ranking = _require_ranking(result.parent)
+        else:  # any other file: treat as the result.json itself (back-compat)
+            run_dir = result.parent
+            result_json_override = result
+    else:
+        raise SelectionError(f"--result path not found: {result}")
+
+    result_json = result_json_override or (run_dir / "result.json")
+    if not result_json.is_file():
+        raise SelectionError(f"no result.json for this run: expected {result_json}")
+
+    index = run_dir / "index.md"
+    return ResultLocation(
+        result_json=result_json,
+        run_dir=run_dir,
+        index=index if index.is_file() else None,
+        ranking=ranking,
+    )
+
+
 __all__ = [
     "LoadedResult",
+    "ResultLocation",
     "load_result",
     "parse_repo_path_from_index",
     "resolve_candidate",
@@ -217,4 +294,5 @@ __all__ = [
     "resolve_module",
     "resolve_module_run",
     "resolve_repo_path",
+    "resolve_result_location",
 ]
