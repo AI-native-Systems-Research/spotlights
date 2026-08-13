@@ -26,7 +26,6 @@ _REPO = {
     "name": "demo",
     "summary": "A demo repo.",
     "source_root": "",
-    "external_dependencies": ["torch"],
 }
 _SUBTREE = {
     "source_root": "",
@@ -55,7 +54,7 @@ def _scope(**over):
 
 def _render(scope) -> str:
     return render_enrich_shard_prompt(
-        repository=_REPO, subtree=_SUBTREE, scope=scope, top_level_qns=["pkg", "csrc"]
+        repository=_REPO, subtree=_SUBTREE, scope=scope
     )
 
 
@@ -63,8 +62,6 @@ def test_shard_prompt_confines_the_model_to_its_subtree() -> None:
     prompt = _render(_scope())
     assert "Emit or fold **only** paths at or under `pkg`" in prompt
     assert "Return exactly ONE top-level module, whose `path` is `pkg`" in prompt
-    # The dependency vocabulary is global, not the shard's own slice.
-    assert '"csrc"' in prompt and '"pkg"' in prompt
 
 
 def test_spine_prompt_fences_off_the_promoted_children() -> None:
@@ -82,29 +79,13 @@ def test_spine_prompt_fences_off_the_promoted_children() -> None:
     assert "does **not** apply to `pkg` itself" in prompt
 
 
-def test_child_subshard_prompt_forbids_depends_on() -> None:
+def test_child_subshard_prompt_confines_to_its_subtree() -> None:
     """A child sub-shard's top module is demoted to an `EnrichedSubmodule` at
-    merge, and that model has no `depends_on` field at all."""
+    merge; the prompt must confine it to its own subtree."""
     prompt = _render(
         _scope(key="pkg__a", root_path="pkg/a", owns_root=False, depth=1)
     )
-    assert "Do **not** declare `depends_on`." in prompt
     assert "Do **not** emit any ancestor of `pkg/a`" in prompt
-
-
-def test_depth_two_spine_also_forbids_depends_on() -> None:
-    """`owns_root` alone is not the predicate: a depth-2 spine emits a module
-    that becomes a submodule after the merge."""
-    prompt = _render(
-        _scope(key="pkg__a__spine", root_path="pkg/a", depth=2,
-               promoted_children=["pkg/a/g1", "pkg/a/g2"])
-    )
-    assert "Do **not** declare `depends_on`." in prompt
-
-
-def test_branch_spine_may_still_declare_depends_on() -> None:
-    prompt = _render(_scope(promoted_children=["pkg/a", "pkg/b"]))
-    assert "Do **not** declare `depends_on`." not in prompt
 
 
 _PLACEHOLDERS = (
@@ -112,7 +93,6 @@ _PLACEHOLDERS = (
     "{skeleton_json}",
     "{scope_json}",
     "{scope_rules}",
-    "{top_level_qns_json}",
 )
 
 
@@ -120,13 +100,11 @@ def test_every_placeholder_is_substituted_in_both_renderings() -> None:
     """The template's literal JSON-shape braces mean substitution is explicit
     `str.replace`, not `str.format` — so a missed token fails silently."""
     for prompt in (
-        render_enrich_prompt(
-            repository=_REPO, skeleton=_SUBTREE, top_level_qns=["pkg"]
-        ),
+        render_enrich_prompt(repository=_REPO, skeleton=_SUBTREE),
         _render(_scope(promoted_children=["pkg/a"])),
     ):
         for token in _PLACEHOLDERS:
             assert token not in prompt, token
     assert "entire repository" in render_enrich_prompt(
-        repository=_REPO, skeleton=_SUBTREE, top_level_qns=["pkg"]
+        repository=_REPO, skeleton=_SUBTREE
     )

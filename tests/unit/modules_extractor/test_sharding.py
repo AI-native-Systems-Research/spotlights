@@ -39,7 +39,6 @@ from spotlights_engine.modules_extractor.sharding import (
     merge_fragments,
     node_weight,
     owning_shard,
-    validate_shard_depends_on,
     validate_shard_scope,
     validate_spine_main_files,
 )
@@ -99,7 +98,6 @@ def test_two_branches_yield_two_shards_sorted_by_root_path() -> None:
 
     assert [s.key for s in plan.shards] == ["alpha", "zeta"]
     assert [s.root_path for s in plan.shards] == ["alpha", "zeta"]
-    assert plan.top_level_qns == ["alpha", "zeta"]
     assert all(s.depth == 0 and s.owns_root and not s.is_subshard for s in plan.shards)
     assert all(s.parent_key is None for s in plan.shards)
 
@@ -427,21 +425,18 @@ def test_review_shards_are_the_top_level_partition_only() -> None:
 # ── Merge ─────────────────────────────────────────────────────────────────
 
 
-def _mod(path: str, *, subs=(), depends=(), files=None) -> dict:
+def _mod(path: str, *, subs=(), files=None) -> dict:
     return {
         "name": path.rsplit("/", 1)[-1],
         "path": path,
         "description": f"Module {path}.",
-        "depends_on": list(depends),
         "main_files": files or [{"path": f"{path}/main.py", "role": "Entry."}],
         "submodules": list(subs),
     }
 
 
 def _sub(path: str, *, subs=(), files=None) -> dict:
-    d = _mod(path, subs=subs, files=files)
-    d.pop("depends_on")
-    return d
+    return _mod(path, subs=subs, files=files)
 
 
 def _frag(*modules: dict, folds=()) -> EnrichedTree:
@@ -500,7 +495,7 @@ def test_merge_reassembles_subshards_and_demotes_them() -> None:
 
     merged = merge_fragments(
         [
-            (spine, _frag(_mod("pkg", depends=["other"]))),
+            (spine, _frag(_mod("pkg"))),
             (a, _frag(_mod("pkg/a"))),
             (b, _frag(_mod("pkg/b"))),
         ],
@@ -511,11 +506,7 @@ def test_merge_reassembles_subshards_and_demotes_them() -> None:
     assert len(merged.modules) == 1
     top = merged.modules[0]
     assert top.path == "pkg"
-    # The branch's depends_on comes only from the spine fragment.
-    assert top.depends_on == ["other"]
     assert [s.path for s in top.submodules] == ["pkg/a", "pkg/b"]
-    # Grafted children are demoted: EnrichedSubmodule has no depends_on field.
-    assert not hasattr(top.submodules[0], "depends_on")
 
 
 def test_merge_grafts_a_depth_two_grandchild_bottom_up() -> None:
@@ -683,10 +674,7 @@ def test_shards_partition_the_inventory_exhaustively_and_disjointly(seed: int) -
 
 
 def _emit_everything(node: SkeletonNode, *, top: bool) -> dict:
-    d = _mod(node.path, subs=[_emit_everything(c, top=False) for c in node.children])
-    if not top:
-        d.pop("depends_on")
-    return d
+    return _mod(node.path, subs=[_emit_everything(c, top=False) for c in node.children])
 
 
 @pytest.mark.parametrize("seed", range(60))
@@ -741,33 +729,6 @@ def test_shard_scope_rejects_an_out_of_scope_fold() -> None:
     }
     with pytest.raises(CrossArtifactError, match="outside its scope"):
         validate_shard_scope(shard, _frag(_mod("alpha"), folds=[fold]))
-
-
-def test_child_subshard_must_not_declare_depends_on() -> None:
-    child = _shard(
-        "pkg__a", "pkg/a", is_subshard=True, parent_key="pkg", owns_root=False, depth=1
-    )
-    frag = _frag(_mod("pkg/a", depends=["other"]))
-    with pytest.raises(CrossArtifactError, match="must not declare depends_on"):
-        validate_shard_depends_on(child, frag, carries_depends_on=False)
-    # The spine (or an un-split top-level shard) legitimately carries it.
-    validate_shard_depends_on(child, frag, carries_depends_on=True)
-
-
-def test_depth_two_spine_does_not_carry_depends_on() -> None:
-    """`owns_root` alone is not the predicate: a depth-2 spine emits a module
-    that becomes a *submodule* after the merge, so it must not declare deps."""
-    branch_spine = _shard(
-        "pkg__spine", "pkg", is_subshard=True, parent_key="pkg", depth=1,
-        promoted_children=["pkg/a"],
-    )
-    inner_spine = _shard(
-        "pkg__a__spine", "pkg/a", is_subshard=True, parent_key="pkg", depth=2,
-        promoted_children=["pkg/a/g1"],
-    )
-    plan = _plan_for([branch_spine, inner_spine], {"pkg": "pkg"})
-    assert plan.carries_depends_on(branch_spine)
-    assert not plan.carries_depends_on(inner_spine)
 
 
 def test_spine_main_files_may_not_reach_into_a_promoted_child() -> None:
@@ -887,8 +848,6 @@ def test_single_child_spine_passes_locally_and_the_merge_passes_rule_4(tmp_path)
         repo,
         _repository(),
         spine.subtree,
-        skip_dependency_resolution=True,
-        allowed_internal_qns=set(plan.top_level_qns),
         rule4_exempt_paths={spine.root_path},
     )
     with pytest.raises(CrossArtifactError, match="single child"):
@@ -897,8 +856,6 @@ def test_single_child_spine_passes_locally_and_the_merge_passes_rule_4(tmp_path)
             repo,
             _repository(),
             spine.subtree,
-            skip_dependency_resolution=True,
-            allowed_internal_qns=set(plan.top_level_qns),
         )
 
     # The merged tree passes the *unchanged* full Rule-4 check.
@@ -960,7 +917,6 @@ def test_spine_main_file_under_a_promoted_child_is_fatal_after_the_merge(tmp_pat
         repo,
         _repository(),
         spine.subtree,
-        skip_dependency_resolution=True,
         rule4_exempt_paths={spine.root_path},
     )
     # ...and fatal after the merge.

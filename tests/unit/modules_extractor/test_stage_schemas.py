@@ -1,9 +1,9 @@
 """Strict inter-stage model tests.
 
 The stage models are deliberately stricter than the public `ProjectTree`:
-they forbid extra fields (including extras nested in the raw `Repository`),
-drop `depends_on` from submodules, bound descriptions/roles, require 1-5 unique
-`main_files`, and enforce `review ok == (issues == [])`.
+they forbid extra fields (including extras nested in the raw `Repository`, and
+`depends_on` on any module or submodule), bound descriptions/roles, require 1-5
+unique `main_files`, and enforce `review ok == (issues == [])`.
 """
 
 from __future__ import annotations
@@ -24,7 +24,6 @@ def _min_top_module(**over) -> dict:
         "name": "core",
         "path": "pkg/core",
         "description": "Core.",
-        "depends_on": [],
         "main_files": [{"path": "pkg/core/a.py", "role": "A."}],
     }
     d.update(over)

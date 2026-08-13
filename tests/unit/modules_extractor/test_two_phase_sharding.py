@@ -105,7 +105,6 @@ def _decision(source_root: str = "") -> dict:
             "name": "demo",
             "summary": "A demo repository.",
             "source_root": source_root,
-            "external_dependencies": [],
         },
         "excluded_source_paths": [],
     }
@@ -124,7 +123,6 @@ ALPHA = {
             "name": "alpha",
             "path": "alpha",
             "description": "Alpha runtime.",
-            "depends_on": ["beta"],
             "main_files": [_file("alpha/a1.py"), _file("alpha/util/helper.py")],
             "submodules": [
                 {
@@ -158,7 +156,6 @@ BETA = {
             "name": "beta",
             "path": "beta",
             "description": "Beta services.",
-            "depends_on": [],
             "main_files": [_file("beta/b1.py")],
             "submodules": [
                 {
@@ -187,7 +184,6 @@ PKG_SPINE = {
             "name": "pkg",
             "path": "pkg",
             "description": "The package root.",
-            "depends_on": [],
             "main_files": [_file("pkg/root.py"), _file("pkg/light2/m.py")],
             "submodules": [
                 {
@@ -215,7 +211,6 @@ PKG_A = {
             "name": "a",
             "path": "pkg/a",
             "description": "Sub-package a.",
-            "depends_on": [],
             "main_files": [_file("pkg/a/a1.py")],
             "submodules": [],
         }
@@ -229,7 +224,6 @@ PKG_B = {
             "name": "b",
             "path": "pkg/b",
             "description": "Sub-package b.",
-            "depends_on": [],
             "main_files": [_file("pkg/b/b1.py")],
             "submodules": [],
         }
@@ -390,8 +384,8 @@ def test_two_branches_run_as_two_shards_and_merge(tmp_path, monkeypatch) -> None
     assert claude.calls_for("beta") == 1
     # One review per top-level branch.
     assert sorted(codex.calls) == ["alpha", "beta"]
-    # The cross-branch dependency resolved in the merged tree.
-    assert run.project_tree.modules[0].depends_on == ["beta"]
+    # The extractor no longer emits dependency data; the public field stays empty.
+    assert run.project_tree.modules[0].depends_on == []
 
 
 def test_oversized_branch_runs_as_spine_plus_child_subshards(tmp_path, monkeypatch) -> None:
@@ -618,7 +612,6 @@ def _whole_pkg() -> dict:
                 "name": "pkg",
                 "path": "pkg",
                 "description": "The whole package.",
-                "depends_on": [],
                 "main_files": [_file("pkg/root.py"), _file("pkg/light2/m.py")],
                 "submodules": [
                     {
@@ -769,21 +762,6 @@ def test_global_coverage_reports_a_dropped_required_path(tmp_path) -> None:
     assert "alpha/kv_offload" in compute_coverage(merged, skeleton).missing
 
 
-def test_a_dependency_outside_the_vocabulary_is_rejected(tmp_path, monkeypatch) -> None:
-    repo = _two_branch_repo(tmp_path)
-    bogus = json.loads(json.dumps(ALPHA))
-    bogus["modules"][0]["depends_on"] = ["gamma"]
-    claude = _ShardClaude(
-        _decision(), {"alpha": [bogus, ALPHA], "beta": [BETA]}
-    )
-    codex = _BranchCodex(lambda key: _codex_result(_OK))
-    run = _run(repo, claude, codex, monkeypatch)
-    # The shard-time vocabulary check caught it and spent the one repair.
-    assert claude.calls_for("alpha") == 2
-    assert claude.calls_for("beta") == 1
-    assert run.project_tree.modules[0].depends_on == ["beta"]
-
-
 def test_a_cross_branch_fold_is_rejected_by_the_full_validator(tmp_path) -> None:
     repo = _two_branch_repo(tmp_path)
     skeleton = build_skeleton(repo, "")
@@ -832,7 +810,6 @@ def test_sharded_artifacts_layout(tmp_path, monkeypatch) -> None:
     enrich = artifacts / "03_enrich"
     plan = json.loads((enrich / "shards.json").read_text())
     assert sorted(s["key"] for s in plan["shards"]) == ["pkg__a", "pkg__b", "pkg__spine"]
-    assert plan["top_level_qns"] == ["pkg"]
     assert plan["branch_roots"] == {"pkg": "pkg"}
     # A split branch has NO directory of its own — only its spine + children.
     assert not (enrich / "pkg").exists()

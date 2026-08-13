@@ -186,14 +186,12 @@ def test_extract_with_telemetry_legacy_path(tmp_path, monkeypatch) -> None:
             "name": "demo",
             "summary": "A demo package.",
             "source_root": "pkg",
-            "external_dependencies": [],
         },
         "modules": [
             {
                 "name": "core",
                 "path": "pkg/core",
                 "description": "Core.",
-                "depends_on": [],
                 "main_files": [{"path": "pkg/core/engine.py", "role": "Engine."}],
                 "submodules": [],
             }

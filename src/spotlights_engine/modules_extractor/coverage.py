@@ -29,7 +29,6 @@ from spotlights_engine.modules_extractor.stage_schemas import (
 from spotlights_engine.schemas.project import (
     ProjectTree,
     Repository,
-    _qualified_name,
 )
 
 
@@ -238,8 +237,6 @@ def validate_enriched_tree(
     repository: Repository,
     skeleton: Skeleton,
     *,
-    skip_dependency_resolution: bool = False,
-    allowed_internal_qns: set[str] | None = None,
     rule4_exempt_paths: set[str] | None = None,
 ) -> None:
     """Validate the enriched tree against the filesystem, repo metadata, and
@@ -249,18 +246,11 @@ def validate_enriched_tree(
     `compute_coverage`; this function establishes the invariants that make the
     coverage equation meaningful.
 
-    The three keyword parameters exist only so a *sharded* Stage-3 enrichment
+    The keyword parameter exists only so a *sharded* Stage-3 enrichment
     (see `sharding.py`) can run this same validator against one shard's subtree
-    without forking it. Each defaults to today's exact behavior, so the merged
+    without forking it. It defaults to today's exact behavior, so the merged
     Stage-5 call is byte-for-byte the unsharded validation:
 
-    - `skip_dependency_resolution` — when True, drop **only** the "internal dep
-      resolves to an emitted top-level module in *this* tree" clause. A shard
-      legitimately references sibling top-level qualified names it neither sees
-      nor emits; the merged tree proves resolvability.
-    - `allowed_internal_qns` — when set, every internal (non-external)
-      dependency must be a member of this vocabulary. This is the shard-time
-      guard that catches an invented qualified name before the merge does.
     - `rule4_exempt_paths` — when set, the zero-or-≥2-children rule is
       *deferred* (not weakened) for exactly those emitted paths. Used only by a
       spine shard for its own root, whose ≥2 guaranteed children are pruned
@@ -363,15 +353,6 @@ def validate_enriched_tree(
             f"(a parent needs zero or ≥2 children): {listed}"
         )
 
-    # Rule 5: dependencies.
-    _validate_dependencies(
-        enriched,
-        provisional,
-        repository,
-        skip_resolution=skip_dependency_resolution,
-        allowed_internal_qns=allowed_internal_qns,
-    )
-
     # Rules 6–8: folds.
     _validate_folds(enriched, repo_path, skeleton, provisional, emitted_set)
 
@@ -426,55 +407,6 @@ def _check_object_tree_matches_physical(tree: ProjectTree) -> None:
                 raise CrossArtifactError(
                     f"paths {a!r} and {b!r} are physically nested but not "
                     "object-tree ancestors (overlapping siblings/cousins)"
-                )
-
-
-def _validate_dependencies(
-    enriched: EnrichedTree,
-    tree: ProjectTree,
-    repository: Repository,
-    *,
-    skip_resolution: bool = False,
-    allowed_internal_qns: set[str] | None = None,
-) -> None:
-    source_root = repository.source_root
-    top_qns = {
-        _qualified_name(m.path, source_root): m.path for m in tree.modules
-    }
-    externals = set(repository.external_dependencies)
-
-    # External names must not collide with an emitted top-level qn.
-    for ext in externals:
-        if ext in top_qns:
-            raise CrossArtifactError(
-                f"external dependency {ext!r} collides with emitted top-level "
-                "qualified name"
-            )
-
-    for m in enriched.modules:
-        this_qn = _qualified_name(m.path, source_root)
-        seen: set[str] = set()
-        for dep in m.depends_on:
-            if dep in seen:
-                raise CrossArtifactError(
-                    f"duplicate dependency {dep!r} on module {this_qn!r}"
-                )
-            seen.add(dep)
-            if dep == this_qn:
-                raise CrossArtifactError(
-                    f"module {this_qn!r} depends on itself"
-                )
-            if dep in externals:
-                continue
-            if allowed_internal_qns is not None and dep not in allowed_internal_qns:
-                raise CrossArtifactError(
-                    f"internal dependency {dep!r} on {this_qn!r} is not in the "
-                    "provided top-level module vocabulary"
-                )
-            if not skip_resolution and dep not in top_qns:
-                raise CrossArtifactError(
-                    f"dependency {dep!r} on {this_qn!r} resolves to neither an "
-                    "emitted top-level module nor an external dependency"
                 )
 
 

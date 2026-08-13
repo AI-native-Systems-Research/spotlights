@@ -149,8 +149,7 @@ Return ONLY this JSON, no markdown fences, no commentary:
   "repository": {
     "name": "string — repo name",
     "summary": "2–4 sentences: what the repo does, its project type, primary languages/frameworks, and high-level architectural shape.",
-    "source_root": "repo-relative container directory that qualified names resolve relative to — the parent of the top-level namespace/package directories, never a package/crate/namespace directory itself; '' for repo root. No leading/trailing slash.",
-    "external_dependencies": ["primary external packages/frameworks the repo depends on — flat list of names"]
+    "source_root": "repo-relative container directory that qualified names resolve relative to — the parent of the top-level namespace/package directories, never a package/crate/namespace directory itself; '' for repo root. No leading/trailing slash."
   },
   "excluded_source_paths": [
     {
@@ -163,6 +162,5 @@ Return ONLY this JSON, no markdown fences, no commentary:
 
 ## Rules
 - All paths are repo-relative POSIX, no leading "./" or "/", no "..".
-- `name` and `summary` must be non-empty. `external_dependencies` names must be
-  unique and non-empty.
+- `name` and `summary` must be non-empty.
 - Output valid JSON, parseable by `JSON.parse` — no trailing commas, no comments.

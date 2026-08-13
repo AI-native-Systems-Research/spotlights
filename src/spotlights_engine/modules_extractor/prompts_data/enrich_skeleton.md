@@ -39,18 +39,6 @@ whether it is `required`, and its `children`.
 
 {scope_rules}
 
-## TOP_LEVEL_MODULES (data)
-
-```json
-{top_level_qns_json}
-```
-
-This is the complete, authoritative vocabulary of internal `depends_on` targets
-for this repository — the qualified name of every top-level module, including
-ones outside your scope that you will not see or emit. A `depends_on` entry must
-be either one of these names or a name from
-`repository.external_dependencies`. Never invent a qualified name.
-
 ## Your task
 
 Inspect the repository source and emit a strict `EnrichedTree`:
@@ -62,7 +50,7 @@ Inspect the repository source and emit a strict `EnrichedTree`:
   `docker/` of Dockerfiles + `.hcl` + `.json` whose only real source sits in a
   child), cite that directory's most representative real files of any extension
   (a Dockerfile, a build/config file) instead.
-- Record top-level `depends_on` and fold decisions.
+- Record fold decisions.
 
 ### Coverage rules (hard)
 
@@ -108,13 +96,6 @@ Inspect the repository source and emit a strict `EnrichedTree`:
   physically under `pkg`, it must be an object-tree descendant of `pkg`, never a
   sibling or cousin.
 
-### Dependencies
-
-- Only top-level modules carry `depends_on`. Submodules omit it.
-- Each entry is either a source-root-relative qualified name of another emitted
-  top-level module, or a name from `repository.external_dependencies`. No
-  duplicates, no self-dependencies.
-
 ### Descriptions and metadata
 
 - Descriptions are 1–2 sentences grounded in real source; do not join two
@@ -131,9 +112,8 @@ Return ONLY this JSON, no markdown fences, no commentary:
       "name": "string — normalized basename of path",
       "path": "path/from/repo/root",
       "description": "1–2 sentences",
-      "depends_on": ["qualified/name/of/peer", "external_pkg"],
       "main_files": [ { "path": "path/from/repo/root.ext", "role": "what it does" } ],
-      "submodules": [ <LEAF or PARENT, without depends_on> ]
+      "submodules": [ <LEAF or PARENT> ]
     }
   ],
   "folds": [

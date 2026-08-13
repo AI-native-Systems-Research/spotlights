@@ -55,7 +55,6 @@ def _source_root_decision() -> dict:
             "name": "demo",
             "summary": "A demo package.",
             "source_root": "pkg",
-            "external_dependencies": [],
         },
         "excluded_source_paths": [],
     }
@@ -68,7 +67,6 @@ def _enriched_tree() -> dict:
                 "name": "core",
                 "path": "pkg/core",
                 "description": "Core runtime.",
-                "depends_on": [],
                 "main_files": [
                     {"path": "pkg/core/engine.py", "role": "Engine."},
                     {"path": "pkg/core/util/helper.py", "role": "Helper (folded)."},
@@ -387,42 +385,6 @@ def test_review_revision_accepted_when_valid(tmp_path, monkeypatch) -> None:
     assert len(claude.prompts) == 3
     # Accepted session updates to the revision session.
     assert run.invocation.session_id == "sess-99-88"
-
-
-def test_single_mode_revision_prompt_keeps_the_dependency_vocabulary(
-    tmp_path, monkeypatch
-) -> None:
-    """The monolithic revision reuses the enrich template, whose
-    `TOP_LEVEL_MODULES` block the prompt calls "the complete, authoritative
-    vocabulary" of internal `depends_on` targets. Rendering it empty would tell
-    the model that no internal dependency is legal at all.
-    """
-    repo = _repo(tmp_path)
-    first = _enriched_tree()
-    first["modules"][0]["description"] = "core"
-    claude = _FakeClaude([
-        _stream_result(_source_root_decision()),
-        _stream_result(first),
-        _stream_result(_enriched_tree()),
-    ])
-    codex = _FakeCodex(lambda p, o: _codex_result({
-        "ok": False,
-        "issues": [
-            {"kind": "bad_description", "path": "pkg/core", "detail": "too terse"}
-        ],
-    }))
-    _patch(monkeypatch, claude, codex)
-
-    run_two_phase_extraction(
-        repo,
-        config=ExtractorConfig(enrich_sharding="single"),
-        on_event=None,
-        artifacts_dir=None,
-    )
-    # 1 source-root + 1 monolithic enrichment + 1 revision.
-    assert len(claude.prompts) == 3
-    block = claude.prompts[-1].split("## TOP_LEVEL_MODULES (data)")[1].split("```")[1]
-    assert '"core"' in block
 
 
 def test_strict_mode_reraises_when_rereview_still_flags(tmp_path, monkeypatch) -> None:

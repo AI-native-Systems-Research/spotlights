@@ -21,9 +21,6 @@ from spotlights_engine.modules_extractor.coverage import (
 )
 from spotlights_engine.modules_extractor.skeleton import build_skeleton
 from spotlights_engine.modules_extractor.stage_schemas import EnrichedTree
-from spotlights_engine.modules_extractor.two_phase import (
-    _prune_colliding_externals,
-)
 from spotlights_engine.schemas.project import Repository
 
 
@@ -56,7 +53,6 @@ def _full_tree() -> dict:
                 "name": "core",
                 "path": "pkg/core",
                 "description": "Core runtime.",
-                "depends_on": [],
                 "main_files": [
                     {"path": "pkg/core/engine.py", "role": "Engine."},
                     {"path": "pkg/core/util/helper.py", "role": "Helper (folded)."},
@@ -147,7 +143,6 @@ def test_emitting_only_descendant_does_not_cover_ancestor(tmp_path: Path) -> Non
                 "name": "kv_offload",
                 "path": "pkg/core/kv_offload",
                 "description": "KV offloading only.",
-                "depends_on": [],
                 "main_files": [
                     {"path": "pkg/core/kv_offload/a.py", "role": "A."}
                 ],
@@ -208,7 +203,6 @@ def test_source_less_module_may_cite_nonsource_main_files(tmp_path: Path) -> Non
                 "name": "docker",
                 "path": "docker",
                 "description": "Container build definitions and entrypoints.",
-                "depends_on": [],
                 "main_files": [
                     {"path": "docker/Dockerfile", "role": "Primary build image."},
                     {"path": "docker/docker-bake.hcl", "role": "buildx bake targets."},
@@ -294,55 +288,6 @@ def test_passthrough_fold_evidence_need_not_be_in_main_files(tmp_path: Path) -> 
     assert "pkg/core/fla" in cov.folded
 
 
-def test_external_dependency_colliding_with_internal_qn_fails(tmp_path: Path) -> None:
-    _repo(tmp_path)
-    skel = build_skeleton(tmp_path, "pkg")
-    repo = Repository(
-        name="r", summary="s", source_root="pkg", external_dependencies=["core"]
-    )
-    tree = EnrichedTree.model_validate(_full_tree())
-    with pytest.raises(CrossArtifactError, match="collides"):
-        validate_enriched_tree(tree, tmp_path, repo, skel)
-
-
-def test_prune_colliding_externals_drops_collision_and_keeps_rest(
-    tmp_path: Path,
-) -> None:
-    # Regression: vllm has a real top-level `cmake/` directory AND lists `cmake`
-    # (the build tool) as an external, so the emitted module qn `core` collides
-    # with an external of the same name. Pruning resolves it in the module's
-    # favor and leaves genuine externals untouched — the whole run must not die.
-    _repo(tmp_path)
-    skel = build_skeleton(tmp_path, "pkg")
-    repo = Repository(
-        name="r",
-        summary="s",
-        source_root="pkg",
-        external_dependencies=["torch", "core"],
-    )
-    events: list[str] = []
-    pruned = _prune_colliding_externals(repo, skel, on_event=events.append)
-    assert pruned.external_dependencies == ["torch"]
-    assert any("core" in e for e in events)
-    # The pruned repository now passes the previously-fatal validator.
-    tree = EnrichedTree.model_validate(_full_tree())
-    validate_enriched_tree(tree, tmp_path, pruned, skel)
-
-
-def test_prune_colliding_externals_noop_returns_same_object(
-    tmp_path: Path,
-) -> None:
-    _repo(tmp_path)
-    skel = build_skeleton(tmp_path, "pkg")
-    repo = Repository(
-        name="r", summary="s", source_root="pkg", external_dependencies=["torch"]
-    )
-    events: list[str] = []
-    pruned = _prune_colliding_externals(repo, skel, on_event=events.append)
-    assert pruned is repo
-    assert events == []
-
-
 def test_all_single_child_parents_reported_together(tmp_path: Path) -> None:
     # Two clustered single-child parents in one tree. Rule 4 must name BOTH in a
     # single error so the one bounded repair pass can collapse them together;
@@ -361,7 +306,6 @@ def test_all_single_child_parents_reported_together(tmp_path: Path) -> None:
                 "name": "core",
                 "path": "pkg/core",
                 "description": "Core runtime.",
-                "depends_on": [],
                 "main_files": [{"path": "pkg/core/engine.py", "role": "Engine."}],
                 "submodules": [
                     {

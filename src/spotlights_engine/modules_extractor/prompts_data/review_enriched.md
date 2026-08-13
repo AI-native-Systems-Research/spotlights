@@ -38,7 +38,6 @@ enforces (missing required dirs, nonexistent paths, single-child parents,
 - `bad_description` — a description that is wrong, empty of content, or conflates
   two responsibilities.
 - `weak_main_files` — main files that do not represent the module's real core.
-- `wrong_depends_on` — a dependency that is incorrect or missing an obvious one.
 - `missing_dir` — a directory that should have been modeled but was not.
 
 For each issue, cite a `path` that appears in the skeleton or enriched tree.
@@ -58,7 +57,7 @@ or, when you find issues:
   "ok": false,
   "issues": [
     {
-      "kind": "missing_dir|bad_fold|bad_description|weak_main_files|wrong_depends_on",
+      "kind": "missing_dir|bad_fold|bad_description|weak_main_files",
       "path": "path/from/repo/root",
       "detail": "specific, actionable description of the problem"
     }
@@ -68,7 +67,7 @@ or, when you find issues:
 ## Rules
 - `ok` must equal `(issues == [])`. If there are no issues, `ok` is true and
   `issues` is empty; otherwise `ok` is false.
-- `kind` must be one of the five values above; `path` must be a real path from
+- `kind` must be one of the four values above; `path` must be a real path from
   the provided data; `detail` must be non-empty.
 - Output valid JSON, parseable by `JSON.parse` — no trailing commas, no comments,
   no extra fields.

@@ -41,7 +41,6 @@ from spotlights_engine.modules_extractor.stage_schemas import (
     Skeleton,
     SkeletonNode,
 )
-from spotlights_engine.schemas.project import _qualified_name
 
 if TYPE_CHECKING:  # pragma: no cover - import cycle guard only
     from spotlights_engine.modules_extractor.extractor import ExtractorConfig
@@ -106,14 +105,13 @@ class EnrichShard(BaseModel):
 
 
 class ShardPlan(BaseModel):
-    """The derived plan. Carries the three derivation-time facts no individual
-    shard holds: the `depends_on` vocabulary, the *unpruned* per-branch subtree
-    the branch precheck compares against, and the not-split ledger."""
+    """The derived plan. Carries the two derivation-time facts no individual
+    shard holds: the *unpruned* per-branch subtree the branch precheck compares
+    against, and the not-split ledger."""
 
     model_config = ConfigDict(extra="forbid")
 
     shards: list[EnrichShard] = Field(default_factory=list)
-    top_level_qns: list[str] = Field(default_factory=list)
     branch_subtrees: dict[str, Skeleton] = Field(default_factory=dict)
     branch_roots: dict[str, str] = Field(default_factory=dict)
     """branch key -> the branch's `root_path`."""
@@ -128,18 +126,6 @@ class ShardPlan(BaseModel):
     def branch_keys(self) -> list[str]:
         """Branch keys ordered by the branch's `root_path` (POSIX lexicographic)."""
         return [k for k, _ in sorted(self.branch_roots.items(), key=lambda kv: kv[1])]
-
-    def carries_depends_on(self, shard: EnrichShard) -> bool:
-        """Only a shard emitting a *top-level branch root* may declare
-        `depends_on`.
-
-        `owns_root` alone is not enough: a depth-2 spine also has
-        `owns_root=True`, but the module it emits becomes a submodule after the
-        merge, and `EnrichedSubmodule` has no `depends_on` field.
-        """
-        return shard.owns_root and shard.root_path == self.branch_roots.get(
-            self.branch_key_of(shard)
-        )
 
     def primary_shard(self) -> EnrichShard | None:
         """The branch-owning shard of the first top-level branch by `root_path`.
@@ -413,9 +399,6 @@ def derive_enrich_shards(skeleton: Skeleton, config: ExtractorConfig) -> ShardPl
     ]
 
     plan = ShardPlan(
-        top_level_qns=sorted(
-            _qualified_name(n.path, skeleton.source_root) for n in top_nodes
-        ),
         branch_subtrees={k: slice_skeleton(skeleton, n) for n, k in branch_keys},
         branch_roots={k: n.path for n, k in branch_keys},
     )
@@ -560,31 +543,10 @@ def validate_spine_main_files(shard: EnrichShard, fragment: EnrichedTree) -> Non
                     )
 
 
-def validate_shard_depends_on(
-    shard: EnrichShard, fragment: EnrichedTree, *, carries_depends_on: bool
-) -> None:
-    """A shard whose top module is demoted to a submodule at merge must not
-    declare `depends_on` — `EnrichedSubmodule` has no such field, so a silent
-    drop would be the alternative."""
-    if carries_depends_on or not fragment.modules:
-        return
-    if fragment.modules[0].depends_on:
-        raise CrossArtifactError(
-            f"sub-shard {shard.key!r} root must not declare depends_on; the "
-            "branch's dependencies belong to its spine"
-        )
-
-
 # ── Merge ─────────────────────────────────────────────────────────────────
 
 
-def _demote(module: EnrichedTopModule, *, shard_key: str) -> EnrichedSubmodule:
-    if module.depends_on:  # pragma: no cover - validation catches this first
-        raise ExtractorValidationError(
-            f"cannot graft sub-shard {shard_key!r} module {module.path!r}: it "
-            "carries depends_on, which only a top-level branch may declare",
-            stage="enrich",
-        )
+def _demote(module: EnrichedTopModule) -> EnrichedSubmodule:
     return EnrichedSubmodule(
         name=module.name,
         path=module.path,
@@ -651,7 +613,7 @@ def assemble_branch(
                 stage="enrich",
             )
         by_root[target_root].submodules.append(
-            _demote(by_root[shard.root_path], shard_key=shard.key)
+            _demote(by_root[shard.root_path])
         )
 
     _sort_submodules(root_module)
@@ -799,7 +761,6 @@ __all__ = [
     "node_weight",
     "owning_shard",
     "slice_skeleton",
-    "validate_shard_depends_on",
     "validate_shard_scope",
     "validate_spine_main_files",
 ]

@@ -80,7 +80,6 @@ from spotlights_engine.modules_extractor.sharding import (
     has_several_source_roots,
     merge_fragments,
     owning_shard,
-    validate_shard_depends_on,
     validate_shard_scope,
     validate_spine_main_files,
 )
@@ -101,8 +100,6 @@ from spotlights_engine.modules_extractor.stage_schemas import (
 )
 from spotlights_engine.schemas.project import (
     ProjectTree,
-    Repository,
-    _qualified_name,
 )
 
 if TYPE_CHECKING:
@@ -319,16 +316,6 @@ def run_two_phase_extraction(
     # ── Stage 2 — deterministic skeleton ──────────────────────────────────
     skeleton = _stage2_skeleton(
         repo_path, decision, base=base, on_event=on_event
-    )
-
-    # Reconcile Stage-1 externals against the authoritative top-level module
-    # vocabulary the skeleton just fixed. When a repo has a real top-level
-    # directory whose name also happens to be a build tool the LLM listed as
-    # an external (vllm's `cmake/` folder vs. the `cmake` build tool), the two
-    # names collide. The emitted module wins — drop the colliding external so
-    # the cross-artifact validator never aborts the whole run over it.
-    repository = _prune_colliding_externals(
-        repository, skeleton, on_event=on_event
     )
 
     # ── Stage 3 — enrichment + coverage gate ──────────────────────────────
@@ -711,9 +698,8 @@ def _stage3_enrich_single(
     """
     repo_data = repository.model_dump(mode="json")
     skel_data = skeleton.model_dump(mode="json")
-    top_level_qns = _top_level_qns(skeleton)
     base_prompt = render_enrich_prompt(
-        repository=repo_data, skeleton=skel_data, top_level_qns=top_level_qns
+        repository=repo_data, skeleton=skel_data
     )
     _required_write_text(base, "03_enrich/prompt.md", base_prompt)
     _required_write_json(
@@ -825,45 +811,6 @@ def _stage3_enrich_single(
 # ── Stage 3 — sharded ─────────────────────────────────────────────────────
 
 
-def _top_level_qns(skeleton: Skeleton) -> list[str]:
-    return sorted(
-        _qualified_name(n.path, skeleton.source_root) for n in skeleton.nodes
-    )
-
-
-def _prune_colliding_externals(
-    repository: Repository,
-    skeleton: Skeleton,
-    *,
-    on_event: Callable[[str], None] | None,
-) -> Repository:
-    """Drop any external dependency whose name collides with an emitted
-    top-level module's qualified name.
-
-    Such a collision is otherwise fatal in the cross-artifact validator
-    (`_validate_dependencies`), which forbids the same name being both an
-    emitted module and an external because a `depends_on` reference to it
-    would be ambiguous. When a repo has a genuine top-level directory that
-    merely shares a name with a build tool the LLM listed as external (e.g.
-    vllm's `cmake/` folder vs. the `cmake` build tool), the emitted module is
-    the real, source-bearing artifact and wins; the stray external is pruned
-    so a whole extraction is not aborted over it.
-    """
-    collisions = set(_top_level_qns(skeleton))
-    kept = [d for d in repository.external_dependencies if d not in collisions]
-    dropped = [d for d in repository.external_dependencies if d in collisions]
-    if not dropped:
-        return repository
-    notify(
-        on_event,
-        "extractor: dropping external dependenc"
-        + ("y " if len(dropped) == 1 else "ies ")
-        + ", ".join(sorted(dropped))
-        + " (collides with emitted top-level module)",
-    )
-    return repository.model_copy(update={"external_dependencies": kept})
-
-
 def _scope_dict(shard: EnrichShard) -> dict[str, Any]:
     return {
         "key": shard.key,
@@ -878,7 +825,6 @@ def _scope_dict(shard: EnrichShard) -> dict[str, Any]:
 
 def _shard_plan_dict(plan: ShardPlan) -> dict[str, Any]:
     return {
-        "top_level_qns": list(plan.top_level_qns),
         "branch_roots": dict(plan.branch_roots),
         "not_split_reasons": dict(plan.not_split_reasons),
         "shards": [
@@ -898,28 +844,20 @@ def _validate_shard_fragment(
     *,
     repo_path: Path,
     repository: Any,
-    plan: ShardPlan,
 ) -> str | None:
     """Subtree-scoped cross-artifact validation. Returns the error text or None.
 
-    The shard-scoped knobs are what let the *unchanged* validator run against a
-    slice: dependency resolution is deferred to the merged tree (a shard
-    legitimately names siblings it cannot see), the vocabulary check replaces it
-    locally, and a spine defers Rule 4 for its own root because the children
-    that guarantee it are pruned from its subtree.
+    The shard-scoped knob is what lets the *unchanged* validator run against a
+    slice: a spine defers Rule 4 for its own root because the children that
+    guarantee it are pruned from its subtree.
     """
     try:
         validate_shard_scope(shard, fragment)
-        validate_shard_depends_on(
-            shard, fragment, carries_depends_on=plan.carries_depends_on(shard)
-        )
         validate_enriched_tree(
             fragment,
             repo_path,
             repository,
             shard.subtree,
-            skip_dependency_resolution=True,
-            allowed_internal_qns=set(plan.top_level_qns),
             rule4_exempt_paths={shard.root_path} if shard.is_spine else None,
         )
         validate_spine_main_files(shard, fragment)
@@ -990,7 +928,6 @@ async def _enrich_shard_attempts(
         repository=repo_data,
         subtree=subtree_data,
         scope=scope,
-        top_level_qns=plan.top_level_qns,
     )
     _required_write_json(base, f"{shard_rel}/scope.json", scope)
     _required_write_json(base, f"{shard_rel}/subtree_skeleton.json", subtree_data)
@@ -1001,7 +938,6 @@ async def _enrich_shard_attempts(
             "repository": repo_data,
             "subtree": subtree_data,
             "scope": scope,
-            "top_level_qns": list(plan.top_level_qns),
         },
     )
     _required_write_text(base, f"{shard_rel}/prompt.md", base_prompt)
@@ -1070,7 +1006,6 @@ async def _enrich_shard_attempts(
             fragment,
             repo_path=repo_path,
             repository=repository,
-            plan=plan,
         )
         coverage = compute_coverage(fragment, shard.subtree)
         _required_write_json(
@@ -1596,10 +1531,6 @@ def _run_review_revision(
     base_prompt = render_enrich_prompt(
         repository=repository.model_dump(mode="json"),
         skeleton=skeleton.model_dump(mode="json"),
-        # Without this the TOP_LEVEL_MODULES block renders as `[]`, and the
-        # prompt calls that "the complete, authoritative vocabulary" — i.e. it
-        # would tell the model no internal `depends_on` target is legal at all.
-        top_level_qns=_top_level_qns(skeleton),
     )
     prompt = (
         f"{base_prompt}\n\n## Reviewer notes to address\n\n"
@@ -1849,7 +1780,6 @@ def _revise_branch_shards(
         outcome = _revise_one_shard(
             repo_path,
             repository,
-            plan,
             shard,
             by_shard[shard_key],
             fragments[shard_key],
@@ -1881,7 +1811,6 @@ def _revise_branch_shards(
 def _revise_one_shard(
     repo_path: Path,
     repository: Any,
-    plan: ShardPlan,
     shard: EnrichShard,
     issues: list[ReviewIssue],
     previous: EnrichedTree,
@@ -1897,7 +1826,6 @@ def _revise_one_shard(
         repository=repository.model_dump(mode="json"),
         subtree=shard.subtree.model_dump(mode="json"),
         scope=_scope_dict(shard),
-        top_level_qns=plan.top_level_qns,
     )
     prompt = (
         f"{base_prompt}\n\n## Reviewer notes to address\n\n"
@@ -1937,7 +1865,7 @@ def _revise_one_shard(
         base, f"{rel}/enriched_tree.json", revised.model_dump(mode="json")
     )
     detail = _validate_shard_fragment(
-        shard, revised, repo_path=repo_path, repository=repository, plan=plan
+        shard, revised, repo_path=repo_path, repository=repository
     )
     coverage = compute_coverage(revised, shard.subtree)
     _required_write_json(base, f"{rel}/coverage.json", coverage.model_dump(mode="json"))

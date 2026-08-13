@@ -8,8 +8,8 @@ than the public `ProjectTree`/`Module` schema:
   than duplicating its fields, and rejects unknown repository keys.
 - `Skeleton`/`SkeletonNode` (Stage 2) are the deterministic inventory.
 - `EnrichedTree` and friends (Stage 3) forbid extra fields, require non-empty
-  bounded descriptions, 1–5 unique `main_files`, and drop `depends_on` from
-  submodules — none of which the public `Module` model enforces.
+  bounded descriptions, and 1–5 unique `main_files` — none of which the public
+  `Module` model enforces.
 - `ReviewReport`/`ReviewArtifact` (Stage 4) capture Codex output plus an honest
   completed/skipped execution status.
 
@@ -51,7 +51,6 @@ ReviewIssueKind = Literal[
     "bad_fold",
     "bad_description",
     "weak_main_files",
-    "wrong_depends_on",
 ]
 
 _REPOSITORY_KEYS = frozenset(Repository.model_fields.keys())
@@ -129,13 +128,6 @@ class SourceRootDecision(BaseModel):
             raise ValueError("repository.name must be non-empty")
         if not self.repository.summary.strip():
             raise ValueError("repository.summary must be non-empty")
-        seen: set[str] = set()
-        for dep in self.repository.external_dependencies:
-            if not dep.strip():
-                raise ValueError("external_dependencies entries must be non-empty")
-            if dep in seen:
-                raise ValueError(f"duplicate external dependency: {dep!r}")
-            seen.add(dep)
         return self
 
 
@@ -219,7 +211,7 @@ def _check_main_files(main_files: list[EnrichedFile]) -> None:
 
 
 class EnrichedSubmodule(BaseModel):
-    """A nested module. No `depends_on` (implied by the top-level parent)."""
+    """A nested module."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -242,14 +234,13 @@ class EnrichedSubmodule(BaseModel):
 
 
 class EnrichedTopModule(BaseModel):
-    """A top-level module. Carries `depends_on`."""
+    """A top-level module."""
 
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
     path: str
     description: str = Field(min_length=1, max_length=_MAX_DESCRIPTION)
-    depends_on: list[str] = Field(default_factory=list)
     main_files: list[EnrichedFile]
     submodules: list[EnrichedSubmodule] = Field(default_factory=list)
 
@@ -329,7 +320,6 @@ class EnrichedTree(BaseModel):
                 "name": m.name,
                 "path": m.path,
                 "description": m.description,
-                "depends_on": list(m.depends_on),
                 "main_files": [
                     {"path": f.path, "role": f.role} for f in m.main_files
                 ],

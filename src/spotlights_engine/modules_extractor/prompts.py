@@ -71,16 +71,6 @@ def _shard_scope_rules(scope: dict[str, Any]) -> str:
             f"- Do **not** emit any ancestor of `{root}`; `{root}` is your "
             "top-level object here."
         )
-    # Only a shard emitting a *top-level branch root* may declare `depends_on`.
-    # The branch's own spine is always depth ≤ 1; a deeper spine emits a module
-    # that becomes a submodule after the merge, and submodules have no
-    # `depends_on` field at all.
-    if not (owns_root and int(scope.get("depth", 0)) <= 1):
-        lines.append(
-            "- Do **not** declare `depends_on`. This subtree is part of a larger "
-            "top-level module, and that module's dependencies are declared "
-            "elsewhere. Leave `depends_on` empty."
-        )
     promoted = list(scope.get("promoted_children") or [])
     if promoted:
         listed = ", ".join(f"`{p}`" for p in promoted)
@@ -105,9 +95,7 @@ def _shard_scope_rules(scope: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def render_enrich_prompt(
-    *, repository: Any, skeleton: Any, top_level_qns: Any = None
-) -> str:
+def render_enrich_prompt(*, repository: Any, skeleton: Any) -> str:
     """Stage-3 enrichment prompt for the **whole repository** (single mode).
 
     `repository` and `skeleton` are JSON-serializable (dicts or the model
@@ -122,13 +110,10 @@ def render_enrich_prompt(
         .replace("{skeleton_json}", _as_json_block(skeleton))
         .replace("{scope_json}", _as_json_block(scope))
         .replace("{scope_rules}", _WHOLE_REPO_SCOPE_RULES)
-        .replace("{top_level_qns_json}", _as_json_block(list(top_level_qns or [])))
     )
 
 
-def render_enrich_shard_prompt(
-    *, repository: Any, subtree: Any, scope: Any, top_level_qns: Any
-) -> str:
+def render_enrich_shard_prompt(*, repository: Any, subtree: Any, scope: Any) -> str:
     """Stage-3 enrichment prompt scoped to one shard's subtree.
 
     The `SKELETON` block carries the shard's subtree slice, not the whole
@@ -141,7 +126,6 @@ def render_enrich_shard_prompt(
         .replace("{skeleton_json}", _as_json_block(subtree))
         .replace("{scope_json}", _as_json_block(scope))
         .replace("{scope_rules}", _shard_scope_rules(dict(scope)))
-        .replace("{top_level_qns_json}", _as_json_block(list(top_level_qns)))
     )
 
 
