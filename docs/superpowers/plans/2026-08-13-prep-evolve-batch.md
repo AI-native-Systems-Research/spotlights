@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Simplify `prep-evolve` so `--result` accepts a run directory, `--candidate`/`--module`/`--out` become optional (candidate omitted = all candidates), and bundles land in a uniform `<base>/evolve/<module>/<candidate>/<evolver>/` tree.
+**Goal:** Simplify `prep-evolve` so `--result` accepts any run artifact (run dir, `result.json`, `index.md`, a `sorted/` dir, or a `sorted_candidates.json`/`.md`), `--candidate`/`--module`/`--out` become optional (candidate omitted = all candidates, or the ranking's top-N via `--top-n` when the source is sorted), and bundles land in a uniform `<base>/evolve/<module>/<candidate>/<evolver>/` tree.
 
-**Architecture:** Keep the existing extract → validate → render → materialize pipeline. Add two pure resolver helpers (a result-path locator and a candidate-id scanner), rewrite the `prep_evolve` orchestrator to loop over a selection (one candidate, or all) with per-candidate skip-and-warn resilience, and replace the flat bundle-dir name with a nested path built from `slug_for(qn)`.
+**Architecture:** Keep the existing extract → validate → render → materialize pipeline. Add three pure resolver helpers (a result-path locator that self-locates `result.json`/`index.md`/ranking from any accepted form, a candidate-id scanner, and a ranking reader), rewrite the `prep_evolve` orchestrator to loop over a selection (one candidate, all candidates, or the ranked top-N) with per-candidate skip-and-warn resilience, and replace the flat bundle-dir name with a nested path built from `slug_for(qn)`.
 
 **Tech Stack:** Python 3, Pydantic v2 models, `argparse` CLI, `pytest`. Existing module: `src/spotlights_engine/prep_evolve/`.
 
@@ -12,7 +12,9 @@
 
 - **Design spec:** `docs/superpowers/specs/2026-08-13-prep-evolve-batch-design.md` — all behavior below is defined there.
 - **Module slug:** the `<module>` path segment MUST be `slug_for(qn)` from `spotlights_engine.utils.id_helpers` (slash-form qn with any char outside `[A-Za-z0-9._-]` → `_`), matching the existing `modules/<slug>.md` convention. Never hand-roll the flattening.
-- **Bundle layout (always):** `<base>/evolve/<slug_for(qn)>/<candidate_id>/<evolver>/`. Base = `--out` if given, else the run directory (the folder containing `result.json`).
+- **Bundle layout (always):** `<base>/evolve/<slug_for(qn)>/<candidate_id>/<evolver>/`. Base = `--out` if given, else the run directory (the folder containing `result.json`). For a sorted source the run directory is the parent of `sorted/`, so bundles land at `<run>/evolve/…`, never inside `sorted/`.
+- **Candidate data always from `result.json`:** a sorted source supplies only the order + top-N cut; each ranked id is resolved back to its full candidate in `result.json`.
+- **`--top-n` is sorted-only:** `--top-n <N>` with a plain source (run dir / `result.json` / `index.md`) is a `SelectionError`. Default is `all` (no cut).
 - **Bundle contents unchanged:** skydiscover = `seed.<ext>` + `config.yaml` + `README.md`; coral = `task.yaml` + `README.md`; nous = `campaign.yaml` (minimal, no README). Do not alter adapters.
 - **Errors:** raise the existing `PrepEvolveError` subclasses in `errors.py`. `SelectionError` for bad/missing selections, `RepoResolutionError` for repo issues, `StalenessError` from `validate_target`.
 - **Run tests with:** `python -m pytest tests/unit/prep_evolve/ -q` from the repo root.
@@ -21,25 +23,62 @@
 
 ## File Structure
 
-- `src/spotlights_engine/prep_evolve/resolve.py` — add `ResultLocation` + `resolve_result_location`, `CandidateSelection` + `find_candidate` + `iter_candidates`. (Existing resolvers stay.)
-- `src/spotlights_engine/prep_evolve/api.py` — rewrite `prep_evolve`; add `_bundle_dir`; extend `SkippedEvolver`; make `PrepEvolveInput.module/candidate/out` optional; drop `_bundle_dir_name`/`_path_segment`/`_candidate_id`/`_BUNDLE_SEGMENT_RE`; simplify `_materialize`.
-- `src/spotlights_engine/prep_evolve/cli.py` — make `--module`/`--candidate`/`--out` optional; add batch summary output.
+- `src/spotlights_engine/prep_evolve/resolve.py` — add `ResultLocation` + `resolve_result_location` (all `--result` forms + ranking source), `CandidateSelection` + `find_candidate` + `iter_candidates`, and `load_ranking`. (Existing resolvers stay.)
+- `src/spotlights_engine/prep_evolve/api.py` — rewrite `prep_evolve` (single / all / ranked top-N selection); add `_bundle_dir`; extend `SkippedEvolver`; make `PrepEvolveInput.module/candidate/out` optional and add `top_n`; drop `_bundle_dir_name`/`_path_segment`/`_candidate_id`/`_BUNDLE_SEGMENT_RE`; simplify `_materialize`.
+- `src/spotlights_engine/prep_evolve/cli.py` — make `--module`/`--candidate`/`--out` optional; add `--top-n`; add batch summary output.
 - `tests/unit/prep_evolve/test_extract_resolve.py` — add resolver tests (Tasks 1–2).
 - `tests/unit/prep_evolve/test_materialize_cli.py` — add new-behavior tests and update path/skip-dependent tests (Tasks 3–4).
 - `docs/prep-evolve.md` and `README.md` — usage updates (Task 5).
 
 ---
 
-## Task 1: Result-path locator (directory-or-file `--result`)
+## Task 1: Result-path locator (every `--result` form + ranking source)
 
 **Files:**
 - Modify: `src/spotlights_engine/prep_evolve/resolve.py`
+- Modify: `tests/unit/prep_evolve/_fixtures.py` (add `write_sorted`)
 - Test: `tests/unit/prep_evolve/test_extract_resolve.py`
 
 **Interfaces:**
-- Produces: `ResultLocation(result_json: Path, run_dir: Path, index: Path | None)` and `resolve_result_location(result: Path) -> ResultLocation`. When `result` is a directory, `result_json = result/"result.json"` (SelectionError if absent) and `run_dir = result`; when a file, `result_json = result` and `run_dir = result.parent`; `index` is `run_dir/"index.md"` when that file exists, else `None`. Nonexistent `result` → SelectionError.
+- Produces: `ResultLocation(result_json: Path, run_dir: Path, index: Path | None, ranking: Path | None)` and `resolve_result_location(result: Path) -> ResultLocation`.
+  - Directory containing `result.json` → `run_dir = result`, no ranking.
+  - Directory containing `sorted_candidates.json`/`.md` (a `sorted/` dir) → `run_dir = result.parent`, `ranking = result/"sorted_candidates.json"`.
+  - File `index.md` → `run_dir = parent`, `result_json = parent/"result.json"`.
+  - File `sorted_candidates.json` → `run_dir = parent.parent`, `ranking = the file`.
+  - File `sorted_candidates.md` → `run_dir = parent.parent`, `ranking = parent/"sorted_candidates.json"`.
+  - Any other file → treated as the `result.json` itself (back-compat): `run_dir = parent`, no ranking.
+  - `result_json` (whether derived as `run_dir/"result.json"` or the file itself) must exist, else SelectionError. `index` = `run_dir/"index.md"` when present, else `None`. A sorted source with no `sorted_candidates.json` is a SelectionError. Nonexistent `result` → SelectionError.
 
-- [ ] **Step 1: Write the failing tests**
+- [ ] **Step 1: Add the `write_sorted` fixture helper**
+
+Add to `tests/unit/prep_evolve/_fixtures.py` (after `write_index`):
+
+```python
+def write_sorted(run_dir: Path, ids: list[str], *, md: bool = True) -> Path:
+    """Write a run/sorted/ dir with sorted_candidates.json (+ optional .md).
+
+    Returns the sorted directory. `ids` are written in rank order.
+    """
+    sorted_dir = run_dir / "sorted"
+    sorted_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "source_result": "result.json",
+        "method": "listwise sub-agent judge",
+        "total_ranked": len(ids),
+        "candidates": [
+            {"rank": i + 1, "id": cid, "module_qualified_name": "v1/attention"}
+            for i, cid in enumerate(ids)
+        ],
+    }
+    (sorted_dir / "sorted_candidates.json").write_text(json.dumps(payload), encoding="utf-8")
+    if md:
+        (sorted_dir / "sorted_candidates.md").write_text(
+            "# Sorted candidates\n", encoding="utf-8"
+        )
+    return sorted_dir
+```
+
+- [ ] **Step 2: Write the failing tests**
 
 Add to `tests/unit/prep_evolve/test_extract_resolve.py`:
 
@@ -54,96 +93,198 @@ from spotlights_engine.prep_evolve.resolve import resolve_result_location
 from . import _fixtures as fx
 
 
-def test_resolve_result_location_directory(tmp_path: Path) -> None:
-    fx.write_result(tmp_path)          # writes tmp_path/result.json
-    fx.write_index(tmp_path, tmp_path)  # writes tmp_path/index.md
+def test_resolve_location_run_directory(tmp_path: Path) -> None:
+    fx.write_result(tmp_path)
+    fx.write_index(tmp_path, tmp_path)
     loc = resolve_result_location(tmp_path)
     assert loc.result_json == tmp_path / "result.json"
     assert loc.run_dir == tmp_path
     assert loc.index == tmp_path / "index.md"
+    assert loc.ranking is None
 
 
-def test_resolve_result_location_file_no_index(tmp_path: Path) -> None:
+def test_resolve_location_result_json_file(tmp_path: Path) -> None:
     rj = fx.write_result(tmp_path)
     loc = resolve_result_location(rj)
     assert loc.result_json == rj
     assert loc.run_dir == tmp_path
-    assert loc.index is None  # no index.md written
+    assert loc.index is None
+    assert loc.ranking is None
 
 
-def test_resolve_result_location_dir_missing_result_json(tmp_path: Path) -> None:
+def test_resolve_location_arbitrary_file_is_result_json(tmp_path: Path) -> None:
+    # A non-standard filename is still treated as the result.json itself.
+    payload = fx.make_result_dict()
+    rj = tmp_path / "custom_result.json"
+    rj.write_text(__import__("json").dumps(payload), encoding="utf-8")
+    loc = resolve_result_location(rj)
+    assert loc.result_json == rj
+    assert loc.run_dir == tmp_path
+
+
+def test_resolve_location_index_md(tmp_path: Path) -> None:
+    fx.write_result(tmp_path)
+    index = fx.write_index(tmp_path, tmp_path)
+    loc = resolve_result_location(index)
+    assert loc.result_json == tmp_path / "result.json"
+    assert loc.run_dir == tmp_path
+    assert loc.index == index
+    assert loc.ranking is None
+
+
+def test_resolve_location_sorted_dir(tmp_path: Path) -> None:
+    fx.write_result(tmp_path)
+    sorted_dir = fx.write_sorted(tmp_path, ["cand-v1_attention-0002"])
+    loc = resolve_result_location(sorted_dir)
+    assert loc.result_json == tmp_path / "result.json"
+    assert loc.run_dir == tmp_path
+    assert loc.ranking == sorted_dir / "sorted_candidates.json"
+
+
+def test_resolve_location_sorted_json_file(tmp_path: Path) -> None:
+    fx.write_result(tmp_path)
+    sorted_dir = fx.write_sorted(tmp_path, ["cand-v1_attention-0002"])
+    loc = resolve_result_location(sorted_dir / "sorted_candidates.json")
+    assert loc.result_json == tmp_path / "result.json"
+    assert loc.run_dir == tmp_path
+    assert loc.ranking == sorted_dir / "sorted_candidates.json"
+
+
+def test_resolve_location_sorted_md_file(tmp_path: Path) -> None:
+    fx.write_result(tmp_path)
+    sorted_dir = fx.write_sorted(tmp_path, ["cand-v1_attention-0002"])
+    loc = resolve_result_location(sorted_dir / "sorted_candidates.md")
+    assert loc.ranking == sorted_dir / "sorted_candidates.json"
+    assert loc.run_dir == tmp_path
+
+
+def test_resolve_location_sorted_md_without_json(tmp_path: Path) -> None:
+    fx.write_result(tmp_path)
+    sorted_dir = fx.write_sorted(tmp_path, ["cand-v1_attention-0002"], md=True)
+    (sorted_dir / "sorted_candidates.json").unlink()
+    with pytest.raises(SelectionError):
+        resolve_result_location(sorted_dir / "sorted_candidates.md")
+
+
+def test_resolve_location_dir_without_artifacts(tmp_path: Path) -> None:
     with pytest.raises(SelectionError):
         resolve_result_location(tmp_path)  # empty dir
 
 
-def test_resolve_result_location_missing_path(tmp_path: Path) -> None:
+def test_resolve_location_index_without_result_json(tmp_path: Path) -> None:
+    index = fx.write_index(tmp_path, tmp_path)  # no result.json alongside
+    with pytest.raises(SelectionError):
+        resolve_result_location(index)
+
+
+def test_resolve_location_missing_path(tmp_path: Path) -> None:
     with pytest.raises(SelectionError):
         resolve_result_location(tmp_path / "nope")
 ```
 
-- [ ] **Step 2: Run tests to verify they fail**
+- [ ] **Step 3: Run tests to verify they fail**
 
-Run: `python -m pytest tests/unit/prep_evolve/test_extract_resolve.py -q -k resolve_result_location`
+Run: `python -m pytest tests/unit/prep_evolve/test_extract_resolve.py -q -k resolve_location`
 Expected: FAIL with `ImportError: cannot import name 'resolve_result_location'`.
 
-- [ ] **Step 3: Implement `ResultLocation` + `resolve_result_location`**
+- [ ] **Step 4: Implement `ResultLocation` + `resolve_result_location`**
 
 In `resolve.py`, after the `LoadedResult` dataclass, add:
 
 ```python
 @dataclass
 class ResultLocation:
-    """Where a run's artifacts live, resolved from a directory or file `--result`."""
+    """Where a run's artifacts live, resolved from any accepted `--result` form.
+
+    `ranking` is the `sorted_candidates.json` when `--result` pointed at a sorted
+    source (a `sorted/` dir or a `sorted_candidates.{json,md}`), else `None`.
+    """
 
     result_json: Path
     run_dir: Path
     index: Path | None
+    ranking: Path | None
+
+
+def _require_ranking(sorted_dir: Path) -> Path:
+    ranking = sorted_dir / "sorted_candidates.json"
+    if not ranking.is_file():
+        raise SelectionError(
+            f"{sorted_dir} has no sorted_candidates.json to read the ranking from"
+        )
+    return ranking
 
 
 def resolve_result_location(result: Path) -> ResultLocation:
-    """Resolve `--result` (a run directory or a `result.json` file).
+    """Resolve `--result` (any run artifact) into result.json/run dir/index/ranking.
 
-    A directory must contain `result.json`; the run dir is the directory itself.
-    A file is used directly; the run dir is its parent. `index` points at a
-    sibling `index.md` when present (the `--repo` fallback), else `None`.
+    Accepts a run directory, a `result.json` (or any other file, treated as the
+    result.json itself), an `index.md`, a `sorted/` directory, or a
+    `sorted_candidates.{json,md}`. Sorted sources live one level below the run
+    dir, so the run dir is resolved by going up; the candidate *data* is always
+    read from `result.json` regardless (a ranking only orders/filters it).
     """
     result = Path(result).expanduser()
+    ranking: Path | None = None
+    result_json_override: Path | None = None  # set when --result IS the result.json
+
     if result.is_dir():
-        result_json = result / "result.json"
-        if not result_json.is_file():
-            raise SelectionError(f"no result.json in directory: {result}")
-        run_dir = result
+        if (result / "result.json").is_file():
+            run_dir = result
+        elif (result / "sorted_candidates.json").is_file() or (
+            result / "sorted_candidates.md"
+        ).is_file():
+            run_dir = result.parent
+            ranking = _require_ranking(result)
+        else:
+            raise SelectionError(
+                f"directory has no result.json or sorted_candidates.json: {result}"
+            )
     elif result.is_file():
-        result_json = result
-        run_dir = result.parent
+        if result.name == "index.md":
+            run_dir = result.parent
+        elif result.name == "sorted_candidates.json":
+            run_dir = result.parent.parent
+            ranking = result
+        elif result.name == "sorted_candidates.md":
+            run_dir = result.parent.parent
+            ranking = _require_ranking(result.parent)
+        else:  # any other file: treat as the result.json itself (back-compat)
+            run_dir = result.parent
+            result_json_override = result
     else:
         raise SelectionError(f"--result path not found: {result}")
+
+    result_json = result_json_override or (run_dir / "result.json")
+    if not result_json.is_file():
+        raise SelectionError(f"no result.json for this run: expected {result_json}")
 
     index = run_dir / "index.md"
     return ResultLocation(
         result_json=result_json,
         run_dir=run_dir,
         index=index if index.is_file() else None,
+        ranking=ranking,
     )
 ```
 
 Add `"ResultLocation"` and `"resolve_result_location"` to `resolve.py`'s `__all__`.
 
-- [ ] **Step 4: Run tests to verify they pass**
+- [ ] **Step 5: Run tests to verify they pass**
 
-Run: `python -m pytest tests/unit/prep_evolve/test_extract_resolve.py -q -k resolve_result_location`
-Expected: PASS (4 passed).
+Run: `python -m pytest tests/unit/prep_evolve/test_extract_resolve.py -q -k resolve_location`
+Expected: PASS (11 passed).
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add src/spotlights_engine/prep_evolve/resolve.py tests/unit/prep_evolve/test_extract_resolve.py
-git commit -m "feat(prep-evolve): resolve --result from a run directory or file"
+git add src/spotlights_engine/prep_evolve/resolve.py tests/unit/prep_evolve/test_extract_resolve.py tests/unit/prep_evolve/_fixtures.py
+git commit -m "feat(prep-evolve): resolve --result from any run artifact incl. sorted sources"
 ```
 
 ---
 
-## Task 2: Candidate-id scanner (drop `--module` dependency + batch enumeration)
+## Task 2: Candidate-id scanner + ranking reader
 
 **Files:**
 - Modify: `src/spotlights_engine/prep_evolve/resolve.py`
@@ -155,6 +296,7 @@ git commit -m "feat(prep-evolve): resolve --result from a run directory or file"
   - `CandidateSelection(qn: str, run: dict, candidate: Candidate)` — a resolved selection carrying the module qn, its raw run dict, and the validated candidate.
   - `find_candidate(loaded: LoadedResult, candidate_id: str) -> CandidateSelection` — scans every module run for a candidate whose `id` matches; SelectionError if none.
   - `iter_candidates(loaded: LoadedResult) -> list[CandidateSelection]` — every candidate across all runs, in `module_runs` order then per-module candidate order. Runs with no/invalid `candidates` block are skipped (tolerated).
+  - `load_ranking(path: Path) -> list[str]` — ordered candidate ids from a `sorted_candidates.json` (sorted by `rank` ascending). SelectionError if unreadable, not an object, or has no candidate ids.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -199,11 +341,28 @@ def test_iter_candidates_enumerates_all(tmp_path: Path) -> None:
     ids = [s.candidate.id for s in iter_candidates(loaded)]
     assert ids == ["cand-v1_attention-0002", "cand-v1_attention-0003"]
     assert all(s.qn == "v1/attention" for s in iter_candidates(loaded))
+
+
+def test_load_ranking_orders_by_rank(tmp_path: Path) -> None:
+    from spotlights_engine.prep_evolve.resolve import load_ranking
+
+    sorted_dir = fx.write_sorted(tmp_path, ["cand-a-0001", "cand-b-0002", "cand-c-0003"])
+    ids = load_ranking(sorted_dir / "sorted_candidates.json")
+    assert ids == ["cand-a-0001", "cand-b-0002", "cand-c-0003"]
+
+
+def test_load_ranking_empty_errors(tmp_path: Path) -> None:
+    from spotlights_engine.prep_evolve.resolve import load_ranking
+
+    bad = tmp_path / "sorted_candidates.json"
+    bad.write_text('{"candidates": []}', encoding="utf-8")
+    with pytest.raises(SelectionError):
+        load_ranking(bad)
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `python -m pytest tests/unit/prep_evolve/test_extract_resolve.py -q -k "find_candidate or iter_candidates"`
+Run: `python -m pytest tests/unit/prep_evolve/test_extract_resolve.py -q -k "find_candidate or iter_candidates or load_ranking"`
 Expected: FAIL with `ImportError: cannot import name 'find_candidate'`.
 
 - [ ] **Step 3: Implement the scanner**
@@ -264,20 +423,42 @@ def iter_candidates(loaded: LoadedResult) -> list[CandidateSelection]:
         for cand in cands.candidates:
             out.append(CandidateSelection(qn=qn, run=run, candidate=cand))
     return out
+
+
+def load_ranking(path: Path) -> list[str]:
+    """Ordered candidate ids from a `sorted_candidates.json` (rank ascending).
+
+    Only the id order is used; the candidate *data* is read from `result.json`.
+    """
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SelectionError(f"could not read ranking {path}: {exc}") from exc
+    cands = raw.get("candidates") if isinstance(raw, dict) else None
+    if not isinstance(cands, list):
+        raise SelectionError(f"ranking {path} has no candidates list")
+    ranked = sorted(
+        (c for c in cands if isinstance(c, dict) and c.get("id")),
+        key=lambda c: c.get("rank", 1_000_000),
+    )
+    ids = [c["id"] for c in ranked]
+    if not ids:
+        raise SelectionError(f"ranking {path} lists no candidate ids")
+    return ids
 ```
 
-Add `"CandidateSelection"`, `"find_candidate"`, `"iter_candidates"` to `__all__`.
+Add `"CandidateSelection"`, `"find_candidate"`, `"iter_candidates"`, `"load_ranking"` to `__all__`.
 
 - [ ] **Step 4: Run tests to verify they pass**
 
-Run: `python -m pytest tests/unit/prep_evolve/test_extract_resolve.py -q -k "find_candidate or iter_candidates"`
-Expected: PASS (3 passed).
+Run: `python -m pytest tests/unit/prep_evolve/test_extract_resolve.py -q -k "find_candidate or iter_candidates or load_ranking"`
+Expected: PASS (5 passed).
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add src/spotlights_engine/prep_evolve/resolve.py tests/unit/prep_evolve/test_extract_resolve.py
-git commit -m "feat(prep-evolve): locate/enumerate candidates by id, inferring the module"
+git commit -m "feat(prep-evolve): candidate-by-id scanner + sorted_candidates ranking reader"
 ```
 
 ---
@@ -289,13 +470,13 @@ git commit -m "feat(prep-evolve): locate/enumerate candidates by id, inferring t
 - Test: `tests/unit/prep_evolve/test_materialize_cli.py`
 
 **Interfaces:**
-- Consumes: `resolve_result_location`, `find_candidate`, `iter_candidates`, `CandidateSelection` (Tasks 1–2); existing `load_result`, `resolve_repo_path`, `resolve_module`, `resolve_findings`, `ensure_repo_dir`, `validate_candidate_target`, `validate_scope_file`, `capture_revision`, `build_spec`, `infer_direction`, `build_adapter`, `normalize_evolver`, `slug_for`.
+- Consumes: `resolve_result_location`, `find_candidate`, `iter_candidates`, `load_ranking`, `CandidateSelection` (Tasks 1–2); existing `load_result`, `resolve_repo_path`, `resolve_module`, `resolve_findings`, `ensure_repo_dir`, `validate_candidate_target`, `validate_scope_file`, `capture_revision`, `build_spec`, `infer_direction`, `build_adapter`, `normalize_evolver`, `slug_for`, `SelectionError`.
 - Produces:
-  - `PrepEvolveInput` with `result: Path`, `module: str | None = None`, `candidate: str | None = None`, `out: Path | None = None` (other fields unchanged).
+  - `PrepEvolveInput` with `result: Path`, `module: str | None = None`, `candidate: str | None = None`, `out: Path | None = None`, `top_n: int | None = None` (other fields unchanged).
   - `SkippedEvolver(evolver: str, reason: str, candidate_id: str | None = None, module_qualified_name: str | None = None)`.
   - `_bundle_dir(base: Path, qn: str, candidate_id: str, evolver: str) -> Path` returning `base/"evolve"/slug_for(qn)/candidate_id/evolver`.
   - `_materialize(bundle_path: Path, files: list[GeneratedFile]) -> list[str]` (no `force` param; keeps the path-escape guard; always writes/overwrites).
-  - `prep_evolve(input, config) -> PrepEvolveResult` — single candidate when `input.candidate` set (loud errors), all candidates when `None` (per-candidate skip-and-warn).
+  - `prep_evolve(input, config) -> PrepEvolveResult` — selection is: `input.candidate` set → that one (loud errors); else sorted source (`location.ranking`) → ranked ids (top-N cut) resolved via `find_candidate`, per-id skip-and-warn; else plain batch → `iter_candidates`. `top_n` with a plain source is a `SelectionError`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -388,6 +569,75 @@ def test_batch_skips_invalid_candidate(tmp_path: Path) -> None:
     assert len(result.bundles) == 1
     assert Path(result.bundles[0].path).parent.name == "cand-v1_attention-0002"
     assert any(s.candidate_id == "cand-v1_attention-0099" for s in result.skipped)
+
+
+def _two_candidate_run(tmp_path: Path) -> Path:
+    """Write a result.json with two candidates; return its path."""
+    payload = fx.make_result_dict()
+    run = payload["module_runs"]["v1/attention"]
+    second = dict(run["candidates"]["candidates"][0])
+    second["id"] = "cand-v1_attention-0003"
+    run["candidates"]["candidates"].append(second)
+    result_json = tmp_path / "result.json"
+    result_json.write_text(json.dumps(payload), encoding="utf-8")
+    return result_json
+
+
+def test_sorted_source_uses_ranking_order(tmp_path: Path) -> None:
+    repo = fx.make_repo(tmp_path)
+    _two_candidate_run(tmp_path)
+    # Ranking lists 0003 first, then 0002.
+    sorted_dir = fx.write_sorted(
+        tmp_path, ["cand-v1_attention-0003", "cand-v1_attention-0002"]
+    )
+    result = prep_evolve(
+        _input(tmp_path, repo, result=sorted_dir, candidate=None,
+               evolver="coral", out=tmp_path / "b"),
+        _CFG,
+    )
+    order = [Path(b.path).parent.name for b in result.bundles]
+    assert order == ["cand-v1_attention-0003", "cand-v1_attention-0002"]
+
+
+def test_top_n_limits_ranked_selection(tmp_path: Path) -> None:
+    repo = fx.make_repo(tmp_path)
+    _two_candidate_run(tmp_path)
+    sorted_dir = fx.write_sorted(
+        tmp_path, ["cand-v1_attention-0003", "cand-v1_attention-0002"]
+    )
+    result = prep_evolve(
+        _input(tmp_path, repo, result=sorted_dir, candidate=None, top_n=1,
+               evolver="coral", out=tmp_path / "b"),
+        _CFG,
+    )
+    names = [Path(b.path).parent.name for b in result.bundles]
+    assert names == ["cand-v1_attention-0003"]
+
+
+def test_ranked_id_missing_in_result_is_skipped(tmp_path: Path) -> None:
+    repo = fx.make_repo(tmp_path)
+    fx.write_result(tmp_path)  # only cand-v1_attention-0002 exists
+    sorted_dir = fx.write_sorted(
+        tmp_path, ["cand-v1_attention-0002", "cand-ghost-0009"]
+    )
+    result = prep_evolve(
+        _input(tmp_path, repo, result=sorted_dir, candidate=None,
+               evolver="coral", out=tmp_path / "b"),
+        _CFG,
+    )
+    assert len(result.bundles) == 1
+    assert any(s.candidate_id == "cand-ghost-0009" for s in result.skipped)
+
+
+def test_top_n_without_ranking_errors(tmp_path: Path) -> None:
+    repo = fx.make_repo(tmp_path)
+    result_json = fx.write_result(tmp_path)
+    with pytest.raises(SelectionError):
+        prep_evolve(
+            _input(tmp_path, repo, result=result_json, candidate=None, top_n=5,
+                   evolver="coral", out=tmp_path / "b"),
+            _CFG,
+        )
 ```
 
 Also update the three existing tests that assumed the old flat name / force-raise:
@@ -482,6 +732,7 @@ class PrepEvolveInput(BaseModel):
     module: str | None = None  # slash-form qn; inferred from candidate when omitted
     candidate: str | None = None  # omit to process every candidate in result.json
     out: Path | None = None  # base dir; defaults to the run directory
+    top_n: int | None = Field(default=None, ge=1)  # sorted sources only; None = all
     index: Path | None = None
     repo: str | None = None
     scope: Scope = "candidate"
@@ -489,6 +740,8 @@ class PrepEvolveInput(BaseModel):
     model: str | None = None
     force: bool = False
 ```
+
+(`Field` is already imported at the top of `api.py`.)
 
 Extend `SkippedEvolver`:
 
@@ -598,10 +851,11 @@ def prep_evolve(input: PrepEvolveInput, config: PrepEvolveConfig | None = None) 
         )
 
     # 6. build the selection.
+    #    - explicit --candidate → that one (top_n/ranking ignored)
+    #    - sorted source        → ranked ids (top-N cut), each resolved in result.json
+    #    - plain batch          → every candidate in document order
     batch = input.candidate is None
-    if batch:
-        selections = iter_candidates(loaded)
-    else:
+    if not batch:
         sel = find_candidate(loaded, input.candidate)
         if input.module is not None and input.module != sel.qn:
             raise SelectionError(
@@ -609,6 +863,25 @@ def prep_evolve(input: PrepEvolveInput, config: PrepEvolveConfig | None = None) 
                 f"{input.candidate!r}, which is in module {sel.qn!r}; omit --module"
             )
         selections = [sel]
+    elif location.ranking is not None:
+        ranked_ids = load_ranking(location.ranking)
+        if input.top_n is not None:
+            ranked_ids = ranked_ids[: input.top_n]
+        selections = []
+        for cid in ranked_ids:
+            try:
+                selections.append(find_candidate(loaded, cid))
+            except SelectionError as exc:
+                skipped.append(
+                    SkippedEvolver(evolver=input.evolver, reason=str(exc), candidate_id=cid)
+                )
+    else:
+        if input.top_n is not None:
+            raise SelectionError(
+                "--top-n requires a ranked source; point --result at a sorted/ "
+                "directory or a sorted_candidates.json (a plain result.json has no ranking)"
+            )
+        selections = iter_candidates(loaded)
 
     # 7. process each selection.
     bundles: list[BundleResult] = []
@@ -712,12 +985,20 @@ def _process_candidate(
     return bundles, skips
 ```
 
-Update the imports at the top of `api.py` to pull the new resolvers:
+Update the imports at the top of `api.py` to pull the new resolvers, and add `SelectionError` to the `errors` import:
 
 ```python
+from spotlights_engine.prep_evolve.errors import (
+    BundleExistsError,
+    PrepEvolveError,
+    ScopeError,
+    SelectionError,
+    UnsupportedEvolverError,
+)
 from spotlights_engine.prep_evolve.resolve import (
     find_candidate,
     iter_candidates,
+    load_ranking,
     load_result,
     resolve_findings,
     resolve_module,
@@ -726,7 +1007,7 @@ from spotlights_engine.prep_evolve.resolve import (
 )
 ```
 
-(The old `resolve_candidate`, `resolve_candidates`, `resolve_module_run` imports are no longer used by `api.py`; remove them from this import block. They remain exported by `resolve.py` for other callers.)
+(The old `resolve_candidate`, `resolve_candidates`, `resolve_module_run` imports are no longer used by `api.py`; remove them from this import block. They remain exported by `resolve.py` for other callers. `PrepEvolveError` must be present in the `errors` import because the per-candidate loop catches it — verify it's imported; add it if the current file only imports the subclasses.)
 
 - [ ] **Step 6: Run the full prep_evolve test module**
 
@@ -754,8 +1035,8 @@ git commit -m "feat(prep-evolve): batch-first orchestrator with nested evolve/ l
 - Test: `tests/unit/prep_evolve/test_materialize_cli.py`
 
 **Interfaces:**
-- Consumes: `PrepEvolveInput` (module/candidate/out optional), `PrepEvolveResult` (`bundles`, `warnings`, `skipped` with the new `candidate_id`/`module_qualified_name`).
-- Produces: `main(argv) -> int` — 0 when ≥1 bundle written, else 1. Prints one line per written bundle to stdout, then a `prep-evolve: N bundle(s) written, M skipped` summary and one line per skip to stderr.
+- Consumes: `PrepEvolveInput` (module/candidate/out optional, `top_n`), `PrepEvolveResult` (`bundles`, `warnings`, `skipped` with the new `candidate_id`/`module_qualified_name`).
+- Produces: `main(argv) -> int` — 0 when ≥1 bundle written, else 1; 2 on a bad `--top-n` value or a `PrepEvolveError`. `--top-n` accepts `all` (default → `top_n=None`) or a positive integer (→ `top_n=<int>`); anything else prints an error and returns 2. Prints one line per written bundle to stdout, then a `prep-evolve: N bundle(s) written, M skipped` summary and one line per skip to stderr.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -784,14 +1065,42 @@ def test_cli_minimal_flags_directory(tmp_path: Path, capsys) -> None:
     rc = prep_main(["--result", str(run_dir), "--evolver", "coral"])
     assert rc == 0
     assert (run_dir / "evolve" / "v1_attention").is_dir()
+
+
+def test_cli_top_n_from_sorted(tmp_path: Path) -> None:
+    repo = fx.make_repo(tmp_path)
+    _two_candidate_run(tmp_path)
+    sorted_dir = fx.write_sorted(
+        tmp_path, ["cand-v1_attention-0003", "cand-v1_attention-0002"]
+    )
+    rc = prep_main(
+        ["--result", str(sorted_dir), "--evolver", "coral",
+         "--top-n", "1", "--out", str(tmp_path / "out")]
+    )
+    assert rc == 0
+    # Only the top-ranked candidate's bundle exists.
+    evolve = tmp_path / "out" / "evolve" / "v1_attention"
+    assert (evolve / "cand-v1_attention-0003").is_dir()
+    assert not (evolve / "cand-v1_attention-0002").exists()
+
+
+def test_cli_bad_top_n_returns_2(tmp_path: Path, capsys) -> None:
+    repo = fx.make_repo(tmp_path)
+    result_json = fx.write_result(tmp_path)
+    rc = prep_main(
+        ["--result", str(result_json), "--evolver", "coral",
+         "--top-n", "banana", "--out", str(tmp_path / "out")]
+    )
+    assert rc == 2
+    assert "--top-n" in capsys.readouterr().err
 ```
 
 - [ ] **Step 2: Run tests to verify they fail**
 
-Run: `python -m pytest tests/unit/prep_evolve/test_materialize_cli.py -q -k "cli_batch_no_candidate or cli_minimal_flags"`
-Expected: FAIL — argparse still marks `--module`/`--candidate`/`--out` required.
+Run: `python -m pytest tests/unit/prep_evolve/test_materialize_cli.py -q -k "cli_batch_no_candidate or cli_minimal_flags or cli_top_n or cli_bad_top_n"`
+Expected: FAIL — argparse still marks `--module`/`--candidate`/`--out` required and does not know `--top-n`.
 
-- [ ] **Step 3: Make flags optional in `_build_argparser`**
+- [ ] **Step 3: Make flags optional and add `--top-n` in `_build_argparser`**
 
 In `cli.py`, change these three arguments:
 
@@ -814,18 +1123,77 @@ In `cli.py`, change these three arguments:
     )
 ```
 
-Update the `--result` help to note directory support:
+Update the `--result` help to note the extra accepted forms:
 
 ```python
     p.add_argument(
         "--result",
         type=Path,
         required=True,
-        help="Path to result.json, or a run directory containing it.",
+        help=(
+            "A finished run's result.json, or the run directory / index.md / "
+            "sorted/ dir / sorted_candidates.{json,md} that self-locates it."
+        ),
     )
 ```
 
-- [ ] **Step 4: Emit the batch summary in `main`**
+Add the `--top-n` argument (kept as a raw string here; parsed in `main` so a bad
+value returns 2 like other errors rather than argparse's own exit):
+
+```python
+    p.add_argument(
+        "--top-n",
+        dest="top_n",
+        default="all",
+        help=(
+            "For a sorted --result: build only the top N ranked candidates "
+            "('all' = every ranked candidate, the default)."
+        ),
+    )
+```
+
+- [ ] **Step 4: Parse `--top-n` and build the input in `main`**
+
+In `main`, after `args = _build_argparser().parse_args(argv)` and before constructing `PrepEvolveInput`, parse `--top-n` and thread it through:
+
+```python
+    raw_top_n = str(args.top_n).strip().lower()
+    if raw_top_n == "all":
+        top_n: int | None = None
+    else:
+        try:
+            top_n = int(raw_top_n)
+        except ValueError:
+            print(
+                f"prep-evolve: --top-n must be a positive integer or 'all', "
+                f"got {args.top_n!r}",
+                file=sys.stderr,
+            )
+            return 2
+        if top_n < 1:
+            print(
+                f"prep-evolve: --top-n must be >= 1, got {top_n}",
+                file=sys.stderr,
+            )
+            return 2
+
+    inp = PrepEvolveInput(
+        result=args.result,
+        index=args.index,
+        module=args.module,
+        candidate=args.candidate,
+        repo=args.repo,
+        evolver=args.evolver,
+        out=args.out,
+        top_n=top_n,
+        scope=args.scope,
+        direction=args.direction,
+        model=args.model,
+        force=args.force,
+    )
+```
+
+- [ ] **Step 5: Emit the batch summary in `main`**
 
 Replace the reporting block at the end of `main` (everything after the `prep_evolve(...)` try/except) with:
 
@@ -852,21 +1220,21 @@ Replace the reporting block at the end of `main` (everything after the `prep_evo
     return 0 if result.bundles else 1
 ```
 
-- [ ] **Step 5: Run the CLI tests**
+- [ ] **Step 6: Run the CLI tests**
 
 Run: `python -m pytest tests/unit/prep_evolve/test_materialize_cli.py -q -k cli`
 Expected: PASS (all `cli` tests, including the existing `test_cli_main_success`, `test_top_level_cli_dispatch`, `test_cli_main_clean_error`).
 
-- [ ] **Step 6: Run the whole prep_evolve suite**
+- [ ] **Step 7: Run the whole prep_evolve suite**
 
 Run: `python -m pytest tests/unit/prep_evolve/ -q`
 Expected: PASS.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
 git add src/spotlights_engine/prep_evolve/cli.py tests/unit/prep_evolve/test_materialize_cli.py
-git commit -m "feat(prep-evolve): optional --module/--candidate/--out and batch summary"
+git commit -m "feat(prep-evolve): optional --module/--candidate/--out, --top-n, batch summary"
 ```
 
 ---
@@ -897,27 +1265,45 @@ spotlights-engine prep-evolve --result ./spotlights-out --evolver skydiscover
 # one candidate
 spotlights-engine prep-evolve --result ./spotlights-out \
   --candidate cand-vllm_v1_kv_offload-0002 --evolver skydiscover
+
+# top 10 of a ranking → still under spotlights-out/evolve/… (not inside sorted/)
+spotlights-engine prep-evolve --result ./spotlights-out/sorted \
+  --evolver skydiscover --top-n 10
 ```
 
-`--result` accepts a run directory or a `result.json` file. `--candidate` takes
-the candidate id from the module page and is optional (omitting it processes all
-candidates); the module is inferred from the id, so `--module` is no longer
-required. The target repo is resolved from `--repo`, else from the `Repo path:`
-line in the run directory's `index.md`. Bundles are written to
-`<base>/evolve/<module>/<candidate>/<evolver>/`, where `<base>` is `--out` when
+`--result` accepts any run artifact and self-locates the rest: a run directory, a
+`result.json` file, an `index.md`, a `sorted/` directory, or a
+`sorted_candidates.json`/`.md`. `--candidate` takes the candidate id from the
+module page and is optional (omitting it processes all candidates); the module is
+inferred from the id, so `--module` is no longer required. When `--result` points
+at a sorted source, omitting `--candidate` processes the ranked candidates in rank
+order, and `--top-n <N>` builds only the top N (default `all`); `--top-n` with a
+plain `result.json` is an error. The target repo is resolved from `--repo`, else
+from the `Repo path:` line in the run directory's `index.md`. Bundles are written
+to `<base>/evolve/<module>/<candidate>/<evolver>/`, where `<base>` is `--out` when
 given, else the run directory. Candidates an evolver cannot handle are skipped
 with a warning, and existing bundles are skipped unless `--force` is set.
 ````
 
 - [ ] **Step 2: Update the Flags table in `docs/prep-evolve.md`**
 
-In the `### Flags` table, change the rows for `--result`, `--module`, `--candidate`, and `--out` to:
+In the `### Flags` table, change the rows for `--result`, `--module`, `--candidate`, and `--out`, and add a `--top-n` row after `--candidate`:
 
 ```markdown
-| `--result` | (required) | A finished run's `result.json`, or the run directory containing it. |
+| `--result` | (required) | A finished run's `result.json`, the run directory containing it, an `index.md`, a `sorted/` dir, or a `sorted_candidates.{json,md}`. |
 | `--module` | (inferred) | Slash-form qualified name; inferred from the candidate id when omitted. |
 | `--candidate` | (all) | Candidate id, e.g. `cand-…-0002`. Omit to process every candidate. |
+| `--top-n` | `all` | For a sorted `--result`: build only the top N ranked candidates. Error with a plain source. |
 | `--out` | (run dir) | Base directory; the `evolve/…` tree is written under it. Defaults to the run directory. |
+```
+
+Also update the last paragraph of the Flags section (the re-run guard) so it matches the new skip-not-fail semantics:
+
+```markdown
+Re-runs resume cleanly: an existing bundle directory is skipped (not an error)
+unless `--force` is set. With `--force`, every generated file in that bundle is
+overwritten — including a hand-edited evaluator/grader — so copy out any evaluator
+work you want to keep before re-running.
 ```
 
 - [ ] **Step 3: Update the "What lands on disk" section**
@@ -954,16 +1340,17 @@ git commit -m "docs(prep-evolve): document batch-first, run-dir-aware usage"
 ## Self-Review
 
 **1. Spec coverage:**
-- §1 `--result` dir/file → Task 1 + Task 3 (repo-from-index wiring). ✓
+- §1 `--result` accepts every form (run dir, `result.json`/any file, `index.md`, `sorted/` dir, `sorted_candidates.{json,md}`) + ranking source → Task 1 (`resolve_result_location`, 11 tests) + Task 3 (repo-from-index wiring, sorted run-dir default). ✓
 - §2 `--candidate` optional / batch → Task 2 (`iter_candidates`) + Task 3 (selection). ✓
+- §2 `--top-n` for ranked sources: sorted source → ranked order, top-N cut, ranked-id-missing skip-with-warning; `--top-n` with plain source is an error → Task 2 (`load_ranking`) + Task 3 (ranking branch, `top_n` field, `test_sorted_source_uses_ranking_order`/`test_top_n_limits_ranked_selection`/`test_ranked_id_missing_in_result_is_skipped`/`test_top_n_without_ranking_errors`) + Task 4 (`--top-n` flag, `all`→None parse, rc 2 on bad value). ✓
 - §3 `--module` dropped, inferred, validated on mismatch → Task 2 (`find_candidate`) + Task 3 (mismatch SelectionError). ✓
-- §4 uniform layout, `--out` relocates base → Task 3 (`_bundle_dir`, base default). ✓
+- §4 uniform layout, `--out` relocates base (sorted source → run dir is parent of `sorted/`, bundles never inside `sorted/`) → Task 3 (`_bundle_dir`, base default from `location.run_dir`). ✓
 - §5 batch resilience (skip unsupported/staleness, existing-bundle skip, summary) → Task 3 (skip-and-warn, per-candidate try/except) + Task 4 (summary). ✓
 - Bundle contents unchanged → adapters untouched. ✓
-- Backward compat (`--module` accepted+validated, file `--result` works, `--candidate` reproduces single) → Task 3. ✓
+- Backward compat (`--module` accepted+validated, file `--result` works, `--candidate` reproduces single) → Task 1 (arbitrary-file → result.json) + Task 3. ✓
 
 **2. Placeholder scan:** No TBD/TODO; every code and test step shows full content. ✓
 
-**3. Type consistency:** `resolve_result_location`/`ResultLocation`, `find_candidate`/`iter_candidates`/`CandidateSelection`, `_bundle_dir(base, qn, candidate_id, evolver)`, `SkippedEvolver(..., candidate_id, module_qualified_name)`, and `_materialize(bundle_path, files)` are used with identical signatures across tasks. `PrepEvolveInput` optional fields (`module`/`candidate`/`out`) are consumed consistently in Task 3 and set optionally by the CLI in Task 4. ✓
+**3. Type consistency:** `ResultLocation(result_json, run_dir, index, ranking)`/`resolve_result_location`, `find_candidate`/`iter_candidates`/`load_ranking`/`CandidateSelection`, `_bundle_dir(base, qn, candidate_id, evolver)`, `SkippedEvolver(..., candidate_id, module_qualified_name)`, and `_materialize(bundle_path, files)` are used with identical signatures across tasks. `PrepEvolveInput` optional fields (`module`/`candidate`/`out`/`top_n`) are consumed consistently in Task 3 and set optionally by the CLI in Task 4 (`--top-n` parsed `all`→`None`, else positive int). The `write_sorted` fixture (Task 1) is reused by Tasks 2–4. ✓
 
 **Note for the implementer:** existing single-candidate behavior changes in two visible ways — output path (now nested `evolve/…` instead of the flat `repo__module__cand__evolver` dir) and existing-bundle handling (now skipped-with-warning instead of raising `BundleExistsError`). Both are intended by the spec and the affected tests are updated in Task 3.

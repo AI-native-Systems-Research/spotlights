@@ -47,35 +47,69 @@ simplification:
 
 ## Non-goals
 
-- No new ranking or "best candidate" default. Selection stays either "one named
-  candidate" or "all candidates" — never a heuristic pick.
-- No dependency on `sorted/sorted_candidates.json`.
+- No new ranking computed here. `prep-evolve` never *ranks* candidates; it only
+  *consumes* an existing `sorted_candidates.json` when the user points `--result`
+  at one. Selection stays "one named candidate", "all candidates", or "the
+  ranking's top-N" — never a heuristic pick made by this tool.
+- No *hard* dependency on `sorted_candidates.json`. Plain sources work without it;
+  it is an optional ranked source, not a required input.
 - No change to bundle *contents* (the per-candidate files each evolver emits are
   unchanged).
 
 ## Design
 
-### 1. `--result` accepts a directory or a file
+### 1. `--result` accepts any run artifact and self-locates the rest
 
-- **Directory** (e.g. `./spotlights-out`): locate `result.json` inside it for the
-  data, and read the sibling `index.md`'s `Repo path:` line to auto-resolve the
-  target repo (today's `--index` fallback, applied automatically). The output
-  base defaults to this directory (see §4).
-- **File** (e.g. `./spotlights-out/result.json`): today's behavior. `--repo` is
-  still needed (or `--index`); the output base defaults to the directory
-  containing the file (see §4).
+Every accepted form resolves to the same triple — the `result.json` to load, the
+**run directory** (the folder holding `result.json`), and the sibling `index.md`
+used as the `--repo` fallback — plus, for the two sorted forms, a **ranking
+source**. `--repo`/`--index` remain explicit overrides that win over the
+auto-resolved value.
 
-`--repo` and `--index` remain available as explicit overrides and win over the
-auto-resolved value, preserving the current resolution precedence.
+| `--result` points at | run directory | `result.json` | ranking source |
+|---|---|---|---|
+| a run directory (`./spotlights-out`) | itself | `<dir>/result.json` | — |
+| a `result.json` (or any other file) | its parent | the file itself | — |
+| an `index.md` | its parent | `<parent>/result.json` | — |
+| a `sorted/` directory | its **parent** | `<parent>/result.json` | `<dir>/sorted_candidates.json` |
+| a `sorted_candidates.json` | parent's parent | `<run>/result.json` | the file itself |
+| a `sorted_candidates.md` | parent's parent | `<run>/result.json` | sibling `sorted_candidates.json` |
 
-### 2. `--candidate` is optional (batch-first)
+Notes:
 
-- **Omitted:** generate bundles for **every candidate in `result.json`**,
-  iterating `module_runs` in document order. No ranking file is read.
-- **Given:** generate a bundle for that one candidate only (today's behavior).
+- A directory is a **run dir** when it contains `result.json`, else a **sorted
+  dir** when it contains `sorted_candidates.json`/`.md`; otherwise it is an
+  error. The two sorted *file* forms and the sorted *dir* form all live one level
+  below the run dir (`<run>/sorted/…`), so the run dir is resolved by going up.
+- The candidate **data** always comes from `result.json` (the sorted files carry
+  only the ranking — rank/id/symbol/score/locations — not the `proposals`,
+  `evolve_rationale`, or `findings` a bundle needs). A sorted source only
+  supplies the **order** and the **top-N cut** (§2); each ranked id is then
+  resolved back to its full candidate in `result.json`.
+- The ranking is read from `sorted_candidates.json` (the machine-readable file);
+  pointing at `sorted_candidates.md` reads its sibling `.json`. A sorted source
+  with no `sorted_candidates.json` is an error.
+- The output base still defaults to the run directory (§4) — bundles land at
+  `<run>/evolve/…`, never inside `sorted/`.
 
-Selection never invents a default candidate; omission means "all," not "the best
-one."
+### 2. `--candidate` optional (batch-first); `--top-n` for ranked sources
+
+- **`--candidate` given:** generate a bundle for that one candidate only
+  (today's behavior). An explicit candidate always wins — `--top-n` and any
+  ranking are ignored.
+- **`--candidate` omitted, plain source** (run dir / `result.json` / `index.md`):
+  generate bundles for **every candidate in `result.json`**, iterating
+  `module_runs` in document order. No ranking file is read.
+- **`--candidate` omitted, sorted source**: generate bundles for the ranked
+  candidates in `sorted_candidates.json`, in rank order. `--top-n <N>` builds only
+  the top `N`; `--top-n all` (the default) builds every ranked candidate. Each
+  ranked id is resolved to its full candidate in `result.json`; a ranked id that
+  is missing or stale in `result.json` is skipped-with-a-warning (§5).
+
+`--top-n` is meaningful only with a sorted source — "top" needs a ranking.
+Passing `--top-n <N>` with a plain source is an error (a plain `result.json` has
+no rank order to take the top of). Selection never invents a default candidate;
+omission means "all" (or "top-N of the ranking"), never a heuristic pick.
 
 ### 3. `--module` is dropped
 
@@ -161,14 +195,22 @@ spotlights-engine prep-evolve --result ./spotlights-out --evolver skydiscover
 spotlights-engine prep-evolve --result ./spotlights-out \
   --candidate cand-vllm_v1_kv_offload-0002 --evolver skydiscover
 
+# top 10 of the ranking → still under spotlights-out/evolve/… (not inside sorted/)
+spotlights-engine prep-evolve --result ./spotlights-out/sorted --evolver skydiscover --top-n 10
+
+# a bare index.md or sorted_candidates.json works too; the rest is self-located
+spotlights-engine prep-evolve --result ./spotlights-out/index.md --evolver coral
+spotlights-engine prep-evolve --result ./spotlights-out/sorted/sorted_candidates.json --evolver coral --top-n 25
+
 # relocate output; same structure underneath
 spotlights-engine prep-evolve --result ./spotlights-out --evolver skydiscover --out my-out
 ```
 
-Required now: `--result`, `--evolver`. Optional: `--candidate` (default: all),
-`--out` (default: the run directory — the folder containing `result.json`),
-`--repo`/`--index` (default: from run dir's `index.md`), plus the existing
-`--scope`, `--direction`, `--model`, `--force`.
+Required now: `--result`, `--evolver`. Optional: `--candidate` (default: all, or
+the ranking's top-N when `--result` is a sorted source), `--top-n` (default:
+`all`; sorted sources only), `--out` (default: the run directory — the folder
+containing `result.json`), `--repo`/`--index` (default: from run dir's
+`index.md`), plus the existing `--scope`, `--direction`, `--model`, `--force`.
 
 ## Backward compatibility
 
