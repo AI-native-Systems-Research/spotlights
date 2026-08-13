@@ -246,8 +246,12 @@ def _candidates_or_none(run: dict) -> Candidates | None:
         return None
 
 
-def find_candidate(loaded: LoadedResult, candidate_id: str) -> CandidateSelection:
-    """Locate a candidate by id across all module runs (module is inferred)."""
+def _iter_module_candidates(loaded: LoadedResult):
+    """Yield (qn, run, candidate) for every candidate across all module runs.
+
+    Runs that are not dicts or whose `candidates` block is missing/invalid are
+    skipped (tolerated during enumeration).
+    """
     for qn, run in loaded.module_runs_raw.items():
         if not isinstance(run, dict):
             continue
@@ -255,8 +259,14 @@ def find_candidate(loaded: LoadedResult, candidate_id: str) -> CandidateSelectio
         if cands is None:
             continue
         for cand in cands.candidates:
-            if cand.id == candidate_id:
-                return CandidateSelection(qn=qn, run=run, candidate=cand)
+            yield qn, run, cand
+
+
+def find_candidate(loaded: LoadedResult, candidate_id: str) -> CandidateSelection:
+    """Locate a candidate by id across all module runs (module is inferred)."""
+    for qn, run, cand in _iter_module_candidates(loaded):
+        if cand.id == candidate_id:
+            return CandidateSelection(qn=qn, run=run, candidate=cand)
     raise SelectionError(
         f"candidate {candidate_id!r} not found in any module run of result.json"
     )
@@ -264,16 +274,10 @@ def find_candidate(loaded: LoadedResult, candidate_id: str) -> CandidateSelectio
 
 def iter_candidates(loaded: LoadedResult) -> list[CandidateSelection]:
     """Every candidate across all module runs, in document order."""
-    out: list[CandidateSelection] = []
-    for qn, run in loaded.module_runs_raw.items():
-        if not isinstance(run, dict):
-            continue
-        cands = _candidates_or_none(run)
-        if cands is None:
-            continue
-        for cand in cands.candidates:
-            out.append(CandidateSelection(qn=qn, run=run, candidate=cand))
-    return out
+    return [
+        CandidateSelection(qn=qn, run=run, candidate=cand)
+        for qn, run, cand in _iter_module_candidates(loaded)
+    ]
 
 
 def load_ranking(path: Path) -> list[str]:

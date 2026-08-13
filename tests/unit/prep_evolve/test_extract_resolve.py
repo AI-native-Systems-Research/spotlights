@@ -16,6 +16,7 @@ from spotlights_engine.prep_evolve.extract import (
 from spotlights_engine.prep_evolve.resolve import (
     find_candidate,
     iter_candidates,
+    load_ranking,
     load_result,
     parse_repo_path_from_index,
     resolve_candidate,
@@ -329,22 +330,19 @@ def test_find_candidate_missing(tmp_path: Path) -> None:
 
 def test_iter_candidates_enumerates_all(tmp_path: Path) -> None:
     loaded = _loaded_with_second_candidate(tmp_path)
-    ids = [s.candidate.id for s in iter_candidates(loaded)]
+    selections = iter_candidates(loaded)
+    ids = [s.candidate.id for s in selections]
     assert ids == ["cand-v1_attention-0002", "cand-v1_attention-0003"]
-    assert all(s.qn == "v1/attention" for s in iter_candidates(loaded))
+    assert all(s.qn == "v1/attention" for s in selections)
 
 
 def test_load_ranking_orders_by_rank(tmp_path: Path) -> None:
-    from spotlights_engine.prep_evolve.resolve import load_ranking
-
     sorted_dir = fx.write_sorted(tmp_path, ["cand-a-0001", "cand-b-0002", "cand-c-0003"])
     ids = load_ranking(sorted_dir / "sorted_candidates.json")
     assert ids == ["cand-a-0001", "cand-b-0002", "cand-c-0003"]
 
 
 def test_load_ranking_empty_errors(tmp_path: Path) -> None:
-    from spotlights_engine.prep_evolve.resolve import load_ranking
-
     bad = tmp_path / "sorted_candidates.json"
     bad.write_text('{"candidates": []}', encoding="utf-8")
     with pytest.raises(SelectionError):
