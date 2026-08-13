@@ -62,8 +62,8 @@ simplification:
   target repo (today's `--index` fallback, applied automatically). The output
   base defaults to this directory (see §4).
 - **File** (e.g. `./spotlights-out/result.json`): today's behavior. `--repo` is
-  still needed (or `--index`); the output base defaults to the current
-  directory.
+  still needed (or `--index`); the output base defaults to the directory
+  containing the file (see §4).
 
 `--repo` and `--index` remain available as explicit overrides and win over the
 auto-resolved value, preserving the current resolution precedence.
@@ -98,9 +98,10 @@ convention (`vllm/v1/kv_offload` → `vllm_v1_kv_offload`), `<candidate>` is the
 full candidate id, and `<evolver>` is the evolver key. The base is:
 
 - `--out <dir>` when given → `<dir>/evolve/…`
-- else the `--result` directory when `--result` is a directory →
-  `spotlights-out/evolve/…`
-- else the current directory when `--result` is a bare file → `./evolve/…`
+- else the **run directory** — the directory containing `result.json`. This is
+  the `--result` directory itself when `--result` is a directory, or the parent
+  of the file when `--result` is a bare `result.json`. Either way →
+  `spotlights-out/evolve/…`.
 
 This replaces the old flat `repo__module__cand__evolver` directory name
 entirely — one consistent structure regardless of how output is located. The
@@ -165,8 +166,9 @@ spotlights-engine prep-evolve --result ./spotlights-out --evolver skydiscover --
 ```
 
 Required now: `--result`, `--evolver`. Optional: `--candidate` (default: all),
-`--out` (default: run dir / cwd), `--repo`/`--index` (default: from run dir's
-`index.md`), plus the existing `--scope`, `--direction`, `--model`, `--force`.
+`--out` (default: the run directory — the folder containing `result.json`),
+`--repo`/`--index` (default: from run dir's `index.md`), plus the existing
+`--scope`, `--direction`, `--model`, `--force`.
 
 ## Backward compatibility
 
