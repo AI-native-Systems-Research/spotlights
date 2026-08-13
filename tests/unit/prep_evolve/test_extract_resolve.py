@@ -14,6 +14,8 @@ from spotlights_engine.prep_evolve.extract import (
     parse_performance_oracle,
 )
 from spotlights_engine.prep_evolve.resolve import (
+    find_candidate,
+    iter_candidates,
     load_result,
     parse_repo_path_from_index,
     resolve_candidate,
@@ -297,3 +299,53 @@ def test_resolve_location_index_without_result_json(tmp_path: Path) -> None:
 def test_resolve_location_missing_path(tmp_path: Path) -> None:
     with pytest.raises(SelectionError):
         resolve_result_location(tmp_path / "nope")
+
+
+def _loaded_with_second_candidate(tmp_path: Path):
+    """A LoadedResult whose single module run has two candidates."""
+    payload = fx.make_result_dict()
+    run = payload["module_runs"]["v1/attention"]
+    second = dict(run["candidates"]["candidates"][0])
+    second["id"] = "cand-v1_attention-0003"
+    run["candidates"]["candidates"].append(second)
+    result_json = tmp_path / "result.json"
+    result_json.write_text(__import__("json").dumps(payload), encoding="utf-8")
+    return load_result(result_json)
+
+
+def test_find_candidate_locates_module(tmp_path: Path) -> None:
+    loaded = load_result(fx.write_result(tmp_path))
+    sel = find_candidate(loaded, "cand-v1_attention-0002")
+    assert sel.qn == "v1/attention"
+    assert sel.candidate.id == "cand-v1_attention-0002"
+    assert isinstance(sel.run, dict)
+
+
+def test_find_candidate_missing(tmp_path: Path) -> None:
+    loaded = load_result(fx.write_result(tmp_path))
+    with pytest.raises(SelectionError):
+        find_candidate(loaded, "cand-does-not-exist-9999")
+
+
+def test_iter_candidates_enumerates_all(tmp_path: Path) -> None:
+    loaded = _loaded_with_second_candidate(tmp_path)
+    ids = [s.candidate.id for s in iter_candidates(loaded)]
+    assert ids == ["cand-v1_attention-0002", "cand-v1_attention-0003"]
+    assert all(s.qn == "v1/attention" for s in iter_candidates(loaded))
+
+
+def test_load_ranking_orders_by_rank(tmp_path: Path) -> None:
+    from spotlights_engine.prep_evolve.resolve import load_ranking
+
+    sorted_dir = fx.write_sorted(tmp_path, ["cand-a-0001", "cand-b-0002", "cand-c-0003"])
+    ids = load_ranking(sorted_dir / "sorted_candidates.json")
+    assert ids == ["cand-a-0001", "cand-b-0002", "cand-c-0003"]
+
+
+def test_load_ranking_empty_errors(tmp_path: Path) -> None:
+    from spotlights_engine.prep_evolve.resolve import load_ranking
+
+    bad = tmp_path / "sorted_candidates.json"
+    bad.write_text('{"candidates": []}', encoding="utf-8")
+    with pytest.raises(SelectionError):
+        load_ranking(bad)

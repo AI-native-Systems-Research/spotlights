@@ -221,6 +221,83 @@ def resolve_repo_path(
     return path.resolve()
 
 
+@dataclass
+class CandidateSelection:
+    """A resolved (module qn, raw run, candidate) triple."""
+
+    qn: str
+    run: dict
+    candidate: Candidate
+
+
+def _candidates_or_none(run: dict) -> Candidates | None:
+    """Validate a run's `candidates` block, tolerating absent/invalid blocks.
+
+    Batch enumeration must not abort on one module whose discovery failed, so a
+    missing or non-validating block yields `None` (the run is skipped) rather
+    than raising.
+    """
+    raw = run.get("candidates")
+    if not raw:
+        return None
+    try:
+        return Candidates.model_validate(raw)
+    except Exception:  # noqa: BLE001 - tolerate one bad run during enumeration
+        return None
+
+
+def find_candidate(loaded: LoadedResult, candidate_id: str) -> CandidateSelection:
+    """Locate a candidate by id across all module runs (module is inferred)."""
+    for qn, run in loaded.module_runs_raw.items():
+        if not isinstance(run, dict):
+            continue
+        cands = _candidates_or_none(run)
+        if cands is None:
+            continue
+        for cand in cands.candidates:
+            if cand.id == candidate_id:
+                return CandidateSelection(qn=qn, run=run, candidate=cand)
+    raise SelectionError(
+        f"candidate {candidate_id!r} not found in any module run of result.json"
+    )
+
+
+def iter_candidates(loaded: LoadedResult) -> list[CandidateSelection]:
+    """Every candidate across all module runs, in document order."""
+    out: list[CandidateSelection] = []
+    for qn, run in loaded.module_runs_raw.items():
+        if not isinstance(run, dict):
+            continue
+        cands = _candidates_or_none(run)
+        if cands is None:
+            continue
+        for cand in cands.candidates:
+            out.append(CandidateSelection(qn=qn, run=run, candidate=cand))
+    return out
+
+
+def load_ranking(path: Path) -> list[str]:
+    """Ordered candidate ids from a `sorted_candidates.json` (rank ascending).
+
+    Only the id order is used; the candidate *data* is read from `result.json`.
+    """
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SelectionError(f"could not read ranking {path}: {exc}") from exc
+    cands = raw.get("candidates") if isinstance(raw, dict) else None
+    if not isinstance(cands, list):
+        raise SelectionError(f"ranking {path} has no candidates list")
+    ranked = sorted(
+        (c for c in cands if isinstance(c, dict) and c.get("id")),
+        key=lambda c: c.get("rank", 1_000_000),
+    )
+    ids = [c["id"] for c in ranked]
+    if not ids:
+        raise SelectionError(f"ranking {path} lists no candidate ids")
+    return ids
+
+
 def _require_ranking(sorted_dir: Path) -> Path:
     ranking = sorted_dir / "sorted_candidates.json"
     if not ranking.is_file():
@@ -284,9 +361,13 @@ def resolve_result_location(result: Path) -> ResultLocation:
 
 
 __all__ = [
+    "CandidateSelection",
     "LoadedResult",
     "ResultLocation",
+    "find_candidate",
+    "iter_candidates",
     "load_result",
+    "load_ranking",
     "parse_repo_path_from_index",
     "resolve_candidate",
     "resolve_candidates",
