@@ -79,6 +79,35 @@ def test_spine_prompt_fences_off_the_promoted_children() -> None:
     assert "does **not** apply to `pkg` itself" in prompt
 
 
+def test_chain_split_prompt_addresses_the_promotion_parent_not_the_root() -> None:
+    """When derivation walks down a one-child chain to split, the node whose
+    children were removed is *inside* the subtree, not the root. Aiming the
+    Rule-4 deferral at the root instead would exempt the wrong module and let
+    through the one shape the merge cannot repair."""
+    prompt = _render(
+        _scope(
+            root_path="rust",
+            promoted_children=["rust/src/chat", "rust/src/server"],
+            promotion_parent="rust/src",
+        )
+    )
+    assert "They are children of `rust/src`." in prompt
+    assert "does **not** apply to `rust/src` itself" in prompt
+    assert "does **not** apply to `rust` itself" not in prompt
+    # The chain node above it is held to Rule 4 in full, and the promotion
+    # parent itself must survive as a module for the merge to attach to.
+    assert "You **must** emit `rust/src` as a module of its own" in prompt
+    assert "Every directory between `rust` and `rust/src`" in prompt
+
+
+def test_root_split_prompt_says_nothing_about_a_chain() -> None:
+    """The common case is unchanged: promotion parent == root, no extra rules."""
+    prompt = _render(_scope(promoted_children=["pkg/a", "pkg/b"]))
+    assert "They are children of `pkg`." in prompt
+    assert "must** emit" not in prompt
+    assert "Every directory between" not in prompt
+
+
 def test_child_subshard_prompt_confines_to_its_subtree() -> None:
     """A child sub-shard's top module is demoted to an `EnrichedSubmodule` at
     merge; the prompt must confine it to its own subtree."""

@@ -66,6 +66,7 @@ from spotlights_engine.modules_extractor.sharding import (
     has_several_source_roots,
     merge_fragments,
     owning_shard,
+    validate_promotion_parent,
     validate_shard_scope,
     validate_spine_main_files,
 )
@@ -765,6 +766,7 @@ def _scope_dict(shard: EnrichShard) -> dict[str, Any]:
         "parent_key": shard.parent_key,
         "depth": shard.depth,
         "promoted_children": list(shard.promoted_children),
+        "promotion_parent": shard.promotion_parent,
     }
 
 
@@ -793,8 +795,10 @@ def _validate_shard_fragment(
     """Subtree-scoped cross-artifact validation. Returns the error text or None.
 
     The shard-scoped knob is what lets the *unchanged* validator run against a
-    slice: a spine defers Rule 4 for its own root because the children that
-    guarantee it are pruned from its subtree.
+    slice: a spine defers Rule 4 for its promotion parent, because the children
+    that guarantee it are pruned from its subtree. That is the promotion parent
+    and nothing else — a chain-split spine holds chain nodes above it whose
+    children are all present, and their Rule 4 is decided here or never.
     """
     try:
         validate_shard_scope(shard, fragment)
@@ -803,9 +807,10 @@ def _validate_shard_fragment(
             repo_path,
             repository,
             shard.subtree,
-            rule4_exempt_paths={shard.root_path} if shard.is_spine else None,
+            rule4_exempt_paths=shard.rule4_exempt_paths or None,
         )
         validate_spine_main_files(shard, fragment)
+        validate_promotion_parent(shard, fragment)
     except CrossArtifactError as exc:
         return str(exc)
     return None

@@ -71,29 +71,48 @@ def _shard_scope_rules(scope: dict[str, Any]) -> str:
         )
     promoted = list(scope.get("promoted_children") or [])
     if promoted:
+        # The removed subtrees are children of the promotion parent, which is
+        # the shard root in the common case and a descendant of it when
+        # derivation walked down a one-child chain to find a splittable node.
+        # Every rule below is about *that* node, so addressing them to the root
+        # would be silently wrong for a chain-split spine — including the Rule-4
+        # deferral, the one rule where being wrong is unrecoverable.
+        parent = str(scope.get("promotion_parent") or root)
         listed = ", ".join(f"`{p}`" for p in promoted)
         lines += [
             "",
             f"These subtrees are owned by other shards and have been removed "
-            f"from your SKELETON: {listed}. Therefore:",
+            f"from your SKELETON: {listed}. They are children of `{parent}`. "
+            "Therefore:",
             "",
             "- Do **not** emit them and do **not** fold them.",
             "- Do **not** choose any `main_files` entry that lives under them — "
             "those files belong to modules another shard emits, and claiming one "
             "invalidates the whole result.",
-            f"- If that leaves `{root}` with no file of its own to cite (it is a "
-            "pure container of sub-directories), give it `\"main_files\": []`. "
+            f"- If that leaves `{parent}` with no file of its own to cite (it is "
+            "a pure container of sub-directories), give it `\"main_files\": []`. "
             "That is correct here — do not reach into a removed subtree, and do "
             "not fold anything just to have something to cite.",
-            f"- `{root}`'s `source_child_count` counts those removed children, so "
-            "it will be larger than the `children` actually present above. That "
-            "is expected.",
-            f"- The zero-or-≥2-children rule below does **not** apply to `{root}` "
-            "itself: those removed subtrees are re-attached as its children "
-            f"afterwards, so `{root}` may legitimately carry exactly one child "
-            "of its own here. The rule still applies to every module nested "
-            "inside it.",
+            f"- `{parent}`'s `source_child_count` counts those removed children, "
+            "so it will be larger than the `children` actually present above. "
+            "That is expected.",
+            f"- The zero-or-≥2-children rule below does **not** apply to "
+            f"`{parent}` itself: those removed subtrees are re-attached as its "
+            f"children afterwards, so `{parent}` may legitimately carry exactly "
+            "one child of its own here. The rule still applies to every other "
+            "module in your subtree.",
         ]
+        if parent != root:
+            lines += [
+                f"- You **must** emit `{parent}` as a module of its own — never "
+                "fold it into a parent. The removed subtrees come back as its "
+                "children, so it has to exist for them to attach to.",
+                f"- Every directory between `{root}` and `{parent}` keeps all of "
+                "its children in your SKELETON, so the zero-or-≥2-children rule "
+                f"applies to each of them in full. `{parent}` counts as one "
+                "child of its own parent — give that parent its other children "
+                "too rather than folding them away.",
+            ]
     return "\n".join(lines)
 
 

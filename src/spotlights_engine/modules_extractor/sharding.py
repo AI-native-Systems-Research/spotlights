@@ -15,16 +15,18 @@ concatenation + re-parenting, and the merged tree is handed to the **unchanged**
 `validate_enriched_tree` / `compute_coverage` in Stage 5. Sharding changes only
 how the tree is *produced*, never how it is *validated*.
 
-Two traps are created by splitting a branch — a single-child spine, and a spine
-`main_file` that lands under a promoted child — and each is closed here at
-derivation or shard-validation time, because the merge is pure Python and
-Stage 5 has no repair. (A third, a spine with no legal `main_file` at all, is
-closed at the source: Rule 3 lets a pure container directory cite none.)
+Three traps are created by splitting a branch — a single-child spine, a spine
+`main_file` that lands under a promoted child, and a chain-split spine that
+folds away the very node its promoted children re-attach to — and each is closed
+here at derivation or shard-validation time, because the merge is pure Python
+and Stage 5 has no repair. (A fourth, a spine with no legal `main_file` at all,
+is closed at the source: Rule 3 lets a pure container directory cite none.)
 """
 
 from __future__ import annotations
 
 import re
+from collections.abc import Iterator, Mapping
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -96,12 +98,40 @@ class EnrichShard(BaseModel):
     re-assembly order in `merge_fragments`."""
 
     promoted_children: list[str] = Field(default_factory=list)
-    """Immediate child roots delegated to child sub-shards and pruned from this
-    shard's `subtree`; `[]` unless this shard is a spine."""
+    """Child roots delegated to child sub-shards and pruned from this shard's
+    `subtree`; `[]` unless this shard is a spine. They are children of
+    `promotion_parent`, which is usually — but not always — `root_path`."""
 
     @property
     def is_spine(self) -> bool:
         return self.owns_root and bool(self.promoted_children)
+
+    @property
+    def promotion_parent(self) -> str:
+        """The node whose children were promoted away, i.e. the one directory in
+        this shard's subtree whose `children` are incomplete.
+
+        `root_path` for a shard split at its own root, and a descendant of it
+        when derivation had to walk down a one-child chain to find a splittable
+        node (see `_split_target`). `root_path` for a shard with nothing
+        promoted, so callers need no special case.
+        """
+        if not self.promoted_children:
+            return self.root_path
+        return _parent_path(self.promoted_children[0])
+
+    @property
+    def rule4_exempt_paths(self) -> set[str]:
+        """Paths whose zero-or-≥2-children rule this shard cannot check itself.
+
+        Exactly the promotion parent: its guaranteeing children are pruned from
+        this subtree and only come back at merge. Every *other* module here —
+        including any chain node between `root_path` and the promotion parent —
+        sees all of its children and is held to Rule 4 locally, which is what
+        keeps the merged tree from acquiring a single-child parent that Stage 5
+        would reject with no repair left.
+        """
+        return {self.promotion_parent} if self.is_spine else set()
 
 
 class ShardPlan(BaseModel):
@@ -153,6 +183,14 @@ class ShardPlan(BaseModel):
 def _is_ancestor(ancestor: str, descendant: str) -> bool:
     """Physical-path ancestry, inclusive of equality."""
     return descendant == ancestor or descendant.startswith(ancestor + "/")
+
+
+def _parent_path(path: str) -> str:
+    """The POSIX parent of a source-root-relative path (`""` for a top-level
+    one). Plain string surgery — these paths are always `/`-separated and
+    already normalized by the skeleton."""
+    head, _, _ = path.rpartition("/")
+    return head
 
 
 def _in_scope(path: str, root: str, pruned: frozenset[str]) -> bool:
@@ -275,6 +313,44 @@ def _promotion_order(children: list[SkeletonNode]) -> list[SkeletonNode]:
     )
 
 
+def _split_target(node: SkeletonNode, config: ExtractorConfig) -> SkeletonNode | None:
+    """The descendant whose children this split promotes, or None when there is
+    no such node and `node` must stay whole.
+
+    Usually `node` itself. But a node with exactly one promotable child cannot
+    be split *at that node*: promoting the one child leaves a single-child spine
+    that Stage-5 Rule 4 rejects with no possible repair. Refusing outright is
+    what pinned vLLM's `rust/` — `rust` → `rust/src` → 13 crates, 71 required
+    nodes — to one monolithic shard, which then blew its per-shard deadline. So
+    walk *down* the one-child chain instead and promote from the first
+    descendant that has two promotable children of its own. The chain nodes stay
+    with the spine, which is what makes this safe: they keep every child they
+    have, so the merged tree's Rule 4 is decided inside the shard, where the
+    bounded repair can still fix it.
+
+    Descending past a node with a single *child* is the one thing this must not
+    do. Such a node would be left holding exactly one emitted child after the
+    merge — the promoted subtrees re-attach under the descendant, not under it —
+    and its only escape, folding the chain node away, is denied by
+    `validate_promotion_parent`. That is a deadlock, so refuse the split
+    instead; the branch stays monolithic exactly as before.
+
+    The walk is unbounded and still cannot leave the spine large: a sibling
+    heavy enough to matter is by definition promotable, so it would have ended
+    the descent at the branch above. Every subtree the chain leaves with the
+    spine weighs less than `enrich_subshard_child_min`.
+    """
+    current = node
+    while True:
+        promotable = _promotable(current, config.enrich_subshard_child_min)
+        if len(promotable) >= 2:
+            return current
+        if len(promotable) == 1 and len(current.children) >= 2:
+            current = promotable[0]
+            continue
+        return None
+
+
 def _refuse_split_reason(
     node: SkeletonNode,
     *,
@@ -284,9 +360,10 @@ def _refuse_split_reason(
 ) -> str | None:
     """Why `node` must not be split, or None when all gates pass.
 
-    One gate is a hard **correctness** requirement, not tuning: a split with
-    fewer than two promotable children deterministically produces a single-child
-    spine that Stage-5 Rule 4 rejects unrecoverably.
+    One gate is a hard **correctness** requirement, not tuning: a split with no
+    `_split_target` deterministically produces a single-child spine that Stage-5
+    Rule 4 rejects unrecoverably. It is *not* satisfied by `node`'s own children
+    alone — a one-child chain below it can still offer a legal split point.
 
     A root owning no direct source file used to be refused here as well, because
     its spine had no legal `main_file`: every file in the branch belongs to an
@@ -301,7 +378,7 @@ def _refuse_split_reason(
         return NOT_SPLIT_MAX_DEPTH
     if node_weight(node) <= config.enrich_subshard_threshold:
         return NOT_SPLIT_BELOW_THRESHOLD
-    if len(_promotable(node, config.enrich_subshard_child_min)) < 2:
+    if _split_target(node, config) is None:
         return NOT_SPLIT_ONE_PROMOTABLE
     if budget.remaining < 2:
         return NOT_SPLIT_BUDGET
@@ -345,7 +422,16 @@ def _plan_node(
             )
         ]
 
-    promotable = _promotable(node, config.enrich_subshard_child_min)
+    # The promotion parent is `node` itself unless derivation had to walk down a
+    # one-child chain to reach a splittable node; `node` still owns the shard
+    # either way, and the chain in between rides along with the spine.
+    target = _split_target(node, config)
+    if target is None:  # pragma: no cover - defensive; the gate above cleared it
+        raise ExtractorValidationError(
+            f"no split target for {node.path!r} after the split gate passed",
+            stage="enrich",
+        )
+    promotable = _promotable(target, config.enrich_subshard_child_min)
     take = min(len(promotable), budget.remaining)
     promoted = sorted(_promotion_order(promotable)[:take], key=lambda c: c.path)
     budget.remaining -= len(promoted)
@@ -388,7 +474,10 @@ def derive_enrich_shards(skeleton: Skeleton, config: ExtractorConfig) -> ShardPl
     The primary partition is the skeleton's top-level nodes, sorted by
     `root_path`. A branch large enough to reproduce the monolithic timeout on
     its own is additionally sub-sharded into a spine + child sub-shards, but
-    only when the three-part gate (`_refuse_split_reason`) allows it.
+    only when the three-part gate (`_refuse_split_reason`) allows it. The split
+    point need not be the branch root: `_split_target` walks down a one-child
+    chain to the first node that can legally be split, so the promoted children
+    may be deeper than the spine's own root.
 
     A repo with a single top-level source-bearing node under the size threshold
     yields exactly one shard — today's single call.
@@ -520,6 +609,35 @@ def validate_spine_main_files(shard: EnrichShard, fragment: EnrichedTree) -> Non
                     )
 
 
+def validate_promotion_parent(shard: EnrichShard, fragment: EnrichedTree) -> None:
+    """A chain-split spine must *emit* the node whose children it promoted.
+
+    `validate_shard_scope` already forces the root to be emitted, so this only
+    bites when `_split_target` walked down a one-child chain: there the
+    promotion parent is an ordinary module in the middle of the subtree, and the
+    model is free to fold it into its parent. Folding it is unrecoverable after
+    the merge — the promoted children re-attach to whatever emitted ancestor is
+    left, and the fold itself then has to prove Rule-7 evidence for a directory
+    whose entire content lives in subtrees another shard owns. Caught here, it
+    is just another repairable shard error.
+    """
+    if not shard.promoted_children:
+        return
+    parent = shard.promotion_parent
+    if parent == shard.root_path:
+        return  # guaranteed by `validate_shard_scope`
+    emitted = {m.path.strip("/") for m in fragment.iter_all_modules()}
+    if parent in emitted:
+        return
+    folded = {f.path.strip("/") for f in fragment.folds}
+    detail = "folded away" if parent in folded else "neither emitted nor folded"
+    raise CrossArtifactError(
+        f"spine shard {shard.key!r} must emit {parent!r} as a module ({detail}): "
+        f"the subtrees removed from your SKELETON are re-attached as its "
+        f"children, so it cannot be collapsed into its parent"
+    )
+
+
 # ── Merge ─────────────────────────────────────────────────────────────────
 
 
@@ -548,21 +666,35 @@ def assemble_branch(
 
     Bottom-up by sub-shard `depth`: a depth-2 grandchild is grafted into its
     parent sub-shard's fragment *before* that parent is grafted upward, so it
-    lands at its true object-tree position. Grafting is by physical-path
-    ancestry, unambiguous because sub-shard roots are always *immediate*
-    children of exactly one enclosing sub-shard root.
+    lands at its true object-tree position.
+
+    Grafting is by physical-path ancestry, into the *nearest emitted module*
+    above the sub-shard's root — which is the enclosing fragment's own top
+    module when the promotion parent is the shard root, and a module nested
+    inside that fragment when derivation walked down a one-child chain to split
+    (`_split_target`). Attaching a chain-split child to the fragment root
+    instead would put it at an object-tree position its physical path
+    contradicts, which `validate_enriched_tree` rejects after the merge.
     """
     # Deep-copy every fragment module before grafting: this function is called
     # once per branch by the *dry-run* precheck and again by the authoritative
     # global merge, so mutating the caller's fragments in place would graft the
     # same children twice.
     by_root: dict[str, EnrichedTopModule] = {}
+    emitted: dict[str, EnrichedTopModule | EnrichedSubmodule] = {}
     for shard, fragment in fragments:
         if not fragment.modules:  # pragma: no cover - validation catches this
             raise ExtractorValidationError(
                 f"shard {shard.key!r} produced no top-level module", stage="enrich"
             )
-        by_root[shard.root_path] = fragment.modules[0].model_copy(deep=True)
+        top = fragment.modules[0].model_copy(deep=True)
+        by_root[shard.root_path] = top
+        # Index the whole fragment, not just its root: a chain-split spine's
+        # graft targets are nested inside it. Mutating one of those nested
+        # objects stays visible after its own fragment is demoted upward,
+        # because `_demote` copies the submodule *list*, not its elements.
+        for module in _iter_modules(top):
+            emitted[module.path.strip("/")] = module
 
     root_module = by_root.get(branch_root)
     if root_module is None:
@@ -581,15 +713,15 @@ def assemble_branch(
     ):
         if shard.root_path == branch_root:
             continue
-        target_root = _nearest_ancestor_root(shard.root_path, by_root)
-        if target_root is None:
+        target_path = _nearest_ancestor_root(shard.root_path, emitted)
+        if target_path is None:
             raise ExtractorValidationError(
                 f"sub-shard {shard.key!r} ({shard.root_path!r}) has no emitted "
-                "ancestor to graft into; shard derivation broke its "
-                "immediate-child invariant",
+                "ancestor to graft into; its promotion parent was neither "
+                "emitted nor covered by an enclosing shard",
                 stage="enrich",
             )
-        by_root[target_root].submodules.append(
+        emitted[target_path].submodules.append(
             _demote(by_root[shard.root_path])
         )
 
@@ -597,7 +729,18 @@ def assemble_branch(
     return root_module
 
 
-def _nearest_ancestor_root(path: str, roots: dict[str, EnrichedTopModule]) -> str | None:
+def _iter_modules(
+    module: EnrichedTopModule | EnrichedSubmodule,
+) -> Iterator[EnrichedTopModule | EnrichedSubmodule]:
+    """`module` and every module nested under it, preorder."""
+    yield module
+    for sub in module.submodules:
+        yield from _iter_modules(sub)
+
+
+def _nearest_ancestor_root(
+    path: str, roots: Mapping[str, EnrichedTopModule | EnrichedSubmodule]
+) -> str | None:
     best: str | None = None
     for root in roots:
         if root != path and _is_ancestor(root, path):
@@ -736,6 +879,7 @@ __all__ = [
     "node_weight",
     "owning_shard",
     "slice_skeleton",
+    "validate_promotion_parent",
     "validate_shard_scope",
     "validate_spine_main_files",
 ]

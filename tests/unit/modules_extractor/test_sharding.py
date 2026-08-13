@@ -38,6 +38,7 @@ from spotlights_engine.modules_extractor.sharding import (
     merge_fragments,
     node_weight,
     owning_shard,
+    validate_promotion_parent,
     validate_shard_scope,
     validate_spine_main_files,
 )
@@ -203,9 +204,11 @@ def test_light_children_stay_with_the_spine() -> None:
 def test_branch_with_one_promotable_child_is_not_split() -> None:
     """The Rule-4 split gate.
 
-    Splitting here would graft a single child under the spine, and the merged
-    tree would carry a single-child parent that Stage 5 rejects with no possible
-    LLM recovery on the pure-Python merge.
+    Splitting *at `pkg`* would graft a single child under the spine, and the
+    merged tree would carry a single-child parent that Stage 5 rejects with no
+    possible LLM recovery on the pure-Python merge. Descending into `pkg/heavy`
+    is no help either: its own children are all below `child_min`, so there is
+    no legal split point anywhere down the chain.
     """
     branch = _node(
         "pkg",
@@ -218,6 +221,100 @@ def test_branch_with_one_promotable_child_is_not_split() -> None:
         _skel(branch), _cfg(enrich_subshard_threshold=2, enrich_subshard_child_min=2)
     )
 
+    assert [s.key for s in plan.shards] == ["pkg"]
+    assert plan.not_split_reasons["pkg"] == NOT_SPLIT_ONE_PROMOTABLE
+
+
+def _chain_branch() -> SkeletonNode:
+    """vLLM's `rust/`: one light sibling, one heavy child, the split point a
+    level further down. Refusing to split this is what blew the 1800s per-shard
+    deadline on a 71-node branch."""
+    return _node(
+        "rust",
+        files=0,
+        rep=[],
+        children=(
+            _node("rust/proto"),
+            _node(
+                "rust/src",
+                files=0,
+                rep=[],
+                children=tuple(
+                    _node(f"rust/src/c{i}", children=(_node(f"rust/src/c{i}/deep"),))
+                    for i in range(3)
+                ),
+            ),
+        ),
+    )
+
+
+def test_one_promotable_child_descends_to_the_splittable_node() -> None:
+    """The split point may be a descendant, not just the branch root."""
+    plan = derive_enrich_shards(
+        _skel(_chain_branch()),
+        _cfg(enrich_subshard_threshold=2, enrich_subshard_child_min=2),
+    )
+
+    assert sorted(s.key for s in plan.shards) == [
+        "rust__spine",
+        "rust__src__c0",
+        "rust__src__c1",
+        "rust__src__c2",
+    ]
+    spine = next(s for s in plan.shards if s.key == "rust__spine")
+    assert spine.root_path == "rust"
+    assert spine.promoted_children == [f"rust/src/c{i}" for i in range(3)]
+    assert spine.promotion_parent == "rust/src"
+    # The chain rides along with the spine; only the promoted grandchildren go.
+    assert spine.subtree.all_paths() == {"rust", "rust/proto", "rust/src"}
+    # Every promoted subtree is a child sub-shard of the same branch.
+    for i in range(3):
+        child = next(s for s in plan.shards if s.key == f"rust__src__c{i}")
+        assert child.parent_key == "rust" and not child.owns_root
+
+
+def test_only_the_promotion_parent_defers_rule_4() -> None:
+    """The chain node above the split point keeps every child it has, so its
+    Rule 4 is decided inside the shard — where the bounded repair can still fix
+    it. Exempting it too would let a folded `rust/proto` through, and the merged
+    tree would then carry `rust` with `rust/src` as its only child, which Stage
+    5 rejects with no repair left."""
+    plan = derive_enrich_shards(
+        _skel(_chain_branch()),
+        _cfg(enrich_subshard_threshold=2, enrich_subshard_child_min=2),
+    )
+    spine = next(s for s in plan.shards if s.key == "rust__spine")
+    assert spine.rule4_exempt_paths == {"rust/src"}
+    assert "rust" not in spine.rule4_exempt_paths
+
+
+def test_a_single_child_chain_node_refuses_the_split() -> None:
+    """The one descent that must not happen.
+
+    `pkg` holds nothing but the chain, so splitting below it would leave `pkg`
+    with exactly one emitted child after the merge — the promoted subtrees
+    re-attach under `pkg/src`, not under `pkg` — and folding `pkg/src` away is
+    denied by `validate_promotion_parent`. Unsplittable beats deadlocked.
+    """
+    branch = _node(
+        "pkg",
+        files=0,
+        rep=[],
+        children=(
+            _node(
+                "pkg/src",
+                files=0,
+                rep=[],
+                children=tuple(
+                    _node(f"pkg/src/c{i}", children=(_node(f"pkg/src/c{i}/deep"),))
+                    for i in range(3)
+                ),
+            ),
+        ),
+    )
+    plan = derive_enrich_shards(
+        _skel(branch), _cfg(enrich_subshard_threshold=2, enrich_subshard_child_min=2)
+    )
     assert [s.key for s in plan.shards] == ["pkg"]
     assert plan.not_split_reasons["pkg"] == NOT_SPLIT_ONE_PROMOTABLE
 
@@ -987,3 +1084,221 @@ def test_a_split_namespace_root_cites_nothing_and_survives_the_merge(tmp_path) -
     grabby = _frag(_mod("pkg", files=[{"path": "pkg/a/a2.py", "role": "Not mine."}]))
     with pytest.raises(CrossArtifactError, match="promoted child"):
         validate_spine_main_files(spine, grabby)
+
+
+# ── The chain split, against a real filesystem ────────────────────────────
+
+
+CHAIN_CFG = dict(enrich_subshard_threshold=2, enrich_subshard_child_min=2)
+
+
+def _chain_repo(tmp_path: Path) -> Path:
+    """vLLM's `rust/` in miniature: `pkg` → `pkg/src` → two heavy crates.
+
+    `pkg` keeps siblings of its own (`proto`, `tools`) — that is what makes the
+    chain splittable at all — and `pkg/src` keeps a light leaf that stays with
+    the spine.
+    """
+    for sibling in ("proto", "tools"):
+        _write(tmp_path / "pkg" / sibling / "s1.py")
+        _write(tmp_path / "pkg" / sibling / "s2.py")
+    for crate in ("a", "b"):
+        _write(tmp_path / "pkg" / "src" / crate / f"{crate}1.py")
+        _write(tmp_path / "pkg" / "src" / crate / f"{crate}2.py")
+        for deep in ("deep1", "deep2"):
+            _write(tmp_path / "pkg" / "src" / crate / deep / "d1.py")
+            _write(tmp_path / "pkg" / "src" / crate / deep / "d2.py")
+    _write(tmp_path / "pkg" / "src" / "light" / "l.py")
+    return tmp_path
+
+
+def _chain_plan(repo: Path) -> tuple[Skeleton, ShardPlan]:
+    skeleton = build_skeleton(repo, "")
+    return skeleton, derive_enrich_shards(skeleton, _cfg(**CHAIN_CFG))
+
+
+def _chain_fragments(plan: ShardPlan) -> list[tuple[EnrichShard, EnrichedTree]]:
+    """What a well-behaved model returns: the spine emits the whole chain
+    (`pkg` → `pkg/src`) plus the paths left with it, and each crate its own."""
+    spine = next(s for s in plan.shards if s.key == "pkg__spine")
+    spine_fragment = _frag(
+        _mod(
+            "pkg",
+            files=[],
+            subs=[
+                _sub(s, files=[{"path": f"pkg/{s.rsplit('/', 1)[-1]}/s1.py", "role": "S."}])
+                for s in ("pkg/proto", "pkg/tools")
+            ]
+            + [
+                _sub(
+                    "pkg/src",
+                    files=[],
+                    subs=[
+                        _sub(
+                            "pkg/src/light",
+                            files=[{"path": "pkg/src/light/l.py", "role": "L."}],
+                        )
+                    ],
+                ),
+            ],
+        )
+    )
+    return [
+        (spine, spine_fragment),
+        *(
+            (
+                next(s for s in plan.shards if s.key == f"pkg__src__{crate}"),
+                _frag(
+                    _mod(
+                        f"pkg/src/{crate}",
+                        files=[{"path": f"pkg/src/{crate}/{crate}1.py", "role": "C."}],
+                        subs=[
+                            _sub(
+                                f"pkg/src/{crate}/{deep}",
+                                files=[
+                                    {
+                                        "path": f"pkg/src/{crate}/{deep}/d1.py",
+                                        "role": "D.",
+                                    }
+                                ],
+                            )
+                            for deep in ("deep1", "deep2")
+                        ],
+                    )
+                ),
+            )
+            for crate in ("a", "b")
+        ),
+    ]
+
+
+def test_chain_repo_splits_at_the_descendant(tmp_path) -> None:
+    _, plan = _chain_plan(_chain_repo(tmp_path))
+    assert sorted(s.key for s in plan.shards) == [
+        "pkg__spine",
+        "pkg__src__a",
+        "pkg__src__b",
+    ]
+    spine = next(s for s in plan.shards if s.key == "pkg__spine")
+    assert spine.promoted_children == ["pkg/src/a", "pkg/src/b"]
+    assert spine.promotion_parent == "pkg/src"
+    assert "pkg/src/light" in spine.subtree.all_paths()
+
+
+def test_chain_split_children_graft_under_the_promotion_parent(tmp_path) -> None:
+    """The merge's object-tree position has to follow the physical path.
+
+    Grafting these into the fragment's root module — which is all the merge had
+    to do while every promoted child was an immediate child of the shard root —
+    would put `pkg/src/a` beside `pkg/src` instead of inside it, and
+    `validate_enriched_tree` rejects exactly that shape.
+    """
+    repo = _chain_repo(tmp_path)
+    skeleton, plan = _chain_plan(repo)
+    pairs = _chain_fragments(plan)
+
+    merged = merge_fragments(pairs, skeleton=skeleton, plan=plan)
+    root = merged.modules[0]
+    assert [s.path for s in root.submodules] == ["pkg/proto", "pkg/src", "pkg/tools"]
+    src = next(s for s in root.submodules if s.path == "pkg/src")
+    assert [s.path for s in src.submodules] == [
+        "pkg/src/a",
+        "pkg/src/b",
+        "pkg/src/light",
+    ]
+
+    validate_enriched_tree(merged, repo, _repository(), skeleton)
+    assert compute_coverage(merged, skeleton).missing == []
+
+
+def test_chain_split_spine_defers_rule_4_only_for_the_promotion_parent(tmp_path) -> None:
+    """`pkg/src` looks single-child inside the shard and is exempt; `pkg` does
+    not and is not. Fold both of `pkg`'s siblings away and the shard must fail
+    *locally*, while it can still be repaired — the merge cannot give `pkg` a
+    second child, because the promoted subtrees land under `pkg/src`."""
+    repo = _chain_repo(tmp_path)
+    _, plan = _chain_plan(repo)
+    spine, fragment = _chain_fragments(plan)[0]
+
+    validate_enriched_tree(
+        fragment, repo, _repository(), spine.subtree,
+        rule4_exempt_paths=spine.rule4_exempt_paths,
+    )
+    with pytest.raises(CrossArtifactError, match="single child"):
+        validate_enriched_tree(fragment, repo, _repository(), spine.subtree)
+
+    folded_siblings = _frag(
+        _mod(
+            "pkg",
+            files=[
+                {"path": "pkg/proto/s1.py", "role": "Folded."},
+                {"path": "pkg/tools/s1.py", "role": "Folded."},
+            ],
+            subs=[_sub("pkg/src", files=[], subs=[
+                _sub("pkg/src/light", files=[{"path": "pkg/src/light/l.py", "role": "L."}])
+            ])],
+        ),
+        folds=[
+            {
+                "path": f"pkg/{sibling}",
+                "into": "pkg",
+                "reason": "thin generated shim",
+                "evidence_files": [f"pkg/{sibling}/s1.py"],
+            }
+            for sibling in ("proto", "tools")
+        ],
+    )
+    with pytest.raises(CrossArtifactError, match="single child.*'pkg'"):
+        validate_enriched_tree(
+            folded_siblings, repo, _repository(), spine.subtree,
+            rule4_exempt_paths=spine.rule4_exempt_paths,
+        )
+
+
+def test_chain_split_spine_may_not_fold_its_promotion_parent(tmp_path) -> None:
+    """Folding `pkg/src` passes every subtree-scoped rule and is unrecoverable
+    after the merge, so it is caught where a repair is still possible."""
+    repo = _chain_repo(tmp_path)
+    _, plan = _chain_plan(repo)
+    spine = next(s for s in plan.shards if s.key == "pkg__spine")
+
+    folded_parent = _frag(
+        _mod(
+            "pkg",
+            files=[{"path": "pkg/src/light/l.py", "role": "Folded."}],
+            subs=[
+                _sub(s, files=[{"path": f"pkg/{s.rsplit('/', 1)[-1]}/s1.py", "role": "S."}])
+                for s in ("pkg/proto", "pkg/tools")
+            ],
+        ),
+        folds=[
+            {
+                "path": "pkg/src",
+                "into": "pkg",
+                "reason": "container",
+                "evidence_files": ["pkg/src/light/l.py"],
+            },
+            {
+                "path": "pkg/src/light",
+                "into": "pkg",
+                "reason": "single-file helper",
+                "evidence_files": ["pkg/src/light/l.py"],
+            },
+        ],
+    )
+    # Locally legal — `pkg/src`'s real content is in subtrees another shard owns
+    # and is simply not visible here.
+    validate_enriched_tree(
+        folded_parent, repo, _repository(), spine.subtree,
+        rule4_exempt_paths=spine.rule4_exempt_paths,
+    )
+    with pytest.raises(CrossArtifactError, match="must emit 'pkg/src'"):
+        validate_promotion_parent(spine, folded_parent)
+
+    # An ordinary spine, whose promotion parent is its own root, is unaffected —
+    # `validate_shard_scope` already forces that module to exist.
+    root_split = next(
+        s for s in _spine_plan(_spine_repo(tmp_path / "other"))[1].shards
+        if s.key == "pkg__spine"
+    )
+    validate_promotion_parent(root_split, _spine_fragment())

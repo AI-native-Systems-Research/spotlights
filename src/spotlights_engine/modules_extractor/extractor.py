@@ -97,7 +97,16 @@ class ExtractorConfig(BaseModel):
     # Hard ceiling on total derived enrich shards. `ge=2` so the cap can never
     # force a single-child spine, which Stage-5 Rule 4 would reject with no
     # possible recovery on the pure-Python merge.
-    enrich_max_shards: int = Field(default=24, ge=2)
+    #
+    # Budget is spent greedily in top-level path order, so a cap that binds does
+    # not shave the *cheapest* split — it starves whichever heavy branch happens
+    # to sort last, handing it back the monolithic shard (and the per-shard
+    # timeout) that sharding exists to prevent. 24 became binding once a
+    # one-child chain like vLLM's `rust/` could split at all: vLLM asks for 33,
+    # and at 24 `vllm/model_executor` (50 required nodes) was the branch that
+    # lost. The ceiling is there to bound a pathological repo, not to referee
+    # between branches of a normal one.
+    enrich_max_shards: int = Field(default=40, ge=2)
 
 
 class ExtractorResult(BaseModel):
