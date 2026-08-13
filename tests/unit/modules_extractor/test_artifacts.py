@@ -18,10 +18,8 @@ from spotlights_engine.modules_extractor.two_phase import (
 )
 from spotlights_engine.schemas.pipeline import ModulesExtractorInput
 from tests.unit.modules_extractor.test_two_phase import (  # reuse fakes
-    _codex_result,
     _enriched_tree,
     _FakeClaude,
-    _FakeCodex,
     _patch,
     _repo,
     _source_root_decision,
@@ -38,8 +36,7 @@ def _run(tmp_path, monkeypatch, *, artifacts: Path | None, extra_enrich=None, co
         results.append(_stream_result(extra_enrich))
     results.append(_stream_result(_enriched_tree()))
     claude = _FakeClaude(results)
-    codex = _FakeCodex(lambda p, o: _codex_result({"ok": True, "issues": []}))
-    _patch(monkeypatch, claude, codex)
+    _patch(monkeypatch, claude)
     run = run_two_phase_extraction(
         repo,
         config=config or ExtractorConfig(),
@@ -81,14 +78,12 @@ def test_per_stage_artifacts_written(tmp_path, monkeypatch) -> None:
     for name in ("enriched_tree.json", "coverage.json", "validation.json"):
         assert (enrich / "merged" / name).exists(), name
     assert (enrich / "branches" / _SHARD / "coverage.json").exists()
-    # Stage 4 — per-branch review + merged ledger.
-    assert (artifacts / "04_review" / "shards.json").exists()
-    assert (artifacts / "04_review" / _SHARD / "attempt_01" / "status.json").exists()
-    assert (artifacts / "04_review" / "merged_review.json").exists()
+    # Stage 4 (semantic review) was removed — no review artifacts are produced.
+    assert not (artifacts / "04_review").exists()
+    assert not (artifacts / "review.json").exists()
     # Top-level
     assert (artifacts / "enriched_tree.json").exists()
     assert (artifacts / "coverage.json").exists()
-    assert (artifacts / "review.json").exists()
     assert (artifacts / "project_tree.json").exists()
     assert (artifacts / "sessions.json").exists()
 
@@ -166,8 +161,7 @@ def test_extract_with_telemetry_dispatches_to_two_phase(tmp_path, monkeypatch) -
         _stream_result(_source_root_decision()),
         _stream_result(_enriched_tree()),
     ])
-    codex = _FakeCodex(lambda p, o: _codex_result({"ok": True, "issues": []}))
-    _patch(monkeypatch, claude, codex)
+    _patch(monkeypatch, claude)
 
     result = extract_with_telemetry(
         ModulesExtractorInput(repo_path=repo),

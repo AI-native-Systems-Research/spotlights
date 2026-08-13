@@ -432,30 +432,6 @@ def derive_enrich_shards(skeleton: Skeleton, config: ExtractorConfig) -> ShardPl
     return plan
 
 
-def derive_review_shards(skeleton: Skeleton) -> list[EnrichShard]:
-    """Stage-4 review shards: the top-level partition only, no sub-sharding.
-
-    A review of a sub-sharded branch therefore sends that whole branch in one
-    Codex call, which can be large. That is deliberate and acceptable **only**
-    because review is advisory and skip-on-failure: an oversized review degrades
-    to a per-shard `skipped` artifact and never blocks the run.
-    """
-    used: set[str] = set()
-    return [
-        EnrichShard(
-            key=_mint_key(n.path, used),
-            root_path=n.path,
-            subtree=slice_skeleton(skeleton, n),
-            is_subshard=False,
-            parent_key=None,
-            owns_root=True,
-            depth=0,
-            promoted_children=[],
-        )
-        for n in sorted(skeleton.nodes, key=lambda n: n.path)
-    ]
-
-
 def covers_entire_skeleton(shard: EnrichShard, skeleton: Skeleton) -> bool:
     """True when this shard's scope is the whole repository.
 
@@ -478,7 +454,7 @@ def has_several_source_roots(skeleton: Skeleton) -> bool:
 
 def owning_shard(path: str, shards: list[EnrichShard]) -> EnrichShard | None:
     """The shard whose scope owns `path`: the deepest shard root that is an
-    ancestor of it. Shared by the branch precheck and review-issue attribution."""
+    ancestor of it. Used by the Stage-3 branch precheck."""
     best: EnrichShard | None = None
     for s in shards:
         if _is_ancestor(s.root_path, path) and (
@@ -754,7 +730,6 @@ __all__ = [
     "branch_tree",
     "covers_entire_skeleton",
     "derive_enrich_shards",
-    "derive_review_shards",
     "has_several_source_roots",
     "merge_fragments",
     "node_source_file_count",

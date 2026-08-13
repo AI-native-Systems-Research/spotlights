@@ -34,7 +34,6 @@ from spotlights_engine.modules_extractor.sharding import (
     branch_coverage,
     covers_entire_skeleton,
     derive_enrich_shards,
-    derive_review_shards,
     has_several_source_roots,
     merge_fragments,
     node_weight,
@@ -415,13 +414,6 @@ def test_branch_subtrees_are_unpruned() -> None:
     }
 
 
-def test_review_shards_are_the_top_level_partition_only() -> None:
-    review = derive_review_shards(_skel(_heavy_branch(), _node("csrc")))
-    assert [s.key for s in review] == ["csrc", "pkg"]
-    assert all(s.depth == 0 and not s.is_subshard for s in review)
-    assert "pkg/c0" in next(s for s in review if s.key == "pkg").subtree.all_paths()
-
-
 # ── Merge ─────────────────────────────────────────────────────────────────
 
 
@@ -655,8 +647,8 @@ def test_shards_partition_the_inventory_exhaustively_and_disjointly(seed: int) -
             owner_of[path] = shard.key
     assert set(owner_of) == skeleton.all_paths()
 
-    # `owning_shard` (used by the branch precheck and review attribution) must
-    # agree with that partition, and must be total.
+    # `owning_shard` (used by the branch precheck) must agree with that
+    # partition, and must be total.
     for path in skeleton.all_paths():
         found = owning_shard(path, plan.shards)
         assert found is not None and found.key == owner_of[path]

@@ -32,11 +32,6 @@ class ExtractorCoverageError(ModulesExtractorError):
     """
 
 
-class ExtractorReviewError(ModulesExtractorError):
-    """Strict-mode review found remaining semantic issues, or a review-driven
-    revision failed validation while `fail_on_review_issues=True`."""
-
-
 class ExtractorArtifactError(ModulesExtractorError):
     """A required artifact write failed on an otherwise successful stage.
 
@@ -51,7 +46,6 @@ __all__ = [
     "ExtractorAgentError",
     "ExtractorArtifactError",
     "ExtractorCoverageError",
-    "ExtractorReviewError",
     "ExtractorSetupError",
     "ExtractorValidationError",
     "ModulesExtractorError",

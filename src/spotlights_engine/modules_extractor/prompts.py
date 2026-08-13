@@ -5,10 +5,9 @@ once via `importlib.resources` so behavior does not depend on cwd.
 
 The legacy `extraction.md` is parameter-free. The two-phase prompts embed
 untrusted repository/inventory data in clearly delimited JSON blocks:
-`render_enrich_prompt` and `render_review_prompt` substitute those blocks into
-the loaded templates. Substitution uses explicit `{token}` replacement (not
-`str.format`) so literal braces in the template body (the JSON shape examples)
-are left untouched.
+`render_enrich_prompt` substitutes those blocks into the loaded templates.
+Substitution uses explicit `{token}` replacement (not `str.format`) so literal
+braces in the template body (the JSON shape examples) are left untouched.
 """
 
 from __future__ import annotations
@@ -29,7 +28,6 @@ def _load(name: str) -> str:
 EXTRACTION_PROMPT: str = _load("extraction.md")
 IDENTIFY_SOURCE_ROOT_PROMPT: str = _load("identify_source_root.md")
 ENRICH_SKELETON_PROMPT: str = _load("enrich_skeleton.md")
-REVIEW_ENRICHED_PROMPT: str = _load("review_enriched.md")
 
 
 def _as_json_block(data: Any) -> str:
@@ -129,46 +127,11 @@ def render_enrich_shard_prompt(*, repository: Any, subtree: Any, scope: Any) -> 
     )
 
 
-def render_review_prompt(*, skeleton: Any, enriched: Any) -> str:
-    """Stage-4 Codex review prompt with the Skeleton + EnrichedTree data blocks."""
-    return (
-        REVIEW_ENRICHED_PROMPT
-        .replace("{skeleton_json}", _as_json_block(skeleton))
-        .replace("{enriched_json}", _as_json_block(enriched))
-        .replace("{scope_json}", _as_json_block({"whole_repository": True}))
-        .replace(
-            "{scope_rules}",
-            "Review the entire tree above.",
-        )
-    )
-
-
-def render_review_shard_prompt(*, subtree: Any, fragment: Any, scope: Any) -> str:
-    """Stage-4 Codex review prompt scoped to one top-level branch."""
-    root = dict(scope).get("root_path", "")
-    return (
-        REVIEW_ENRICHED_PROMPT
-        .replace("{skeleton_json}", _as_json_block(subtree))
-        .replace("{enriched_json}", _as_json_block(fragment))
-        .replace("{scope_json}", _as_json_block(scope))
-        .replace(
-            "{scope_rules}",
-            f"Review only the branch rooted at `{root}`. The data above is that "
-            "branch's slice of the skeleton and of the enriched tree; other "
-            "branches are reviewed separately. Every issue you report must cite "
-            f"a `path` at or under `{root}`.",
-        )
-    )
-
-
 __all__ = [
     "ENRICH_SKELETON_PROMPT",
     "EXTRACTION_PROMPT",
     "IDENTIFY_SOURCE_ROOT_PROMPT",
-    "REVIEW_ENRICHED_PROMPT",
     "render_enrich_prompt",
     "render_enrich_shard_prompt",
     "render_identify_source_root_prompt",
-    "render_review_prompt",
-    "render_review_shard_prompt",
 ]

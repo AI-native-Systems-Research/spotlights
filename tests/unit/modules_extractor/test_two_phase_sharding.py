@@ -1,4 +1,4 @@
-"""Sharded Stage-3/4 orchestration: executor bounds, repair, artifacts, review.
+"""Sharded Stage-3 orchestration: executor bounds, repair, artifacts, merge.
 
 The fake Claude is keyed by *prompt content* rather than by call order, because
 shards run concurrently and completion order is not deterministic. Each shard's
@@ -24,10 +24,6 @@ from typing import Any
 
 import pytest
 
-from spotlights_engine.module_deep_research.codex_exec import (
-    CodexExecResult,
-    CodexExecTimeout,
-)
 from spotlights_engine.modules_extractor.coverage import (
     CrossArtifactError,
     compute_coverage,
@@ -36,7 +32,6 @@ from spotlights_engine.modules_extractor.coverage import (
 from spotlights_engine.modules_extractor.errors import (
     ExtractorAgentError,
     ExtractorCoverageError,
-    ExtractorReviewError,
 )
 from spotlights_engine.modules_extractor.extractor import ExtractorConfig
 from spotlights_engine.modules_extractor.sharding import (
@@ -306,46 +301,7 @@ class _ShardClaude:
                 self._live -= 1
 
 
-class _BranchCodex:
-    """Fake `CodexExecClient` factory dispatching on the review scope root."""
-
-    def __init__(self, behavior) -> None:
-        self.behavior = behavior
-        self.calls: list[str] = []
-        self._lock = threading.Lock()
-
-    def factory(self, options):
-        return _BranchCodexClient(self)
-
-
-class _BranchCodexClient:
-    def __init__(self, parent: _BranchCodex) -> None:
-        self.parent = parent
-
-    def run(self, prompt: str, *, check: bool = True) -> CodexExecResult:
-        match = _KEY_RE.search(prompt)
-        key = match.group(1) if match else ""
-        with self.parent._lock:
-            self.parent.calls.append(key)
-        return self.parent.behavior(key)
-
-
-def _codex_result(report: dict, *, returncode: int = 0) -> CodexExecResult:
-    return CodexExecResult(
-        command=["codex"],
-        returncode=returncode,
-        stdout="{}\n",
-        stderr="",
-        final_message=json.dumps(report),
-        usage=None,
-        output_last_message=None,
-    )
-
-
-_OK = {"ok": True, "issues": []}
-
-
-def _patch(monkeypatch, claude, codex) -> None:
+def _patch(monkeypatch, claude) -> None:
     monkeypatch.setattr(
         "spotlights_engine.modules_extractor.claude_stage.resolve_claude_argv0",
         lambda _: ["claude"],
@@ -354,14 +310,10 @@ def _patch(monkeypatch, claude, codex) -> None:
         "spotlights_engine.modules_extractor.claude_stage.run_streaming_claude",
         claude,
     )
-    monkeypatch.setattr(
-        "spotlights_engine.modules_extractor.two_phase.CodexExecClient",
-        codex.factory,
-    )
 
 
-def _run(repo, claude, codex, monkeypatch, *, artifacts=None, **cfg):
-    _patch(monkeypatch, claude, codex)
+def _run(repo, claude, monkeypatch, *, artifacts=None, **cfg):
+    _patch(monkeypatch, claude)
     return run_two_phase_extraction(
         repo,
         config=ExtractorConfig(**cfg),
@@ -376,14 +328,11 @@ def _run(repo, claude, codex, monkeypatch, *, artifacts=None, **cfg):
 def test_two_branches_run_as_two_shards_and_merge(tmp_path, monkeypatch) -> None:
     repo = _two_branch_repo(tmp_path)
     claude = _ShardClaude(_decision(), TWO_BRANCH)
-    codex = _BranchCodex(lambda key: _codex_result(_OK))
-    run = _run(repo, claude, codex, monkeypatch)
+    run = _run(repo, claude, monkeypatch)
 
     assert [m.name for m in run.project_tree.modules] == ["alpha", "beta"]
     assert claude.calls_for("alpha") == 1
     assert claude.calls_for("beta") == 1
-    # One review per top-level branch.
-    assert sorted(codex.calls) == ["alpha", "beta"]
     # The extractor no longer emits dependency data; the public field stays empty.
     assert run.project_tree.modules[0].depends_on == []
 
@@ -391,8 +340,7 @@ def test_two_branches_run_as_two_shards_and_merge(tmp_path, monkeypatch) -> None
 def test_oversized_branch_runs_as_spine_plus_child_subshards(tmp_path, monkeypatch) -> None:
     repo = _spine_repo(tmp_path)
     claude = _ShardClaude(_decision(), SPINE_SHARDS)
-    codex = _BranchCodex(lambda key: _codex_result(_OK))
-    run = _run(repo, claude, codex, monkeypatch, **SPINE_CFG)
+    run = _run(repo, claude, monkeypatch, **SPINE_CFG)
 
     # No single call spanned the whole branch; three scoped calls did.
     assert sorted(k for k in claude.calls if k != "01_source_root") == [
@@ -403,8 +351,6 @@ def test_oversized_branch_runs_as_spine_plus_child_subshards(tmp_path, monkeypat
     top = run.project_tree.modules[0]
     assert top.name == "pkg"
     assert [s.name for s in top.submodules] == ["a", "b", "light1"]
-    # Review stays at top-level granularity: one call for the whole branch.
-    assert codex.calls == ["pkg"]
 
 
 # ── Dispatch: several source folders override a `single` request ───────────
@@ -422,9 +368,8 @@ def test_several_source_folders_force_the_sharded_path_even_in_single_mode(
     assert has_several_source_roots(build_skeleton(repo, "")) is True
 
     claude = _ShardClaude(_decision(), TWO_BRANCH)
-    codex = _BranchCodex(lambda key: _codex_result(_OK))
     run = _run(
-        repo, claude, codex, monkeypatch,
+        repo, claude, monkeypatch,
         artifacts=artifacts, enrich_sharding="single",
     )
 
@@ -450,9 +395,8 @@ def test_auto_mode_on_two_branches_is_unchanged(tmp_path, monkeypatch) -> None:
     artifacts = tmp_path / "run"
     artifacts.mkdir()
     claude = _ShardClaude(_decision(), TWO_BRANCH)
-    codex = _BranchCodex(lambda key: _codex_result(_OK))
     run = _run(
-        repo, claude, codex, monkeypatch,
+        repo, claude, monkeypatch,
         artifacts=artifacts, enrich_sharding="auto",
     )
 
@@ -482,8 +426,7 @@ def test_single_top_level_folder_in_single_mode_keeps_the_monolithic_pass(
             return _result(_whole_pkg(), "sess-mono")
         return _result(_decision(), "sess-root")
 
-    codex = _BranchCodex(lambda key: _codex_result(_OK))
-    _patch(monkeypatch, fake, codex)
+    _patch(monkeypatch, fake)
     run = run_two_phase_extraction(
         repo,
         config=ExtractorConfig(enrich_sharding="single"),
@@ -501,9 +444,8 @@ def test_single_top_level_folder_in_single_mode_keeps_the_monolithic_pass(
 def test_peak_concurrency_respects_the_semaphore(tmp_path, monkeypatch) -> None:
     repo = _spine_repo(tmp_path)
     claude = _ShardClaude(_decision(), SPINE_SHARDS, delay=0.05)
-    codex = _BranchCodex(lambda key: _codex_result(_OK))
     _run(
-        repo, claude, codex, monkeypatch,
+        repo, claude, monkeypatch,
         max_parallel_enrich_shards=2, **SPINE_CFG,
     )
     assert claude.peak <= 2
@@ -518,8 +460,7 @@ def test_extraction_works_inside_a_caller_owned_event_loop(tmp_path, monkeypatch
     """
     repo = _two_branch_repo(tmp_path)
     claude = _ShardClaude(_decision(), TWO_BRANCH)
-    codex = _BranchCodex(lambda key: _codex_result(_OK))
-    _patch(monkeypatch, claude, codex)
+    _patch(monkeypatch, claude)
 
     async def _caller():
         return run_two_phase_extraction(
@@ -528,8 +469,6 @@ def test_extraction_works_inside_a_caller_owned_event_loop(tmp_path, monkeypatch
 
     run = asyncio.run(_caller())
     assert [m.name for m in run.project_tree.modules] == ["alpha", "beta"]
-    # Stage 4's own executor ran too, not just Stage 3's.
-    assert sorted(codex.calls) == ["alpha", "beta"]
 
 
 def test_sequential_fallback_matches_concurrent_output(tmp_path, monkeypatch) -> None:
@@ -539,12 +478,10 @@ def test_sequential_fallback_matches_concurrent_output(tmp_path, monkeypatch) ->
         artifacts = tmp_path / f"run{i}"
         artifacts.mkdir(parents=True)
         claude = _ShardClaude(_decision(), SPINE_SHARDS)
-        codex = _BranchCodex(lambda key: _codex_result(_OK))
         _run(
-            repo, claude, codex, monkeypatch,
+            repo, claude, monkeypatch,
             artifacts=artifacts,
             max_parallel_enrich_shards=parallel,
-            max_parallel_review_shards=parallel,
             **SPINE_CFG,
         )
         outputs.append((artifacts / "project_tree.json").read_text(encoding="utf-8"))
@@ -560,10 +497,9 @@ def test_a_failed_shard_fails_the_run_and_never_launches_queued_siblings(
     # Shards run in root_path order (`pkg`, `pkg/a`, `pkg/b`); with a semaphore
     # of 1 the spine finishes, `pkg__a` fails, and `pkg__b` is still queued.
     claude = _ShardClaude(_decision(), SPINE_SHARDS, fail_keys=("pkg__a",))
-    codex = _BranchCodex(lambda key: _codex_result(_OK))
     with pytest.raises(ExtractorAgentError) as exc:
         _run(
-            repo, claude, codex, monkeypatch,
+            repo, claude, monkeypatch,
             max_parallel_enrich_shards=1, **SPINE_CFG,
         )
     assert "pkg__a" in str(exc.value)
@@ -572,8 +508,6 @@ def test_a_failed_shard_fails_the_run_and_never_launches_queued_siblings(
     assert claude.calls_for("pkg__spine") == 1
     # The failing shard still spent its one repair before giving up.
     assert claude.calls_for("pkg__a") == 1  # a subprocess error is not repairable
-    # No review ran, since Stage 3 never completed.
-    assert codex.calls == []
 
 
 # ── Per-shard deadline selection ──────────────────────────────────────────
@@ -582,9 +516,8 @@ def test_a_failed_shard_fails_the_run_and_never_launches_queued_siblings(
 def test_real_shards_get_the_per_shard_deadline(tmp_path, monkeypatch) -> None:
     repo = _spine_repo(tmp_path)
     claude = _ShardClaude(_decision(), SPINE_SHARDS)
-    codex = _BranchCodex(lambda key: _codex_result(_OK))
     _run(
-        repo, claude, codex, monkeypatch,
+        repo, claude, monkeypatch,
         timeout_s=5400, enrich_timeout_s=1800, **SPINE_CFG,
     )
     assert claude.timeouts["pkg__spine"] == 1800
@@ -595,9 +528,8 @@ def test_a_whole_skeleton_shard_keeps_the_full_timeout(tmp_path, monkeypatch) ->
     """A repo that degenerates to one shard must not newly time out."""
     repo = _spine_repo(tmp_path)
     claude = _ShardClaude(_decision(), {"pkg": [_whole_pkg()]})
-    codex = _BranchCodex(lambda key: _codex_result(_OK))
     _run(
-        repo, claude, codex, monkeypatch,
+        repo, claude, monkeypatch,
         timeout_s=5400,
         enrich_timeout_s=1800,
         enrich_subshard_threshold=1000,  # never split
@@ -659,8 +591,7 @@ def test_single_mode_uses_the_full_timeout_and_the_monolithic_prompt(
             return _result(_whole_pkg(), "sess-mono")
         return _result(_decision(), "sess-root")
 
-    codex = _BranchCodex(lambda key: _codex_result(_OK))
-    _patch(monkeypatch, fake, codex)
+    _patch(monkeypatch, fake)
     run_two_phase_extraction(
         repo,
         config=ExtractorConfig(
@@ -697,8 +628,7 @@ def test_only_the_failing_shard_is_repaired(tmp_path, monkeypatch) -> None:
         "pkg__b": [PKG_B],
     }
     claude = _ShardClaude(_decision(), per_shard)
-    codex = _BranchCodex(lambda key: _codex_result(_OK))
-    run = _run(repo, claude, codex, monkeypatch, **SPINE_CFG)
+    run = _run(repo, claude, monkeypatch, **SPINE_CFG)
 
     assert claude.calls_for("pkg__a") == 2  # one bounded repair
     assert claude.calls_for("pkg__b") == 1  # siblings ran once
@@ -718,9 +648,8 @@ def test_shard_coverage_failure_after_repair_hard_fails(tmp_path, monkeypatch) -
         "pkg__b": [PKG_B],
     }
     claude = _ShardClaude(_decision(), per_shard)
-    codex = _BranchCodex(lambda key: _codex_result(_OK))
     with pytest.raises(Exception) as exc:
-        _run(repo, claude, codex, monkeypatch, **SPINE_CFG)
+        _run(repo, claude, monkeypatch, **SPINE_CFG)
     assert "pkg__a" in str(exc.value)
     assert claude.calls_for("pkg__a") == 2
 
@@ -737,9 +666,8 @@ def test_missing_required_path_fails_with_the_owning_shard_named(
     # single remaining child would trip Rule 4, so drop both and fold neither.
     dropped["modules"][0]["submodules"] = []
     claude = _ShardClaude(_decision(), {"alpha": [dropped], "beta": [BETA]})
-    codex = _BranchCodex(lambda key: _codex_result(_OK))
     with pytest.raises(ExtractorCoverageError) as exc:
-        _run(repo, claude, codex, monkeypatch)
+        _run(repo, claude, monkeypatch)
     assert "alpha" in str(exc.value)
     assert "alpha/kv_offload" in exc.value.context["missing"]  # type: ignore[operator]
 
@@ -804,8 +732,7 @@ def test_sharded_artifacts_layout(tmp_path, monkeypatch) -> None:
     artifacts = tmp_path / "run"
     artifacts.mkdir()
     claude = _ShardClaude(_decision(), SPINE_SHARDS)
-    codex = _BranchCodex(lambda key: _codex_result(_OK))
-    _run(repo, claude, codex, monkeypatch, artifacts=artifacts, **SPINE_CFG)
+    _run(repo, claude, monkeypatch, artifacts=artifacts, **SPINE_CFG)
 
     enrich = artifacts / "03_enrich"
     plan = json.loads((enrich / "shards.json").read_text())
@@ -827,7 +754,6 @@ def test_sharded_artifacts_layout(tmp_path, monkeypatch) -> None:
         "03_enrich[pkg__spine]",
         "03_enrich[pkg__a]",
         "03_enrich[pkg__b]",
-        "04_review[pkg]",
     }
 
 
@@ -843,8 +769,7 @@ def test_failed_shard_leaves_its_evidence_and_the_repair_writes_attempt_02(
         "pkg__b": [PKG_B],
     }
     claude = _ShardClaude(_decision(), per_shard)
-    codex = _BranchCodex(lambda key: _codex_result(_OK))
-    _run(repo, claude, codex, monkeypatch, artifacts=artifacts, **SPINE_CFG)
+    _run(repo, claude, monkeypatch, artifacts=artifacts, **SPINE_CFG)
 
     shard_dir = artifacts / "03_enrich" / "pkg__a"
     assert (shard_dir / "attempt_01" / "last_message.json").exists()
@@ -855,201 +780,6 @@ def test_failed_shard_leaves_its_evidence_and_the_repair_writes_attempt_02(
     # attempt_01 was never promoted to the accepted fragment.
     fragment = json.loads((shard_dir / "fragment.json").read_text())
     assert fragment["modules"][0]["path"] == "pkg/a"
-
-
-# ── Stage 4: per-shard skip, merge, revision ──────────────────────────────
-
-
-def _timeout(_key: str):
-    raise CodexExecTimeout(
-        cmd=["codex"],
-        timeout=1.0,
-        stdout="partial",
-        stderr="",
-        final_message=None,
-        duration_s=1.0,
-        output_last_message=None,
-    )
-
-
-def test_one_branch_review_skips_while_the_other_completes(tmp_path, monkeypatch) -> None:
-    repo = _two_branch_repo(tmp_path / "repo")
-    artifacts = tmp_path / "run"
-    artifacts.mkdir()
-    claude = _ShardClaude(_decision(), TWO_BRANCH)
-    codex = _BranchCodex(
-        lambda key: _timeout(key) if key == "alpha" else _codex_result(_OK)
-    )
-    run = _run(repo, claude, codex, monkeypatch, artifacts=artifacts)
-
-    assert [m.name for m in run.project_tree.modules] == ["alpha", "beta"]
-    merged = json.loads((artifacts / "04_review" / "merged_review.json").read_text())
-    assert merged["status"] == "completed"
-    assert [s["key"] for s in merged["skipped"]] == ["alpha"]
-    # `review.json` stays a plain ReviewArtifact dump — no extra keys.
-    public = json.loads((artifacts / "review.json").read_text())
-    assert set(public) == {"status", "report", "error"}
-
-
-def test_all_branches_skipping_never_reports_a_false_ok(tmp_path, monkeypatch) -> None:
-    repo = _two_branch_repo(tmp_path / "repo")
-    artifacts = tmp_path / "run"
-    artifacts.mkdir()
-    claude = _ShardClaude(_decision(), TWO_BRANCH)
-    codex = _BranchCodex(_timeout)
-    _run(repo, claude, codex, monkeypatch, artifacts=artifacts)
-
-    public = json.loads((artifacts / "review.json").read_text())
-    assert public["status"] == "skipped"
-    assert public["report"] is None
-    merged = json.loads((artifacts / "04_review" / "merged_review.json").read_text())
-    assert sorted(s["key"] for s in merged["skipped"]) == ["alpha", "beta"]
-
-
-def test_issues_from_two_branches_merge_into_one_sorted_report(
-    tmp_path, monkeypatch
-) -> None:
-    repo = _two_branch_repo(tmp_path / "repo")
-    artifacts = tmp_path / "run"
-    artifacts.mkdir()
-    reports = {
-        "alpha": {
-            "ok": False,
-            "issues": [
-                {"kind": "bad_description", "path": "alpha", "detail": "terse"}
-            ],
-        },
-        "beta": {
-            "ok": False,
-            "issues": [
-                {"kind": "weak_main_files", "path": "beta/core", "detail": "weak"}
-            ],
-        },
-    }
-    claude = _ShardClaude(_decision(), TWO_BRANCH)
-    codex = _BranchCodex(lambda key: _codex_result(reports[key]))
-    _run(repo, claude, codex, monkeypatch, artifacts=artifacts)
-
-    public = json.loads((artifacts / "review.json").read_text())
-    assert public["status"] == "completed"
-    assert public["report"]["ok"] is False
-    assert [i["path"] for i in public["report"]["issues"]] == ["alpha", "beta/core"]
-    # One bounded revision per owning shard: `alpha`'s and `beta`'s.
-    assert claude.calls_for("alpha") == 2
-    assert claude.calls_for("beta") == 2
-
-
-def test_revision_is_scoped_to_the_shard_that_owns_the_issue(
-    tmp_path, monkeypatch
-) -> None:
-    repo = _spine_repo(tmp_path / "repo")
-    artifacts = tmp_path / "run"
-    artifacts.mkdir()
-    report = {
-        "ok": False,
-        "issues": [
-            {"kind": "bad_description", "path": "pkg/a", "detail": "terse"}
-        ],
-    }
-    claude = _ShardClaude(_decision(), SPINE_SHARDS)
-    codex = _BranchCodex(lambda key: _codex_result(report))
-    _run(repo, claude, codex, monkeypatch, artifacts=artifacts, **SPINE_CFG)
-
-    # Only `pkg__a` was re-run — not the spine, not `pkg__b`.
-    assert claude.calls_for("pkg__a") == 2
-    assert claude.calls_for("pkg__b") == 1
-    assert claude.calls_for("pkg__spine") == 1
-    attribution = json.loads(
-        (artifacts / "04_review" / "pkg" / "revision" / "attribution.json").read_text()
-    )
-    assert attribution["issues"][0]["shard"] == "pkg__a"
-    assert attribution["issues"][0]["unmapped"] == "False"
-
-
-def test_unmappable_issue_path_falls_back_to_the_branch_spine(
-    tmp_path, monkeypatch
-) -> None:
-    repo = _spine_repo(tmp_path / "repo")
-    artifacts = tmp_path / "run"
-    artifacts.mkdir()
-    report = {
-        "ok": False,
-        "issues": [
-            {"kind": "missing_dir", "path": "not/a/real/path", "detail": "?"}
-        ],
-    }
-    claude = _ShardClaude(_decision(), SPINE_SHARDS)
-    codex = _BranchCodex(lambda key: _codex_result(report))
-    _run(repo, claude, codex, monkeypatch, artifacts=artifacts, **SPINE_CFG)
-
-    attribution = json.loads(
-        (artifacts / "04_review" / "pkg" / "revision" / "attribution.json").read_text()
-    )
-    assert attribution["issues"][0]["shard"] == "pkg__spine"
-    assert attribution["issues"][0]["unmapped"] == "True"
-    assert claude.calls_for("pkg__spine") == 2
-
-
-def test_advisory_mode_discards_an_invalid_revision(tmp_path, monkeypatch) -> None:
-    repo = _spine_repo(tmp_path / "repo")
-    report = {
-        "ok": False,
-        "issues": [{"kind": "bad_description", "path": "pkg/a", "detail": "terse"}],
-    }
-    per_shard = {
-        "pkg__spine": [PKG_SPINE],
-        "pkg__a": [PKG_A, _incomplete_a()],  # the revision is empty → invalid
-        "pkg__b": [PKG_B],
-    }
-    claude = _ShardClaude(_decision(), per_shard)
-    codex = _BranchCodex(lambda key: _codex_result(report))
-    run = _run(repo, claude, codex, monkeypatch, **SPINE_CFG)
-
-    # The known-valid fragment survived.
-    assert [s.name for s in run.project_tree.modules[0].submodules] == [
-        "a",
-        "b",
-        "light1",
-    ]
-
-
-def test_strict_mode_raises_on_an_invalid_revision(tmp_path, monkeypatch) -> None:
-    repo = _spine_repo(tmp_path / "repo")
-    report = {
-        "ok": False,
-        "issues": [{"kind": "bad_description", "path": "pkg/a", "detail": "terse"}],
-    }
-    per_shard = {
-        "pkg__spine": [PKG_SPINE],
-        "pkg__a": [PKG_A, _incomplete_a()],
-        "pkg__b": [PKG_B],
-    }
-    claude = _ShardClaude(_decision(), per_shard)
-    codex = _BranchCodex(lambda key: _codex_result(report))
-    with pytest.raises(ExtractorReviewError):
-        _run(
-            repo, claude, codex, monkeypatch,
-            fail_on_review_issues=True, **SPINE_CFG,
-        )
-
-
-def test_strict_rereview_runs_once_per_branch_on_the_revised_tree(
-    tmp_path, monkeypatch
-) -> None:
-    repo = _spine_repo(tmp_path / "repo")
-    report = {
-        "ok": False,
-        "issues": [{"kind": "bad_description", "path": "pkg/a", "detail": "terse"}],
-    }
-    claude = _ShardClaude(_decision(), SPINE_SHARDS)
-    codex = _BranchCodex(lambda key: _codex_result(report))
-    with pytest.raises(ExtractorReviewError, match="strict review"):
-        _run(
-            repo, claude, codex, monkeypatch,
-            fail_on_review_issues=True, **SPINE_CFG,
-        )
-    # One review, one re-review — per branch.
-    assert codex.calls == ["pkg", "pkg"]
 
 
 # ── Telemetry ─────────────────────────────────────────────────────────────
@@ -1065,8 +795,7 @@ def test_sessions_json_records_every_shard_invocation(tmp_path, monkeypatch) -> 
         "pkg__b": [PKG_B],
     }
     claude = _ShardClaude(_decision(), per_shard)
-    codex = _BranchCodex(lambda key: _codex_result(_OK))
-    run = _run(repo, claude, codex, monkeypatch, artifacts=artifacts, **SPINE_CFG)
+    run = _run(repo, claude, monkeypatch, artifacts=artifacts, **SPINE_CFG)
 
     sessions = json.loads((artifacts / "sessions.json").read_text())
     stages = [s["stage"] for s in sessions["sessions"]]
@@ -1081,8 +810,7 @@ def test_primary_session_is_the_branch_owning_shard(tmp_path, monkeypatch) -> No
     """A lexicographic-key rule would wrongly pick `pkg__a` over `pkg__spine`."""
     repo = _spine_repo(tmp_path)
     claude = _ShardClaude(_decision(), SPINE_SHARDS)
-    codex = _BranchCodex(lambda key: _codex_result(_OK))
-    run = _run(repo, claude, codex, monkeypatch, **SPINE_CFG)
+    run = _run(repo, claude, monkeypatch, **SPINE_CFG)
     assert run.invocation.session_id == "sess-pkg__spine-1"
 
 
@@ -1091,24 +819,9 @@ def test_primary_session_is_stable_across_concurrency(tmp_path, monkeypatch) -> 
     for i, parallel in enumerate((1, 4)):
         repo = _spine_repo(tmp_path / f"repo{i}")
         claude = _ShardClaude(_decision(), SPINE_SHARDS, delay=0.01)
-        codex = _BranchCodex(lambda key: _codex_result(_OK))
         run = _run(
-            repo, claude, codex, monkeypatch,
+            repo, claude, monkeypatch,
             max_parallel_enrich_shards=parallel, **SPINE_CFG,
         )
         ids.append(run.invocation.session_id)
     assert ids[0] == ids[1] == "sess-pkg__spine-1"
-
-
-def test_a_revision_of_the_primary_shard_updates_the_primary_session(
-    tmp_path, monkeypatch
-) -> None:
-    repo = _spine_repo(tmp_path / "repo")
-    report = {
-        "ok": False,
-        "issues": [{"kind": "bad_description", "path": "pkg", "detail": "terse"}],
-    }
-    claude = _ShardClaude(_decision(), SPINE_SHARDS)
-    codex = _BranchCodex(lambda key: _codex_result(report))
-    run = _run(repo, claude, codex, monkeypatch, **SPINE_CFG)
-    assert run.invocation.session_id == "sess-pkg__spine-2"

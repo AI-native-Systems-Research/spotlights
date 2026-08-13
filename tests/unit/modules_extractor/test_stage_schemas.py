@@ -2,8 +2,8 @@
 
 The stage models are deliberately stricter than the public `ProjectTree`:
 they forbid extra fields (including extras nested in the raw `Repository`, and
-`depends_on` on any module or submodule), bound descriptions/roles, require 1-5
-unique `main_files`, and enforce `review ok == (issues == [])`.
+`depends_on` on any module or submodule), bound descriptions/roles, and require
+1-5 unique `main_files`.
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ from pydantic import ValidationError
 from spotlights_engine.modules_extractor.stage_schemas import (
     EnrichedTree,
     FoldRecord,
-    ReviewReport,
     SourceRootDecision,
 )
 
@@ -106,36 +105,6 @@ def test_fold_record_requires_evidence() -> None:
     with pytest.raises(ValidationError):
         FoldRecord.model_validate(
             {"path": "a", "into": "b", "reason": "r", "evidence_files": []}
-        )
-
-
-def test_review_report_ok_must_agree_with_issues() -> None:
-    with pytest.raises(ValidationError, match="ok"):
-        ReviewReport.model_validate(
-            {
-                "ok": True,
-                "issues": [
-                    {"kind": "bad_fold", "path": "p", "detail": "d"}
-                ],
-            }
-        )
-    with pytest.raises(ValidationError, match="ok"):
-        ReviewReport.model_validate({"ok": False, "issues": []})
-    # Valid both ways.
-    assert ReviewReport.model_validate({"ok": True, "issues": []}).ok
-    r = ReviewReport.model_validate(
-        {"ok": False, "issues": [{"kind": "missing_dir", "path": "p", "detail": "d"}]}
-    )
-    assert not r.ok
-
-
-def test_review_issue_unknown_kind_rejected() -> None:
-    with pytest.raises(ValidationError):
-        ReviewReport.model_validate(
-            {
-                "ok": False,
-                "issues": [{"kind": "not_a_kind", "path": "p", "detail": "d"}],
-            }
         )
 
 

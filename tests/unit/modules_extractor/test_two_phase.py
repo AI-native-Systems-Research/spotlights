@@ -1,10 +1,8 @@
-"""Two-phase orchestration tests with fake Claude and fake Codex.
+"""Two-phase orchestration tests with a fake Claude.
 
 Fake Claude follows the same boundary as ``test_agent.py``: patch
 ``run_streaming_claude`` in ``claude_stage`` to return a ``StreamingResult``
-whose terminal ``result`` event carries ``structured_output``. Fake Codex
-patches ``CodexExecClient`` in ``two_phase`` to return a ``CodexExecResult``
-(or raise ``CodexExecTimeout`` / ``FileNotFoundError``).
+whose terminal ``result`` event carries ``structured_output``.
 
 The synthetic repo is the ``pkg/core`` layout from ``test_coverage``: two
 direct files, two required nested dirs (``kv_offload``, ``scheduler``), and a
@@ -18,14 +16,7 @@ from pathlib import Path
 
 import pytest
 
-from spotlights_engine.module_deep_research.codex_exec import (
-    CodexExecResult,
-    CodexExecTimeout,
-)
-from spotlights_engine.modules_extractor.errors import (
-    ExtractorCoverageError,
-    ExtractorReviewError,
-)
+from spotlights_engine.modules_extractor.errors import ExtractorCoverageError
 from spotlights_engine.modules_extractor.extractor import ExtractorConfig
 from spotlights_engine.modules_extractor.two_phase import run_two_phase_extraction
 from spotlights_engine.signal_pipeline._subprocess_util import StreamingResult
@@ -133,43 +124,7 @@ class _FakeClaude:
         return self.results.pop(0)
 
 
-class _FakeCodex:
-    """Fake CodexExecClient factory. `behavior` decides what run() does."""
-
-    def __init__(self, behavior):
-        self.behavior = behavior
-        self.calls: list[str] = []
-
-    def factory(self, options):
-        self.options = options
-        client = _FakeCodexClient(self.behavior, self.calls, options)
-        return client
-
-
-class _FakeCodexClient:
-    def __init__(self, behavior, calls, options):
-        self.behavior = behavior
-        self.calls = calls
-        self.options = options
-
-    def run(self, prompt: str, *, check: bool = True) -> CodexExecResult:
-        self.calls.append(prompt)
-        return self.behavior(prompt, self.options)
-
-
-def _codex_result(report: dict, *, returncode: int = 0) -> CodexExecResult:
-    return CodexExecResult(
-        command=["codex"],
-        returncode=returncode,
-        stdout="{}\n",
-        stderr="",
-        final_message=json.dumps(report),
-        usage=None,
-        output_last_message=None,
-    )
-
-
-def _patch(monkeypatch, fake_claude: _FakeClaude, fake_codex: _FakeCodex) -> None:
+def _patch(monkeypatch, fake_claude: _FakeClaude) -> None:
     monkeypatch.setattr(
         "spotlights_engine.modules_extractor.claude_stage.resolve_claude_argv0",
         lambda _: ["claude"],
@@ -178,23 +133,18 @@ def _patch(monkeypatch, fake_claude: _FakeClaude, fake_codex: _FakeCodex) -> Non
         "spotlights_engine.modules_extractor.claude_stage.run_streaming_claude",
         fake_claude,
     )
-    monkeypatch.setattr(
-        "spotlights_engine.modules_extractor.two_phase.CodexExecClient",
-        fake_codex.factory,
-    )
 
 
 # ── Happy path ──────────────────────────────────────────────────────────
 
 
-def test_happy_path_two_sessions_and_clean_review(tmp_path, monkeypatch) -> None:
+def test_happy_path_two_sessions(tmp_path, monkeypatch) -> None:
     repo = _repo(tmp_path)
     claude = _FakeClaude([
         _stream_result(_source_root_decision(), in_tok=5, out_tok=6),
         _stream_result(_enriched_tree(), in_tok=10, out_tok=20),
     ])
-    codex = _FakeCodex(lambda p, o: _codex_result({"ok": True, "issues": []}))
-    _patch(monkeypatch, claude, codex)
+    _patch(monkeypatch, claude)
 
     artifacts = tmp_path / "run"
     artifacts.mkdir()
@@ -207,9 +157,8 @@ def test_happy_path_two_sessions_and_clean_review(tmp_path, monkeypatch) -> None
     subs = {s.name for s in run.project_tree.modules[0].submodules}
     assert subs == {"kv_offload", "scheduler"}
 
-    # Exactly 2 Claude sessions + 1 Codex review.
+    # Exactly 2 Claude sessions.
     assert len(claude.prompts) == 2
-    assert len(codex.calls) == 1
 
     # Primary session id = accepted Stage-3 enrichment session.
     assert run.invocation.session_id == "sess-10-20"
@@ -227,8 +176,7 @@ def test_stage_order_and_cwd(tmp_path, monkeypatch) -> None:
         _stream_result(_source_root_decision()),
         _stream_result(_enriched_tree()),
     ])
-    codex = _FakeCodex(lambda p, o: _codex_result({"ok": True, "issues": []}))
-    _patch(monkeypatch, claude, codex)
+    _patch(monkeypatch, claude)
     run_two_phase_extraction(
         repo, config=ExtractorConfig(), on_event=None, artifacts_dir=None
     )
@@ -254,8 +202,7 @@ def test_stage3_one_coverage_repair_then_success(tmp_path, monkeypatch) -> None:
         _stream_result(incomplete),
         _stream_result(_enriched_tree()),
     ])
-    codex = _FakeCodex(lambda p, o: _codex_result({"ok": True, "issues": []}))
-    _patch(monkeypatch, claude, codex)
+    _patch(monkeypatch, claude)
 
     run = run_two_phase_extraction(
         repo, config=ExtractorConfig(), on_event=None, artifacts_dir=None
@@ -280,139 +227,13 @@ def test_stage3_coverage_failure_after_repair_raises(tmp_path, monkeypatch) -> N
         _stream_result(incomplete),
         _stream_result(incomplete),
     ])
-    codex = _FakeCodex(lambda p, o: _codex_result({"ok": True, "issues": []}))
-    _patch(monkeypatch, claude, codex)
+    _patch(monkeypatch, claude)
 
     with pytest.raises(ExtractorCoverageError) as exc:
         run_two_phase_extraction(
             repo, config=ExtractorConfig(), on_event=None, artifacts_dir=None
         )
     assert "pkg/core/kv_offload" in exc.value.context["missing"]  # type: ignore[operator]
-
-
-# ── Review skip cases ───────────────────────────────────────────────────
-
-
-@pytest.mark.parametrize(
-    "behavior",
-    [
-        lambda p, o: _codex_result({"ok": True, "issues": []}, returncode=1),
-        lambda p, o: (_ for _ in ()).throw(FileNotFoundError("no codex")),
-        lambda p, o: CodexExecResult(
-            command=["codex"],
-            returncode=0,
-            stdout="",
-            stderr="",
-            final_message="this is not json",
-            usage=None,
-            output_last_message=None,
-        ),
-    ],
-    ids=["nonzero_exit", "missing_executable", "malformed_json"],
-)
-def test_review_skips_are_not_fatal(tmp_path, monkeypatch, behavior) -> None:
-    repo = _repo(tmp_path)
-    claude = _FakeClaude([
-        _stream_result(_source_root_decision()),
-        _stream_result(_enriched_tree()),
-    ])
-    codex = _FakeCodex(behavior)
-    _patch(monkeypatch, claude, codex)
-    # Advisory mode (default): a skipped review still yields a tree.
-    run = run_two_phase_extraction(
-        repo, config=ExtractorConfig(), on_event=None, artifacts_dir=None
-    )
-    assert run.project_tree.modules[0].name == "core"
-
-
-def test_review_timeout_with_partial_output_skipped(tmp_path, monkeypatch) -> None:
-    repo = _repo(tmp_path)
-    claude = _FakeClaude([
-        _stream_result(_source_root_decision()),
-        _stream_result(_enriched_tree()),
-    ])
-
-    def _timeout(p, o):
-        raise CodexExecTimeout(
-            cmd=["codex"],
-            timeout=1.0,
-            stdout="partial",
-            stderr="",
-            final_message=None,
-            duration_s=1.0,
-            output_last_message=None,
-        )
-
-    codex = _FakeCodex(_timeout)
-    _patch(monkeypatch, claude, codex)
-    artifacts = tmp_path / "run"
-    artifacts.mkdir()
-    run = run_two_phase_extraction(
-        repo, config=ExtractorConfig(), on_event=None, artifacts_dir=artifacts
-    )
-    assert run.project_tree.modules[0].name == "core"
-    review = json.loads((artifacts / "review.json").read_text())
-    assert review["status"] == "skipped"
-
-
-# ── Review revision + strict re-review ───────────────────────────────────
-
-
-def test_review_revision_accepted_when_valid(tmp_path, monkeypatch) -> None:
-    repo = _repo(tmp_path)
-    # First enrichment: valid but description flagged. Revision: full tree.
-    first = _enriched_tree()
-    first["modules"][0]["description"] = "core"
-    claude = _FakeClaude([
-        _stream_result(_source_root_decision()),
-        _stream_result(first),
-        _stream_result(_enriched_tree(), in_tok=99, out_tok=88),
-    ])
-    # Codex flags an issue once (non-strict → one revision).
-    review_report = {
-        "ok": False,
-        "issues": [
-            {"kind": "bad_description", "path": "pkg/core", "detail": "too terse"}
-        ],
-    }
-    codex = _FakeCodex(lambda p, o: _codex_result(review_report))
-    _patch(monkeypatch, claude, codex)
-
-    run = run_two_phase_extraction(
-        repo, config=ExtractorConfig(), on_event=None, artifacts_dir=None
-    )
-    # 1 source-root + 1 enrichment + 1 revision = 3 Claude calls.
-    assert len(claude.prompts) == 3
-    # Accepted session updates to the revision session.
-    assert run.invocation.session_id == "sess-99-88"
-
-
-def test_strict_mode_reraises_when_rereview_still_flags(tmp_path, monkeypatch) -> None:
-    repo = _repo(tmp_path)
-    first = _enriched_tree()
-    first["modules"][0]["description"] = "core"
-    claude = _FakeClaude([
-        _stream_result(_source_root_decision()),
-        _stream_result(first),
-        _stream_result(_enriched_tree()),
-    ])
-    review_report = {
-        "ok": False,
-        "issues": [
-            {"kind": "bad_description", "path": "pkg/core", "detail": "too terse"}
-        ],
-    }
-    # Codex always flags — even the strict re-review.
-    codex = _FakeCodex(lambda p, o: _codex_result(review_report))
-    _patch(monkeypatch, claude, codex)
-
-    with pytest.raises(ExtractorReviewError):
-        run_two_phase_extraction(
-            repo,
-            config=ExtractorConfig(fail_on_review_issues=True),
-            on_event=None,
-            artifacts_dir=None,
-        )
 
 
 # ── Telemetry ─────────────────────────────────────────────────────────────
@@ -424,8 +245,7 @@ def test_telemetry_sums_and_selects_primary_session(tmp_path, monkeypatch) -> No
         _stream_result(_source_root_decision(), in_tok=5, out_tok=6),
         _stream_result(_enriched_tree(), in_tok=10, out_tok=20),
     ])
-    codex = _FakeCodex(lambda p, o: _codex_result({"ok": True, "issues": []}))
-    _patch(monkeypatch, claude, codex)
+    _patch(monkeypatch, claude)
     artifacts = tmp_path / "run"
     artifacts.mkdir()
     run = run_two_phase_extraction(
@@ -436,9 +256,9 @@ def test_telemetry_sums_and_selects_primary_session(tmp_path, monkeypatch) -> No
     assert run.invocation.output_tokens == 26
     # Primary session = accepted enrichment session.
     assert run.invocation.session_id == "sess-10-20"
-    # sessions.json lists both Claude stages + the review. Stage-3/4 records are
-    # tagged with the shard key (`03_enrich[pkg__core]`) since enrichment is
-    # sharded; this repo has exactly one top-level branch, so exactly one shard.
+    # sessions.json lists both Claude stages. Stage-3 records are tagged with the
+    # shard key (`03_enrich[pkg__core]`) since enrichment is sharded; this repo
+    # has exactly one top-level branch, so exactly one shard.
     sessions = json.loads((artifacts / "sessions.json").read_text())
     stages = [s["stage"] for s in sessions["sessions"]]
     assert "01_source_root" in stages

@@ -60,15 +60,8 @@ class ExtractorConfig(BaseModel):
     # legacy single-shot path.
     two_phase: bool = True
     source_root_max_turns: int = Field(default=15, ge=1)
-    codex_bin: str = "codex"
-    codex_model: str | None = None
-    codex_reasoning_effort: (
-        Literal["minimal", "low", "medium", "high", "xhigh"] | None
-    ) = None
-    codex_timeout_s: int = Field(default=900, ge=1)
-    fail_on_review_issues: bool = False
 
-    # ── Stage-3/4 sharding strategy ───────────────────────────────────────
+    # ── Stage-3 sharding strategy ─────────────────────────────────────────
     # Enrichment is sharded by top-level skeleton node and run under a bounded
     # concurrency executor; see `sharding.py` and
     # `design/module_extraction_fix_impl__top_level_plan.md`. Always-on rather
@@ -82,7 +75,6 @@ class ExtractorConfig(BaseModel):
     #   "single"          force today's monolithic single call (A/B, small repos)
     enrich_sharding: Literal["auto", "top_level_only", "single"] = "auto"
     max_parallel_enrich_shards: int = Field(default=5, ge=1)
-    max_parallel_review_shards: int = Field(default=5, ge=1)
 
     # Stage-specific deadlines that decouple from the coarse `timeout_s`.
     # `None` means "inherit `timeout_s`". The fields are `int | None` rather
@@ -157,9 +149,9 @@ def extract_with_telemetry(
         run_dir = None
 
     if cfg.two_phase:
-        # Lazy import: two_phase pulls in codex/skeleton machinery that the
-        # legacy path (and the Stage-02 safety-order test) must not require at
-        # module top.
+        # Lazy import: two_phase pulls in skeleton machinery that the legacy
+        # path (and the Stage-02 safety-order test) must not require at module
+        # top.
         from spotlights_engine.modules_extractor.two_phase import (
             run_two_phase_extraction,
         )

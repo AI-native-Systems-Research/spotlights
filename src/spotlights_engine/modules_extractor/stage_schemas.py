@@ -10,8 +10,6 @@ than the public `ProjectTree`/`Module` schema:
 - `EnrichedTree` and friends (Stage 3) forbid extra fields, require non-empty
   bounded descriptions, and 1–5 unique `main_files` — none of which the public
   `Module` model enforces.
-- `ReviewReport`/`ReviewArtifact` (Stage 4) capture Codex output plus an honest
-  completed/skipped execution status.
 
 The public serialized `ProjectTree` schema is unchanged; Stage 5 converts an
 `EnrichedTree` back into `ProjectTree` dicts via `modules_as_project_tree_dicts`.
@@ -32,7 +30,6 @@ _MAX_DESCRIPTION = 2000
 _MAX_ROLE = 500
 _MAX_REASON = 500
 _MAX_EXPLANATION = 1000
-_MAX_DETAIL = 2000
 
 ExclusionReason = Literal[
     "centralized_tests",
@@ -44,13 +41,6 @@ ExclusionReason = Literal[
     "vendored",
     "not_product_source",
     "repository_level_file",
-]
-
-ReviewIssueKind = Literal[
-    "missing_dir",
-    "bad_fold",
-    "bad_description",
-    "weak_main_files",
 ]
 
 _REPOSITORY_KEYS = frozenset(Repository.model_fields.keys())
@@ -330,56 +320,6 @@ class EnrichedTree(BaseModel):
         return out
 
 
-# ── Stage 4 — review ─────────────────────────────────────────────────────
-
-
-class ReviewIssue(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    kind: ReviewIssueKind
-    path: str
-    detail: str = Field(min_length=1, max_length=_MAX_DETAIL)
-
-
-class ReviewReport(BaseModel):
-    """Strict Codex review output (the JSON the reviewer must return)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    ok: bool
-    issues: list[ReviewIssue] = Field(default_factory=list)
-
-    @model_validator(mode="after")
-    def _ok_agrees_with_issues(self) -> ReviewReport:
-        if self.ok != (len(self.issues) == 0):
-            raise ValueError(
-                "review `ok` must equal (issues == []); "
-                f"got ok={self.ok} with {len(self.issues)} issue(s)"
-            )
-        return self
-
-
-class ReviewArtifact(BaseModel):
-    """Review report wrapped in an honest execution status.
-
-    A skipped review (nonzero exit, timeout, malformed JSON, missing executable)
-    is recorded as `status="skipped"` with the raw `error` — never as a
-    successful empty `ok=true` review.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    status: Literal["completed", "skipped"]
-    report: ReviewReport | None = None
-    error: str | None = None
-
-    @model_validator(mode="after")
-    def _validate(self) -> ReviewArtifact:
-        if self.status == "completed" and self.report is None:
-            raise ValueError("completed review must carry a report")
-        return self
-
-
 SkeletonNode.model_rebuild()
 EnrichedSubmodule.model_rebuild()
 EnrichedTopModule.model_rebuild()
@@ -393,10 +333,6 @@ __all__ = [
     "ExcludedSourcePath",
     "ExclusionReason",
     "FoldRecord",
-    "ReviewArtifact",
-    "ReviewIssue",
-    "ReviewIssueKind",
-    "ReviewReport",
     "Skeleton",
     "SkeletonNode",
     "SourceRootDecision",
