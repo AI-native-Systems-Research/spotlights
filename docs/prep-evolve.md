@@ -15,21 +15,44 @@ Pass `--evolver all` to emit one bundle per compatible evolver (skydiscover is r
 ### Usage
 
 `prep-evolve` consumes a completed run and a target repo. Point `--result` at the
-run directory (it finds `result.json` and reads the repo path from `index.md`);
-omit `--candidate` to generate a bundle for every candidate:
+run directory (it finds `result.json`) and pass `--repo` at the checkout you want
+the bundle to target; omit `--candidate` to generate a bundle for every candidate:
 
 ```bash
 # every candidate → spotlights-out/evolve/<module>/<candidate>/skydiscover/
-spotlights-engine prep-evolve --result ./spotlights-out --evolver skydiscover
+spotlights-engine prep-evolve --result ./spotlights-out \
+  --repo ../vllm --evolver skydiscover
 
 # one candidate
 spotlights-engine prep-evolve --result ./spotlights-out \
-  --candidate cand-vllm_v1_kv_offload-0002 --evolver skydiscover
+  --repo ../vllm --candidate cand-vllm_v1_kv_offload-0002 --evolver skydiscover
 
 # top 10 of a ranking → still under spotlights-out/evolve/… (not inside sorted/)
 spotlights-engine prep-evolve --result ./spotlights-out/sorted \
-  --evolver skydiscover --top-n 10
+  --repo ../vllm --evolver skydiscover --top-n 10
 ```
+
+> [!TIP]
+> **Prefer `--repo` over the `index.md` fallback.** If you omit `--repo`,
+> the repo is read from the `Repo path:` line in the run's `index.md`. That path
+> is whatever was recorded when the run was produced, so it is often stale or
+> wrong on another machine or checkout — it may not exist, or (worse) point at a
+> *different* checkout whose code no longer matches the recorded line ranges,
+> which surfaces later as a confusing staleness error. Passing `--repo`
+> explicitly makes the target unambiguous.
+>
+> **Check out the same commit the run was produced against.** `prep-evolve`
+> validates each candidate's recorded symbol/line range against the *live* repo
+> before writing a bundle. Point `--repo` at a checkout on the commit recorded
+> in the run's `run_manifest.json` under `target.commit_sha` (from
+> `target.repo_url`). On any other commit the code may have shifted, and the
+> gate fails with a staleness error even though the run itself is fine:
+>
+> ```bash
+> # commit the run targeted, e.g. from examples/vllm_subset/run_manifest.json
+> git -C ../vllm checkout 83ad767eed3be3ee7f2df63be693bfaca5c7c922
+> spotlights-engine prep-evolve --result ./spotlights-out --repo ../vllm --evolver skydiscover
+> ```
 
 `--result` accepts any run artifact and self-locates the rest: a run directory, a
 `result.json` file, an `index.md`, a `sorted/` directory, or a

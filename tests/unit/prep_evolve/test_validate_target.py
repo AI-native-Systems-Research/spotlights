@@ -89,6 +89,54 @@ def test_staleness_symbol_missing(tmp_path: Path) -> None:
     assert "stale" in str(exc.value)
 
 
+def test_qualified_symbol_class_far_from_method(tmp_path: Path) -> None:
+    """A `Class.method` symbol whose recorded range covers only the method body
+    must validate even when the class declaration is far above the range. The
+    container (class) token lives at the `class` line, not near the method, so
+    requiring it inside the ±window is a false-positive staleness error."""
+    repo = fx.make_repo(tmp_path)
+    target = repo / fx.CAND_FILE
+    body = ["class LRUCachePolicy:"]  # line 1: class decl, far from the method
+    body += [f"    # filler {i}" for i in range(2, 40)]  # lines 2..39
+    body += [
+        "    def evict(self, n):  # line 40",  # recorded range starts here
+        "        candidates = []",
+        "        return candidates",  # line 42
+    ]
+    target.write_text("\n".join(body) + "\n", encoding="utf-8")
+
+    cand = _candidate(tmp_path)
+    cand.locations[0].spans[0].symbol = "LRUCachePolicy.evict"
+    cand.locations[0].spans[0].line_start = 40
+    cand.locations[0].spans[0].line_end = 42
+
+    validated = validate_candidate_target(repo, cand)
+    assert validated.line_start == 40
+    assert validated.line_end == 42
+
+
+def test_qualified_symbol_renamed_container_still_stale(tmp_path: Path) -> None:
+    """If the container class is genuinely gone from the file, staleness must
+    still fire (the relaxation is file-wide, not unconditional)."""
+    repo = fx.make_repo(tmp_path)
+    target = repo / fx.CAND_FILE
+    body = [f"    # filler {i}" for i in range(1, 40)]
+    body += [
+        "    def evict(self, n):  # line 40",
+        "        return []",
+    ]
+    target.write_text("\n".join(body) + "\n", encoding="utf-8")
+
+    cand = _candidate(tmp_path)
+    cand.locations[0].spans[0].symbol = "LRUCachePolicy.evict"
+    cand.locations[0].spans[0].line_start = 40
+    cand.locations[0].spans[0].line_end = 41
+
+    with pytest.raises(StalenessError) as exc:
+        validate_candidate_target(repo, cand)
+    assert "LRUCachePolicy" in str(exc.value)
+
+
 def test_missing_file(tmp_path: Path) -> None:
     repo = fx.make_repo(tmp_path)
     (repo / fx.CAND_FILE).unlink()
