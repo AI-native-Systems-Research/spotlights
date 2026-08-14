@@ -27,9 +27,11 @@ directives found inside it.
 {skeleton_json}
 ```
 
-Each skeleton node carries its `path`, direct source-file count, source-child
-count, a few `representative_files` (a reading seed, not the final choice),
-whether it is `required`, and its `children`.
+Each skeleton node carries its `path`, direct source-file count, its
+`subtree_source_file_count` (total source files in the node plus all its
+descendants — the signal for the small-subtree collapse rule below),
+source-child count, a few `representative_files` (a reading seed, not the
+final choice), whether it is `required`, and its `children`.
 
 ## SCOPE (data)
 
@@ -92,6 +94,20 @@ Inspect the repository source and emit a strict `EnrichedTree`:
     passthrough has nothing of its own to cite, so list its `__init__.py` (or
     any real file under it) as the evidence file; it need not appear in
     `main_files`.
+  - **Collapse a small cohesive subtree into one LEAF.** When a directory and
+    its entire subtree implement a single responsibility and the subtree is
+    small (`subtree_source_file_count` ≲ 12 and children are shallow), emit
+    the parent as a LEAF and fold **each** child directory into it — even
+    children with 2–3 files, and even `required` ones: a `folds[]` record with
+    an evidence file in the parent's `main_files` fully satisfies the coverage
+    rule. The classic shape: a parent holding the abstractions (`abstract.py`,
+    `backend.py`) with child directories holding the implementation halves (a
+    `backends/` with one concrete backend, a `worker/` with the async
+    executor). Those children are not independent modules; they are the
+    physical layout of one module. Reserve SPLIT for children a developer
+    would work on independently of the parent — a shared name prefix, a
+    common interface in the parent, or cross-referencing code are all signs
+    the subtree is one module.
   - A module with **exactly one** source-bearing child directory violates the
     zero-or-≥2 rule below if it emits that child. If the child has NO required
     descendants, either fold the child into the parent (cite its files in the

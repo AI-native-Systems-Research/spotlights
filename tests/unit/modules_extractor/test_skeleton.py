@@ -99,6 +99,18 @@ def test_organizational_only_namespace_recorded(tmp_path: Path) -> None:
     assert "src/wrapper" in skel.organizational_only
 
 
+def test_subtree_source_file_counts(tmp_path: Path) -> None:
+    _shape_repo(tmp_path)
+    skel = build_skeleton(tmp_path, "src")
+    counts = {n.path: n.subtree_source_file_count for n in skel.iter_nodes()}
+    # direct (a.py, b.py) + nested onefile/only.py; __init__.py never counts
+    assert counts["src/twofile"] == 3
+    assert counts["src/twofile/onefile"] == 1
+    assert counts["src/withchild"] == 2
+    assert counts["src/ns"] == 2
+    assert counts["src/passthrough"] == 1
+
+
 def test_passthrough_branch_is_promoted(tmp_path: Path) -> None:
     _shape_repo(tmp_path)
     skel = build_skeleton(tmp_path, "src")

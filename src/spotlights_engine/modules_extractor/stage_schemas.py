@@ -133,6 +133,9 @@ class SkeletonNode(BaseModel):
 
     path: str
     direct_source_file_count: int = Field(ge=0)
+    # Non-init source files in the whole subtree (this node + descendants).
+    # Defaulted so skeletons serialized before the field existed still load.
+    subtree_source_file_count: int = Field(default=0, ge=0)
     source_child_count: int = Field(ge=0)
     representative_files: list[str] = Field(default_factory=list, max_length=5)
     required: bool

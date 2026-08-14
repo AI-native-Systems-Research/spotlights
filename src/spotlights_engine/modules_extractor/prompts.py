@@ -93,9 +93,11 @@ def _shard_scope_rules(scope: dict[str, Any]) -> str:
             "a pure container of sub-directories), give it `\"main_files\": []`. "
             "That is correct here — do not reach into a removed subtree, and do "
             "not fold anything just to have something to cite.",
-            f"- `{parent}`'s `source_child_count` counts those removed children, "
-            "so it will be larger than the `children` actually present above. "
-            "That is expected.",
+            f"- `{parent}`'s `source_child_count` and "
+            "`subtree_source_file_count` count those removed subtrees, so both "
+            "will be larger than the `children` actually present above suggest. "
+            "That is expected — do not use its `subtree_source_file_count` as a "
+            "small-subtree collapse signal.",
             f"- The zero-or-≥2-children rule below does **not** apply to "
             f"`{parent}` itself: those removed subtrees are re-attached as its "
             f"children afterwards, so `{parent}` may legitimately carry exactly "

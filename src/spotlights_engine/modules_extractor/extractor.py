@@ -74,7 +74,7 @@ class ExtractorConfig(BaseModel):
     #   "top_level_only"  shard by top-level, never sub-shard
     #   "single"          force today's monolithic single call (A/B, small repos)
     enrich_sharding: Literal["auto", "top_level_only", "single"] = "auto"
-    max_parallel_enrich_shards: int = Field(default=5, ge=1)
+    max_parallel_enrich_shards: int = Field(default=10, ge=1)
 
     # Stage-specific deadlines that decouple from the coarse `timeout_s`.
     # `None` means "inherit `timeout_s`". The fields are `int | None` rather

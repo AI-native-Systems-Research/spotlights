@@ -294,6 +294,9 @@ def _classify_node(raw: _RawDir) -> tuple[SkeletonNode, list[str]]:
 
     direct_count = len(raw.direct_source_files)
     child_count = len(raw.children)
+    subtree_count = direct_count + sum(
+        c.subtree_source_file_count for c in child_nodes
+    )
 
     reasons: list[str] = []
     if direct_count >= 2:
@@ -310,6 +313,7 @@ def _classify_node(raw: _RawDir) -> tuple[SkeletonNode, list[str]]:
     node = SkeletonNode(
         path=raw.rel,
         direct_source_file_count=direct_count,
+        subtree_source_file_count=subtree_count,
         source_child_count=child_count,
         representative_files=_representative_files(raw),
         required=required,

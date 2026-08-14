@@ -202,8 +202,9 @@ def _in_scope(path: str, root: str, pruned: frozenset[str]) -> bool:
 def _prune_node(node: SkeletonNode, pruned: frozenset[str]) -> SkeletonNode:
     """Deep copy of `node` with every pruned child subtree removed.
 
-    Every other field — including `required`, `required_reasons`, and
-    `source_child_count` — is copied **verbatim**. For a spine this deliberately
+    Every other field — including `required`, `required_reasons`,
+    `source_child_count`, and `subtree_source_file_count` — is copied
+    **verbatim**. For a spine this deliberately
     leaves `source_child_count` disagreeing with `len(children)`: the reasons
     were derived from the original counts, and rewriting one field without the
     other would produce an incoherent node. The spine's `SCOPE` block is what
