@@ -400,3 +400,55 @@ def test_top_n_without_ranking_errors(tmp_path: Path) -> None:
                    evolver="coral", out=tmp_path / "b"),
             _CFG,
         )
+
+
+def test_cli_batch_no_candidate(tmp_path: Path, capsys) -> None:
+    repo = fx.make_repo(tmp_path)
+    result_json = fx.write_result(tmp_path)
+    rc = prep_main(
+        ["--result", str(result_json), "--repo", str(repo),
+         "--evolver", "coral", "--out", str(tmp_path / "out")]
+    )
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "bundle(s) written" in err
+
+
+def test_cli_minimal_flags_directory(tmp_path: Path, capsys) -> None:
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    fx.write_result(run_dir)
+    repo = fx.make_repo(tmp_path)
+    fx.write_index(run_dir, repo)
+    # No --module, --candidate, --repo, or --out.
+    rc = prep_main(["--result", str(run_dir), "--evolver", "coral"])
+    assert rc == 0
+    assert (run_dir / "evolve" / "v1_attention").is_dir()
+
+
+def test_cli_top_n_from_sorted(tmp_path: Path) -> None:
+    repo = fx.make_repo(tmp_path)
+    _two_candidate_run(tmp_path)
+    sorted_dir = fx.write_sorted(
+        tmp_path, ["cand-v1_attention-0003", "cand-v1_attention-0002"]
+    )
+    rc = prep_main(
+        ["--result", str(sorted_dir), "--repo", str(repo), "--evolver", "coral",
+         "--top-n", "1", "--out", str(tmp_path / "out")]
+    )
+    assert rc == 0
+    # Only the top-ranked candidate's bundle exists.
+    evolve = tmp_path / "out" / "evolve" / "v1_attention"
+    assert (evolve / "cand-v1_attention-0003").is_dir()
+    assert not (evolve / "cand-v1_attention-0002").exists()
+
+
+def test_cli_bad_top_n_returns_2(tmp_path: Path, capsys) -> None:
+    repo = fx.make_repo(tmp_path)
+    result_json = fx.write_result(tmp_path)
+    rc = prep_main(
+        ["--result", str(result_json), "--evolver", "coral",
+         "--top-n", "banana", "--out", str(tmp_path / "out")]
+    )
+    assert rc == 2
+    assert "--top-n" in capsys.readouterr().err

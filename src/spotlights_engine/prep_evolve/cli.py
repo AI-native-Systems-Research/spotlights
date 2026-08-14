@@ -27,7 +27,15 @@ def _build_argparser() -> argparse.ArgumentParser:
             "and an evaluator scaffold. Does not run the evolve."
         ),
     )
-    p.add_argument("--result", type=Path, required=True, help="Path to result.json.")
+    p.add_argument(
+        "--result",
+        type=Path,
+        required=True,
+        help=(
+            "A finished run's result.json, or the run directory / index.md / "
+            "sorted/ dir / sorted_candidates.{json,md} that self-locates it."
+        ),
+    )
     p.add_argument(
         "--index",
         type=Path,
@@ -36,10 +44,14 @@ def _build_argparser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--module",
-        required=True,
-        help="Slash-form qualified name, e.g. v1/attention.",
+        default=None,
+        help="Slash-form qualified name (optional; inferred from --candidate).",
     )
-    p.add_argument("--candidate", required=True, help="Candidate id, e.g. cand-0002.")
+    p.add_argument(
+        "--candidate",
+        default=None,
+        help="Candidate id, e.g. cand-....; omit to process every candidate.",
+    )
     p.add_argument(
         "--repo",
         default=None,
@@ -51,7 +63,10 @@ def _build_argparser() -> argparse.ArgumentParser:
         help="skydiscover | coral | nous | agentic-strategy-evolution | all.",
     )
     p.add_argument(
-        "--out", type=Path, required=True, help="Bundles parent dir, e.g. evolve_bundles/."
+        "--out",
+        type=Path,
+        default=None,
+        help="Bundles base dir (optional; defaults to the run directory).",
     )
     p.add_argument(
         "--scope",
@@ -71,11 +86,40 @@ def _build_argparser() -> argparse.ArgumentParser:
         action="store_true",
         help="Rewrite only generator-owned files (manifest-guarded).",
     )
+    p.add_argument(
+        "--top-n",
+        dest="top_n",
+        default="all",
+        help=(
+            "For a sorted --result: build only the top N ranked candidates "
+            "('all' = every ranked candidate, the default)."
+        ),
+    )
     return p
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_argparser().parse_args(argv)
+
+    raw_top_n = str(args.top_n).strip().lower()
+    if raw_top_n == "all":
+        top_n: int | None = None
+    else:
+        try:
+            top_n = int(raw_top_n)
+        except ValueError:
+            print(
+                f"prep-evolve: --top-n must be a positive integer or 'all', "
+                f"got {args.top_n!r}",
+                file=sys.stderr,
+            )
+            return 2
+        if top_n < 1:
+            print(
+                f"prep-evolve: --top-n must be >= 1, got {top_n}",
+                file=sys.stderr,
+            )
+            return 2
 
     inp = PrepEvolveInput(
         result=args.result,
@@ -85,6 +129,7 @@ def main(argv: list[str] | None = None) -> int:
         repo=args.repo,
         evolver=args.evolver,
         out=args.out,
+        top_n=top_n,
         scope=args.scope,
         direction=args.direction,
         model=args.model,
@@ -99,16 +144,24 @@ def main(argv: list[str] | None = None) -> int:
 
     for w in result.warnings:
         print(f"warning: {w}", file=sys.stderr)
-    for s in result.skipped:
-        print(f"skipped {s.evolver}: {s.reason}", file=sys.stderr)
-
-    if not result.bundles:
-        print("prep-evolve: no bundles emitted", file=sys.stderr)
-        return 1
 
     for b in result.bundles:
         print(f"{b.evolver}: {b.path} ({len(b.files)} files)")
-    return 0
+
+    print(
+        f"prep-evolve: {len(result.bundles)} bundle(s) written, "
+        f"{len(result.skipped)} skipped",
+        file=sys.stderr,
+    )
+    for s in result.skipped:
+        who = (
+            f"{s.module_qualified_name}/{s.candidate_id} "
+            if s.candidate_id
+            else ""
+        )
+        print(f"  skipped {who}({s.evolver}): {s.reason}", file=sys.stderr)
+
+    return 0 if result.bundles else 1
 
 
 if __name__ == "__main__":
