@@ -14,23 +14,64 @@ Pass `--evolver all` to emit one bundle per compatible evolver (skydiscover is r
 
 ### Usage
 
-`prep-evolve` consumes a completed run's `result.json` plus a `(module, candidate)` selection, pointed at the same target repo:
+`prep-evolve` consumes a completed run and a target repo. Point `--result` at the
+run directory (it finds `result.json`) and pass `--repo` at the checkout you want
+the bundle to target; omit `--candidate` to generate a bundle for every candidate:
 
 ```bash
-spotlights-engine prep-evolve \
-  --result   ./spotlights-out/result.json \
-  --module   vllm/v1/kv_offload \
-  --candidate cand-0002 \
-  --repo     ../vllm \
-  --evolver  skydiscover \
-  --out      ./evolve_bundles
+# every candidate → spotlights-out/evolve/<module>/<candidate>/skydiscover/
+spotlights-engine prep-evolve --result ./spotlights-out \
+  --repo ../vllm --evolver skydiscover
+
+# one candidate
+spotlights-engine prep-evolve --result ./spotlights-out \
+  --repo ../vllm --candidate cand-vllm_v1_kv_offload-0002 --evolver skydiscover
+
+# top 10 of a ranking → still under spotlights-out/evolve/… (not inside sorted/)
+spotlights-engine prep-evolve --result ./spotlights-out/sorted \
+  --repo ../vllm --evolver skydiscover --top-n 10
 ```
 
-`--module` takes the slash-form qualified name shown in `index.md`; `--candidate` takes the candidate id from the module page. The target repo is resolved from `--repo` (preferred); if omitted, `--index path/to/index.md` supplies the `Repo path:` recorded by the run. One of the two must resolve to an existing directory, or the command fails before writing anything.
+> [!TIP]
+> **Prefer `--repo` over the `index.md` fallback.** If you omit `--repo`,
+> the repo is read from the `Repo path:` line in the run's `index.md`. That path
+> is whatever was recorded when the run was produced, so it is often stale or
+> wrong on another machine or checkout — it may not exist, or (worse) point at a
+> *different* checkout whose code no longer matches the recorded line ranges,
+> which surfaces later as a confusing staleness error. Passing `--repo`
+> explicitly makes the target unambiguous.
+>
+> **Check out the same commit the run was produced against.** `prep-evolve`
+> validates each candidate's recorded symbol/line range against the *live* repo
+> before writing a bundle. Point `--repo` at a checkout on the commit recorded
+> in the run's `run_manifest.json` under `target.commit_sha` (from
+> `target.repo_url`). On any other commit the code may have shifted, and the
+> gate fails with a staleness error even though the run itself is fine:
+>
+> ```bash
+> # commit the run targeted, e.g. from examples/vllm_subset/run_manifest.json
+> git -C ../vllm checkout 83ad767eed3be3ee7f2df63be693bfaca5c7c922
+> spotlights-engine prep-evolve --result ./spotlights-out --repo ../vllm --evolver skydiscover
+> ```
+
+`--result` accepts any run artifact and self-locates the rest: a run directory, a
+`result.json` file, an `index.md`, a `sorted/` directory, or a
+`sorted_candidates.json`/`.md`. `--candidate` takes the candidate id from the
+module page and is optional (omitting it processes all candidates); the module is
+inferred from the id, so `--module` is no longer required. When `--result` points
+at a sorted source, omitting `--candidate` processes the ranked candidates in rank
+order, and `--top-n <N>` builds only the top N (default `all`); `--top-n` with a
+plain `result.json` is an error. The target repo is resolved from `--repo`, else
+from the `Repo path:` line in the run directory's `index.md`. Bundles are written
+to `<base>/evolve/<module>/<candidate>/<evolver>/`, where `<base>` is `--out` when
+given, else the run directory. Candidates an evolver cannot handle are skipped
+with a warning, and existing bundles are skipped unless `--force` is set.
 
 ### What lands on disk
 
-One directory per `(candidate × evolver)`, named `<repo>__<module>__<candidate>__<evolver>/`. Alongside the evolver-native files, every bundle (except the single-file Nous campaign) includes:
+Bundles are written to `<base>/evolve/<module>/<candidate>/<evolver>/`, mirroring
+the `modules/` tree. Alongside the evolver-native files, every bundle (except the
+single-file Nous campaign) includes:
 
 - `README.md` — the copy-paste run command, the in-scope files, and the **evaluation-gap warning**.
 
@@ -43,11 +84,12 @@ The findings/proposals digest is embedded directly in each evolver's native conf
 
 | Flag | Default | Purpose |
 |---|---|---|
-| `--result` | (required) | Path to a finished run's `result.json`. |
-| `--module` | (required) | Slash-form qualified name, e.g. `vllm/v1/attention`. |
-| `--candidate` | (required) | Candidate id, e.g. `cand-0002`. |
+| `--result` | (required) | A finished run's `result.json`, the run directory containing it, an `index.md`, a `sorted/` dir, or a `sorted_candidates.{json,md}`. |
+| `--module` | (inferred) | Slash-form qualified name; inferred from the candidate id when omitted. |
+| `--candidate` | (all) | Candidate id, e.g. `cand-…-0002`. Omit to process every candidate. |
+| `--top-n` | `all` | For a sorted `--result`: build only the top N ranked candidates. Error with a plain source. |
+| `--out` | (run dir) | Base directory; the `evolve/…` tree is written under it. Defaults to the run directory. |
 | `--evolver` | (required) | `skydiscover` \| `coral` \| `nous` \| `agentic-strategy-evolution` \| `all`. |
-| `--out` | (required) | Parent directory the bundle dir is written under. |
 | `--repo` | (none) | Target repo path; wins over `--index`. |
 | `--index` | (none) | Rendered `index.md`, used only as a `--repo` fallback. |
 | `--scope` | `candidate` | `candidate` or `module-main-files` (CORAL/Nous only — adds the module's `main_files` as editable targets). |
@@ -55,4 +97,7 @@ The findings/proposals digest is embedded directly in each evolver's native conf
 | `--model` | (evolver default) | Override the default evolver LLM model. |
 | `--force` | off | Re-run over an existing bundle, overwriting every generated file. |
 
-Re-runs are guarded by default: if the bundle directory already exists, the command fails unless `--force` is set. With `--force`, every generated file is overwritten — including a hand-edited evaluator/grader — so copy out any evaluator work you want to keep before re-running.
+Re-runs resume cleanly: an existing bundle directory is skipped (not an error)
+unless `--force` is set. With `--force`, every generated file in that bundle is
+overwritten — including a hand-edited evaluator/grader — so copy out any evaluator
+work you want to keep before re-running.

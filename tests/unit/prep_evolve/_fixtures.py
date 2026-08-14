@@ -198,3 +198,27 @@ def write_index(tmp_path: Path, repo_path: Path) -> Path:
         encoding="utf-8",
     )
     return index
+
+
+def write_sorted(run_dir: Path, ids: list[str], *, md: bool = True) -> Path:
+    """Write a run/sorted/ dir with sorted_candidates.json (+ optional .md).
+
+    Returns the sorted directory. `ids` are written in rank order.
+    """
+    sorted_dir = run_dir / "sorted"
+    sorted_dir.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "source_result": "result.json",
+        "method": "listwise sub-agent judge",
+        "total_ranked": len(ids),
+        "candidates": [
+            {"rank": i + 1, "id": cid, "module_qualified_name": "v1/attention"}
+            for i, cid in enumerate(ids)
+        ],
+    }
+    (sorted_dir / "sorted_candidates.json").write_text(json.dumps(payload), encoding="utf-8")
+    if md:
+        (sorted_dir / "sorted_candidates.md").write_text(
+            "# Sorted candidates\n", encoding="utf-8"
+        )
+    return sorted_dir

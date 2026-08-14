@@ -111,12 +111,22 @@ def validate_candidate_target(
     win_start = max(0, start - 1 - _SYMBOL_WINDOW)
     win_end = min(n, end + _SYMBOL_WINDOW)
     window_text = "\n".join(lines[win_start:win_end])
-    # Tokenize the (possibly compound) symbol and require every component to be
-    # present in the window. A whole-string match would false-positive on
-    # `region` candidates whose symbol is a qualified name spanning several
-    # symbols (e.g. "Type.methodA/methodB"), which never appears verbatim.
+    # Tokenize the (possibly compound) symbol. A whole-string match would
+    # false-positive on `region` candidates whose symbol is a qualified name
+    # spanning several symbols (e.g. "Type.methodA/methodB"), which never
+    # appears verbatim. The recorded range covers the *leaf* symbol being
+    # evolved (a method/function body), so require the leaf near the range but
+    # allow container identifiers (a class/type name, which sits at its
+    # declaration far above the method) to appear anywhere in the file. A
+    # container that is truly gone still trips the gate.
     components = _symbol_components(span.symbol) if span.symbol else []
-    missing = [c for c in components if c not in window_text]
+    missing: list[str] = []
+    if components:
+        *containers, leaf = components
+        file_text = "\n".join(lines)
+        if leaf not in window_text:
+            missing.append(leaf)
+        missing.extend(c for c in containers if c not in file_text)
     if missing:
         raise StalenessError(
             f"recorded symbol {span.symbol!r} not found near lines "
