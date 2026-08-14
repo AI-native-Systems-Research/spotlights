@@ -34,13 +34,13 @@ class UnsupportedEvolverError(PrepEvolveError):
     the spec."""
 
 
-class BundleExistsError(PrepEvolveError):
-    """The bundle directory already exists and `--force` was not given (or the
-    prior manifest is missing so ownership cannot be determined)."""
+class GeneratedPathError(PrepEvolveError):
+    """A generated file's path is absolute, empty, contains '..', or otherwise
+    escapes the bundle directory."""
 
 
 __all__ = [
-    "BundleExistsError",
+    "GeneratedPathError",
     "PrepEvolveError",
     "RepoResolutionError",
     "ScopeError",

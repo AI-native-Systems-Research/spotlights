@@ -15,7 +15,7 @@ from spotlights_engine.prep_evolve.api import (
     prep_evolve,
 )
 from spotlights_engine.prep_evolve.errors import (
-    BundleExistsError,
+    GeneratedPathError,
     PrepEvolveError,
     RepoResolutionError,
     ScopeError,
@@ -26,9 +26,9 @@ from spotlights_engine.prep_evolve.errors import (
 from spotlights_engine.prep_evolve.spec import EvolveSpec
 
 __all__ = [
-    "BundleExistsError",
     "BundleResult",
     "EvolveSpec",
+    "GeneratedPathError",
     "PrepEvolveConfig",
     "PrepEvolveError",
     "PrepEvolveInput",

@@ -16,7 +16,7 @@ from spotlights_engine.prep_evolve.api import (
 )
 from spotlights_engine.prep_evolve.cli import main as prep_main
 from spotlights_engine.prep_evolve.errors import (
-    BundleExistsError,
+    GeneratedPathError,
     ScopeError,
     SelectionError,
     UnsupportedEvolverError,
@@ -79,7 +79,7 @@ def test_force_overwrites_bundle_without_prior_manifest(tmp_path: Path) -> None:
 
 def test_generated_path_escape_rejected_before_writing(tmp_path: Path) -> None:
     bundle = tmp_path / "bundle"
-    with pytest.raises(BundleExistsError):
+    with pytest.raises(GeneratedPathError):
         _materialize(bundle, [GeneratedFile(path="../escape.txt", text="x")])
     assert not bundle.exists()
     assert not (tmp_path / "escape.txt").exists()
@@ -452,3 +452,33 @@ def test_cli_bad_top_n_returns_2(tmp_path: Path, capsys) -> None:
     )
     assert rc == 2
     assert "--top-n" in capsys.readouterr().err
+
+
+def test_cli_clean_rerun_exits_0(tmp_path: Path, capsys) -> None:
+    repo = fx.make_repo(tmp_path)
+    result_json = fx.write_result(tmp_path)
+    args = ["--result", str(result_json), "--repo", str(repo),
+            "--evolver", "coral", "--out", str(tmp_path / "out")]
+    assert prep_main(args) == 0            # first run writes the bundle
+    capsys.readouterr()                    # drain
+    rc = prep_main(args)                   # re-run: bundle exists -> skipped
+    assert rc == 0                         # clean resume is success, not failure
+    err = capsys.readouterr().err
+    assert "0 bundle(s) written" in err
+    assert "1 skipped" in err
+
+
+def test_cli_stale_ranked_id_summary_omits_none(tmp_path: Path, capsys) -> None:
+    repo = fx.make_repo(tmp_path)
+    fx.write_result(tmp_path)  # only cand-v1_attention-0002 exists
+    sorted_dir = fx.write_sorted(
+        tmp_path, ["cand-v1_attention-0002", "cand-ghost-0009"]
+    )
+    rc = prep_main(
+        ["--result", str(sorted_dir), "--repo", str(repo), "--evolver", "coral",
+         "--out", str(tmp_path / "out")]
+    )
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "cand-ghost-0009" in err
+    assert "None/" not in err

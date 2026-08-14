@@ -20,7 +20,7 @@ from spotlights_engine.prep_evolve.adapters import (
 )
 from spotlights_engine.prep_evolve.adapters.base import GeneratedFile
 from spotlights_engine.prep_evolve.errors import (
-    BundleExistsError,
+    GeneratedPathError,
     PrepEvolveError,
     ScopeError,
     SelectionError,
@@ -376,12 +376,12 @@ def _generated_destination(bundle_path: Path, bundle_root: Path, path: str) -> P
     """Resolve a generated file path and reject bundle path escapes."""
     rel = Path(path)
     if rel.is_absolute() or not rel.parts or ".." in rel.parts:
-        raise BundleExistsError(f"invalid generated file path: {path!r}")
+        raise GeneratedPathError(f"invalid generated file path: {path!r}")
 
     dest = bundle_path / rel
     resolved_dest = dest.parent.resolve() / dest.name
     if not resolved_dest.is_relative_to(bundle_root):
-        raise BundleExistsError(f"generated file path escapes bundle directory: {path!r}")
+        raise GeneratedPathError(f"generated file path escapes bundle directory: {path!r}")
     return dest
 
 

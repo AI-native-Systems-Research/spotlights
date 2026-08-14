@@ -154,14 +154,15 @@ def main(argv: list[str] | None = None) -> int:
         file=sys.stderr,
     )
     for s in result.skipped:
-        who = (
-            f"{s.module_qualified_name}/{s.candidate_id} "
-            if s.candidate_id
-            else ""
-        )
+        if s.candidate_id and s.module_qualified_name:
+            who = f"{s.module_qualified_name}/{s.candidate_id} "
+        elif s.candidate_id:
+            who = f"{s.candidate_id} "
+        else:
+            who = ""
         print(f"  skipped {who}({s.evolver}): {s.reason}", file=sys.stderr)
 
-    return 0 if result.bundles else 1
+    return 0 if (result.bundles or result.skipped) else 1
 
 
 if __name__ == "__main__":
