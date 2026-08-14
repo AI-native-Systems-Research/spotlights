@@ -66,6 +66,7 @@ from spotlights_engine.modules_extractor.sharding import (
     has_several_source_roots,
     merge_fragments,
     owning_shard,
+    render_shard_plan_markdown,
     shard_weight,
     validate_promotion_parent,
     validate_shard_scope,
@@ -1176,6 +1177,9 @@ def _stage3_enrich_sharded(
 ) -> _Stage3Result:
     plan = derive_enrich_shards(skeleton, config)
     _required_write_json(base, "03_enrich/shards.json", _shard_plan_dict(plan))
+    _required_write_text(
+        base, "03_enrich/sharding.md", render_shard_plan_markdown(plan)
+    )
     notify(
         on_event,
         f"extractor: stage-3 sharded into {len(plan.shards)} shard(s) "

@@ -265,6 +265,11 @@ def node_source_file_count(node: SkeletonNode) -> int:
     )
 
 
+def shard_source_file_count(shard: EnrichShard) -> int:
+    """Total source files across the shard's (possibly pruned) subtree."""
+    return sum(node_source_file_count(n) for n in shard.subtree.nodes)
+
+
 def shard_weight(shard: EnrichShard) -> int:
     """The weight of what this shard actually enriches: the required-node count
     of its own (possibly pruned) subtree.
@@ -851,6 +856,91 @@ def _assert_disjoint(
             seen_folded[path] = shard.key
 
 
+# ── Human-readable sharding log ───────────────────────────────────────────
+
+
+def _shard_kind(shard: EnrichShard) -> str:
+    if shard.is_spine:
+        return "spine"
+    if shard.is_subshard:
+        return "sub-shard"
+    return "branch"
+
+
+def _shard_notes(shard: EnrichShard, plan: ShardPlan) -> str:
+    notes: list[str] = []
+    if shard.promoted_children:
+        promoted = ", ".join(f"`{p}`" for p in shard.promoted_children)
+        notes.append(
+            f"promoted {len(shard.promoted_children)} child(ren): {promoted}"
+        )
+        if shard.promotion_parent != shard.root_path:
+            notes.append(f"split at `{shard.promotion_parent}`")
+    reason = plan.not_split_reasons.get(shard.key)
+    if reason is not None:
+        label = "not split" if not shard.is_subshard else "not split further"
+        notes.append(f"{label}: {reason}")
+    return "; ".join(notes)
+
+
+def render_shard_plan_markdown(plan: ShardPlan) -> str:
+    """Render the derived shard plan as deterministic Markdown.
+
+    The human companion to `03_enrich/shards.json`: one row per shard, grouped
+    by top-level branch in derivation order (spine before the children it
+    promoted), with each shard's size. Pure and timestamp-free, so identical
+    plans produce byte-identical logs.
+    """
+    rows: list[tuple[str, EnrichShard]] = [
+        (branch_key, shard)
+        for branch_key in plan.branch_keys()
+        for shard in plan.shards_of_branch(branch_key)
+    ]
+
+    out: list[str] = []
+    out.append("# Stage-3 sharding")
+    out.append("")
+    out.append(
+        f"{len(plan.shards)} shard(s) across {len(plan.branch_roots)} "
+        "top-level branch(es). One row per shard, grouped by branch."
+    )
+    out.append("")
+    out.append(
+        "Sizes are the shard's own (possibly pruned) scope — a spine's row "
+        "excludes the children it promoted to sub-shards:"
+    )
+    out.append("")
+    out.append(
+        "- **required** — required skeleton nodes the shard enriches "
+        "(its deterministic weight, the number its deadline is sized against)"
+    )
+    out.append("- **nodes** — every directory node in the shard's subtree")
+    out.append("- **files** — source files across the shard's subtree")
+    out.append("")
+    out.append(
+        "| branch | shard | kind | root | depth | required | nodes | files "
+        "| notes |"
+    )
+    out.append("|---|---|---|---|---:|---:|---:|---:|---|")
+    for branch_key, shard in rows:
+        inventory = len(shard.subtree.all_paths())
+        out.append(
+            f"| `{plan.branch_roots[branch_key]}` | `{shard.key}` "
+            f"| {_shard_kind(shard)} | `{shard.root_path}` | {shard.depth} "
+            f"| {shard_weight(shard)} | {inventory} "
+            f"| {shard_source_file_count(shard)} "
+            f"| {_shard_notes(shard, plan)} |"
+        )
+    out.append(
+        f"| **total** | {len(plan.shards)} shard(s) | | | "
+        f"| {sum(shard_weight(s) for s in plan.shards)} "
+        f"| {sum(len(s.subtree.all_paths()) for s in plan.shards)} "
+        f"| {sum(shard_source_file_count(s) for s in plan.shards)} | |"
+    )
+    out.append("")
+    return "\n".join(out).rstrip("\n") + "\n"
+
+
 # ── Per-branch coverage precheck ──────────────────────────────────────────
 
 
@@ -893,6 +983,8 @@ __all__ = [
     "node_source_file_count",
     "node_weight",
     "owning_shard",
+    "render_shard_plan_markdown",
+    "shard_source_file_count",
     "shard_weight",
     "slice_skeleton",
     "validate_promotion_parent",

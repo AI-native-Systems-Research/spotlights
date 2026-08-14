@@ -758,6 +758,10 @@ def test_sharded_artifacts_layout(tmp_path, monkeypatch) -> None:
     plan = json.loads((enrich / "shards.json").read_text())
     assert sorted(s["key"] for s in plan["shards"]) == ["pkg__a", "pkg__b", "pkg__spine"]
     assert plan["branch_roots"] == {"pkg": "pkg"}
+    # The human-readable sharding log sits beside shards.json, one row per shard.
+    sharding_md = (enrich / "sharding.md").read_text()
+    for key in ("pkg__spine", "pkg__a", "pkg__b"):
+        assert f"`{key}`" in sharding_md
     # A split branch has NO directory of its own — only its spine + children.
     assert not (enrich / "pkg").exists()
     for key in ("pkg__spine", "pkg__a", "pkg__b"):

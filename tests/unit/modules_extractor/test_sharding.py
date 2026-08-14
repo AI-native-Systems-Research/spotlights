@@ -38,6 +38,8 @@ from spotlights_engine.modules_extractor.sharding import (
     merge_fragments,
     node_weight,
     owning_shard,
+    render_shard_plan_markdown,
+    shard_source_file_count,
     shard_weight,
     validate_promotion_parent,
     validate_shard_scope,
@@ -229,6 +231,37 @@ def test_budget_starved_spine_keeps_its_leftover_weight() -> None:
     assert spine.promoted_children == ["pkg/c0", "pkg/c1"]
     assert shard_weight(spine) == 9  # `pkg` + the two unpromoted children
     assert shard_weight(spine) > cfg.enrich_subshard_threshold
+
+
+def test_sharding_markdown_lists_every_shard_with_its_sizes() -> None:
+    """`03_enrich/sharding.md`: one row per shard, each with its three sizes."""
+    skeleton = _skel(_heavy_branch(), _node("tools"))
+    cfg = _cfg(enrich_subshard_threshold=4, enrich_subshard_child_min=2)
+    plan = derive_enrich_shards(skeleton, cfg)
+
+    text = render_shard_plan_markdown(plan)
+    # Deterministic: an identical plan renders byte-identical bytes.
+    assert text == render_shard_plan_markdown(derive_enrich_shards(skeleton, cfg))
+
+    rows = {
+        cells[1]: cells
+        for line in text.splitlines()
+        if line.startswith("| `")
+        for cells in [[c.strip() for c in line.strip("|").split("|")]]
+    }
+    assert set(rows) == {f"`{s.key}`" for s in plan.shards}
+    for shard in plan.shards:
+        cells = rows[f"`{shard.key}`"]
+        assert cells[0] == f"`{plan.branch_roots[plan.branch_key_of(shard)]}`"
+        assert cells[3] == f"`{shard.root_path}`"
+        assert cells[4] == str(shard.depth)
+        assert cells[5] == str(shard_weight(shard))
+        assert cells[6] == str(len(shard.subtree.all_paths()))
+        assert cells[7] == str(shard_source_file_count(shard))
+
+    # The spine names what it promoted; an un-split branch names why.
+    assert "promoted 4 child(ren)" in " ".join(rows["`pkg__spine`"])
+    assert NOT_SPLIT_BELOW_THRESHOLD in " ".join(rows["`tools`"])
 
 
 def test_wide_flat_branch_stays_whole_and_over_threshold() -> None:
