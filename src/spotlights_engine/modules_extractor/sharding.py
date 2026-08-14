@@ -265,6 +265,21 @@ def node_source_file_count(node: SkeletonNode) -> int:
     )
 
 
+def shard_weight(shard: EnrichShard) -> int:
+    """The weight of what this shard actually enriches: the required-node count
+    of its own (possibly pruned) subtree.
+
+    For a spine this is the *residual* weight after the promoted children were
+    pruned out — the number a per-shard deadline must be sized against, not the
+    branch's original weight. Derivation aims to keep it at or below
+    `enrich_subshard_threshold`, but four paths can leave it above: a wide flat
+    branch with no promotable children, a split refused at the depth cap, a
+    branch starved by the shard budget, and a spine left holding promotable
+    children the budget could not take.
+    """
+    return sum(node_weight(n) for n in shard.subtree.nodes)
+
+
 # ── Key derivation ────────────────────────────────────────────────────────
 
 
@@ -878,6 +893,7 @@ __all__ = [
     "node_source_file_count",
     "node_weight",
     "owning_shard",
+    "shard_weight",
     "slice_skeleton",
     "validate_promotion_parent",
     "validate_shard_scope",

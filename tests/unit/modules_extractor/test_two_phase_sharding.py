@@ -524,6 +524,26 @@ def test_real_shards_get_the_per_shard_deadline(tmp_path, monkeypatch) -> None:
     assert claude.timeouts["pkg__a"] == 1800
 
 
+def test_an_unsplittable_oversized_shard_keeps_the_full_timeout(
+    tmp_path, monkeypatch
+) -> None:
+    """A branch over the sub-shard threshold that derivation cannot split (no
+    child reaches `child_min`) stays monolithic at its full weight. Giving it
+    the short per-shard deadline would reintroduce the very timeout sharding
+    exists to prevent, so it must keep the full `timeout_s`."""
+    repo = _two_branch_repo(tmp_path)
+    claude = _ShardClaude(_decision(), TWO_BRANCH)
+    _run(
+        repo, claude, monkeypatch,
+        timeout_s=5400,
+        enrich_timeout_s=1800,
+        enrich_subshard_threshold=1,   # both branches are over it
+        enrich_subshard_child_min=99,  # and neither has a promotable child
+    )
+    assert claude.timeouts["alpha"] == 5400
+    assert claude.timeouts["beta"] == 5400
+
+
 def test_a_whole_skeleton_shard_keeps_the_full_timeout(tmp_path, monkeypatch) -> None:
     """A repo that degenerates to one shard must not newly time out."""
     repo = _spine_repo(tmp_path)

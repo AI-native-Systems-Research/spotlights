@@ -38,6 +38,7 @@ from spotlights_engine.modules_extractor.sharding import (
     merge_fragments,
     node_weight,
     owning_shard,
+    shard_weight,
     validate_promotion_parent,
     validate_shard_scope,
     validate_spine_main_files,
@@ -199,6 +200,49 @@ def test_light_children_stay_with_the_spine() -> None:
     spine = next(s for s in plan.shards if s.key == "pkg__spine")
     assert spine.promoted_children == ["pkg/heavy1", "pkg/heavy2"]
     assert "pkg/light" in spine.subtree.all_paths()
+
+
+def test_shard_weight_is_the_residual_after_pruning() -> None:
+    """A spine's weight is what it actually enriches, not the branch total."""
+    plan = derive_enrich_shards(
+        _skel(_heavy_branch()),
+        _cfg(enrich_subshard_threshold=4, enrich_subshard_child_min=2),
+    )
+    spine = next(s for s in plan.shards if s.key == "pkg__spine")
+    assert shard_weight(spine) == 1  # `pkg` alone; all four children promoted
+    child = next(s for s in plan.shards if s.key == "pkg__c0")
+    assert shard_weight(child) == 4
+
+
+def test_budget_starved_spine_keeps_its_leftover_weight() -> None:
+    """With the shard budget able to take only two of four promotable children,
+    the other two stay in the spine. `shard_weight` reports that residual —
+    over the threshold — which is what entitles the spine to the full
+    (monolithic) deadline instead of the short per-shard one."""
+    cfg = _cfg(
+        enrich_subshard_threshold=4, enrich_subshard_child_min=2, enrich_max_shards=3
+    )
+    plan = derive_enrich_shards(_skel(_heavy_branch()), cfg)
+
+    assert len(plan.shards) == 3
+    spine = next(s for s in plan.shards if s.key == "pkg__spine")
+    assert spine.promoted_children == ["pkg/c0", "pkg/c1"]
+    assert shard_weight(spine) == 9  # `pkg` + the two unpromoted children
+    assert shard_weight(spine) > cfg.enrich_subshard_threshold
+
+
+def test_wide_flat_branch_stays_whole_and_over_threshold() -> None:
+    """A branch over the threshold whose children are all below `child_min` has
+    no legal split point: it stays monolithic at its full weight, and the
+    deadline selection must compensate with the full `timeout_s`."""
+    branch = _node("pkg", children=tuple(_node(f"pkg/c{i}") for i in range(10)))
+    cfg = _cfg(enrich_subshard_threshold=4, enrich_subshard_child_min=2)
+    plan = derive_enrich_shards(_skel(branch), cfg)
+
+    assert [s.key for s in plan.shards] == ["pkg"]
+    assert plan.not_split_reasons["pkg"] == NOT_SPLIT_ONE_PROMOTABLE
+    assert shard_weight(plan.shards[0]) == 11
+    assert shard_weight(plan.shards[0]) > cfg.enrich_subshard_threshold
 
 
 def test_branch_with_one_promotable_child_is_not_split() -> None:

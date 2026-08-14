@@ -86,7 +86,10 @@ class ExtractorConfig(BaseModel):
     # so this is deliberately below the 5400s monolithic budget — but a shard
     # whose scope IS the entire skeleton still gets `timeout_s` (see
     # `sharding.covers_entire_skeleton`), so the degenerate single-shard repo
-    # does not newly time out.
+    # does not newly time out. So does any shard whose weight derivation could
+    # not push below `enrich_subshard_threshold` (see `sharding.shard_weight`):
+    # an unsplittable wide flat branch, a depth- or budget-capped split, or a
+    # heavy spine residue must not inherit a deadline sized for a small slice.
     enrich_timeout_s: int | None = Field(default=1800, ge=1)
 
     # Recursive sub-sharding of an oversized top-level branch. `weight` is a

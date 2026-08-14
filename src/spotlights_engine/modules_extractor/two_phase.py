@@ -66,6 +66,7 @@ from spotlights_engine.modules_extractor.sharding import (
     has_several_source_roots,
     merge_fragments,
     owning_shard,
+    shard_weight,
     validate_promotion_parent,
     validate_shard_scope,
     validate_spine_main_files,
@@ -81,6 +82,10 @@ from spotlights_engine.modules_extractor.stage_schemas import (
     ExcludedSourcePath,
     Skeleton,
     SourceRootDecision,
+)
+from spotlights_engine.modules_extractor.tree_report import (
+    build_tree_decision_report,
+    render_markdown,
 )
 from spotlights_engine.schemas.project import (
     ProjectTree,
@@ -230,6 +235,74 @@ def _best_effort_write_json(
         notify(on_event, f"extractor: failed to persist {rel} during error handling: {exc}")
 
 
+def _best_effort_write_text(
+    base: Path | None, rel: str, text: str, on_event: Callable | None
+) -> None:
+    """Write during error handling: never mask the in-flight stage error."""
+    if base is None:
+        return
+    try:
+        atomic_write_text(base / rel, text)
+    except OSError as exc:  # noqa: BLE001 - must not mask the original error
+        notify(on_event, f"extractor: failed to persist {rel} during error handling: {exc}")
+
+
+def _write_tree_decisions(
+    base: Path | None,
+    *,
+    skeleton: Skeleton,
+    enriched: EnrichedTree,
+    coverage: CoverageReport,
+    decision: SourceRootDecision | None,
+) -> None:
+    """Derived per-directory decision report, on the success path.
+
+    Required like every other final artifact: it is a pure join over models
+    already in hand (`design/module_extractor_visualization.md`), so a failure
+    here is an artifact-write failure, not a modeling failure.
+    """
+    if base is None:
+        return
+    report = build_tree_decision_report(skeleton, enriched, coverage, decision)
+    _required_write_json(base, "tree_decisions.json", report.model_dump(mode="json"))
+    _required_write_text(base, "tree_decisions.md", render_markdown(report))
+
+
+def _best_effort_tree_decisions(
+    base: Path | None,
+    *,
+    skeleton: Skeleton,
+    enriched: EnrichedTree,
+    coverage: CoverageReport,
+    decision: SourceRootDecision | None,
+    on_event: Callable[[str], None] | None,
+) -> None:
+    """Same report, written while a stage error is in flight.
+
+    The visualization is most useful exactly here — on a failed run — so it is
+    written before the error propagates, best-effort: nothing in this path may
+    mask the original failure.
+    """
+    if base is None:
+        return
+    # Build *and* serialize inside the guard: the two `_best_effort_write_*`
+    # helpers only catch `OSError` around the write itself, so rendering in an
+    # argument expression would let a render bug escape and mask the in-flight
+    # stage error — the one thing this path may never do.
+    try:
+        report = build_tree_decision_report(skeleton, enriched, coverage, decision)
+        payload = report.model_dump(mode="json")
+        markdown = render_markdown(report)
+    except Exception as exc:  # noqa: BLE001 - must not mask the original error
+        notify(
+            on_event,
+            f"extractor: failed to build tree_decisions during error handling: {exc}",
+        )
+        return
+    _best_effort_write_json(base, "tree_decisions.json", payload, on_event)
+    _best_effort_write_text(base, "tree_decisions.md", markdown, on_event)
+
+
 def _persist_sessions(base: Path | None, telemetry: _Telemetry) -> None:
     """sessions.json is rewritten atomically after every invocation."""
     _required_write_json(base, "sessions.json", telemetry.as_dict())
@@ -285,6 +358,7 @@ def run_two_phase_extraction(
         base=base,
         config=config,
         telemetry=telemetry,
+        decision=decision,
         on_event=on_event,
     )
     _persist_sessions(base, telemetry)
@@ -306,6 +380,13 @@ def run_two_phase_extraction(
     # Final top-level artifacts.
     _required_write_json(base, "enriched_tree.json", enriched.model_dump(mode="json"))
     _required_write_json(base, "coverage.json", coverage.model_dump(mode="json"))
+    _write_tree_decisions(
+        base,
+        skeleton=skeleton,
+        enriched=enriched,
+        coverage=coverage,
+        decision=decision,
+    )
     _persist_sessions(base, telemetry)
 
     invocation = ExtractionInvocation(
@@ -596,9 +677,15 @@ def _stage3_enrich(
     base: Path | None,
     config: ExtractorConfig,
     telemetry: _Telemetry,
+    decision: SourceRootDecision | None = None,
     on_event: Callable[[str], None] | None,
 ) -> _Stage3Result:
-    """Enrich the skeleton, sharded by top-level branch unless mode is `single`."""
+    """Enrich the skeleton, sharded by top-level branch unless mode is `single`.
+
+    `decision` is threaded through for one purpose only: the best-effort
+    `tree_decisions` write on a failure path, which grafts Stage-1's semantic
+    exclusions into the report. It never affects enrichment.
+    """
     stage_dir = base / "03_enrich" if base is not None else None
     if stage_dir is not None:
         stage_dir.mkdir(parents=True, exist_ok=True)
@@ -614,6 +701,7 @@ def _stage3_enrich(
             base=base,
             config=config,
             telemetry=telemetry,
+            decision=decision,
             on_event=on_event,
         )
     return _stage3_enrich_sharded(
@@ -623,6 +711,7 @@ def _stage3_enrich(
         base=base,
         config=config,
         telemetry=telemetry,
+        decision=decision,
         on_event=on_event,
     )
 
@@ -635,6 +724,7 @@ def _stage3_enrich_single(
     base: Path | None,
     config: ExtractorConfig,
     telemetry: _Telemetry,
+    decision: SourceRootDecision | None = None,
     on_event: Callable[[str], None] | None,
 ) -> _Stage3Result:
     """The monolithic fallback: one Claude call over the whole repository.
@@ -723,6 +813,14 @@ def _stage3_enrich_single(
                     base_prompt, validation_error, previous_payload=result.raw_payload
                 )
                 continue
+            _best_effort_tree_decisions(
+                base,
+                skeleton=skeleton,
+                enriched=enriched,
+                coverage=coverage,
+                decision=decision,
+                on_event=on_event,
+            )
             raise ExtractorValidationError(
                 f"enriched tree failed cross-artifact validation: {validation_error}",
                 stage="enrich",
@@ -742,6 +840,14 @@ def _stage3_enrich_single(
                     previous_payload=result.raw_payload,
                 )
                 continue
+            _best_effort_tree_decisions(
+                base,
+                skeleton=skeleton,
+                enriched=enriched,
+                coverage=coverage,
+                decision=decision,
+                on_event=on_event,
+            )
             raise ExtractorCoverageError(
                 f"{len(coverage.missing)} required paths not covered",
                 missing=coverage.missing,
@@ -896,11 +1002,16 @@ async def _enrich_shard_attempts(
     )
 
     # A shard whose scope IS the whole skeleton is today's single call and keeps
-    # today's deadline; every real slice gets the shorter per-shard budget.
+    # today's deadline. So does a shard derivation could NOT cut down below the
+    # sub-shard threshold — a wide flat branch with no promotable children, a
+    # depth- or budget-capped split, or a spine left holding what the budget
+    # could not promote: such a shard is a slice in name only, and the shorter
+    # per-shard budget is only right for a shard actually cut down to size.
+    cut_down_to_size = shard_weight(shard) <= config.enrich_subshard_threshold
     timeout_s = (
-        config.timeout_s
-        if covers_entire_skeleton(shard, skeleton)
-        else _effective_timeout(config.enrich_timeout_s, config.timeout_s)
+        _effective_timeout(config.enrich_timeout_s, config.timeout_s)
+        if cut_down_to_size and not covers_entire_skeleton(shard, skeleton)
+        else config.timeout_s
     )
 
     prompt = base_prompt
@@ -1060,6 +1171,7 @@ def _stage3_enrich_sharded(
     base: Path | None,
     config: ExtractorConfig,
     telemetry: _Telemetry,
+    decision: SourceRootDecision | None = None,
     on_event: Callable[[str], None] | None,
 ) -> _Stage3Result:
     plan = derive_enrich_shards(skeleton, config)
@@ -1102,6 +1214,7 @@ def _stage3_enrich_sharded(
         plan,
         fragments,
         base=base,
+        decision=decision,
         on_event=on_event,
     )
     primary = plan.primary_shard()
@@ -1125,6 +1238,7 @@ def _merge_and_gate(
     fragments: dict[str, EnrichedTree],
     *,
     base: Path | None,
+    decision: SourceRootDecision | None = None,
     on_event: Callable[[str], None] | None,
 ) -> tuple[EnrichedTree, CoverageReport]:
     """Per-branch precheck, deterministic merge, then the **unchanged** full
@@ -1186,6 +1300,18 @@ def _merge_and_gate(
         base, "03_enrich/enriched_tree.json", merged.model_dump(mode="json")
     )
 
+    if validation_error is not None or coverage.missing:
+        # The merged tree and its coverage both exist here, so the derived
+        # decision report can be built — and a failed run is exactly when it is
+        # most useful. Best-effort: it must never mask the failure below.
+        _best_effort_tree_decisions(
+            base,
+            skeleton=skeleton,
+            enriched=merged,
+            coverage=coverage,
+            decision=decision,
+            on_event=on_event,
+        )
     if validation_error is not None:
         raise ExtractorValidationError(
             f"merged enriched tree failed cross-artifact validation: "

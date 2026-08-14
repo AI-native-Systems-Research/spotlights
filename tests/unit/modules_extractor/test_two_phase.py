@@ -16,9 +16,27 @@ from pathlib import Path
 
 import pytest
 
-from spotlights_engine.modules_extractor.errors import ExtractorCoverageError
+from spotlights_engine.modules_extractor import two_phase as two_phase_module
+from spotlights_engine.modules_extractor.errors import (
+    ExtractorCoverageError,
+    ExtractorValidationError,
+)
 from spotlights_engine.modules_extractor.extractor import ExtractorConfig
-from spotlights_engine.modules_extractor.two_phase import run_two_phase_extraction
+from spotlights_engine.modules_extractor.sharding import derive_enrich_shards
+from spotlights_engine.modules_extractor.skeleton import build_skeleton
+from spotlights_engine.modules_extractor.stage_schemas import (
+    EnrichedTree,
+    SourceRootDecision,
+)
+from spotlights_engine.modules_extractor.tree_report import (
+    load_report_from_run_dir,
+    render_markdown,
+    report_json_text,
+)
+from spotlights_engine.modules_extractor.two_phase import (
+    _merge_and_gate,
+    run_two_phase_extraction,
+)
 from spotlights_engine.signal_pipeline._subprocess_util import StreamingResult
 
 # ── Fixtures ──────────────────────────────────────────────────────────────
@@ -263,3 +281,170 @@ def test_telemetry_sums_and_selects_primary_session(tmp_path, monkeypatch) -> No
     stages = [s["stage"] for s in sessions["sessions"]]
     assert "01_source_root" in stages
     assert [s for s in stages if s.startswith("03_enrich")] == ["03_enrich[pkg__core]"]
+
+
+# ── Derived tree-decision report ──────────────────────────────────────────
+
+
+def test_tree_decisions_written_on_success(tmp_path, monkeypatch) -> None:
+    repo = _repo(tmp_path)
+    claude = _FakeClaude([
+        _stream_result(_source_root_decision()),
+        _stream_result(_enriched_tree()),
+    ])
+    _patch(monkeypatch, claude)
+    artifacts = tmp_path / "run"
+    artifacts.mkdir()
+    run_two_phase_extraction(
+        repo, config=ExtractorConfig(), on_event=None, artifacts_dir=artifacts
+    )
+
+    data = json.loads((artifacts / "tree_decisions.json").read_text())
+    assert data["schema_version"] == "tree_decisions.v1"
+    decisions = {
+        n["path"]: n["decision"]
+        for n in [data["nodes"][0], *data["nodes"][0]["children"]]
+    }
+    assert decisions["pkg/core"] == "emitted_parent"
+    assert decisions["pkg/core/kv_offload"] == "emitted_leaf"
+    assert decisions["pkg/core/util"] == "folded"
+
+    md = (artifacts / "tree_decisions.md").read_text()
+    assert "Legend:" in md
+    assert "## Problems" not in md
+
+    # Byte-identical to rebuilding the report from the artifacts on disk.
+    rebuilt = load_report_from_run_dir(artifacts)
+    assert (artifacts / "tree_decisions.json").read_text() == report_json_text(rebuilt)
+    assert md == render_markdown(rebuilt)
+
+
+def test_tree_decisions_best_effort_on_stage3_failure(tmp_path, monkeypatch) -> None:
+    """A failed run still gets the visualization — that is when it helps most."""
+    repo = _repo(tmp_path)
+    incomplete = _enriched_tree()
+    incomplete["modules"][0]["submodules"] = []
+    claude = _FakeClaude([
+        _stream_result(_source_root_decision()),
+        _stream_result(incomplete),
+        _stream_result(incomplete),
+    ])
+    _patch(monkeypatch, claude)
+    artifacts = tmp_path / "run"
+    artifacts.mkdir()
+
+    with pytest.raises(ExtractorCoverageError):
+        run_two_phase_extraction(
+            repo,
+            config=ExtractorConfig(enrich_sharding="single"),
+            on_event=None,
+            artifacts_dir=artifacts,
+        )
+
+    data = json.loads((artifacts / "tree_decisions.json").read_text())
+    children = {n["path"]: n["decision"] for n in data["nodes"][0]["children"]}
+    assert children["pkg/core/kv_offload"] == "missing"
+    assert children["pkg/core/scheduler"] == "missing"
+    md = (artifacts / "tree_decisions.md").read_text()
+    assert "## Problems" in md
+    assert "Missing required paths (2)" in md
+
+
+def test_tree_decisions_failure_never_masks_the_original_error(
+    tmp_path, monkeypatch
+) -> None:
+    """The best-effort path must swallow its own failure, whatever its shape.
+
+    Rendering is not an `OSError`, so it has to be caught where the report is
+    built — not left in an argument expression outside the guard, where it
+    would replace the coverage failure the run actually hit.
+    """
+    repo = _repo(tmp_path)
+    incomplete = _enriched_tree()
+    incomplete["modules"][0]["submodules"] = []
+    claude = _FakeClaude([
+        _stream_result(_source_root_decision()),
+        _stream_result(incomplete),
+        _stream_result(incomplete),
+    ])
+    _patch(monkeypatch, claude)
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("rendering exploded")
+
+    monkeypatch.setattr(two_phase_module, "render_markdown", _boom)
+    artifacts = tmp_path / "run"
+    artifacts.mkdir()
+    events: list[str] = []
+
+    with pytest.raises(ExtractorCoverageError):
+        run_two_phase_extraction(
+            repo,
+            config=ExtractorConfig(enrich_sharding="single"),
+            on_event=events.append,
+            artifacts_dir=artifacts,
+        )
+
+    assert any("tree_decisions" in e for e in events)
+    # Nothing half-written: the JSON is not emitted once the render fails.
+    assert not (artifacts / "tree_decisions.json").exists()
+    assert not (artifacts / "tree_decisions.md").exists()
+
+
+def test_tree_decisions_best_effort_on_merged_failure(tmp_path) -> None:
+    """The merged-tree failure branch (`_merge_and_gate`) writes it too.
+
+    Called directly: a merged tree that fails validation while every shard
+    passed would be a `sharding.py` bug, which is exactly the case the report
+    is meant to help debug.
+    """
+    repo = _repo(tmp_path)
+    config = ExtractorConfig()
+    decision = SourceRootDecision.model_validate(_source_root_decision())
+    skeleton = build_skeleton(
+        repo, "pkg", excluded_dirs=frozenset(), excluded_files=frozenset()
+    )
+    plan = derive_enrich_shards(skeleton, config)
+    # `core` keeps a single emitted child (Rule 4 violation on the merged tree)
+    # and folds `scheduler`, so the per-branch coverage precheck still passes.
+    fragment = _enriched_tree()
+    fragment["modules"][0]["submodules"] = [
+        s
+        for s in fragment["modules"][0]["submodules"]
+        if s["name"] == "kv_offload"
+    ]
+    fragment["modules"][0]["main_files"].append(
+        {"path": "pkg/core/scheduler/s1.py", "role": "Scheduler (folded)."}
+    )
+    fragment["folds"].append(
+        {
+            "path": "pkg/core/scheduler",
+            "into": "pkg/core",
+            "reason": "folded for the test",
+            "evidence_files": ["pkg/core/scheduler/s1.py"],
+        }
+    )
+    fragments = {
+        s.key: EnrichedTree.model_validate(fragment) for s in plan.shards
+    }
+    artifacts = tmp_path / "run"
+    artifacts.mkdir()
+
+    with pytest.raises(ExtractorValidationError):
+        _merge_and_gate(
+            repo,
+            decision.repository,
+            skeleton,
+            plan,
+            fragments,
+            base=artifacts,
+            decision=decision,
+            on_event=None,
+        )
+
+    data = json.loads((artifacts / "tree_decisions.json").read_text())
+    children = {n["path"]: n["decision"] for n in data["nodes"][0]["children"]}
+    assert children["pkg/core/scheduler"] == "folded"
+    assert (artifacts / "tree_decisions.md").read_text().startswith(
+        "# Module extractor"
+    )
