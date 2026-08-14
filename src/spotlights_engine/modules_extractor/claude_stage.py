@@ -103,8 +103,14 @@ def clean_env() -> dict[str, str]:
 
 
 def extract_result_event(stdout: bytes) -> dict | None:
-    """Return the terminal `result` event, or None when the last event is not a
-    result. Raises `ExtractorAgentError` on a non-JSON / non-object line."""
+    """Return the terminal `result` event, or None when the last JSON event is
+    not a result.
+
+    Non-JSON and non-object lines are skipped rather than raised on: a stray
+    runtime warning on stdout, or a line truncated by a kill, must not abort an
+    otherwise complete run — a genuinely broken stream still fails through the
+    "no terminal result event" path in the caller.
+    """
     last_event: dict | None = None
     for line in stdout.splitlines():
         line = line.strip()
@@ -112,12 +118,10 @@ def extract_result_event(stdout: bytes) -> dict | None:
             continue
         try:
             obj = json.loads(line)
-        except json.JSONDecodeError as exc:
-            raise ExtractorAgentError(
-                f"claude stream-json line not JSON: {exc}",
-            ) from exc
+        except json.JSONDecodeError:
+            continue
         if not isinstance(obj, dict):
-            raise ExtractorAgentError("claude stream-json line was not an object")
+            continue
         last_event = obj
     if last_event is None or last_event.get("type") != "result":
         return None

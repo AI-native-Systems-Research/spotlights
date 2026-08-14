@@ -343,15 +343,14 @@ def validate_enriched_tree(
             continue
         for f in main_files:
             fpath = f.path
-            if not fpath.startswith(module_path + "/") and not (
-                PurePosixPath(fpath).parent.as_posix() == module_path
-            ):
-                # main file must live under the module directory
-                if not (fpath == module_path or fpath.startswith(module_path + "/")):
-                    problems.append(
-                        f"main_file {fpath!r} is not under module {module_path!r}"
-                    )
-                    continue
+            # A main file must live under the module directory. (`fpath ==
+            # module_path` — a directory cited as a file — falls through to the
+            # real-file checks below, which reject it precisely.)
+            if fpath != module_path and not fpath.startswith(module_path + "/"):
+                problems.append(
+                    f"main_file {fpath!r} is not under module {module_path!r}"
+                )
+                continue
             if allow_any_file:
                 if not _is_real_file(repo_path, fpath):
                     problems.append(

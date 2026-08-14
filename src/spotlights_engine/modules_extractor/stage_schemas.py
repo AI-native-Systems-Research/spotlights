@@ -226,7 +226,7 @@ class EnrichedSubmodule(BaseModel):
 
     @model_validator(mode="after")
     def _validate(self) -> EnrichedSubmodule:
-        _structural_relpath(self.path)
+        object.__setattr__(self, "path", _structural_relpath(self.path))
         _check_main_files(self.main_files)
         return self
 
@@ -249,7 +249,7 @@ class EnrichedTopModule(BaseModel):
 
     @model_validator(mode="after")
     def _validate(self) -> EnrichedTopModule:
-        _structural_relpath(self.path)
+        object.__setattr__(self, "path", _structural_relpath(self.path))
         _check_main_files(self.main_files)
         return self
 

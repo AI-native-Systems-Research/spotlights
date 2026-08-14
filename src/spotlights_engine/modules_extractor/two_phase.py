@@ -1228,8 +1228,17 @@ def _stage5_assemble(
         }
     )
 
-    # Re-run the full validation + coverage gate on the final tree.
-    validate_enriched_tree(enriched, repo_path, repository, skeleton)
+    # Re-run the full validation + coverage gate on the final tree. Wrapped so
+    # the public API keeps its documented error taxonomy: a raw
+    # `CrossArtifactError` is a `ValueError`, which callers catching
+    # `ModulesExtractorError` would not see.
+    try:
+        validate_enriched_tree(enriched, repo_path, repository, skeleton)
+    except CrossArtifactError as exc:
+        raise ExtractorValidationError(
+            f"final tree failed cross-artifact validation at assembly: {exc}",
+            stage="assemble",
+        ) from exc
     coverage = compute_coverage(enriched, skeleton)
     if coverage.missing:
         raise ExtractorCoverageError(
@@ -1241,7 +1250,14 @@ def _stage5_assemble(
     # Re-run Stage-1 exclusion validation and Stage-2 walk; require both
     # fingerprints to match (defense against concurrent mutation).
     fresh_scan = scan_source_files(repo_path, "")
-    validate_source_root_decision(decision, repo_path, fresh_scan.files)
+    try:
+        validate_source_root_decision(decision, repo_path, fresh_scan.files)
+    except CrossArtifactError as exc:
+        raise ExtractorValidationError(
+            "source-root decision no longer validates at assembly "
+            f"(repository changed during extraction?): {exc}",
+            stage="assemble",
+        ) from exc
     fresh_repo_fingerprint = compute_fingerprint(
         repo_path, fresh_scan.files, extra_paths=fresh_scan.skipped_symlinks
     )
