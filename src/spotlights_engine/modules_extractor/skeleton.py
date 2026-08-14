@@ -22,7 +22,7 @@ from spotlights_engine.modules_extractor.stage_schemas import Skeleton, Skeleton
 
 # Version the extension set + walk profile together: both affect the coverage
 # guarantee, so a change must invalidate the `inventory_fingerprint`.
-ALGORITHM_PROFILE_VERSION = "skeleton.v2"
+ALGORITHM_PROFILE_VERSION = "skeleton.v3"
 
 # Compared case-insensitively against a file suffix. Lock files, manifests, and
 # other non-source files are naturally excluded (their suffixes aren't here).
@@ -34,7 +34,7 @@ SOURCE_EXTENSIONS: frozenset[str] = frozenset(
         ".vue", ".svelte", ".proto", ".sh", ".bash", ".lua", ".dart", ".fs",
         ".fsi", ".fsx", ".clj", ".cljs", ".r", ".jl", ".sol", ".zig", ".hs",
         ".lhs", ".ml", ".mli", ".erl", ".hrl", ".nim", ".pl", ".pm",
-        ".groovy", ".elm", ".ps1", ".psm1", ".d", ".rkt",
+        ".groovy", ".elm", ".ps1", ".psm1", ".d", ".rkt", ".cmake",
     }
 )
 

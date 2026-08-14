@@ -23,6 +23,7 @@ from spotlights_engine.modules_extractor.coverage import (
 from spotlights_engine.modules_extractor.skeleton import (
     build_skeleton,
     compute_fingerprint,
+    is_source_file,
     scan_source_files,
 )
 from spotlights_engine.modules_extractor.stage_schemas import SourceRootDecision
@@ -290,3 +291,11 @@ def test_scan_and_skeleton_order_is_stable(tmp_path: Path) -> None:
     order2 = [n.path for n in skel2.iter_nodes()]
     assert order1 == order2
     assert order1 == sorted(order1)
+
+
+def test_cmake_files_are_source() -> None:
+    # The vllm `cmake/` shard failed because one `.py` file in the directory
+    # forced the strict source-extension gate onto `.cmake` citations.
+    assert is_source_file("utils.cmake")
+    assert is_source_file("CPU_Extension.CMAKE")
+    assert not is_source_file("CMakeLists.txt")

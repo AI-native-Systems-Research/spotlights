@@ -580,7 +580,7 @@ def owning_shard(path: str, shards: list[EnrichShard]) -> EnrichShard | None:
 def validate_shard_scope(shard: EnrichShard, fragment: EnrichedTree) -> None:
     """The shard emitted/folded only inside its own scope, and exactly one
     top-level object rooted at `root_path`. Raises `CrossArtifactError` so the
-    caller can spend the shard's one repair on it."""
+    caller can spend a bounded shard repair on it."""
     if len(fragment.modules) != 1:
         raise CrossArtifactError(
             f"shard {shard.key!r} must emit exactly one top-level module rooted "

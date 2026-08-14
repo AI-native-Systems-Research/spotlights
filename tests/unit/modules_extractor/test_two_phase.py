@@ -254,6 +254,108 @@ def test_stage3_coverage_failure_after_repair_raises(tmp_path, monkeypatch) -> N
     assert "pkg/core/kv_offload" in exc.value.context["missing"]  # type: ignore[operator]
 
 
+def test_stage3_distinct_failure_classes_each_get_a_repair(
+    tmp_path, monkeypatch
+) -> None:
+    # Attempt 1 fails validation (bogus main_file), attempt 2 fails coverage
+    # (missing required dirs), attempt 3 is complete. Under the old shared
+    # single repair the run died on attempt 2 — the vllm/kafka death mode.
+    repo = _repo(tmp_path)
+    bad_validation = _enriched_tree()
+    bad_validation["modules"][0]["main_files"][0]["path"] = "pkg/core/nope.py"
+    bad_coverage = _enriched_tree()
+    bad_coverage["modules"][0]["submodules"] = []
+    claude = _FakeClaude([
+        _stream_result(_source_root_decision()),
+        _stream_result(bad_validation),
+        _stream_result(bad_coverage),
+        _stream_result(_enriched_tree()),
+    ])
+    _patch(monkeypatch, claude)
+
+    run = run_two_phase_extraction(
+        repo, config=ExtractorConfig(), on_event=None, artifacts_dir=None
+    )
+    assert len(claude.prompts) == 4  # 1 source-root + 3 enrichment attempts
+    assert {s.name for s in run.project_tree.modules[0].submodules} == {
+        "kv_offload",
+        "scheduler",
+    }
+    # The coverage repair carries the fold-semantics reminder.
+    assert "NOT recursive" in claude.prompts[3]
+
+
+# ── Stage-3 normalization ─────────────────────────────────────────────────
+
+
+def test_single_child_tree_is_normalized_not_repaired(tmp_path, monkeypatch) -> None:
+    # The model emits core -> kv_offload as an only child (Rule-4 offense) with
+    # scheduler and util folded. The normalizer collapses kv_offload into core
+    # deterministically: no repair round, full coverage — the vllm salvage.
+    repo = _repo(tmp_path)
+    single_child = {
+        "modules": [
+            {
+                "name": "core",
+                "path": "pkg/core",
+                "description": "Core runtime.",
+                "main_files": [
+                    {"path": "pkg/core/engine.py", "role": "Engine."},
+                    {"path": "pkg/core/util/helper.py", "role": "Helper (folded)."},
+                    {"path": "pkg/core/scheduler/s1.py", "role": "Sched (folded)."},
+                ],
+                "submodules": [
+                    {
+                        "name": "kv_offload",
+                        "path": "pkg/core/kv_offload",
+                        "description": "KV offloading.",
+                        "main_files": [
+                            {"path": "pkg/core/kv_offload/a.py", "role": "A."}
+                        ],
+                    }
+                ],
+            }
+        ],
+        "folds": [
+            {
+                "path": "pkg/core/util",
+                "into": "pkg/core",
+                "reason": "single-file helper",
+                "evidence_files": ["pkg/core/util/helper.py"],
+            },
+            {
+                "path": "pkg/core/scheduler",
+                "into": "pkg/core",
+                "reason": "thin scheduling helpers",
+                "evidence_files": ["pkg/core/scheduler/s1.py"],
+            },
+        ],
+    }
+    claude = _FakeClaude([
+        _stream_result(_source_root_decision()),
+        _stream_result(single_child),
+    ])
+    _patch(monkeypatch, claude)
+
+    artifacts = tmp_path / "run"
+    artifacts.mkdir()
+    run = run_two_phase_extraction(
+        repo, config=ExtractorConfig(), on_event=None, artifacts_dir=artifacts
+    )
+
+    # No repair round was needed.
+    assert len(claude.prompts) == 2
+    # kv_offload was absorbed: core is a leaf, its path covered by a fold.
+    assert run.project_tree.modules[0].submodules == []
+    norm = json.loads(
+        (artifacts / "03_enrich" / "attempt_01" / "normalization.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    kinds = [a["kind"] for a in norm["actions"]]
+    assert "collapse_single_child" in kinds
+
+
 # ── Telemetry ─────────────────────────────────────────────────────────────
 
 

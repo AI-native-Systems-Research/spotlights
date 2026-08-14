@@ -52,6 +52,7 @@ from spotlights_engine.modules_extractor.errors import (
     ExtractorCoverageError,
     ExtractorValidationError,
 )
+from spotlights_engine.modules_extractor.normalize import normalize_enriched_tree
 from spotlights_engine.modules_extractor.prompts import (
     render_enrich_prompt,
     render_enrich_shard_prompt,
@@ -96,6 +97,24 @@ if TYPE_CHECKING:
     from spotlights_engine.modules_extractor.extractor import ExtractorConfig
 
 _STAGE_REPAIR_PAYLOAD_MAX_CHARS = 60_000
+
+# Stage-3 attempt budget: the initial call plus at most one repair per
+# *distinct* failure class (parse / validation / coverage), capped here. The
+# cap exists because a repair can trade one failure class for another — batch
+# evidence showed repairs that fixed validation while regressing coverage —
+# and a shared single repair then hard-fails a tree that one more targeted
+# repair would have completed. A class that fails twice still fails fast: the
+# second occurrence raises rather than repairing again.
+_MAX_STAGE3_ATTEMPTS = 3
+
+
+def _spend_repair(kind: str, repaired_kinds: set[str], attempt: int) -> bool:
+    """True when a repair for `kind` may run: the class hasn't been repaired
+    yet and the attempt budget allows one more call. Mutates `repaired_kinds`."""
+    if kind in repaired_kinds or attempt >= _MAX_STAGE3_ATTEMPTS:
+        return False
+    repaired_kinds.add(kind)
+    return True
 
 _T = TypeVar("_T")
 
@@ -746,7 +765,8 @@ def _stage3_enrich_single(
     )
 
     prompt = base_prompt
-    for attempt in range(1, 3):
+    repaired_kinds: set[str] = set()
+    for attempt in range(1, _MAX_STAGE3_ATTEMPTS + 1):
         attempt_rel = f"03_enrich/attempt_{attempt:02d}"
         attempt_dir = base / attempt_rel if base is not None else None
         result: ClaudeStageResult[EnrichedTree] = run_structured_claude_stage(
@@ -770,22 +790,37 @@ def _stage3_enrich_single(
                 f"{attempt_rel}/validation.json",
                 {"ok": False, "kind": "pydantic", "detail": detail},
             )
-            if attempt == 1:
-                notify(on_event, "extractor: stage-3 parse failed; one repair")
+            if _spend_repair("parse", repaired_kinds, attempt):
+                notify(on_event, "extractor: stage-3 parse failed; repairing")
                 prompt = _repair_prompt(
                     base_prompt, detail, previous_payload=result.raw_payload
                 )
                 continue
             raise ExtractorValidationError(
-                f"enriched tree failed to parse after 2 attempts: "
+                f"enriched tree failed to parse after {attempt} attempts: "
                 f"{result.validation_error}",
                 stage="enrich",
             )
 
-        enriched = result.parsed
         _required_write_json(
-            base, f"{attempt_rel}/enriched_tree.json", enriched.model_dump(mode="json")
+            base,
+            f"{attempt_rel}/enriched_tree.json",
+            result.parsed.model_dump(mode="json"),
         )
+        enriched, norm_report = normalize_enriched_tree(
+            result.parsed, repo_path, skeleton=skeleton
+        )
+        _required_write_json(
+            base,
+            f"{attempt_rel}/normalization.json",
+            norm_report.model_dump(mode="json"),
+        )
+        if norm_report.actions:
+            _required_write_json(
+                base,
+                f"{attempt_rel}/normalized_tree.json",
+                enriched.model_dump(mode="json"),
+            )
 
         validation_error: str | None = None
         try:
@@ -808,8 +843,8 @@ def _stage3_enrich_single(
         )
 
         if validation_error is not None:
-            if attempt == 1:
-                notify(on_event, "extractor: stage-3 validation failed; one repair")
+            if _spend_repair("validation", repaired_kinds, attempt):
+                notify(on_event, "extractor: stage-3 validation failed; repairing")
                 prompt = _repair_prompt(
                     base_prompt, validation_error, previous_payload=result.raw_payload
                 )
@@ -828,16 +863,15 @@ def _stage3_enrich_single(
             )
 
         if coverage.missing:
-            if attempt == 1:
+            if _spend_repair("coverage", repaired_kinds, attempt):
                 notify(
                     on_event,
                     f"extractor: stage-3 missing {len(coverage.missing)} "
-                    "required paths; one repair",
+                    "required paths; repairing",
                 )
                 prompt = _repair_prompt(
                     base_prompt,
-                    "Missing required paths (must be emitted or folded): "
-                    + ", ".join(coverage.missing),
+                    _coverage_repair_errors(coverage.missing),
                     previous_payload=result.raw_payload,
                 )
                 continue
@@ -937,8 +971,9 @@ async def _run_one_enrich_shard(
     telemetry: _Telemetry,
     on_event: Callable[[str], None] | None,
 ) -> _ShardOutcome:
-    """One shard: enrich its subtree, with the base plan's *one* bounded repair
-    scoped to this shard rather than to the whole tree.
+    """One shard: enrich its subtree, with the bounded repair budget (one per
+    failure class, `_MAX_STAGE3_ATTEMPTS` total) scoped to this shard rather
+    than to the whole tree.
 
     Only the blocking subprocess call goes through `asyncio.to_thread`; telemetry
     is mutated here, on the event-loop thread, so `_Telemetry` needs no lock.
@@ -1016,10 +1051,14 @@ async def _enrich_shard_attempts(
     )
 
     prompt = base_prompt
-    for attempt in range(1, 3):
+    repaired_kinds: set[str] = set()
+    for attempt in range(1, _MAX_STAGE3_ATTEMPTS + 1):
         attempt_rel = f"{shard_rel}/attempt_{attempt:02d}"
         attempt_dir = base / attempt_rel if base is not None else None
-        stage_tag = f"03_enrich[{shard.key}]" + ("#repair" if attempt == 2 else "")
+        repair_tag = "" if attempt == 1 else "#repair" + (
+            str(attempt - 1) if attempt > 2 else ""
+        )
+        stage_tag = f"03_enrich[{shard.key}]{repair_tag}"
         result: ClaudeStageResult[EnrichedTree] = await asyncio.to_thread(
             run_structured_claude_stage,
             output_type=EnrichedTree,
@@ -1042,26 +1081,44 @@ async def _enrich_shard_attempts(
                 {"ok": False, "kind": "pydantic", "detail": detail},
             )
             _persist_sessions(base, telemetry)
-            if attempt == 1:
+            if _spend_repair("parse", repaired_kinds, attempt):
                 notify(
                     on_event,
-                    f"extractor: shard {shard.key} parse failed; one repair",
+                    f"extractor: shard {shard.key} parse failed; repairing",
                 )
                 prompt = _repair_prompt(
                     base_prompt, detail, previous_payload=result.raw_payload
                 )
                 continue
             raise ExtractorValidationError(
-                f"shard {shard.key!r} failed to parse after 2 attempts: "
+                f"shard {shard.key!r} failed to parse after {attempt} attempts: "
                 f"{result.validation_error}",
                 stage="enrich",
                 shard=shard.key,
             )
 
-        fragment = result.parsed
         _required_write_json(
-            base, f"{attempt_rel}/enriched_tree.json", fragment.model_dump(mode="json")
+            base,
+            f"{attempt_rel}/enriched_tree.json",
+            result.parsed.model_dump(mode="json"),
         )
+        fragment, norm_report = normalize_enriched_tree(
+            result.parsed,
+            repo_path,
+            skeleton=shard.subtree,
+            protected_paths=shard.rule4_exempt_paths,
+        )
+        _required_write_json(
+            base,
+            f"{attempt_rel}/normalization.json",
+            norm_report.model_dump(mode="json"),
+        )
+        if norm_report.actions:
+            _required_write_json(
+                base,
+                f"{attempt_rel}/normalized_tree.json",
+                fragment.model_dump(mode="json"),
+            )
 
         validation_error = _validate_shard_fragment(
             shard,
@@ -1085,10 +1142,10 @@ async def _enrich_shard_attempts(
         _persist_sessions(base, telemetry)
 
         if validation_error is not None:
-            if attempt == 1:
+            if _spend_repair("validation", repaired_kinds, attempt):
                 notify(
                     on_event,
-                    f"extractor: shard {shard.key} validation failed; one repair",
+                    f"extractor: shard {shard.key} validation failed; repairing",
                 )
                 prompt = _repair_prompt(
                     base_prompt, validation_error, previous_payload=result.raw_payload
@@ -1101,16 +1158,15 @@ async def _enrich_shard_attempts(
             )
 
         if coverage.missing:
-            if attempt == 1:
+            if _spend_repair("coverage", repaired_kinds, attempt):
                 notify(
                     on_event,
                     f"extractor: shard {shard.key} missing "
-                    f"{len(coverage.missing)} required paths; one repair",
+                    f"{len(coverage.missing)} required paths; repairing",
                 )
                 prompt = _repair_prompt(
                     base_prompt,
-                    "Missing required paths (must be emitted or folded): "
-                    + ", ".join(coverage.missing),
+                    _coverage_repair_errors(coverage.missing),
                     previous_payload=result.raw_payload,
                 )
                 continue
@@ -1277,9 +1333,21 @@ def _merge_and_gate(
                 branch=branch_key,
             )
 
-    merged = merge_fragments(pairs, skeleton=skeleton, plan=plan)
+    merged_raw = merge_fragments(pairs, skeleton=skeleton, plan=plan)
     _required_write_json(
-        base, "03_enrich/merged/enriched_tree.json", merged.model_dump(mode="json")
+        base, "03_enrich/merged/enriched_tree.json", merged_raw.model_dump(mode="json")
+    )
+    # Fragments are individually normalized, but re-assembly can create shapes
+    # no single shard could see — e.g. a one-child chain whose spine locally
+    # deferred Rule 4 for its promotion parent. Normalize the merged whole
+    # before the final gate; the pass is idempotent on already-clean trees.
+    merged, merged_norm = normalize_enriched_tree(
+        merged_raw, repo_path, skeleton=skeleton
+    )
+    _required_write_json(
+        base,
+        "03_enrich/merged/normalization.json",
+        merged_norm.model_dump(mode="json"),
     )
 
     validation_error: str | None = None
@@ -1431,6 +1499,24 @@ def _bounded(text: str) -> str:
     if len(text) > _STAGE_REPAIR_PAYLOAD_MAX_CHARS:
         return text[:_STAGE_REPAIR_PAYLOAD_MAX_CHARS] + "\n...<truncated>"
     return text
+
+
+def _coverage_repair_errors(missing: list[str]) -> str:
+    """The error text for a coverage repair, with the fold-semantics reminder.
+
+    The reminder exists because the observed failure mode is a model "covering"
+    a subtree with one fold of its root: folds are not recursive, so every
+    required descendant went missing at once.
+    """
+    return (
+        "Missing required paths (must be emitted or folded): "
+        + ", ".join(missing)
+        + "\n\nReminder: a folds[] record covers ONLY its own `path` — folds "
+        "are NOT recursive. Every required descendant of a folded directory "
+        "must still be individually emitted or given its own folds[] record. "
+        "If a directory has several required descendants, emit them (or the "
+        "directory itself) instead of folding them all away."
+    )
 
 
 def _repair_prompt(

@@ -548,6 +548,15 @@ def _validate_folds(
         # passed; the descendant emission is what actually covers the content.
         if fpath in organizational:
             continue
+        # Same reasoning, filesystem-determined: a folded directory holding no
+        # direct source-extension file at all (a Java package chain like
+        # `src/.../org/apache/kafka`, a pure container of sub-directories) has
+        # nothing of its own to put in the target's main_files, so requiring it
+        # is unsatisfiable. Coverage still holds its required descendants to
+        # account individually, so the waiver folds away only the passthrough
+        # node itself, never its content.
+        if not _dir_has_direct_source_file(repo_path, fpath):
+            continue
         # Rule 7: ≥1 unique non-symlink inventoried source file under the folded
         # path, outside any separately emitted descendant, present in the
         # target's main_files.

@@ -537,3 +537,84 @@ def test_forced_files_at_nonempty_root() -> None:
 def test_forced_files_none_when_all_nested() -> None:
     assert forced_repository_level_files("", ["vllm/core/x.py"]) == []
     assert forced_repository_level_files("src", ["src/pkg/a.py"]) == []
+
+
+# ── Fold evidence waiver for no-direct-source passthroughs ─────────────────
+
+
+def test_fold_of_dir_without_direct_source_waives_mainfiles_evidence(
+    tmp_path: Path,
+) -> None:
+    # A Java-style package chain: pkg/mod owns direct files; pkg/mod/java holds
+    # no direct file at all, only two source-bearing children. Folding `java`
+    # into `mod` cannot put a direct file of `java` in mod's main_files (none
+    # exists), so the requirement is waived; the kafka batch runs failed
+    # exactly here.
+    _write(tmp_path / "pkg" / "mod" / "build.py")
+    _write(tmp_path / "pkg" / "mod" / "conf.py")
+    _write(tmp_path / "pkg" / "mod" / "java" / "a" / "a1.py")
+    _write(tmp_path / "pkg" / "mod" / "java" / "a" / "a2.py")
+    _write(tmp_path / "pkg" / "mod" / "java" / "b" / "b1.py")
+    _write(tmp_path / "pkg" / "mod" / "java" / "b" / "b2.py")
+    skel = build_skeleton(tmp_path, "pkg")
+
+    tree = EnrichedTree.model_validate(
+        {
+            "modules": [
+                {
+                    "name": "mod",
+                    "path": "pkg/mod",
+                    "description": "Module.",
+                    "main_files": [{"path": "pkg/mod/build.py", "role": "B."}],
+                    "submodules": [
+                        {
+                            "name": "a",
+                            "path": "pkg/mod/java/a",
+                            "description": "A.",
+                            "main_files": [
+                                {"path": "pkg/mod/java/a/a1.py", "role": "A1."}
+                            ],
+                        },
+                        {
+                            "name": "b",
+                            "path": "pkg/mod/java/b",
+                            "description": "B.",
+                            "main_files": [
+                                {"path": "pkg/mod/java/b/b1.py", "role": "B1."}
+                            ],
+                        },
+                    ],
+                }
+            ],
+            "folds": [
+                {
+                    "path": "pkg/mod/java",
+                    "into": "pkg/mod",
+                    "reason": "package chain passthrough",
+                    "evidence_files": ["pkg/mod/java/a/a1.py"],
+                }
+            ],
+        }
+    )
+
+    validate_enriched_tree(tree, tmp_path, _repository(), skel)
+    cov = compute_coverage(tree, skel)
+    assert cov.missing == []
+    assert "pkg/mod/java" in cov.folded
+
+
+def test_fold_of_dir_with_direct_source_still_requires_mainfiles_evidence(
+    tmp_path: Path,
+) -> None:
+    # Negative control for the waiver: `pkg/core/util` HAS a direct source
+    # file, so the fold must still cite it in the target's main_files.
+    _repo(tmp_path)
+    skel = build_skeleton(tmp_path, "pkg")
+    data = _full_tree()
+    # Remove the fold's evidence file from core's main_files.
+    data["modules"][0]["main_files"] = [
+        {"path": "pkg/core/engine.py", "role": "Engine."}
+    ]
+    tree = EnrichedTree.model_validate(data)
+    with pytest.raises(CrossArtifactError, match="no valid evidence file"):
+        validate_enriched_tree(tree, tmp_path, _repository(), skel)

@@ -65,6 +65,12 @@ Inspect the repository source and emit a strict `EnrichedTree`:
 - Every `required` skeleton path MUST be either emitted as a module/submodule OR
   covered by exactly one `folds[]` record. A required path that is neither is a
   hard failure.
+- A fold is **NOT recursive**: a `folds[]` record covers ONLY its own `path`.
+  Every `required` descendant of a folded directory must still be individually
+  emitted or given its own `folds[]` record — and since each fold needs its own
+  evidence file in the target's `main_files` (max 5 entries), folding a
+  directory with several required descendants is effectively impossible. Emit
+  such a directory (or its children) instead of folding it.
 - Initially-foldable (non-required) inventory paths MAY be promoted to modules
   when source inspection shows an independent responsibility, or folded, or left
   unaccounted.
@@ -79,15 +85,23 @@ Inspect the repository source and emit a strict `EnrichedTree`:
     never a synthetic merged path. Record it in `folds[]` with `path`, `into`,
     `reason`, and `evidence_files` (≥1 real source file under `path`). At least
     one evidence file MUST also appear in the target module's `main_files` —
-    EXCEPT for an organizational passthrough whose only direct file is an
-    `__init__.py` and whose real source is emitted as a child module. That
-    passthrough has no substantive file of its own to cite, so list its
-    `__init__.py` as the evidence file; it need not appear in `main_files`.
+    EXCEPT for a passthrough directory with no substantive direct file of its
+    own: one whose only direct source file is an `__init__.py`, or one holding
+    no direct source file at all (a Java package chain like
+    `src/main/java/org/example`, a pure container of sub-directories). Such a
+    passthrough has nothing of its own to cite, so list its `__init__.py` (or
+    any real file under it) as the evidence file; it need not appear in
+    `main_files`.
   - A module with **exactly one** source-bearing child directory violates the
-    zero-or-≥2 rule below if it emits that child. Either fold the child into the
-    parent (cite its files in the parent's `main_files`), or — if the parent is
-    a pure passthrough with no responsibility of its own — emit the child as the
-    module and fold the parent away.
+    zero-or-≥2 rule below if it emits that child. If the child has NO required
+    descendants, either fold the child into the parent (cite its files in the
+    parent's `main_files`), or — if the parent is a pure passthrough with no
+    responsibility of its own — emit the child as the module and fold the
+    parent away. If the child HAS required descendants, do NOT fold the child
+    wholesale (folds are not recursive — its required descendants would all go
+    missing): emit the child's children directly as the parent's submodules and
+    fold only the child itself, with one of its direct files as evidence in the
+    parent's `main_files`.
 - **LEAF** — one cohesive submodule; no `submodules` key.
 - **SPLIT** — a directory with 2+ real nested source-bearing child directories,
   each its own logical unit. A parent has zero or ≥2 children, never exactly
