@@ -31,8 +31,8 @@ your responsibility to run the ranking step first.
    ```
 
 4. **Report** the printed summary: bundle title, number of candidates exported,
-   the `share-bundle/` path, the `share-candidates.zip` path, and any skipped
-   candidates.
+   the `share-bundle/` path, the `share-candidates.zip` path, how many candidates
+   got evolve bundles (if any), and any skipped candidates.
 
 ## What the bundle contains
 
@@ -40,6 +40,31 @@ your responsibility to run the ranking step first.
 - `candidates/modules/<module>/<file>.html` — rendered candidate page.
 - `candidates/modules/<module>/<file>.md` — the original markdown, beside each page.
 - The `modules/` folder structure is preserved for the exported candidates.
+
+## Evolve bundles (automatic when present)
+
+If `prep-evolve` has run, its output lives in a sibling `evolve/` tree beside
+`sorted/` (`<run>/evolve/<module>/<candidate>/<engine>/`). The build folds it in
+automatically — no flag needed. If there is no `evolve/` tree, the build behaves
+exactly as above.
+
+For each exported candidate that has evolve data, the bundle also gets:
+
+- `candidates/modules/<module>/<file>__evolve.html` — an "Evolve bundles" page
+  with one section per engine (`coral`, `skydiscover`, `nous`): what the framework
+  is, its repo, install command(s), edit scope, native config, the run command,
+  the inlined README (where the engine ships one), collapsible raw views of the
+  other files, and a per-engine download button.
+- `candidates/modules/<module>/<file>__evolve/<engine>/…` — the complete original
+  evolve files copied verbatim (including `seed.py`), plus a per-engine
+  `<engine>.zip` that unzips into a tidy top-level `<engine>/` folder.
+- The candidate page gains an "Evolve bundles" section, and its index card gains
+  an `evolve · N` badge and a footer link to the evolve page.
+
+> **Evaluation gap:** every evolve bundle is launchable as-is, but produces no
+> meaningful score until the recipient completes its evaluator/grader — the
+> performance measurement ships as a `TODO`. The evolve page states this and the
+> oracle Spotlights inferred for each engine.
 
 ## Link handling (built into the script)
 
