@@ -271,31 +271,6 @@ def territory_source_file_counts(
     }
 
 
-def emitted_path_territories(
-    emitted_paths: set[str], skeleton: Skeleton
-) -> tuple[dict[str, int], list[str]]:
-    """v1-comparable territories under the same physical rule.
-
-    Assigns every skeleton path to its deepest emitted ancestor (or itself
-    when emitted) and sums direct source counts. Paths with no emitted
-    ancestor are returned separately as `unowned_optional` rather than dropped
-    or assigned to a sibling.
-    """
-    territory: dict[str, int] = {p: 0 for p in emitted_paths}
-    unowned: list[str] = []
-    for node in skeleton.iter_nodes():
-        owner = (
-            node.path
-            if node.path in emitted_paths
-            else nearest_module_ancestor(node.path, emitted_paths)
-        )
-        if owner is None:
-            unowned.append(node.path)
-        else:
-            territory[owner] += node.direct_source_file_count
-    return territory, sorted(unowned)
-
-
 def module_children(resolved: ResolvedAssignmentTree) -> dict[str, list[str]]:
     """Module -> sorted direct descendant module roots (nearest-ancestor rule)."""
     module_paths = resolved.module_paths()
@@ -509,7 +484,6 @@ __all__ = [
     "derive_metadata_batches",
     "derive_module_forest",
     "derive_project_tree",
-    "emitted_path_territories",
     "module_children",
     "resolve_assignments",
     "resolve_territories",

@@ -6,17 +6,11 @@ file, classifies each (`required` plus reasons), and computes a content
 fingerprint over the accepted source files so Stage 5 can detect concurrent
 repository mutation.
 
-What `required` means depends on the Stage-3 contract in force:
-
-- tree contract: the completeness guarantee is structural — a `required`
-  directory must be emitted or validly folded by Stage 3
-  (`design/module_extraction_fix_impl_plan.md`, Stage 2);
-- assignment contract: totality covers the **full** inventory (every path
-  gets a label), so `required` and its reasons are audit metadata for reports
-  and diagnostics, not an emit/fold obligation.
+Stage-3 totality covers the **full** inventory: every path gets a label.
+`required` and its reasons remain audit metadata for reports and diagnostics.
 
 Stage 5 recomputes this inventory and its fingerprint before accepting a tree
-under either contract.
+before accepting the derived tree.
 """
 
 from __future__ import annotations
@@ -334,24 +328,6 @@ def _classify_node(raw: _RawDir) -> tuple[SkeletonNode, list[str]]:
     return node, org_only
 
 
-def _branch_has_required(node: SkeletonNode) -> bool:
-    if node.required:
-        return True
-    return any(_branch_has_required(c) for c in node.children)
-
-
-def _promote_if_no_required(node: SkeletonNode) -> None:
-    """Promote the highest node of a branch with no required node to required.
-
-    Prevents a branch made entirely of single-file passthroughs from having no
-    emittable owner into which its directories could be folded.
-    """
-    if not _branch_has_required(node):
-        node.required = True
-        if "promoted_branch_owner" not in node.required_reasons:
-            node.required_reasons = [*node.required_reasons, "promoted_branch_owner"]
-
-
 def build_skeleton(
     repo_path: Path,
     source_root: str,
@@ -374,7 +350,6 @@ def build_skeleton(
     org_only: list[str] = []
     for raw in top_raw:
         node, sub_org = _classify_node(raw)
-        _promote_if_no_required(node)
         nodes.append(node)
         org_only.extend(sub_org)
 

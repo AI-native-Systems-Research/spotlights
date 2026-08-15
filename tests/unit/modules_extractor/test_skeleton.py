@@ -111,16 +111,15 @@ def test_subtree_source_file_counts(tmp_path: Path) -> None:
     assert counts["src/passthrough"] == 1
 
 
-def test_passthrough_branch_is_promoted(tmp_path: Path) -> None:
+def test_passthrough_branch_remains_optional_audit_metadata(tmp_path: Path) -> None:
     _shape_repo(tmp_path)
     skel = build_skeleton(tmp_path, "src")
     required = skel.required_paths()
-    # The passthrough branch (src/passthrough/deep/leaf.py) has no naturally
-    # required node; the highest node of that branch is promoted so its
-    # directories have an emittable owner.
-    assert "src/passthrough" in required
+    # Stage 3A labels every path, so a branch no longer needs an artificial
+    # required node merely to guarantee an owner.
+    assert "src/passthrough" not in required
     node = next(n for n in skel.iter_nodes() if n.path == "src/passthrough")
-    assert "promoted_branch_owner" in node.required_reasons
+    assert node.required_reasons == []
 
 
 def test_ignored_dirs_and_symlinks_pruned_and_audited(tmp_path: Path) -> None:

@@ -21,7 +21,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from spotlights_engine.modules_extractor.agent import (
     ExtractionInvocation,
@@ -51,41 +51,23 @@ class ExtractorConfig(BaseModel):
     # single repo-wide call that must explore and emit the full module tree; on a
     # large monorepo (e.g. vLLM: ~345 required modules across vllm/, rust/, csrc/)
     # the 1800s default was too small and the enrichment was killed mid-generation
-    # before writing enriched_tree.json/coverage.json. 5400s gives that call the
+    # before writing assignment and coverage artifacts. 5400s gives that call the
     # headroom to finish while every stage still enforces a hard subprocess
     # timeout.
     timeout_s: int = Field(default=5400, ge=1)
 
     # Two-phase (Idea 4) strategy. Default on: the deterministic-skeleton +
     # LLM-enrichment path is the standard extractor now; set False for the
-    # legacy single-shot path.
+    # independent direct-ProjectTree single-shot path.
     two_phase: bool = True
     source_root_max_turns: int = Field(default=15, ge=1)
 
-    # ── Stage-3 contract (temporary migration flag) ───────────────────────
-    # "tree" is the historical EnrichedTree + folds contract; "assignments"
-    # is the exhaustive MODULE/PART labeling with a separate metadata pass
-    # (`design/module_extractor_simplified.md`). The flag exists only for the
-    # A/B window and is removed at cutover.
-    contract: Literal["tree", "assignments"] = "tree"
-    # Assignment-contract size rule: a folder whose subtree_source_file_count
+    # Stage-3 size rule: a folder whose subtree_source_file_count
     # exceeds this must be a MODULE; at or below it a MODULE needs a
     # keep_reason. Compared against the skeleton's raw subtree counts, so the
     # rule is local and identical in whole-repository and pruned-shard
-    # prompts. Semantically ignored (and excluded from the manager's semantic
-    # fingerprint) in tree mode.
+    # prompts.
     merge_threshold: int = Field(default=MERGE_THRESHOLD_DEFAULT, ge=0)
-
-    @model_validator(mode="after")
-    def _contract_requires_two_phase(self) -> ExtractorConfig:
-        # `two_phase=False, contract="assignments"` would silently ignore the
-        # contract; reject the combination instead.
-        if self.contract == "assignments" and not self.two_phase:
-            raise ValueError(
-                'contract="assignments" requires two_phase=True; the legacy '
-                "single-shot path has no assignment contract"
-            )
-        return self
 
     # ── Stage-3 sharding strategy ─────────────────────────────────────────
     # Enrichment is sharded by top-level skeleton node and run under a bounded
@@ -98,7 +80,7 @@ class ExtractorConfig(BaseModel):
     #
     #   "auto"            top-level sharding + size-gated sub-sharding
     #   "top_level_only"  shard by top-level, never sub-shard
-    #   "single"          force today's monolithic single call (A/B, small repos)
+    #   "single"          force one monolithic assignment call (small repos)
     enrich_sharding: Literal["auto", "top_level_only", "single"] = "auto"
     max_parallel_enrich_shards: int = Field(default=10, ge=1)
 
@@ -113,28 +95,20 @@ class ExtractorConfig(BaseModel):
     # whose scope IS the entire skeleton still gets `timeout_s` (see
     # `sharding.covers_entire_skeleton`), so the degenerate single-shard repo
     # does not newly time out. So does any shard whose weight derivation could
-    # not push below `enrich_subshard_threshold` (see `sharding.shard_weight`):
+    # not push below `enrich_subshard_threshold` (see
+    # `sharding.assignment_shard_weight`):
     # an unsplittable wide flat branch, a depth- or budget-capped split, or a
     # heavy spine residue must not inherit a deadline sized for a small slice.
     enrich_timeout_s: int | None = Field(default=1800, ge=1)
 
-    # Recursive sub-sharding of an oversized top-level branch. `weight` is a
-    # node's required-node count.
+    # Recursive sub-sharding of an oversized top-level branch. `weight` is the
+    # number of inventoried paths, because Stage 3A labels every path.
     enrich_subshard_threshold: int = Field(default=40, ge=1)
     enrich_subshard_child_min: int = Field(default=2, ge=1)
     enrich_subshard_max_depth: int = Field(default=2, ge=1)
-    # Hard ceiling on total derived enrich shards. `ge=2` so the cap can never
-    # force a single-child spine, which Stage-5 Rule 4 would reject with no
-    # possible recovery on the pure-Python merge.
-    #
-    # Budget is spent greedily in top-level path order, so a cap that binds does
-    # not shave the *cheapest* split — it starves whichever heavy branch happens
-    # to sort last, handing it back the monolithic shard (and the per-shard
-    # timeout) that sharding exists to prevent. 24 became binding once a
-    # one-child chain like vLLM's `rust/` could split at all: vLLM asks for 33,
-    # and at 24 `vllm/model_executor` (50 required nodes) was the branch that
-    # lost. The ceiling is there to bound a pathological repo, not to referee
-    # between branches of a normal one.
+    # Target ceiling for derived Stage-3A shards. Every top-level branch still
+    # receives one shard, so a repository with more top-level branches may
+    # exceed this value; only recursive shards consume the remaining budget.
     enrich_max_shards: int = Field(default=40, ge=2)
 
 
@@ -187,7 +161,7 @@ def extract_with_telemetry(
         run_dir = None
 
     if cfg.two_phase:
-        # Lazy import: two_phase pulls in skeleton machinery that the legacy
+        # Lazy import: two_phase pulls in skeleton machinery that the direct
         # path (and the Stage-02 safety-order test) must not require at module
         # top.
         from spotlights_engine.modules_extractor.two_phase import (

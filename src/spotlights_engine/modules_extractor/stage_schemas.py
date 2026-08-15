@@ -1,34 +1,13 @@
-"""Strict inter-stage models for the two-phase modules extractor.
+"""Strict inter-stage models for assignment-based module extraction.
 
-These are the contracts that flow *between* the deterministic and LLM stages
-(Idea 4 in `design/module_extraction_fix.md`). They are deliberately stricter
-than the public `ProjectTree`/`Module` schema:
-
-- `SourceRootDecision` (Stage 1) nests the canonical `Repository` model rather
-  than duplicating its fields, and rejects unknown repository keys.
-- `Skeleton`/`SkeletonNode` (Stage 2) are the deterministic inventory.
-- Stage 3 has **two contracts** while the `ExtractorConfig.contract` migration
-  flag exists (`design/module_extractor_simplified.md`):
-  - the tree contract: `EnrichedTree` and friends — a module tree with a
-    `folds[]` ledger. Forbids extra fields, requires non-empty bounded
-    descriptions, and at most `MAX_MAIN_FILES` unique `main_files`; the
-    matching *lower* bound of 1 lives in `coverage.validate_enriched_tree`,
-    which can see the filesystem and so can exempt a pure container directory
-    that owns no file of its own.
-  - the assignment contract: Stage 3A returns an exhaustive
-    `AssignmentTree` (one `MODULE`/`PART` label per skeleton path plus a
-    decision per module), code resolves it into a `ResolvedAssignmentTree`,
-    and Stage 3B returns `ModuleMetadataBatch`es (descriptions + main files
-    for already-final module territories) united into a `ModuleMetadataMap`.
-
-The public serialized `ProjectTree` schema is unchanged; Stage 5 converts an
-`EnrichedTree` (or resolved assignments + metadata, via `derive.py`) back into
-`ProjectTree` dicts.
+Stage 1 selects the source root, Stage 2 builds a deterministic skeleton,
+Stage 3A labels every skeleton path ``MODULE`` or ``PART``, and Stage 3B adds
+metadata for the resolved modules. Stage 5 derives the unchanged public
+``ProjectTree`` from those assignment artifacts.
 """
 
 from __future__ import annotations
 
-from pathlib import PurePosixPath
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -37,10 +16,8 @@ from spotlights_engine.modules_extractor.constants import (
     MAX_MAIN_FILES,
     MAX_REPRESENTATIVE_FILES,
 )
-from spotlights_engine.schemas.project import Repository, _normalize_module_segment
+from spotlights_engine.schemas.project import Repository
 
-# Bounds — generous enough for honest descriptions, tight enough that a
-# runaway model can't blow the argv/prompt budget.
 _MAX_DESCRIPTION = 2000
 _MAX_ROLE = 500
 _MAX_REASON = 500
@@ -62,12 +39,7 @@ _REPOSITORY_KEYS = frozenset(Repository.model_fields.keys())
 
 
 def _structural_relpath(raw: str) -> str:
-    """Structural (non-filesystem) check of a repo-relative POSIX path.
-
-    Rejects empty, absolute, backslash-aliased, and `..`-containing paths.
-    Filesystem existence/symlink checks happen later in `coverage.py` /
-    `skeleton.py`; this only enforces the lexical contract.
-    """
+    """Normalize a lexical repo-relative POSIX path without filesystem I/O."""
     stripped = raw.strip()
     if not stripped:
         raise ValueError("path must be non-empty")
@@ -82,9 +54,6 @@ def _structural_relpath(raw: str) -> str:
     if not parts:
         raise ValueError(f"path normalized to empty: {raw!r}")
     return "/".join(parts)
-
-
-# ── Stage 1 — source-root decision ───────────────────────────────────────
 
 
 class ExcludedSourcePath(BaseModel):
@@ -103,7 +72,7 @@ class ExcludedSourcePath(BaseModel):
 
 
 class SourceRootDecision(BaseModel):
-    """Stage-1 model output: canonical `Repository` + audited exclusions."""
+    """Stage-1 model output: canonical repository metadata and exclusions."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -113,10 +82,6 @@ class SourceRootDecision(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _reject_unknown_repository_keys(cls, data: Any) -> Any:
-        """The nested `Repository` uses Pydantic's default (ignore) extra
-        behavior, so an unknown repository key would be silently dropped.
-        Reject it here, before it can be discarded, keeping the stage contract
-        strict without touching the public `Repository` schema."""
         if isinstance(data, dict):
             repo = data.get("repository")
             if isinstance(repo, dict):
@@ -136,9 +101,6 @@ class SourceRootDecision(BaseModel):
         return self
 
 
-# ── Stage 2 — deterministic skeleton ─────────────────────────────────────
-
-
 class SkeletonNode(BaseModel):
     """One source-bearing directory in the deterministic inventory."""
 
@@ -146,8 +108,6 @@ class SkeletonNode(BaseModel):
 
     path: str
     direct_source_file_count: int = Field(ge=0)
-    # Non-init source files in the whole subtree (this node + descendants).
-    # Defaulted so skeletons serialized before the field existed still load.
     subtree_source_file_count: int = Field(default=0, ge=0)
     source_child_count: int = Field(ge=0)
     representative_files: list[str] = Field(
@@ -172,26 +132,23 @@ class Skeleton(BaseModel):
     inventory_fingerprint: str
 
     def iter_nodes(self):
-        """Preorder traversal over every `SkeletonNode`."""
-
         def _walk(nodes: list[SkeletonNode]):
-            for n in nodes:
-                yield n
-                yield from _walk(n.children)
+            for node in nodes:
+                yield node
+                yield from _walk(node.children)
 
         yield from _walk(self.nodes)
 
     def all_paths(self) -> set[str]:
-        return {n.path for n in self.iter_nodes()}
+        return {node.path for node in self.iter_nodes()}
 
     def required_paths(self) -> set[str]:
-        return {n.path for n in self.iter_nodes() if n.required}
-
-
-# ── Stage 3 — enrichment ─────────────────────────────────────────────────
+        return {node.path for node in self.iter_nodes() if node.required}
 
 
 class EnrichedFile(BaseModel):
+    """One representative file and its role in a resolved module."""
+
     model_config = ConfigDict(extra="forbid")
 
     path: str
@@ -203,178 +160,14 @@ class EnrichedFile(BaseModel):
         return self
 
 
-def _default_name_from_path(data: Any) -> Any:
-    if isinstance(data, dict) and not data.get("name") and data.get("path"):
-        basename = PurePosixPath(str(data["path"]).strip("/")).name
-        data = {**data, "name": _normalize_module_segment(basename)}
-    return data
-
-
-def _check_main_files(main_files: list[EnrichedFile]) -> None:
-    # The upper bound is structural and enforced here; the lower bound is not,
-    # because it depends on the filesystem. A *pure container* directory (only
-    # sub-directories — a Go `cmd/`, a namespace package) has no file of its own
-    # to cite once its children are emitted, so it legally cites none.
-    # `validate_enriched_tree` holds every other module to ≥1, where it can see
-    # the directory and say so precisely.
-    if len(main_files) > MAX_MAIN_FILES:
-        raise ValueError(
-            f"main_files must have at most {MAX_MAIN_FILES} entries, "
-            f"got {len(main_files)}"
-        )
-    paths = [f.path for f in main_files]
-    if len(set(paths)) != len(paths):
-        raise ValueError(f"main_files paths must be unique: {paths}")
-
-
-class EnrichedSubmodule(BaseModel):
-    """A nested module."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
-    path: str
-    description: str = Field(min_length=1, max_length=_MAX_DESCRIPTION)
-    main_files: list[EnrichedFile]
-    submodules: list[EnrichedSubmodule] = Field(default_factory=list)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _name_default(cls, data: Any) -> Any:
-        return _default_name_from_path(data)
-
-    @model_validator(mode="after")
-    def _validate(self) -> EnrichedSubmodule:
-        object.__setattr__(self, "path", _structural_relpath(self.path))
-        _check_main_files(self.main_files)
-        return self
-
-
-class EnrichedTopModule(BaseModel):
-    """A top-level module."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    name: str = Field(pattern=r"^[a-z][a-z0-9_]*$")
-    path: str
-    description: str = Field(min_length=1, max_length=_MAX_DESCRIPTION)
-    main_files: list[EnrichedFile]
-    submodules: list[EnrichedSubmodule] = Field(default_factory=list)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _name_default(cls, data: Any) -> Any:
-        return _default_name_from_path(data)
-
-    @model_validator(mode="after")
-    def _validate(self) -> EnrichedTopModule:
-        object.__setattr__(self, "path", _structural_relpath(self.path))
-        _check_main_files(self.main_files)
-        return self
-
-
-class FoldRecord(BaseModel):
-    """A directory folded into an emitted ancestor module.
-
-    `evidence_files` must name ≥1 real source file under the folded path
-    (validated by Rule 8 in `coverage._validate_folds`); the evidence is not
-    required to appear in the target's `main_files`.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    path: str
-    into: str
-    reason: str = Field(min_length=1, max_length=_MAX_REASON)
-    evidence_files: list[str] = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def _validate(self) -> FoldRecord:
-        object.__setattr__(self, "path", _structural_relpath(self.path))
-        object.__setattr__(self, "into", _structural_relpath(self.into))
-        norm_evidence = [_structural_relpath(f) for f in self.evidence_files]
-        if len(set(norm_evidence)) != len(norm_evidence):
-            raise ValueError(
-                f"fold evidence_files must be unique: {self.evidence_files}"
-            )
-        object.__setattr__(self, "evidence_files", norm_evidence)
-        return self
-
-
-def _submodule_to_dict(sub: EnrichedSubmodule) -> dict[str, Any]:
-    out: dict[str, Any] = {
-        "name": sub.name,
-        "path": sub.path,
-        "description": sub.description,
-        "main_files": [{"path": f.path, "role": f.role} for f in sub.main_files],
-    }
-    if sub.submodules:
-        out["submodules"] = [_submodule_to_dict(s) for s in sub.submodules]
-    return out
-
-
-class EnrichedTree(BaseModel):
-    """Stage-3 output: strict module tree + fold ledger."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    modules: list[EnrichedTopModule] = Field(default_factory=list)
-    folds: list[FoldRecord] = Field(default_factory=list)
-
-    def iter_all_modules(self):
-        """Yield every emitted module/submodule (top-level and nested)."""
-
-        def _walk(mods) -> Any:
-            for m in mods:
-                yield m
-                yield from _walk(m.submodules)
-
-        yield from _walk(self.modules)
-
-    def emitted_paths(self) -> set[str]:
-        return {_structural_relpath(m.path) for m in self.iter_all_modules()}
-
-    def modules_as_project_tree_dicts(self) -> list[dict[str, Any]]:
-        """Convert the top-level modules to `ProjectTree`-shaped dicts."""
-        out: list[dict[str, Any]] = []
-        for m in self.modules:
-            d: dict[str, Any] = {
-                "name": m.name,
-                "path": m.path,
-                "description": m.description,
-                "main_files": [
-                    {"path": f.path, "role": f.role} for f in m.main_files
-                ],
-            }
-            if m.submodules:
-                d["submodules"] = [_submodule_to_dict(s) for s in m.submodules]
-            out.append(d)
-        return out
-
-
-SkeletonNode.model_rebuild()
-EnrichedSubmodule.model_rebuild()
-EnrichedTopModule.model_rebuild()
-
-
-# ── Stage 3 — assignment contract ─────────────────────────────────────────
-
 AssignmentLabel = Literal["MODULE", "PART"]
-
 AssignmentOrigin = Literal[
     "top_level_anchor", "size", "independent", "part", "qn_collision_part"
 ]
 
 
 def _normalize_mapping_keys(raw: Any, field_name: str) -> Any:
-    """Normalize a raw dict's keys with `_structural_relpath`, collision-safe.
-
-    Two distinct raw keys that normalize to the same path (`a/b` and `a//b`)
-    are rejected instead of silently overwriting one — a Pydantic **parse**
-    failure, not a separate validation class. Exact duplicate raw JSON object
-    keys were already collapsed by the standard JSON parser; "exactly once"
-    means the post-parse mapping checked here.
-    """
+    """Normalize mapping keys and reject normalization collisions."""
     if not isinstance(raw, dict):
         return raw
     out: dict[str, Any] = {}
@@ -392,13 +185,7 @@ def _normalize_mapping_keys(raw: Any, field_name: str) -> Any:
 
 
 class ModuleDecision(BaseModel):
-    """The per-module decision record accompanying a `MODULE` label.
-
-    `keep_reason` is required (non-null) only for a non-anchor module at or
-    below the merge threshold — enforced by V3 in `assignments.py`, which can
-    see the skeleton counts. Here it is merely stripped, bounded, and non-empty
-    when present.
-    """
+    """The decision record accompanying one ``MODULE`` label."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -415,13 +202,7 @@ class ModuleDecision(BaseModel):
 
 
 class AssignmentTree(BaseModel):
-    """Raw Stage-3A model output: one label for every skeleton path in scope.
-
-    - `assignments` values are the closed `MODULE`/`PART` enum, never paths.
-    - `module_decisions` keys must equal the `MODULE`-labeled paths exactly
-      (the bijection is enforced by V3, which owns label semantics).
-    - No descriptions, main files, folds, or evidence exist in this pass.
-    """
+    """Raw Stage-3A output: one label for every skeleton path in scope."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -448,16 +229,7 @@ class AssignmentTree(BaseModel):
 
 
 class ResolvedAssignmentTree(BaseModel):
-    """Canonical post-validation Stage-3A artifact: labels + derived maps.
-
-    `owners` maps every path to its owning module (a `MODULE` owns itself; a
-    `PART` is owned by its deepest strict ancestor labeled `MODULE`).
-    `origins` records why each path carries its label; `collision_precedence`
-    maps each forced-`PART` normalized-name-collision loser to its winning
-    path. The derived maps are audit data: every load must recompute and
-    compare them against the full skeleton (`derive.verify_resolved_assignments`)
-    rather than trust the persisted values.
-    """
+    """Canonical Stage-3A artifact with deterministically derived maps."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -510,8 +282,6 @@ class ModuleInfo(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     description: str = Field(min_length=1, max_length=_MAX_DESCRIPTION)
-    # `max_length` (not a custom validator) so the generated Claude JSON
-    # Schema carries `maxItems` and prompt/schema cannot drift.
     main_files: list[EnrichedFile] = Field(max_length=MAX_MAIN_FILES)
 
     @model_validator(mode="after")
@@ -523,7 +293,7 @@ class ModuleInfo(BaseModel):
 
 
 class ModuleMetadataBatch(BaseModel):
-    """One Stage-3B response: metadata for exactly the requested module set."""
+    """One Stage-3B response for exactly the requested module set."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -533,7 +303,10 @@ class ModuleMetadataBatch(BaseModel):
     @classmethod
     def _normalize_keys(cls, data: Any) -> Any:
         if isinstance(data, dict) and "modules" in data:
-            data = {**data, "modules": _normalize_mapping_keys(data["modules"], "modules")}
+            data = {
+                **data,
+                "modules": _normalize_mapping_keys(data["modules"], "modules"),
+            }
         return data
 
 
@@ -548,21 +321,22 @@ class ModuleMetadataMap(BaseModel):
     @classmethod
     def _normalize_keys(cls, data: Any) -> Any:
         if isinstance(data, dict) and "modules" in data:
-            data = {**data, "modules": _normalize_mapping_keys(data["modules"], "modules")}
+            data = {
+                **data,
+                "modules": _normalize_mapping_keys(data["modules"], "modules"),
+            }
         return data
 
+
+SkeletonNode.model_rebuild()
 
 __all__ = [
     "AssignmentLabel",
     "AssignmentOrigin",
     "AssignmentTree",
     "EnrichedFile",
-    "EnrichedSubmodule",
-    "EnrichedTopModule",
-    "EnrichedTree",
     "ExcludedSourcePath",
     "ExclusionReason",
-    "FoldRecord",
     "ModuleDecision",
     "ModuleInfo",
     "ModuleMetadataBatch",

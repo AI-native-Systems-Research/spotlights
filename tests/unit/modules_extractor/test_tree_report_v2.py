@@ -1,4 +1,4 @@
-"""v2 (assignment-contract) decision report: build, render, offline dispatch."""
+"""Assignment decision report: build, render, and offline loading."""
 
 from __future__ import annotations
 
@@ -20,12 +20,10 @@ from spotlights_engine.modules_extractor.stage_schemas import (
     SkeletonNode,
 )
 from spotlights_engine.modules_extractor.tree_report import (
-    SCHEMA_VERSION,
     SCHEMA_VERSION_V2,
     build_tree_decision_report_v2,
-    detect_report_version,
     load_any_report_from_run_dir,
-    load_report_v2_from_run_dir,
+    load_report_from_run_dir,
     render_markdown_v2,
     report_json_text,
 )
@@ -224,24 +222,19 @@ def _fake_v2_run_dir(tmp_path: Path) -> Path:
 
 def test_offline_v2_rebuild_from_artifacts(tmp_path: Path) -> None:
     run = _fake_v2_run_dir(tmp_path)
-    assert detect_report_version(run) == SCHEMA_VERSION_V2
-    report = load_report_v2_from_run_dir(run)
+    report = load_report_from_run_dir(run)
     assert report.schema_version == SCHEMA_VERSION_V2
     assert report.merge_threshold == 15  # from the resolved artifact
     nodes = {n.path: n for n in report.iter_nodes()}
     assert nodes["pkg/app/small"].owner == "pkg/app"
 
 
-def test_offline_dispatch_prefers_existing_report_version(tmp_path: Path) -> None:
+def test_offline_loader_rebuilds_an_incomplete_or_old_report(tmp_path: Path) -> None:
     run = _fake_v2_run_dir(tmp_path)
     (run / "tree_decisions.json").write_text(
         json.dumps({"schema_version": "tree_decisions.v2"}), encoding="utf-8"
     )
-    assert detect_report_version(run) == SCHEMA_VERSION_V2
-    (run / "tree_decisions.json").write_text(
-        json.dumps({"schema_version": "tree_decisions.v1"}), encoding="utf-8"
-    )
-    assert detect_report_version(run) == SCHEMA_VERSION
+    assert load_any_report_from_run_dir(run).schema_version == SCHEMA_VERSION_V2
 
 
 def test_offline_dispatch_preserves_a_complete_best_effort_report(
@@ -277,7 +270,7 @@ def test_offline_v2_rejects_tampered_resolved_artifact(tmp_path: Path) -> None:
     (run / "resolved_assignments.json").write_text(
         json.dumps(resolved), encoding="utf-8"
     )
-    report = load_report_v2_from_run_dir(run)
+    report = load_report_from_run_dir(run)
     # The tampered artifact is dropped, flagged at the root, and the report is
     # rebuilt from the raw labels (owner recomputed correctly).
     assert any(i.code == "resolved_artifact_mismatch" for i in report.root_issues)

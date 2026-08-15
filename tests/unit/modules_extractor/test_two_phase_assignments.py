@@ -1,9 +1,8 @@
-"""Assignment-contract orchestration tests with a fake Claude.
+"""Assignment orchestration tests with a fake Claude.
 
-Same fake boundary as the tree-contract suites: patch `run_streaming_claude`
-in `claude_stage`. Dispatch is on prompt content — a `"whole_repository":
-true` scope marks the single Stage-3A call, a `"key"` marks a shard or a
-metadata batch — because shards and batches run concurrently.
+Patch `run_streaming_claude` in `claude_stage`. Dispatch is on prompt content:
+a `"whole_repository": true` scope marks the single Stage-3A call, while a
+`"key"` marks a shard or metadata batch because they run concurrently.
 """
 
 from __future__ import annotations
@@ -181,7 +180,6 @@ def _patch(monkeypatch, claude) -> None:
 
 def _run(repo, claude, monkeypatch, *, artifacts=None, **cfg):
     _patch(monkeypatch, claude)
-    cfg.setdefault("contract", "assignments")
     return run_two_phase_extraction(
         repo,
         config=ExtractorConfig(**cfg),
@@ -190,12 +188,6 @@ def _run(repo, claude, monkeypatch, *, artifacts=None, **cfg):
     )
 
 
-# ── Config gate ───────────────────────────────────────────────────────────
-
-
-def test_assignments_contract_requires_two_phase() -> None:
-    with pytest.raises(ValueError, match="two_phase"):
-        ExtractorConfig(contract="assignments", two_phase=False)
 
 
 # ── Single-call happy path ────────────────────────────────────────────────

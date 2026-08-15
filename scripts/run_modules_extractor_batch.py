@@ -177,7 +177,7 @@ def resolve_repo_path(spec: RepoSpec, *, output_root: Path, force: bool) -> Path
     return dest
 
 
-# ── Contract A/B metrics ───────────────────────────────────────────────────
+# ── Assignment metrics ────────────────────────────────────────────────────
 
 
 def _distribution(values: list[int]) -> dict[str, Any] | None:
@@ -194,23 +194,17 @@ def _distribution(values: list[int]) -> dict[str, Any] | None:
 
 
 def collect_tree_metrics(run_dir: Path) -> dict[str, Any] | None:
-    """Contract-aware comparison metrics from a finished run's artifacts.
+    """Assignment metrics from a finished run's artifacts.
 
-    Both contracts get a leaf-territory distribution computed under the same
-    physical rule (every skeleton path assigned to its deepest emitted/module
-    ancestor), so tree-mode and assignment-mode rows compare like for like.
-    v1's optional paths with no emitted ancestor go to `unowned_optional`;
-    lints are v2-only. Best-effort: any failure returns an `error` marker
-    rather than failing the batch row.
+    Best-effort: any failure returns an ``error`` marker rather than failing
+    the batch row.
     """
     try:
         from spotlights_engine.modules_extractor.derive import (
-            emitted_path_territories,
             module_children,
             territory_source_file_counts,
         )
         from spotlights_engine.modules_extractor.stage_schemas import (
-            EnrichedTree,
             ResolvedAssignmentTree,
             Skeleton,
         )
@@ -243,7 +237,6 @@ def collect_tree_metrics(run_dir: Path) -> dict[str, Any] | None:
                 code = lint.get("code", "unknown")
                 lint_counts[code] = lint_counts.get(code, 0) + 1
             return {
-                "contract": "assignments",
                 "merge_threshold": resolved.merge_threshold,
                 "modules": len(resolved.module_paths()),
                 "leaves": len(leaves),
@@ -252,27 +245,6 @@ def collect_tree_metrics(run_dir: Path) -> dict[str, Any] | None:
                 "unowned_optional": 0,
             }
 
-        enriched_file = run_dir / "enriched_tree.json"
-        if enriched_file.is_file():
-            enriched = EnrichedTree.model_validate(
-                json.loads(enriched_file.read_text(encoding="utf-8"))
-            )
-            emitted = {m.path.strip().strip("/") for m in enriched.iter_all_modules()}
-            leaves = [
-                m.path.strip().strip("/")
-                for m in enriched.iter_all_modules()
-                if not m.submodules
-            ]
-            territory, unowned = emitted_path_territories(emitted, skeleton)
-            return {
-                "contract": "tree",
-                "merge_threshold": None,
-                "modules": len(emitted),
-                "leaves": len(leaves),
-                "leaf_territory": _distribution([territory[p] for p in leaves]),
-                "lint_counts": {},
-                "unowned_optional": len(unowned),
-            }
         return None
     except Exception as exc:  # noqa: BLE001 — metrics must never fail the row
         return {"error": f"{type(exc).__name__}: {exc}"}
@@ -378,7 +350,6 @@ def run_repo(
         summary["output_tokens"] = inv.output_tokens
         summary["modules_total"] = len(list(tree.walk()))
         summary["modules_leaves"] = len(list(tree.leaves()))
-        summary["contract"] = cfg.contract
         summary["tree_metrics"] = collect_tree_metrics(repo_dir / "modules_extractor")
     except KeyboardInterrupt:
         raise

@@ -1,4 +1,4 @@
-"""Assignment-contract (Stage-3 v2) validation and coverage.
+"""Stage-3 assignment validation and coverage.
 
 Five rules replace the old Stage-3 tree/fold rules
 (`design/module_extractor_simplified.md` §2.4). This module owns:
@@ -21,9 +21,8 @@ and final `ProjectTree`s. Failures are returned as stable, path-indexed
 repair budget sees every problem at once; `format_assignment_issues` caps the
 rendered text for prompt size.
 
-`coverage.py` keeps Stage-1 validation, `CrossArtifactError`, the shared
-filesystem helpers, and the v1 tree-contract validation while the
-`ExtractorConfig.contract` migration flag exists.
+`coverage.py` supplies Stage-1 validation, `CrossArtifactError`, and the shared
+filesystem helpers.
 """
 
 from __future__ import annotations
@@ -466,7 +465,7 @@ def validate_metadata_entries(
 ) -> list[AssignmentIssue]:
     """V4 over one batch (or the final union, with `requested` = all modules).
 
-    Preserves the tree contract's Rule-3 behavior exactly:
+    Applies the main-file ownership and filesystem rules:
 
     - a main file lies under the module, and its nearest resolved module owner
       is that module;

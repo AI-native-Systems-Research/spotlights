@@ -282,19 +282,16 @@ def hash_pydantic_excluding(model: BaseModel | None, *, exclude: set[str]) -> st
 def extractor_semantic_payload(extractor_cfg: BaseModel) -> dict[str, Any]:
     """The extractor config payload that actually determines behavior.
 
-    Adding the defaulted `contract`/`merge_threshold` migration fields to
-    `ExtractorConfig` would otherwise change every serialized hash and
-    invalidate every pre-migration resume. In tree mode both fields are
-    semantically inert (`merge_threshold` is ignored entirely), so they are
-    dropped and the hash stays byte-for-byte compatible with pre-migration
-    defaults. In assignment mode both are included, because they change the
-    produced tree. After the temporary flag is removed at cutover, this
-    helper keeps injecting the literal contract value so assignment-mode A/B
-    hashes remain stable.
+    The Stage-3 contract is now unconditionally assignments-based. Injecting
+    the literal keeps hashes compatible with assignment-mode runs created
+    during the migration window, when `contract="assignments"` was an
+    explicit config field.
     """
     payload = extractor_cfg.model_dump(mode="json", exclude={"artifacts_dir"})
-    if payload.get("contract", "tree") == "tree":
-        payload.pop("contract", None)
+    if payload.get("two_phase", True):
+        payload["contract"] = "assignments"
+    else:
+        # The independent single-shot path never reads the assignment policy.
         payload.pop("merge_threshold", None)
     return payload
 

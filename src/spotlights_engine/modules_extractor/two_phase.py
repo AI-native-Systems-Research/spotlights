@@ -6,16 +6,10 @@ Stage 4 semantic review, since removed; assembly keeps its Stage-5 numbering):
 
 1. Claude + Python — repository metadata and source root.
 2. Python — deterministic directory inventory / skeleton.
-3. Claude + Python — Stage-3 enrichment under one of two contracts while the
-   `ExtractorConfig.contract` migration flag exists
-   (`design/module_extractor_simplified.md`):
-   - `"tree"` — the historical `EnrichedTree` + folds contract, with strict
-     filesystem validation and the coverage gate; or
-   - `"assignments"` — Stage 3A labels every skeleton path `MODULE`/`PART`
-     (single call or sharded, with V1–V3 + path-only V5 validation and the
-     bounded repair budget), code resolves owners, then Stage 3B fetches
-     descriptions/main files for final module territories in deterministic
-     batches (V4 + final V5).
+3. Claude + Python — Stage 3A labels every skeleton path `MODULE`/`PART`
+   (single call or sharded, with V1–V3 + path-only V5 validation and bounded
+   repairs), code resolves owners, then Stage 3B fetches descriptions and main
+   files for final module territories in deterministic batches (V4 + final V5).
 5. Python — deterministic final `ProjectTree` assembly and re-validation.
 
 The public return type (`ExtractionRunResult`) and the serialized `ProjectTree`
@@ -60,11 +54,8 @@ from spotlights_engine.modules_extractor.claude_stage import (
     run_structured_claude_stage,
 )
 from spotlights_engine.modules_extractor.coverage import (
-    CoverageReport,
     CrossArtifactError,
-    compute_coverage,
     forced_repository_level_files,
-    validate_enriched_tree,
     validate_source_root_decision,
 )
 from spotlights_engine.modules_extractor.derive import (
@@ -80,38 +71,24 @@ from spotlights_engine.modules_extractor.errors import (
     ExtractorCoverageError,
     ExtractorValidationError,
 )
-from spotlights_engine.modules_extractor.normalize import normalize_enriched_tree
 from spotlights_engine.modules_extractor.prompts import (
     render_assignment_prompt,
     render_assignment_shard_prompt,
-    render_enrich_prompt,
-    render_enrich_shard_prompt,
     render_identify_source_root_prompt,
     render_metadata_prompt,
 )
 from spotlights_engine.modules_extractor.sharding import (
     AssignmentShard,
     AssignmentShardPlan,
-    EnrichShard,
-    ShardPlan,
     assignment_branch_coverage,
     assignment_owning_shard,
     assignment_shard_weight,
-    branch_coverage,
     covers_entire_skeleton,
     derive_assignment_shards,
-    derive_enrich_shards,
     has_several_source_roots,
     merge_assignment_fragments,
-    merge_fragments,
-    owning_shard,
     render_assignment_shard_plan_markdown,
-    render_shard_plan_markdown,
-    shard_weight,
     validate_assignment_shard_scope,
-    validate_promotion_parent,
-    validate_shard_scope,
-    validate_spine_main_files,
 )
 from spotlights_engine.modules_extractor.skeleton import (
     ALGORITHM_PROFILE_VERSION,
@@ -121,7 +98,6 @@ from spotlights_engine.modules_extractor.skeleton import (
 )
 from spotlights_engine.modules_extractor.stage_schemas import (
     AssignmentTree,
-    EnrichedTree,
     ExcludedSourcePath,
     ModuleInfo,
     ModuleMetadataBatch,
@@ -131,9 +107,7 @@ from spotlights_engine.modules_extractor.stage_schemas import (
     SourceRootDecision,
 )
 from spotlights_engine.modules_extractor.tree_report import (
-    build_tree_decision_report,
     build_tree_decision_report_v2,
-    render_markdown,
     render_markdown_v2,
 )
 from spotlights_engine.schemas.project import (
@@ -318,62 +292,6 @@ def _best_effort_write_text(
         notify(on_event, f"extractor: failed to persist {rel} during error handling: {exc}")
 
 
-def _write_tree_decisions(
-    base: Path | None,
-    *,
-    skeleton: Skeleton,
-    enriched: EnrichedTree,
-    coverage: CoverageReport,
-    decision: SourceRootDecision | None,
-) -> None:
-    """Derived per-directory decision report, on the success path.
-
-    Required like every other final artifact: it is a pure join over models
-    already in hand (`design/module_extractor_visualization.md`), so a failure
-    here is an artifact-write failure, not a modeling failure.
-    """
-    if base is None:
-        return
-    report = build_tree_decision_report(skeleton, enriched, coverage, decision)
-    _required_write_json(base, "tree_decisions.json", report.model_dump(mode="json"))
-    _required_write_text(base, "tree_decisions.md", render_markdown(report))
-
-
-def _best_effort_tree_decisions(
-    base: Path | None,
-    *,
-    skeleton: Skeleton,
-    enriched: EnrichedTree,
-    coverage: CoverageReport,
-    decision: SourceRootDecision | None,
-    on_event: Callable[[str], None] | None,
-) -> None:
-    """Same report, written while a stage error is in flight.
-
-    The visualization is most useful exactly here — on a failed run — so it is
-    written before the error propagates, best-effort: nothing in this path may
-    mask the original failure.
-    """
-    if base is None:
-        return
-    # Build *and* serialize inside the guard: the two `_best_effort_write_*`
-    # helpers only catch `OSError` around the write itself, so rendering in an
-    # argument expression would let a render bug escape and mask the in-flight
-    # stage error — the one thing this path may never do.
-    try:
-        report = build_tree_decision_report(skeleton, enriched, coverage, decision)
-        payload = report.model_dump(mode="json")
-        markdown = render_markdown(report)
-    except Exception as exc:  # noqa: BLE001 - must not mask the original error
-        notify(
-            on_event,
-            f"extractor: failed to build tree_decisions during error handling: {exc}",
-        )
-        return
-    _best_effort_write_json(base, "tree_decisions.json", payload, on_event)
-    _best_effort_write_text(base, "tree_decisions.md", markdown, on_event)
-
-
 def _persist_sessions(base: Path | None, telemetry: _Telemetry) -> None:
     """sessions.json is rewritten atomically after every invocation."""
     _required_write_json(base, "sessions.json", telemetry.as_dict())
@@ -426,72 +344,19 @@ def run_two_phase_extraction(
         repo_path, decision, base=base, on_event=on_event
     )
 
-    # ── Assignment contract (v2) — Stage 3A/3B + Stage 5 ──────────────────
-    if config.contract == "assignments":
-        tree = _run_assignment_extraction(
-            repo_path,
-            repository,
-            decision,
-            skeleton,
-            base=base,
-            config=config,
-            telemetry=telemetry,
-            repo_fingerprint=repo_fingerprint,
-            on_event=on_event,
-        )
-        _persist_sessions(base, telemetry)
-        invocation = ExtractionInvocation(
-            session_id=telemetry.accepted_session_id,
-            duration_s=telemetry.total_duration_s,
-            cost_usd=telemetry.total_cost_usd,
-            input_tokens=telemetry.total_input_tokens,
-            output_tokens=telemetry.total_output_tokens,
-        )
-        return ExtractionRunResult(
-            project_tree=tree,
-            invocation=invocation,
-            raw_payload=tree.model_dump_json(indent=2),
-        )
-
-    # ── Stage 3 — enrichment + coverage gate ──────────────────────────────
-    stage3 = _stage3_enrich(
-        repo_path,
-        repository,
-        skeleton,
-        base=base,
-        config=config,
-        telemetry=telemetry,
-        decision=decision,
-        on_event=on_event,
-    )
-    _persist_sessions(base, telemetry)
-    enriched, coverage = stage3.enriched, stage3.coverage
-
-    # ── Stage 5 — deterministic assembly ──────────────────────────────────
-    tree = _stage5_assemble(
+    # ── Stage 3A/3B + deterministic Stage 5 assembly ─────────────────────
+    tree = _run_assignment_extraction(
         repo_path,
         repository,
         decision,
         skeleton,
-        enriched,
         base=base,
-        detected_source_files=repo_scan.files,
+        config=config,
+        telemetry=telemetry,
         repo_fingerprint=repo_fingerprint,
         on_event=on_event,
     )
-
-    # Final top-level artifacts.
-    _required_write_json(base, "enriched_tree.json", enriched.model_dump(mode="json"))
-    _required_write_json(base, "coverage.json", coverage.model_dump(mode="json"))
-    _write_tree_decisions(
-        base,
-        skeleton=skeleton,
-        enriched=enriched,
-        coverage=coverage,
-        decision=decision,
-    )
     _persist_sessions(base, telemetry)
-
     invocation = ExtractionInvocation(
         session_id=telemetry.accepted_session_id,
         duration_s=telemetry.total_duration_s,
@@ -504,7 +369,6 @@ def run_two_phase_extraction(
         invocation=invocation,
         raw_payload=tree.model_dump_json(indent=2),
     )
-
 
 # ── Stage 1 ───────────────────────────────────────────────────────────────
 
@@ -741,747 +605,11 @@ def _effective_timeout(specific: int | None, fallback: int) -> int:
     return specific if specific is not None else fallback
 
 
-@dataclass
-class _Stage3Result:
-    """Stage-3 output: the accepted enriched tree and its coverage report.
-
-    `plan` is `None` in `enrich_sharding="single"` mode, which reproduces
-    today's monolithic Stage 3 verbatim.
-    """
-
-    enriched: EnrichedTree
-    coverage: CoverageReport
-    plan: ShardPlan | None = None
-    fragments: dict[str, EnrichedTree] = field(default_factory=dict)
-    accepted_sessions: dict[str, str | None] = field(default_factory=dict)
-
-
-@dataclass
-class _ShardOutcome:
-    shard: EnrichShard
-    fragment: EnrichedTree
-    session_id: str | None
-    attempts: int
-
-
 class _CancelFlag:
-    """Set by the first shard to fail, so a shard that wins the semaphore in the
-    same tick does not start a subprocess that is already known to be pointless."""
+    """Stop queued work after the first concurrent shard/batch failure."""
 
     def __init__(self) -> None:
         self.cancelled = False
-
-
-def _stage3_enrich(
-    repo_path: Path,
-    repository: Any,
-    skeleton: Skeleton,
-    *,
-    base: Path | None,
-    config: ExtractorConfig,
-    telemetry: _Telemetry,
-    decision: SourceRootDecision | None = None,
-    on_event: Callable[[str], None] | None,
-) -> _Stage3Result:
-    """Enrich the skeleton, sharded by top-level branch unless mode is `single`.
-
-    `decision` is threaded through for one purpose only: the best-effort
-    `tree_decisions` write on a failure path, which grafts Stage-1's semantic
-    exclusions into the report. It never affects enrichment.
-    """
-    stage_dir = base / "03_enrich" if base is not None else None
-    if stage_dir is not None:
-        stage_dir.mkdir(parents=True, exist_ok=True)
-
-    # Several top-level source folders must always be enriched per-folder in
-    # parallel, never lumped into one monolithic pass — even when the caller
-    # asked for "single". A single top-level folder keeps today's single pass.
-    if config.enrich_sharding == "single" and not has_several_source_roots(skeleton):
-        return _stage3_enrich_single(
-            repo_path,
-            repository,
-            skeleton,
-            base=base,
-            config=config,
-            telemetry=telemetry,
-            decision=decision,
-            on_event=on_event,
-        )
-    return _stage3_enrich_sharded(
-        repo_path,
-        repository,
-        skeleton,
-        base=base,
-        config=config,
-        telemetry=telemetry,
-        decision=decision,
-        on_event=on_event,
-    )
-
-
-def _stage3_enrich_single(
-    repo_path: Path,
-    repository: Any,
-    skeleton: Skeleton,
-    *,
-    base: Path | None,
-    config: ExtractorConfig,
-    telemetry: _Telemetry,
-    decision: SourceRootDecision | None = None,
-    on_event: Callable[[str], None] | None,
-) -> _Stage3Result:
-    """The monolithic fallback: one Claude call over the whole repository.
-
-    Kept byte-for-byte compatible with the pre-sharding implementation for A/B
-    comparison and for small repos where one call is cheaper.
-    """
-    repo_data = repository.model_dump(mode="json")
-    skel_data = skeleton.model_dump(mode="json")
-    base_prompt = render_enrich_prompt(
-        repository=repo_data, skeleton=skel_data
-    )
-    _required_write_text(base, "03_enrich/prompt.md", base_prompt)
-    _required_write_json(
-        base,
-        "03_enrich/data_blocks.json",
-        {"repository": repo_data, "skeleton": skel_data},
-    )
-
-    prompt = base_prompt
-    repaired_kinds: set[str] = set()
-    for attempt in range(1, _MAX_STAGE3_ATTEMPTS + 1):
-        attempt_rel = f"03_enrich/attempt_{attempt:02d}"
-        attempt_dir = base / attempt_rel if base is not None else None
-        result: ClaudeStageResult[EnrichedTree] = run_structured_claude_stage(
-            output_type=EnrichedTree,
-            repo_path=repo_path,
-            prompt=prompt,
-            stage_name="enrich",
-            attempt_dir=attempt_dir,
-            claude_bin=config.claude_bin,
-            max_turns=config.max_turns,
-            timeout_s=config.timeout_s,
-            on_event=on_event,
-        )
-        telemetry.add_claude("03_enrich", result)
-        _persist_sessions(base, telemetry)
-
-        if result.parsed is None:
-            detail = str(result.validation_error)
-            _required_write_json(
-                base,
-                f"{attempt_rel}/validation.json",
-                {"ok": False, "kind": "pydantic", "detail": detail},
-            )
-            if _spend_repair("parse", repaired_kinds, attempt):
-                notify(on_event, "extractor: stage-3 parse failed; repairing")
-                prompt = _repair_prompt(
-                    base_prompt, detail, previous_payload=result.raw_payload
-                )
-                continue
-            raise ExtractorValidationError(
-                f"enriched tree failed to parse after {attempt} attempts: "
-                f"{result.validation_error}",
-                stage="enrich",
-            )
-
-        _required_write_json(
-            base,
-            f"{attempt_rel}/enriched_tree.json",
-            result.parsed.model_dump(mode="json"),
-        )
-        enriched, norm_report = normalize_enriched_tree(result.parsed)
-        _required_write_json(
-            base,
-            f"{attempt_rel}/normalization.json",
-            norm_report.model_dump(mode="json"),
-        )
-        if norm_report.actions:
-            _required_write_json(
-                base,
-                f"{attempt_rel}/normalized_tree.json",
-                enriched.model_dump(mode="json"),
-            )
-
-        validation_error: str | None = None
-        try:
-            validate_enriched_tree(enriched, repo_path, repository, skeleton)
-        except CrossArtifactError as exc:
-            validation_error = str(exc)
-
-        coverage = compute_coverage(enriched, skeleton)
-        _required_write_json(
-            base, f"{attempt_rel}/coverage.json", coverage.model_dump(mode="json")
-        )
-        _required_write_json(
-            base,
-            f"{attempt_rel}/validation.json",
-            {
-                "ok": validation_error is None,
-                "kind": "cross_artifact" if validation_error else None,
-                "detail": validation_error,
-            },
-        )
-
-        if validation_error is not None:
-            if _spend_repair("validation", repaired_kinds, attempt):
-                notify(on_event, "extractor: stage-3 validation failed; repairing")
-                prompt = _repair_prompt(
-                    base_prompt, validation_error, previous_payload=result.raw_payload
-                )
-                continue
-            _best_effort_tree_decisions(
-                base,
-                skeleton=skeleton,
-                enriched=enriched,
-                coverage=coverage,
-                decision=decision,
-                on_event=on_event,
-            )
-            raise ExtractorValidationError(
-                f"enriched tree failed cross-artifact validation: {validation_error}",
-                stage="enrich",
-            )
-
-        if coverage.missing:
-            if _spend_repair("coverage", repaired_kinds, attempt):
-                notify(
-                    on_event,
-                    f"extractor: stage-3 missing {len(coverage.missing)} "
-                    "required paths; repairing",
-                )
-                prompt = _repair_prompt(
-                    base_prompt,
-                    _coverage_repair_errors(coverage.missing),
-                    previous_payload=result.raw_payload,
-                )
-                continue
-            _best_effort_tree_decisions(
-                base,
-                skeleton=skeleton,
-                enriched=enriched,
-                coverage=coverage,
-                decision=decision,
-                on_event=on_event,
-            )
-            raise ExtractorCoverageError(
-                f"{len(coverage.missing)} required paths not covered",
-                missing=coverage.missing,
-                stage="enrich",
-            )
-
-        telemetry.accepted_session_id = result.telemetry.session_id
-        return _Stage3Result(enriched=enriched, coverage=coverage)
-
-    raise AssertionError("unreachable: stage-3 attempt loop exhausted")
-
-
-# ── Stage 3 — sharded ─────────────────────────────────────────────────────
-
-
-def _scope_dict(shard: EnrichShard) -> dict[str, Any]:
-    return {
-        "key": shard.key,
-        "root_path": shard.root_path,
-        "owns_root": shard.owns_root,
-        "is_subshard": shard.is_subshard,
-        "parent_key": shard.parent_key,
-        "depth": shard.depth,
-        "promoted_children": list(shard.promoted_children),
-        "promotion_parent": shard.promotion_parent,
-    }
-
-
-def _shard_plan_dict(plan: ShardPlan) -> dict[str, Any]:
-    return {
-        "branch_roots": dict(plan.branch_roots),
-        "not_split_reasons": dict(plan.not_split_reasons),
-        "shards": [
-            {
-                **_scope_dict(s),
-                "required_nodes": len(s.subtree.required_paths()),
-                "inventory_nodes": len(s.subtree.all_paths()),
-            }
-            for s in plan.shards
-        ],
-    }
-
-
-def _validate_shard_fragment(
-    shard: EnrichShard,
-    fragment: EnrichedTree,
-    *,
-    repo_path: Path,
-    repository: Any,
-) -> str | None:
-    """Subtree-scoped cross-artifact validation. Returns the error text or None.
-
-    The shard-scoped knob is what lets the *unchanged* validator run against a
-    slice: a spine defers Rule 4 for its promotion parent, because the children
-    that guarantee it are pruned from its subtree. That is the promotion parent
-    and nothing else — a chain-split spine holds chain nodes above it whose
-    children are all present, and their Rule 4 is decided here or never.
-    """
-    try:
-        validate_shard_scope(shard, fragment)
-        validate_enriched_tree(
-            fragment,
-            repo_path,
-            repository,
-            shard.subtree,
-            rule4_exempt_paths=shard.rule4_exempt_paths or None,
-        )
-        validate_spine_main_files(shard, fragment)
-        validate_promotion_parent(shard, fragment)
-    except CrossArtifactError as exc:
-        return str(exc)
-    return None
-
-
-async def _run_one_enrich_shard(
-    shard: EnrichShard,
-    *,
-    sem: asyncio.Semaphore,
-    cancel: _CancelFlag,
-    repo_path: Path,
-    repository: Any,
-    skeleton: Skeleton,
-    plan: ShardPlan,
-    base: Path | None,
-    config: ExtractorConfig,
-    telemetry: _Telemetry,
-    on_event: Callable[[str], None] | None,
-) -> _ShardOutcome:
-    """One shard: enrich its subtree, with the bounded repair budget (one per
-    failure class, `_MAX_STAGE3_ATTEMPTS` total) scoped to this shard rather
-    than to the whole tree.
-
-    Only the blocking subprocess call goes through `asyncio.to_thread`; telemetry
-    is mutated here, on the event-loop thread, so `_Telemetry` needs no lock.
-    """
-    async with sem:
-        if cancel.cancelled:
-            raise asyncio.CancelledError(
-                f"shard {shard.key!r} cancelled after a sibling failed"
-            )
-        try:
-            return await _enrich_shard_attempts(
-                shard,
-                repo_path=repo_path,
-                repository=repository,
-                skeleton=skeleton,
-                plan=plan,
-                base=base,
-                config=config,
-                telemetry=telemetry,
-                on_event=on_event,
-            )
-        except BaseException:
-            cancel.cancelled = True
-            raise
-
-
-async def _enrich_shard_attempts(
-    shard: EnrichShard,
-    *,
-    repo_path: Path,
-    repository: Any,
-    skeleton: Skeleton,
-    plan: ShardPlan,
-    base: Path | None,
-    config: ExtractorConfig,
-    telemetry: _Telemetry,
-    on_event: Callable[[str], None] | None,
-) -> _ShardOutcome:
-    shard_rel = f"03_enrich/{shard.key}"
-    repo_data = repository.model_dump(mode="json")
-    subtree_data = shard.subtree.model_dump(mode="json")
-    scope = _scope_dict(shard)
-    base_prompt = render_enrich_shard_prompt(
-        repository=repo_data,
-        subtree=subtree_data,
-        scope=scope,
-    )
-    _required_write_json(base, f"{shard_rel}/scope.json", scope)
-    _required_write_json(base, f"{shard_rel}/subtree_skeleton.json", subtree_data)
-    _required_write_json(
-        base,
-        f"{shard_rel}/data_blocks.json",
-        {
-            "repository": repo_data,
-            "subtree": subtree_data,
-            "scope": scope,
-        },
-    )
-    _required_write_text(base, f"{shard_rel}/prompt.md", base_prompt)
-    _required_write_json(
-        base, f"{shard_rel}/schema.json", EnrichedTree.model_json_schema()
-    )
-
-    # A shard whose scope IS the whole skeleton is today's single call and keeps
-    # today's deadline. So does a shard derivation could NOT cut down below the
-    # sub-shard threshold — a wide flat branch with no promotable children, a
-    # depth- or budget-capped split, or a spine left holding what the budget
-    # could not promote: such a shard is a slice in name only, and the shorter
-    # per-shard budget is only right for a shard actually cut down to size.
-    cut_down_to_size = shard_weight(shard) <= config.enrich_subshard_threshold
-    timeout_s = (
-        _effective_timeout(config.enrich_timeout_s, config.timeout_s)
-        if cut_down_to_size and not covers_entire_skeleton(shard, skeleton)
-        else config.timeout_s
-    )
-
-    prompt = base_prompt
-    repaired_kinds: set[str] = set()
-    for attempt in range(1, _MAX_STAGE3_ATTEMPTS + 1):
-        attempt_rel = f"{shard_rel}/attempt_{attempt:02d}"
-        attempt_dir = base / attempt_rel if base is not None else None
-        repair_tag = "" if attempt == 1 else "#repair" + (
-            str(attempt - 1) if attempt > 2 else ""
-        )
-        stage_tag = f"03_enrich[{shard.key}]{repair_tag}"
-        result: ClaudeStageResult[EnrichedTree] = await asyncio.to_thread(
-            run_structured_claude_stage,
-            output_type=EnrichedTree,
-            repo_path=repo_path,
-            prompt=prompt,
-            stage_name=f"enrich:{shard.key}",
-            attempt_dir=attempt_dir,
-            claude_bin=config.claude_bin,
-            max_turns=config.max_turns,
-            timeout_s=timeout_s,
-            on_event=on_event,
-        )
-        telemetry.add_claude(stage_tag, result)
-
-        if result.parsed is None:
-            detail = str(result.validation_error)
-            _required_write_json(
-                base,
-                f"{attempt_rel}/validation.json",
-                {"ok": False, "kind": "pydantic", "detail": detail},
-            )
-            _persist_sessions(base, telemetry)
-            if _spend_repair("parse", repaired_kinds, attempt):
-                notify(
-                    on_event,
-                    f"extractor: shard {shard.key} parse failed; repairing",
-                )
-                prompt = _repair_prompt(
-                    base_prompt, detail, previous_payload=result.raw_payload
-                )
-                continue
-            raise ExtractorValidationError(
-                f"shard {shard.key!r} failed to parse after {attempt} attempts: "
-                f"{result.validation_error}",
-                stage="enrich",
-                shard=shard.key,
-            )
-
-        _required_write_json(
-            base,
-            f"{attempt_rel}/enriched_tree.json",
-            result.parsed.model_dump(mode="json"),
-        )
-        fragment, norm_report = normalize_enriched_tree(
-            result.parsed,
-            protected_paths=shard.rule4_exempt_paths,
-        )
-        _required_write_json(
-            base,
-            f"{attempt_rel}/normalization.json",
-            norm_report.model_dump(mode="json"),
-        )
-        if norm_report.actions:
-            _required_write_json(
-                base,
-                f"{attempt_rel}/normalized_tree.json",
-                fragment.model_dump(mode="json"),
-            )
-
-        validation_error = _validate_shard_fragment(
-            shard,
-            fragment,
-            repo_path=repo_path,
-            repository=repository,
-        )
-        coverage = compute_coverage(fragment, shard.subtree)
-        _required_write_json(
-            base, f"{attempt_rel}/coverage.json", coverage.model_dump(mode="json")
-        )
-        _required_write_json(
-            base,
-            f"{attempt_rel}/validation.json",
-            {
-                "ok": validation_error is None,
-                "kind": "cross_artifact" if validation_error else None,
-                "detail": validation_error,
-            },
-        )
-        _persist_sessions(base, telemetry)
-
-        if validation_error is not None:
-            if _spend_repair("validation", repaired_kinds, attempt):
-                notify(
-                    on_event,
-                    f"extractor: shard {shard.key} validation failed; repairing",
-                )
-                prompt = _repair_prompt(
-                    base_prompt, validation_error, previous_payload=result.raw_payload
-                )
-                continue
-            raise ExtractorValidationError(
-                f"shard {shard.key!r} failed subtree validation: {validation_error}",
-                stage="enrich",
-                shard=shard.key,
-            )
-
-        if coverage.missing:
-            if _spend_repair("coverage", repaired_kinds, attempt):
-                notify(
-                    on_event,
-                    f"extractor: shard {shard.key} missing "
-                    f"{len(coverage.missing)} required paths; repairing",
-                )
-                prompt = _repair_prompt(
-                    base_prompt,
-                    _coverage_repair_errors(coverage.missing),
-                    previous_payload=result.raw_payload,
-                )
-                continue
-            raise ExtractorCoverageError(
-                f"shard {shard.key!r}: {len(coverage.missing)} required paths "
-                "not covered",
-                missing=coverage.missing,
-                stage="enrich",
-                shard=shard.key,
-            )
-
-        _required_write_json(
-            base, f"{shard_rel}/fragment.json", fragment.model_dump(mode="json")
-        )
-        return _ShardOutcome(
-            shard=shard,
-            fragment=fragment,
-            session_id=result.telemetry.session_id,
-            attempts=attempt,
-        )
-
-    raise AssertionError("unreachable: shard attempt loop exhausted")
-
-
-async def _run_enrich_shards_async(
-    shards: list[EnrichShard], *, sem: asyncio.Semaphore, **kwargs: Any
-) -> list[_ShardOutcome]:
-    """Run every shard under a bounded-concurrency semaphore.
-
-    `asyncio.gather` propagates the first exception but does **not** cancel the
-    still-running siblings, so cancel them explicitly. That saves *cost* — a
-    shard still queued on the semaphore never launches a subprocess — but not
-    wall clock: a shard already inside `asyncio.to_thread` keeps running, and
-    `asyncio.run` teardown joins the default executor's threads, so
-    `enrich_timeout_s` is the real bound on how long a doomed run takes to exit.
-    """
-    cancel = _CancelFlag()
-    tasks = [
-        asyncio.create_task(
-            _run_one_enrich_shard(s, sem=sem, cancel=cancel, **kwargs)
-        )
-        for s in shards
-    ]
-    try:
-        return list(await asyncio.gather(*tasks))
-    except BaseException:
-        cancel.cancelled = True
-        for t in tasks:
-            t.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
-        raise
-
-
-def _stage3_enrich_sharded(
-    repo_path: Path,
-    repository: Any,
-    skeleton: Skeleton,
-    *,
-    base: Path | None,
-    config: ExtractorConfig,
-    telemetry: _Telemetry,
-    decision: SourceRootDecision | None = None,
-    on_event: Callable[[str], None] | None,
-) -> _Stage3Result:
-    plan = derive_enrich_shards(skeleton, config)
-    _required_write_json(base, "03_enrich/shards.json", _shard_plan_dict(plan))
-    _required_write_text(
-        base, "03_enrich/sharding.md", render_shard_plan_markdown(plan)
-    )
-    notify(
-        on_event,
-        f"extractor: stage-3 sharded into {len(plan.shards)} shard(s) "
-        f"across {len(plan.branch_roots)} top-level branch(es)",
-    )
-
-    async def _run() -> list[_ShardOutcome]:
-        return await _run_enrich_shards_async(
-            plan.shards,
-            sem=asyncio.Semaphore(config.max_parallel_enrich_shards),
-            repo_path=repo_path,
-            repository=repository,
-            skeleton=skeleton,
-            plan=plan,
-            base=base,
-            config=config,
-            telemetry=telemetry,
-            on_event=on_event,
-        )
-
-    try:
-        outcomes = _run_event_loop(_run())
-    except BaseException:
-        # A write failure while handling a shard error must never mask it.
-        _best_effort_write_json(base, "sessions.json", telemetry.as_dict(), on_event)
-        raise
-    _persist_sessions(base, telemetry)
-
-    fragments = {o.shard.key: o.fragment for o in outcomes}
-    accepted = {o.shard.key: o.session_id for o in outcomes}
-
-    enriched, coverage = _merge_and_gate(
-        repo_path,
-        repository,
-        skeleton,
-        plan,
-        fragments,
-        base=base,
-        decision=decision,
-        on_event=on_event,
-    )
-    primary = plan.primary_shard()
-    telemetry.accepted_session_id = (
-        accepted.get(primary.key) if primary is not None else None
-    )
-    return _Stage3Result(
-        enriched=enriched,
-        coverage=coverage,
-        plan=plan,
-        fragments=fragments,
-        accepted_sessions=accepted,
-    )
-
-
-def _merge_and_gate(
-    repo_path: Path,
-    repository: Any,
-    skeleton: Skeleton,
-    plan: ShardPlan,
-    fragments: dict[str, EnrichedTree],
-    *,
-    base: Path | None,
-    decision: SourceRootDecision | None = None,
-    on_event: Callable[[str], None] | None,
-) -> tuple[EnrichedTree, CoverageReport]:
-    """Per-branch precheck, deterministic merge, then the **unchanged** full
-    cross-artifact validation and coverage gate on the merged tree."""
-    pairs = [(s, fragments[s.key]) for s in plan.shards if s.key in fragments]
-
-    # Per-branch precheck: a cheap, loud integrity check on this plan's own
-    # partition invariant plus a blame localizer. Its firing indicates a
-    # `sharding.py` bug, not a bad model response.
-    for branch_key in plan.branch_keys():
-        branch_pairs = [
-            (s, f) for s, f in pairs if plan.branch_key_of(s) == branch_key
-        ]
-        report = branch_coverage(plan, branch_key, branch_pairs)
-        _required_write_json(
-            base,
-            f"03_enrich/branches/{branch_key}/coverage.json",
-            report.model_dump(mode="json"),
-        )
-        if report.missing:
-            owners = {
-                p: (
-                    owning_shard(p, [s for s, _ in branch_pairs]) or branch_pairs[0][0]
-                ).key
-                for p in report.missing
-            }
-            raise ExtractorCoverageError(
-                f"branch {branch_key!r} is missing {len(report.missing)} required "
-                f"path(s) after re-assembly: {owners}",
-                missing=report.missing,
-                stage="enrich",
-                branch=branch_key,
-            )
-
-    merged_raw = merge_fragments(pairs, skeleton=skeleton, plan=plan)
-    _required_write_json(
-        base, "03_enrich/merged/enriched_tree.json", merged_raw.model_dump(mode="json")
-    )
-    # Fragments are individually normalized, but re-assembly can create shapes
-    # no single shard could see — e.g. a one-child chain whose spine locally
-    # deferred Rule 4 for its promotion parent. Normalize the merged whole
-    # before the final gate; the pass is idempotent on already-clean trees.
-    merged, merged_norm = normalize_enriched_tree(merged_raw)
-    _required_write_json(
-        base,
-        "03_enrich/merged/normalization.json",
-        merged_norm.model_dump(mode="json"),
-    )
-
-    validation_error: str | None = None
-    try:
-        validate_enriched_tree(merged, repo_path, repository, skeleton)
-    except CrossArtifactError as exc:
-        validation_error = str(exc)
-    coverage = compute_coverage(merged, skeleton)
-    _required_write_json(
-        base,
-        "03_enrich/merged/validation.json",
-        {
-            "ok": validation_error is None,
-            "kind": "cross_artifact" if validation_error else None,
-            "detail": validation_error,
-        },
-    )
-    _required_write_json(
-        base, "03_enrich/merged/coverage.json", coverage.model_dump(mode="json")
-    )
-    _required_write_json(
-        base, "03_enrich/enriched_tree.json", merged.model_dump(mode="json")
-    )
-
-    if validation_error is not None or coverage.missing:
-        # The merged tree and its coverage both exist here, so the derived
-        # decision report can be built — and a failed run is exactly when it is
-        # most useful. Best-effort: it must never mask the failure below.
-        _best_effort_tree_decisions(
-            base,
-            skeleton=skeleton,
-            enriched=merged,
-            coverage=coverage,
-            decision=decision,
-            on_event=on_event,
-        )
-    if validation_error is not None:
-        raise ExtractorValidationError(
-            f"merged enriched tree failed cross-artifact validation: "
-            f"{validation_error}",
-            stage="enrich",
-        )
-    if coverage.missing:
-        raise ExtractorCoverageError(
-            f"{len(coverage.missing)} required paths not covered",
-            missing=coverage.missing,
-            stage="enrich",
-        )
-    notify(
-        on_event,
-        f"extractor: merged {len(pairs)} shard fragment(s) into "
-        f"{len(merged.modules)} top-level module(s)",
-    )
-    return merged, coverage
-
-
-# ── Stage 5 ───────────────────────────────────────────────────────────────
 
 
 def _verify_repo_unchanged(
@@ -1491,7 +619,7 @@ def _verify_repo_unchanged(
     *,
     repo_fingerprint: str,
 ) -> None:
-    """Stage-5 concurrent-mutation defenses, shared by both contracts:
+    """Stage-5 concurrent-mutation defenses:
     re-run Stage-1 exclusion validation on a fresh scan, compare the repo-wide
     content fingerprint, rebuild the skeleton, and compare its fingerprint."""
     fresh_scan = scan_source_files(repo_path, "")
@@ -1528,88 +656,10 @@ def _verify_repo_unchanged(
         )
 
 
-def _stage5_assemble(
-    repo_path: Path,
-    repository: Any,
-    decision: SourceRootDecision,
-    skeleton: Skeleton,
-    enriched: EnrichedTree,
-    *,
-    base: Path | None,
-    detected_source_files: list[str],
-    repo_fingerprint: str,
-    on_event: Callable[[str], None] | None,
-) -> ProjectTree:
-    tree = ProjectTree.model_validate(
-        {
-            "repository": repository.model_dump(),
-            "modules": enriched.modules_as_project_tree_dicts(),
-        }
-    )
-
-    # Re-run the full validation + coverage gate on the final tree. Wrapped so
-    # the public API keeps its documented error taxonomy: a raw
-    # `CrossArtifactError` is a `ValueError`, which callers catching
-    # `ModulesExtractorError` would not see.
-    try:
-        validate_enriched_tree(enriched, repo_path, repository, skeleton)
-    except CrossArtifactError as exc:
-        raise ExtractorValidationError(
-            f"final tree failed cross-artifact validation at assembly: {exc}",
-            stage="assemble",
-        ) from exc
-    coverage = compute_coverage(enriched, skeleton)
-    if coverage.missing:
-        raise ExtractorCoverageError(
-            f"{len(coverage.missing)} required paths not covered at assembly",
-            missing=coverage.missing,
-            stage="assemble",
-        )
-
-    _verify_repo_unchanged(
-        repo_path,
-        decision,
-        skeleton,
-        repo_fingerprint=repo_fingerprint,
-    )
-
-    if base is not None:
-        try:
-            tree.to_json(base / "project_tree.json")
-        except OSError as exc:
-            raise ExtractorArtifactError(
-                f"failed to write project_tree.json: {exc}",
-                artifact="project_tree.json",
-            ) from exc
-    notify(on_event, f"extractor: assembled {len(tree.modules)} top-level modules")
-    return tree
-
-
-# ── Prompt helpers ────────────────────────────────────────────────────────
-
-
 def _bounded(text: str) -> str:
     if len(text) > _STAGE_REPAIR_PAYLOAD_MAX_CHARS:
         return text[:_STAGE_REPAIR_PAYLOAD_MAX_CHARS] + "\n...<truncated>"
     return text
-
-
-def _coverage_repair_errors(missing: list[str]) -> str:
-    """The error text for a coverage repair, with the fold-semantics reminder.
-
-    The reminder exists because the observed failure mode is a model "covering"
-    a subtree with one fold of its root: folds are not recursive, so every
-    required descendant went missing at once.
-    """
-    return (
-        "Missing required paths (must be emitted or folded): "
-        + ", ".join(missing)
-        + "\n\nReminder: a folds[] record covers ONLY its own `path` — folds "
-        "are NOT recursive. Every required descendant of a folded directory "
-        "must still be individually emitted or given its own folds[] record. "
-        "If a directory has several required descendants, emit them (or the "
-        "directory itself) instead of folding them all away."
-    )
 
 
 def _repair_prompt(
@@ -1630,14 +680,12 @@ def _repair_prompt(
 
 
 # ══════════════════════════════════════════════════════════════════════════
-# Stage 3 — assignment contract (v2)
+# Stage 3 — assignments and metadata
 # ══════════════════════════════════════════════════════════════════════════
 
 
 def _assignment_coverage_repair_errors(missing: list[str]) -> str:
-    """Coverage-repair message for the assignment contract: a plain
-    missing-label list. (The tree contract's non-recursive-fold reminder has
-    no analogue here — every path gets exactly one label.)"""
+    """Coverage-repair message containing the missing assignment labels."""
     return (
         "Missing assignment labels for these skeleton paths — `assignments` "
         "must contain every SKELETON path exactly once: " + ", ".join(missing)
@@ -2040,8 +1088,7 @@ async def _assignment_shard_attempts(
     _required_write_json(base, f"{shard_rel}/subtree_skeleton.json", subtree_data)
     _required_write_text(base, f"{shard_rel}/prompt.md", base_prompt)
 
-    # Same deadline rule as the tree contract, under assignment weights: a
-    # shard derivation could not cut down to size keeps the full budget.
+    # A shard derivation that could not cut down to size keeps the full budget.
     cut_down_to_size = (
         assignment_shard_weight(shard) <= config.enrich_subshard_threshold
     )
@@ -2798,7 +1845,7 @@ def _best_effort_tree_decisions_v2_metadata_failure(
     )
 
 
-# ── Stage 5 — assignment assembly ─────────────────────────────────────────
+# ── Stage 5 — deterministic assembly ──────────────────────────────────────
 
 
 def _stage5_assignments_assemble(
@@ -2861,7 +1908,7 @@ def _stage5_assignments_assemble(
     return tree
 
 
-# ── Assignment pipeline ───────────────────────────────────────────────────
+# ── Stage 3 pipeline ───────────────────────────────────────────────────────
 
 
 def _run_assignment_extraction(

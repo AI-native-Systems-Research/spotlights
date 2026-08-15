@@ -1,4 +1,4 @@
-"""Assignment-contract sharding invariants kept separate from the v1 planner."""
+"""Assignment sharding invariants."""
 
 from __future__ import annotations
 
@@ -67,7 +67,6 @@ def _split_skeleton() -> Skeleton:
 
 def _config(**overrides) -> ExtractorConfig:
     values = {
-        "contract": "assignments",
         "enrich_subshard_threshold": 1,
         "enrich_subshard_child_min": 2,
         "enrich_subshard_max_depth": 2,

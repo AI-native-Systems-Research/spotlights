@@ -10,7 +10,6 @@ from spotlights_engine.modules_extractor.derive import (
     derive_metadata_batches,
     derive_module_forest,
     derive_project_tree,
-    emitted_path_territories,
     module_children,
     resolve_assignments,
     resolve_territories,
@@ -363,19 +362,6 @@ def test_territory_counts_partition_the_inventory() -> None:
     assert counts["pkg/kv_offload/tiering"] == 16  # 5 + obj 2 + p2p subtree 9
     assert counts["pkg/kv_offload/tiering/fs"] == 3
     assert sum(counts.values()) == 33
-
-
-def test_v1_emitted_territories_track_unowned_optional() -> None:
-    skel = _kv_skeleton()
-    emitted = {"pkg/kv_offload", "pkg/kv_offload/tiering"}
-    territory, unowned = emitted_path_territories(emitted, skel)
-    assert unowned == []
-    assert territory["pkg/kv_offload"] == 4 + 10  # cpu subtree folds upward
-    assert territory["pkg/kv_offload/tiering"] == 19
-
-    territory, unowned = emitted_path_territories({"pkg/kv_offload/tiering"}, skel)
-    assert "pkg/kv_offload" in unowned
-    assert "pkg/kv_offload/cpu" in unowned
 
 
 def test_metadata_batching_is_deterministic_and_bounded() -> None:
