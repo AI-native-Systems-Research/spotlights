@@ -531,9 +531,10 @@ def test_v4_pure_container_and_nonsource_carveouts(tmp_path: Path) -> None:
     }
 
 
-def test_v4_source_bearing_module_keeps_source_extension_gate(
+def test_v4_source_bearing_module_accepts_any_real_file(
     tmp_path: Path,
 ) -> None:
+    # No extension gate: a README next to source files is a valid citation.
     _write(tmp_path / "pkg" / "app" / "engine.py")
     _write(tmp_path / "pkg" / "app" / "README.md", "# hi\n")
     module_paths = {"pkg/app"}
@@ -548,4 +549,16 @@ def test_v4_source_bearing_module_keeps_source_extension_gate(
     issues = validate_metadata_entries(
         modules, module_paths, module_paths, tmp_path
     )
-    assert issues and issues[0].code == "main_file_not_a_source_file"
+    assert issues == []
+
+    # Files must still exist for real.
+    modules["pkg/app"] = ModuleInfo.model_validate(
+        {
+            "description": "App.",
+            "main_files": [{"path": "pkg/app/missing.py", "role": "Ghost."}],
+        }
+    )
+    issues = validate_metadata_entries(
+        modules, module_paths, module_paths, tmp_path
+    )
+    assert issues and issues[0].code == "main_file_not_a_file"

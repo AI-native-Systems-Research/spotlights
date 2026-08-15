@@ -36,10 +36,8 @@ from pydantic import BaseModel, ConfigDict, Field
 from spotlights_engine.modules_extractor.constants import MAX_MAIN_FILES
 from spotlights_engine.modules_extractor.coverage import (
     _dir_has_direct_file,
-    _dir_has_direct_source_file,
     _is_real_dir,
     _is_real_file,
-    _is_real_source_file,
 )
 from spotlights_engine.modules_extractor.stage_schemas import (
     AssignmentTree,
@@ -469,8 +467,7 @@ def validate_metadata_entries(
 
     - a main file lies under the module, and its nearest resolved module owner
       is that module;
-    - real non-symlink **source** files when the module directory has a direct
-      source-extension file; real files of any extension otherwise;
+    - real, non-symlink files — any extension;
     - zero main files only for a pure container directory (no direct
       non-symlink file of any kind); and
     - no file claimed by two modules — `claimed` threads the cross-batch map
@@ -499,7 +496,6 @@ def validate_metadata_entries(
         if path not in module_paths:
             continue  # already reported as not_requested
         info = modules[path]
-        allow_any_file = not _dir_has_direct_source_file(repo_path, path)
         if not info.main_files:
             if _dir_has_direct_file(repo_path, path):
                 issues.append(
@@ -525,27 +521,14 @@ def validate_metadata_entries(
                     )
                 )
                 continue
-            if allow_any_file:
-                if not _is_real_file(repo_path, fpath):
-                    issues.append(
-                        AssignmentIssue(
-                            code="main_file_not_a_file",
-                            path=path,
-                            detail=(
-                                f"main_file {fpath!r} is not a real "
-                                "non-symlink file"
-                            ),
-                        )
-                    )
-                    continue
-            elif not _is_real_source_file(repo_path, fpath):
+            if not _is_real_file(repo_path, fpath):
                 issues.append(
                     AssignmentIssue(
-                        code="main_file_not_a_source_file",
+                        code="main_file_not_a_file",
                         path=path,
                         detail=(
-                            f"main_file {fpath!r} is not a real non-symlink "
-                            "source file"
+                            f"main_file {fpath!r} is not a real "
+                            "non-symlink file"
                         ),
                     )
                 )

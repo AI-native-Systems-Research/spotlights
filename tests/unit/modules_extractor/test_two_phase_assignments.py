@@ -429,7 +429,7 @@ def test_metadata_exhaustion_report_keeps_last_parseable_batch(
     assert claude.calls_for("batch_00") == 3
     report = json.loads((artifacts / "tree_decisions.json").read_text())
     assert report["nodes"][0]["description"] == "Last parseable metadata."
-    assert "main_file_not_a_source_file" in report["nodes"][0]["invalid_codes"]
+    assert "main_file_not_a_file" in report["nodes"][0]["invalid_codes"]
 
 
 # ── Sharded Stage 3A ──────────────────────────────────────────────────────

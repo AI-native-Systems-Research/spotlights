@@ -9,7 +9,6 @@ from __future__ import annotations
 
 from pathlib import Path, PurePosixPath
 
-from spotlights_engine.modules_extractor.skeleton import is_source_file
 from spotlights_engine.modules_extractor.stage_schemas import SourceRootDecision
 
 
@@ -41,32 +40,9 @@ def _is_real_dir(repo_path: Path, rel: str) -> bool:
     return path.is_dir() and not _has_symlink_component(repo_path, rel)
 
 
-def _is_real_source_file(repo_path: Path, rel: str) -> bool:
-    path = repo_path / rel
-    return (
-        path.is_file()
-        and not _has_symlink_component(repo_path, rel)
-        and is_source_file(path.name)
-    )
-
-
 def _is_real_file(repo_path: Path, rel: str) -> bool:
     path = repo_path / rel
     return path.is_file() and not _has_symlink_component(repo_path, rel)
-
-
-def _dir_has_direct_source_file(repo_path: Path, module_path: str) -> bool:
-    directory = repo_path / module_path
-    try:
-        entries = list(directory.iterdir())
-    except (OSError, NotADirectoryError):
-        return False
-    return any(
-        entry.is_file()
-        and not entry.is_symlink()
-        and is_source_file(entry.name)
-        for entry in entries
-    )
 
 
 def _dir_has_direct_file(repo_path: Path, module_path: str) -> bool:

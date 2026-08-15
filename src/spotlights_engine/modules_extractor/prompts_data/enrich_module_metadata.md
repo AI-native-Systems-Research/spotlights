@@ -45,10 +45,9 @@ For **each requested module**, return:
   - every file lies inside the module's own territory: under the module
     directory but NOT under any of its `child_module_paths` (those files
     belong to the descendant modules);
-  - files are real, non-symlink source files. Exception: when the module's
-    own directory holds NO direct source-code file (e.g. a `docker/` of
-    Dockerfiles whose only real source sits in a child), cite its most
-    representative real files of any extension instead;
+  - files are real, non-symlink files — any extension. Prefer source code,
+    but a README, config, or build file is a fine citation when it is what a
+    reader should open first;
   - a **pure container** directory — one holding no direct file at all, only
     sub-directories — cites `"main_files": []`. Do NOT cite a child module's
     file just to have something to cite;
