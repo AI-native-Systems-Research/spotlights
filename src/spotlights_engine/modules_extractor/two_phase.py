@@ -29,6 +29,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, TypeVar
 
+from pydantic import BaseModel
+
 from spotlights_engine.modules_extractor.agent import (
     ExtractionInvocation,
     ExtractionRunResult,
@@ -46,6 +48,7 @@ from spotlights_engine.modules_extractor.assignments import (
 )
 from spotlights_engine.modules_extractor.claude_stage import (
     ClaudeStageResult,
+    StageTelemetry,
     add_optional_float,
     add_optional_int,
     atomic_write_json,
@@ -67,6 +70,7 @@ from spotlights_engine.modules_extractor.derive import (
     verify_resolved_assignments,
 )
 from spotlights_engine.modules_extractor.errors import (
+    ExtractorAgentError,
     ExtractorArtifactError,
     ExtractorCoverageError,
     ExtractorValidationError,
@@ -190,10 +194,7 @@ class _Telemetry:
     total_output_tokens: int | None = None
     accepted_session_id: str | None = None
 
-    def add_claude(
-        self, stage: str, result: ClaudeStageResult[Any]
-    ) -> None:
-        t = result.telemetry
+    def add_stage(self, stage: str, t: StageTelemetry) -> None:
         usage = t.usage
         self.sessions.append(
             _StageSession(
@@ -216,6 +217,11 @@ class _Telemetry:
         self.total_output_tokens = add_optional_int(
             self.total_output_tokens, t.output_tokens
         )
+
+    def add_claude(
+        self, stage: str, result: ClaudeStageResult[Any]
+    ) -> None:
+        self.add_stage(stage, result.telemetry)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -1061,6 +1067,81 @@ def _validate_assignment_fragment(
     return issues
 
 
+_TStage = TypeVar("_TStage", bound=BaseModel)
+
+
+async def _run_stage_with_api_retry(
+    *,
+    output_type: type[_TStage],
+    repo_path: Path,
+    prompt: str,
+    stage_name: str,
+    label: str,
+    base: Path | None,
+    attempt_rel: str,
+    timeout_s: int,
+    config: ExtractorConfig,
+    telemetry: _Telemetry,
+    stage_tag: str,
+    on_event: Callable[[str], None] | None,
+) -> tuple[ClaudeStageResult[_TStage], str]:
+    """One structured stage call, retrying API-level failures with backoff.
+
+    `run_structured_claude_stage` tags its `ExtractorAgentError` with
+    `context["api_failure"]` when the CLI died on the API transport (rate
+    limit, request timeout, server overload) rather than on anything repo- or
+    prompt-specific. By then the CLI has already burned its internal retry
+    budget, so this wrapper waits out the rate-limit window
+    (`enrich_api_backoff_s`, doubling per retry) and starts a fresh session,
+    up to `enrich_api_retries` extra attempts. Any other failure — and
+    exhaustion — re-raises unchanged, preserving fail-fast.
+
+    Each try keeps its own artifact directory (`<attempt_rel>`,
+    `<attempt_rel>_api2`, ...): a failed try's stream stays on disk as
+    evidence. Returns the result plus the rel of the directory that produced
+    it, so the caller's follow-up artifacts land next to the winning stream.
+    The `await asyncio.sleep` keeps a backoff-parked shard promptly
+    cancellable when a sibling hard-fails.
+    """
+    delay = config.enrich_api_backoff_s
+    total_tries = config.enrich_api_retries + 1
+    for api_try in range(1, total_tries + 1):
+        rel = attempt_rel if api_try == 1 else f"{attempt_rel}_api{api_try}"
+        try:
+            result: ClaudeStageResult[_TStage] = await asyncio.to_thread(
+                run_structured_claude_stage,
+                output_type=output_type,
+                repo_path=repo_path,
+                prompt=prompt,
+                stage_name=stage_name,
+                attempt_dir=base / rel if base is not None else None,
+                claude_bin=config.claude_bin,
+                max_turns=config.max_turns,
+                timeout_s=timeout_s,
+                on_event=on_event,
+            )
+        except ExtractorAgentError as exc:
+            reason = exc.context.get("api_failure")
+            failed_telemetry = exc.context.get("telemetry")
+            if isinstance(failed_telemetry, StageTelemetry):
+                suffix = f"#api{api_try}" if reason is not None else "#failed"
+                telemetry.add_stage(f"{stage_tag}{suffix}", failed_telemetry)
+                _persist_sessions(base, telemetry)
+            if reason is None or api_try >= total_tries:
+                raise
+            notify(
+                on_event,
+                f"extractor: {label} hit an API failure ({reason}); "
+                f"retrying in {delay:.0f}s "
+                f"({api_try}/{config.enrich_api_retries})",
+            )
+            await asyncio.sleep(delay)
+            delay *= 2
+            continue
+        return result, rel
+    raise AssertionError("unreachable: API retry loop exhausted")
+
+
 async def _assignment_shard_attempts(
     shard: AssignmentShard,
     *,
@@ -1112,22 +1193,23 @@ async def _assignment_shard_attempts(
         )
 
     for attempt in range(1, _MAX_STAGE3_ATTEMPTS + 1):
-        attempt_rel = f"{shard_rel}/attempt_{attempt:02d}"
-        attempt_dir = base / attempt_rel if base is not None else None
         repair_tag = "" if attempt == 1 else "#repair" + (
             str(attempt - 1) if attempt > 2 else ""
         )
         stage_tag = f"03_enrich[{shard.key}]{repair_tag}"
-        result: ClaudeStageResult[AssignmentTree] = await asyncio.to_thread(
-            run_structured_claude_stage,
+        result: ClaudeStageResult[AssignmentTree]
+        result, attempt_rel = await _run_stage_with_api_retry(
             output_type=AssignmentTree,
             repo_path=repo_path,
             prompt=prompt,
             stage_name=f"assign:{shard.key}",
-            attempt_dir=attempt_dir,
-            claude_bin=config.claude_bin,
-            max_turns=config.max_turns,
+            label=f"shard {shard.key}",
+            base=base,
+            attempt_rel=f"{shard_rel}/attempt_{attempt:02d}",
             timeout_s=timeout_s,
+            config=config,
+            telemetry=telemetry,
+            stage_tag=stage_tag,
             on_event=on_event,
         )
         telemetry.add_claude(stage_tag, result)
@@ -1464,22 +1546,23 @@ async def _metadata_batch_attempts(
         )
 
     for attempt in range(1, _MAX_STAGE3_ATTEMPTS + 1):
-        attempt_rel = f"{batch_rel}/attempt_{attempt:02d}"
-        attempt_dir = base / attempt_rel if base is not None else None
         repair_tag = "" if attempt == 1 else "#repair" + (
             str(attempt - 1) if attempt > 2 else ""
         )
         stage_tag = f"03_metadata[{batch.key}]{repair_tag}"
-        result: ClaudeStageResult[ModuleMetadataBatch] = await asyncio.to_thread(
-            run_structured_claude_stage,
+        result: ClaudeStageResult[ModuleMetadataBatch]
+        result, attempt_rel = await _run_stage_with_api_retry(
             output_type=ModuleMetadataBatch,
             repo_path=repo_path,
             prompt=prompt,
             stage_name=f"metadata:{batch.key}",
-            attempt_dir=attempt_dir,
-            claude_bin=config.claude_bin,
-            max_turns=config.max_turns,
+            label=f"metadata batch {batch.key}",
+            base=base,
+            attempt_rel=f"{batch_rel}/attempt_{attempt:02d}",
             timeout_s=timeout_s,
+            config=config,
+            telemetry=telemetry,
+            stage_tag=stage_tag,
             on_event=on_event,
         )
         telemetry.add_claude(stage_tag, result)

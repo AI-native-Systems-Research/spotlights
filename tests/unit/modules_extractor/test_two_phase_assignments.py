@@ -15,12 +15,16 @@ from pathlib import Path
 import pytest
 
 from spotlights_engine.modules_extractor.errors import (
+    ExtractorAgentError,
     ExtractorCoverageError,
     ExtractorValidationError,
 )
 from spotlights_engine.modules_extractor.extractor import ExtractorConfig
 from spotlights_engine.modules_extractor.two_phase import run_two_phase_extraction
-from spotlights_engine.signal_pipeline._subprocess_util import StreamingResult
+from spotlights_engine.signal_pipeline._subprocess_util import (
+    StreamingResult,
+    StreamingTimeout,
+)
 
 _KEY_RE = re.compile(r'"key":\s*"([^"]+)"')
 
@@ -112,6 +116,45 @@ TWO_BRANCH_METADATA = {
 }
 
 
+def _api_failure_result(
+    text: str = (
+        "API Error: Request rejected (429) · 429: Rate limit exceeded "
+        "for api_key: test. Limit type: tokens."
+    ),
+    *,
+    returncode: int = 1,
+) -> StreamingResult:
+    """A CLI run that died on the API transport after internal retries."""
+    events = [
+        {
+            "type": "system",
+            "subtype": "api_retry",
+            "attempt": 10,
+            "max_retries": 10,
+            "error_status": 429,
+            "error": "rate_limit",
+        },
+        {
+            "type": "result",
+            "subtype": "success",
+            "is_error": True,
+            "num_turns": 1,
+            "result": text,
+            "session_id": "sess-429",
+            "duration_ms": 1000,
+            "total_cost_usd": 0.005,
+            "usage": {"input_tokens": 3, "output_tokens": 2},
+        },
+    ]
+    stdout = "".join(json.dumps(e) + "\n" for e in events)
+    return StreamingResult(
+        stdout=stdout.encode("utf-8"),
+        stderr=b"",
+        returncode=returncode,
+        duration_s=1.0,
+    )
+
+
 def _result(payload: dict, session: str) -> StreamingResult:
     event = {
         "type": "result",
@@ -164,6 +207,10 @@ class _AssignClaude:
             return _result(self.decision, "sess-root")
         queue = self.per_key[key]
         payload = queue[min(attempt - 1, len(queue) - 1)]
+        if isinstance(payload, BaseException):
+            raise payload
+        if isinstance(payload, StreamingResult):
+            return payload
         return _result(payload, f"sess-{key}-{attempt}")
 
 
@@ -524,3 +571,175 @@ def test_top_level_qn_collision_fails_before_any_stage3_call(
         "top-x": "missing",
         "top_x": "missing",
     }
+
+
+# ── API-level failure retries ─────────────────────────────────────────────
+
+
+def test_enrich_defaults_bound_api_pressure_and_retry_transients() -> None:
+    config = ExtractorConfig()
+    assert config.max_parallel_enrich_shards == 5
+    assert config.enrich_api_retries == 2
+    assert config.enrich_api_backoff_s == 60.0
+
+
+def test_shard_api_failure_is_retried_with_fresh_session(
+    tmp_path, monkeypatch
+) -> None:
+    repo = _two_branch_repo(tmp_path / "repo")
+    artifacts = tmp_path / "run"
+    artifacts.mkdir()
+    claude = _AssignClaude(
+        _decision(""),
+        {
+            "alpha": [_api_failure_result(), ALPHA_ASSIGNMENTS],
+            "beta": [BETA_ASSIGNMENTS],
+            "batch_00": [TWO_BRANCH_METADATA],
+        },
+    )
+    run = _run(
+        repo, claude, monkeypatch, artifacts=artifacts, enrich_api_backoff_s=0.0
+    )
+    assert claude.calls_for("alpha") == 2
+    assert claude.calls_for("beta") == 1
+    assert [m.name for m in run.project_tree.modules] == ["alpha", "beta"]
+    # The failed try's stream stays on disk; the retry got its own directory
+    # and the follow-up artifacts landed next to the winning stream.
+    shard = artifacts / "03_enrich" / "alpha"
+    assert (shard / "attempt_01" / "stream.jsonl").exists()
+    assert not (shard / "attempt_01" / "parsed_model.json").exists()
+    assert (shard / "attempt_01_api2" / "parsed_model.json").exists()
+    assert (shard / "attempt_01_api2" / "validation.json").exists()
+    sessions = json.loads((artifacts / "sessions.json").read_text())
+    retry_session = next(
+        s for s in sessions["sessions"] if s["stage"] == "03_enrich[alpha]#api1"
+    )
+    assert retry_session["session_id"] == "sess-429"
+    assert retry_session["cost_usd"] == 0.005
+    assert sessions["total_cost_usd"] == pytest.approx(0.045)
+
+
+def test_zero_exit_terminal_api_error_is_still_retried(
+    tmp_path, monkeypatch
+) -> None:
+    repo = _two_branch_repo(tmp_path / "repo")
+    artifacts = tmp_path / "run"
+    artifacts.mkdir()
+    claude = _AssignClaude(
+        _decision(""),
+        {
+            "alpha": [_api_failure_result(returncode=0), ALPHA_ASSIGNMENTS],
+            "beta": [BETA_ASSIGNMENTS],
+            "batch_00": [TWO_BRANCH_METADATA],
+        },
+    )
+    run = _run(
+        repo, claude, monkeypatch, artifacts=artifacts, enrich_api_backoff_s=0.0
+    )
+    assert claude.calls_for("alpha") == 2
+    assert [m.name for m in run.project_tree.modules] == ["alpha", "beta"]
+    assert (
+        artifacts
+        / "03_enrich"
+        / "alpha"
+        / "attempt_01_api2"
+        / "parsed_model.json"
+    ).exists()
+
+
+def test_extractor_timeout_during_api_retry_is_retried(
+    tmp_path, monkeypatch
+) -> None:
+    timed_out = StreamingTimeout(
+        timeout_s=10,
+        duration_s=10.1,
+        stdout=(
+            json.dumps(
+                {
+                    "type": "system",
+                    "subtype": "api_retry",
+                    "error_status": 429,
+                    "error": "rate_limit",
+                }
+            )
+            + "\n"
+        ).encode(),
+        stderr=b"",
+    )
+    repo = _two_branch_repo(tmp_path / "repo")
+    artifacts = tmp_path / "run"
+    artifacts.mkdir()
+    claude = _AssignClaude(
+        _decision(""),
+        {
+            "alpha": [timed_out, ALPHA_ASSIGNMENTS],
+            "beta": [BETA_ASSIGNMENTS],
+            "batch_00": [TWO_BRANCH_METADATA],
+        },
+    )
+    run = _run(
+        repo, claude, monkeypatch, artifacts=artifacts, enrich_api_backoff_s=0.0
+    )
+    assert claude.calls_for("alpha") == 2
+    assert [m.name for m in run.project_tree.modules] == ["alpha", "beta"]
+    sessions = json.loads((artifacts / "sessions.json").read_text())
+    retry_session = next(
+        s for s in sessions["sessions"] if s["stage"] == "03_enrich[alpha]#api1"
+    )
+    assert retry_session["duration_s"] == 10.1
+
+
+def test_shard_api_failure_exhausts_retries_and_raises(
+    tmp_path, monkeypatch
+) -> None:
+    repo = _two_branch_repo(tmp_path)
+    claude = _AssignClaude(
+        _decision(""),
+        {
+            "alpha": [_api_failure_result()],
+            "beta": [BETA_ASSIGNMENTS],
+            "batch_00": [TWO_BRANCH_METADATA],
+        },
+    )
+    with pytest.raises(ExtractorAgentError, match=r"api_failure: rate_limit"):
+        _run(
+            repo,
+            claude,
+            monkeypatch,
+            enrich_api_retries=1,
+            enrich_api_backoff_s=0.0,
+        )
+    assert claude.calls_for("alpha") == 2  # initial try + one retry
+
+
+def test_non_api_exit_failure_is_not_retried(tmp_path, monkeypatch) -> None:
+    boom = StreamingResult(
+        stdout=b"", stderr=b"segfault", returncode=1, duration_s=0.1
+    )
+    repo = _two_branch_repo(tmp_path)
+    claude = _AssignClaude(
+        _decision(""),
+        {
+            "alpha": [boom],
+            "beta": [BETA_ASSIGNMENTS],
+            "batch_00": [TWO_BRANCH_METADATA],
+        },
+    )
+    with pytest.raises(ExtractorAgentError, match="exit=1"):
+        _run(repo, claude, monkeypatch, enrich_api_backoff_s=0.0)
+    assert claude.calls_for("alpha") == 1
+
+
+def test_metadata_batch_api_failure_is_retried(tmp_path, monkeypatch) -> None:
+    repo = _two_branch_repo(tmp_path)
+    claude = _AssignClaude(
+        _decision(""),
+        {
+            "alpha": [ALPHA_ASSIGNMENTS],
+            "beta": [BETA_ASSIGNMENTS],
+            "batch_00": [_api_failure_result(), TWO_BRANCH_METADATA],
+        },
+    )
+    run = _run(repo, claude, monkeypatch, enrich_api_backoff_s=0.0)
+    assert claude.calls_for("batch_00") == 2
+    assert [m.name for m in run.project_tree.modules] == ["alpha", "beta"]

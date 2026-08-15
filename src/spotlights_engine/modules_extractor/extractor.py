@@ -84,7 +84,22 @@ class ExtractorConfig(BaseModel):
     #                     several top-level source roots it falls back to
     #                     per-branch sharding without sub-sharding
     enrich_sharding: Literal["auto", "top_level_only", "single"] = "auto"
-    max_parallel_enrich_shards: int = Field(default=10, ge=1)
+    # Concurrent enrich sessions share one API key's token budget. At 10-wide
+    # on a 40-shard repo (vLLM) the key's rate window was drained and the
+    # late shards starved: every request 429'd until the CLI gave up. 5 keeps
+    # the fan-out useful without turning stage 3 into a self-inflicted
+    # rate-limit storm.
+    max_parallel_enrich_shards: int = Field(default=5, ge=1)
+
+    # Retry budget for API-level stage failures (429 rate limit, request
+    # timeout, server overload) during concurrent enrichment. The CLI already
+    # spends its own internal retries (~3 min of backoff) before surfacing
+    # such a failure, so each orchestrator retry starts a fresh session after
+    # `enrich_api_backoff_s * 2**n` seconds — sized to outlive a token
+    # rate-limit window rather than to dodge a blip. 0 retries restores
+    # fail-fast.
+    enrich_api_retries: int = Field(default=2, ge=0)
+    enrich_api_backoff_s: float = Field(default=60.0, ge=0.0)
 
     # Stage-specific deadlines that decouple from the coarse `timeout_s`.
     # `None` means "inherit `timeout_s`". The fields are `int | None` rather

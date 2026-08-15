@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -128,6 +129,78 @@ def extract_result_event(stdout: bytes) -> dict | None:
     return last_event
 
 
+_API_STATUS_RE = re.compile(r"\((\d{3})\)")
+_RATE_LIMIT_RE = re.compile(r"rate.?limit", re.IGNORECASE)
+
+
+def api_failure_reason(stdout: bytes) -> str | None:
+    """Classify a failed CLI run as an API-level failure, from its stream.
+
+    Returns a short reason (``"rate_limit (429)"``, ``"request_timeout"``,
+    ``"overloaded"``, ``"api_error (<status>)"``) when the stream shows the run
+    died on the API transport — a rate limit, request timeout, or server
+    error — rather than on anything repo- or prompt-specific. Returns None for
+    every other failure so callers keep failing fast.
+
+    Only the *last* stream event decides: an early transient ``api_retry`` the
+    CLI recovered from must not mark a later unrelated failure as retryable.
+    The two shapes seen in practice:
+
+    - the CLI exhausts its internal retries and emits a terminal ``result``
+      with ``is_error`` and an ``API Error: ... (429)`` / ``Request timed
+      out`` text;
+    - the stream is cut off (killed / extractor timeout) while the last event
+      is still a ``system``/``api_retry`` or the CLI's terminal ``assistant``
+      event carrying a top-level transport ``error``.
+    """
+    last: dict | None = None
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(obj, dict):
+            last = obj
+    if last is None:
+        return None
+    if last.get("type") == "system" and last.get("subtype") == "api_retry":
+        status = last.get("error_status")
+        name = last.get("error") or "api_error"
+        return f"{name} ({status})" if status is not None else str(name)
+    if last.get("type") == "assistant":
+        error = last.get("error")
+        if isinstance(error, str):
+            lowered = error.lower()
+            if _RATE_LIMIT_RE.search(error) is not None:
+                return "rate_limit"
+            if "timeout" in lowered:
+                return "request_timeout"
+            if "overload" in lowered:
+                return "overloaded"
+            if "server" in lowered:
+                return "server_error"
+    if last.get("type") == "result" and last.get("is_error"):
+        text = last.get("result")
+        if not isinstance(text, str):
+            return None
+        lowered = text.lower()
+        if "request timed out" in lowered:
+            return "request_timeout"
+        if _RATE_LIMIT_RE.search(text) is not None or "429" in text:
+            return "rate_limit (429)" if "429" in text else "rate_limit"
+        if "overloaded" in lowered:
+            return "overloaded"
+        match = _API_STATUS_RE.search(text)
+        if match is not None:
+            status = int(match.group(1))
+            if status == 408 or status >= 500:
+                return f"api_error ({status})"
+    return None
+
+
 def final_message_text(result_event: dict) -> str:
     structured = result_event.get("structured_output")
     if isinstance(structured, (dict, list)):
@@ -228,6 +301,27 @@ class ClaudeStageResult(Generic[TModel]):
     telemetry: StageTelemetry
 
 
+def _stage_telemetry_from_stream(
+    stdout: bytes, *, fallback_duration_s: float
+) -> StageTelemetry:
+    """Build telemetry for both successful and terminal-error CLI results."""
+    result_event = extract_result_event(stdout) or {}
+    usage = claude_usage_from_stream(stdout)
+    reported_duration = duration_seconds(result_event)
+    return StageTelemetry(
+        session_id=result_event.get("session_id"),
+        duration_s=(
+            reported_duration
+            if reported_duration is not None
+            else fallback_duration_s
+        ),
+        cost_usd=as_float(result_event.get("total_cost_usd")),
+        input_tokens=usage.input if usage is not None else None,
+        output_tokens=usage.output if usage is not None else None,
+        usage=usage,
+    )
+
+
 def resolve_and_check(
     *, claude_bin: str, repo_path: Path
 ) -> list[str]:
@@ -313,25 +407,48 @@ def run_structured_claude_stage(
         if attempt_dir is not None:
             atomic_write_bytes(attempt_dir / "stream.jsonl", exc.stdout or b"")
             atomic_write_bytes(attempt_dir / "stderr.log", exc.stderr or b"")
+        context: dict[str, object] = {
+            "timeout_s": timeout_s,
+            "stage": stage_name,
+            "telemetry": _stage_telemetry_from_stream(
+                exc.stdout or b"", fallback_duration_s=exc.duration_s
+            ),
+        }
+        api_reason = api_failure_reason(exc.stdout or b"")
+        suffix = ""
+        if api_reason is not None:
+            context["api_failure"] = api_reason
+            suffix = f" [api_failure: {api_reason}]"
         raise ExtractorAgentError(
-            f"claude ({stage_name}) timed out after {exc.duration_s:.1f}s",
-            timeout_s=timeout_s,
-            stage=stage_name,
+            f"claude ({stage_name}) timed out after {exc.duration_s:.1f}s{suffix}",
+            **context,
         ) from exc
 
     if attempt_dir is not None:
         atomic_write_bytes(attempt_dir / "stream.jsonl", result.stdout or b"")
         atomic_write_bytes(attempt_dir / "stderr.log", result.stderr or b"")
 
+    stage_telemetry = _stage_telemetry_from_stream(
+        result.stdout, fallback_duration_s=result.duration_s
+    )
     if result.returncode != 0:
         stderr_tail = result.stderr[-500:].decode("utf-8", "replace")
         stdout_tail = result.stdout[-500:].decode("utf-8", "replace")
+        context = {
+            "returncode": result.returncode,
+            "stderr_tail": stderr_tail,
+            "stdout_tail": stdout_tail,
+            "stage": stage_name,
+            "telemetry": stage_telemetry,
+        }
+        api_reason = api_failure_reason(result.stdout)
+        suffix = ""
+        if api_reason is not None:
+            context["api_failure"] = api_reason
+            suffix = f" [api_failure: {api_reason}]"
         raise ExtractorAgentError(
-            f"claude ({stage_name}) exit={result.returncode}",
-            returncode=result.returncode,
-            stderr_tail=stderr_tail,
-            stdout_tail=stdout_tail,
-            stage=stage_name,
+            f"claude ({stage_name}) exit={result.returncode}{suffix}",
+            **context,
         )
 
     result_event = extract_result_event(result.stdout)
@@ -339,28 +456,31 @@ def run_structured_claude_stage(
         raise ExtractorAgentError(
             f"claude ({stage_name}) stream-json had no terminal result event",
             stage=stage_name,
+            telemetry=stage_telemetry,
+        )
+    if result_event.get("is_error"):
+        api_reason = api_failure_reason(result.stdout)
+        terminal_context: dict[str, object] = {
+            "stage": stage_name,
+            "telemetry": stage_telemetry,
+        }
+        suffix = ""
+        if api_reason is not None:
+            terminal_context["api_failure"] = api_reason
+            suffix = f" [api_failure: {api_reason}]"
+        raise ExtractorAgentError(
+            f"claude ({stage_name}) returned a terminal error{suffix}",
+            **terminal_context,
         )
     if attempt_dir is not None:
         atomic_write_json(attempt_dir / "result_event.json", result_event)
-
-    usage = claude_usage_from_stream(result.stdout)
-    reported_duration = duration_seconds(result_event)
-    telemetry = StageTelemetry(
-        session_id=result_event.get("session_id"),
-        duration_s=(
-            reported_duration if reported_duration is not None else result.duration_s
-        ),
-        cost_usd=as_float(result_event.get("total_cost_usd")),
-        input_tokens=usage.input if usage is not None else None,
-        output_tokens=usage.output if usage is not None else None,
-        usage=usage,
-    )
 
     payload = final_message_text(result_event)
     if not payload.strip():
         raise ExtractorAgentError(
             f"claude ({stage_name}) returned an empty final message",
             stage=stage_name,
+            telemetry=stage_telemetry,
         )
     if attempt_dir is not None:
         atomic_write_text(attempt_dir / "last_message.json", payload)
@@ -377,7 +497,7 @@ def run_structured_claude_stage(
             validation_error=exc,
             result_event=result_event,
             raw_payload=payload,
-            telemetry=telemetry,
+            telemetry=stage_telemetry,
         )
 
     if attempt_dir is not None:
@@ -391,7 +511,7 @@ def run_structured_claude_stage(
         validation_error=None,
         result_event=result_event,
         raw_payload=payload,
-        telemetry=telemetry,
+        telemetry=stage_telemetry,
     )
 
 
@@ -401,6 +521,7 @@ __all__ = [
     "StageTelemetry",
     "add_optional_float",
     "add_optional_int",
+    "api_failure_reason",
     "as_float",
     "as_int",
     "atomic_write_bytes",
