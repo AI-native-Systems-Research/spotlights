@@ -9,8 +9,8 @@ repository mutation.
 Stage-3 totality covers the **full** inventory: every path gets a label.
 `required` and its reasons remain audit metadata for reports and diagnostics.
 
-Stage 5 recomputes this inventory and its fingerprint before accepting a tree
-before accepting the derived tree.
+Stage 5 recomputes this inventory and its fingerprint before accepting the
+derived tree.
 """
 
 from __future__ import annotations

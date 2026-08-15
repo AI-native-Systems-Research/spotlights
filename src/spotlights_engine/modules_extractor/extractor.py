@@ -80,7 +80,9 @@ class ExtractorConfig(BaseModel):
     #
     #   "auto"            top-level sharding + size-gated sub-sharding
     #   "top_level_only"  shard by top-level, never sub-shard
-    #   "single"          force one monolithic assignment call (small repos)
+    #   "single"          one monolithic assignment call (small repos); with
+    #                     several top-level source roots it falls back to
+    #                     per-branch sharding without sub-sharding
     enrich_sharding: Literal["auto", "top_level_only", "single"] = "auto"
     max_parallel_enrich_shards: int = Field(default=10, ge=1)
 
