@@ -203,6 +203,145 @@ def test_build_skips_missing_candidate_file():
     assert len(result["skipped"]) == 1
 
 
+# --- evolve bundles ---------------------------------------------------------
+
+
+def test_find_evolve_join_and_absent(tmp_root=None):
+    root = Path(tmp_root or tempfile.mkdtemp())
+    evolve = root / "evolve"
+    # cand-<module_slug>-NNNN -> <module_slug>/<cand_id>/<engine>/
+    eng_dir = evolve / "qiskit_compiler" / "cand-qiskit_compiler-0001" / "coral"
+    eng_dir.mkdir(parents=True)
+    (eng_dir / "task.yaml").write_text("goal: x\n", encoding="utf-8")
+
+    found = bb.find_evolve("cand-qiskit_compiler-0001", evolve)
+    assert found is not None
+    assert list(found) == ["coral"]
+    assert found["coral"][0].name == "task.yaml"
+
+    assert bb.find_evolve("cand-qiskit_compiler-9999", evolve) is None
+
+
+def test_render_engine_coral_has_repo_install_quickstart_download():
+    files = [Path("task.yaml")]  # name-only; render_engine reads .md files, not this
+    # use a real temp file so stat()/read work for the non-md raw view
+    d = Path(tempfile.mkdtemp())
+    f = d / "task.yaml"
+    f.write_text("goal: reduce latency\n", encoding="utf-8")
+    out = bb.render_engine("coral", [f], "foo__cand-a-0001__evolve")
+    assert 'https://github.com/Human-Agent-Society/CORAL' in out
+    assert "curl -fsSL" in out and "install.sh" in out           # shell installer
+    assert "/plugin install coral@coral-marketplace" in out       # plugin install
+    assert "You must write" in out                                # coral writes grader+seed
+    assert "Quickstart" in out and "&lt;CORAL_BUNDLE_PATH&gt;" in out  # literal placeholder
+    assert 'href="foo__cand-a-0001__evolve/coral.zip"' in out     # per-engine download
+    assert 'href="foo__cand-a-0001__evolve/coral/task.yaml"' in out   # open-raw link
+
+
+def test_render_engine_nous_has_no_writes_row():
+    d = Path(tempfile.mkdtemp())
+    f = d / "campaign.yaml"
+    f.write_text("research_question: q\n", encoding="utf-8")
+    out = bb.render_engine("nous", [f], "bar__cand-b-0002__evolve")
+    assert "agentic-strategy-evolution.git@reflective" in out     # install command
+    assert "You must write" not in out                            # nothing to hand-author
+    assert "Quickstart" not in out                                # coral-only
+
+
+def test_render_index_evolve_badge_and_footer_link():
+    header = {"title": "T", "objective": "O"}
+    rows = [
+        {"rank": "1", "cand_id": "cand-a-0001", "module": "m", "symbol": "foo",
+         "impact": "high", "score": "96", "rationale": "R",
+         "html_href": "candidates/modules/m/foo__cand-a-0001.html",
+         "evolve_count": 2, "evolve_engines": ["coral", "nous"],
+         "evolve_href": "candidates/modules/m/foo__cand-a-0001__evolve.html"},
+    ]
+    idx = bb.render_index(header, rows)
+    assert '<span class="badge evolve">evolve · 2</span>' in idx
+    assert 'class="evolve-link"' in idx
+    assert 'href="candidates/modules/m/foo__cand-a-0001__evolve.html"' in idx
+    assert "coral · nous" in idx
+
+
+def test_render_index_no_evolve_keys_is_plain_card():
+    # Regression: rows without evolve_* keys must render a normal card, no badge.
+    header = {"title": "T", "objective": "O"}
+    rows = [
+        {"rank": "1", "cand_id": "cand-a-0001", "module": "m", "symbol": "foo",
+         "impact": "high", "score": "96", "rationale": "R",
+         "html_href": "candidates/modules/m/foo__cand-a-0001.html"},
+    ]
+    idx = bb.render_index(header, rows)
+    # look only at the body (the CSS names .evolve-link / .badge.evolve)
+    body = idx.split("</style>", 1)[1]
+    assert '<span class="badge evolve">' not in body
+    assert '<div class="card-foot">' not in body
+    assert 'href="candidates/modules/m/foo__cand-a-0001.html"' in body
+
+
+def test_build_end_to_end_with_evolve():
+    root = Path(tempfile.mkdtemp())
+    src = root / "sorted"
+    src.mkdir(parents=True, exist_ok=True)
+    (src / "sorted_candidates.md").write_text(SAMPLE_SORTED, encoding="utf-8")
+
+    # top-2 candidate files
+    c1 = (src / ".." / "modules" / "qiskit_compiler" / "foo__cand-a-0001.md").resolve()
+    c2 = (src / ".." / "modules" / "qiskit_transpiler_passes" / "bar__cand-b-0002.md").resolve()
+    for c, body in ((c1, "# foo\n\nbody\n"), (c2, "# bar\n\nbody\n")):
+        c.parent.mkdir(parents=True, exist_ok=True)
+        c.write_text(body, encoding="utf-8")
+
+    # sibling evolve/ for cand-a-0001 only: coral (README + task.yaml) + nous (campaign.yaml)
+    ev = src / ".." / "evolve" / "a" / "cand-a-0001"
+    (ev / "coral").mkdir(parents=True)
+    (ev / "coral" / "README.md").write_text("# coral\n\nrun me\n", encoding="utf-8")
+    (ev / "coral" / "task.yaml").write_text("goal: x\n", encoding="utf-8")
+    (ev / "nous").mkdir(parents=True)
+    (ev / "nous" / "campaign.yaml").write_text("research_question: q\n", encoding="utf-8")
+
+    result = bb.build(str(src), top_n=2)
+    assert result["evolve_bundles"] == 1
+    bundle = Path(result["bundle_dir"])
+
+    # evolve page exists and lists both engines
+    evolve_html = (bundle / "candidates" / "modules" / "qiskit_compiler"
+                   / "foo__cand-a-0001__evolve.html")
+    assert evolve_html.exists()
+    ev_text = evolve_html.read_text(encoding="utf-8")
+    assert "<h3>coral</h3>" in ev_text and "<h3>nous</h3>" in ev_text
+
+    # candidate page gained the Evolve bundles section + link
+    cand_html = (bundle / "candidates" / "modules" / "qiskit_compiler"
+                 / "foo__cand-a-0001.html").read_text(encoding="utf-8")
+    assert "Evolve bundles" in cand_html
+    assert 'href="foo__cand-a-0001__evolve.html"' in cand_html
+
+    # index card gained the evolve badge; the candidate without evolve did not
+    idx = (bundle / "index.html").read_text(encoding="utf-8")
+    idx_body = idx.split("</style>", 1)[1]
+    assert '<span class="badge evolve">' in idx_body
+    assert idx_body.count('<div class="card-foot">') == 1
+
+    # per-engine zips namespace their entries under <engine>/
+    coral_zip = (bundle / "candidates" / "modules" / "qiskit_compiler"
+                 / "foo__cand-a-0001__evolve" / "coral.zip")
+    with _zip.ZipFile(coral_zip) as zf:
+        names = zf.namelist()
+    assert "coral/README.md" in names and "coral/task.yaml" in names
+
+    # original files copied verbatim into the bundle
+    assert (bundle / "candidates" / "modules" / "qiskit_compiler"
+            / "foo__cand-a-0001__evolve" / "nous" / "campaign.yaml").exists()
+
+    # the second candidate has no evolve data and still builds cleanly
+    assert (bundle / "candidates" / "modules" / "qiskit_transpiler_passes"
+            / "bar__cand-b-0002.html").exists()
+    assert not (bundle / "candidates" / "modules" / "qiskit_transpiler_passes"
+                / "bar__cand-b-0002__evolve.html").exists()
+
+
 def _run_all():
     fns = [g for n, g in sorted(globals().items()) if n.startswith("test_") and callable(g)]
     failed = 0
