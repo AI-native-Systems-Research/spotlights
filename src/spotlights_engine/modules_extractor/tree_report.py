@@ -576,6 +576,7 @@ def _tree_lines(
 
     def _emit(node: TreeDecisionNode, prefix: str, connector: str, depth: int) -> None:
         label = node.path if depth == 0 else node.path.rsplit("/", 1)[-1]
+        label = f"{label} ({node.direct_source_file_count} files)"
         left = f"{prefix}{connector}{_SYMBOLS[node.decision]} {label}"
         entries.append((left, _tag_of(node), _detail_of(node, rollups)))
 
