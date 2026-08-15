@@ -1,0 +1,52 @@
+{
+  "modules": [
+    {
+      "name": "tiering",
+      "path": "pkg/tiering",
+      "description": "Multi-tier offloading orchestrator: a tier interface plus one physical layout per storage backend.",
+      "main_files": [
+        {"path": "pkg/tiering/manager.py", "role": "Coordinates the tiers."},
+        {"path": "pkg/tiering/base.py", "role": "Tier interface."}
+      ],
+      "submodules": []
+    }
+  ],
+  "folds": [
+    {
+      "path": "pkg/tiering/fs",
+      "into": "pkg/tiering",
+      "reason": "one filesystem backend implementing the tier interface",
+      "evidence_files": ["pkg/tiering/fs/fs_backend.py"]
+    },
+    {
+      "path": "pkg/tiering/obj",
+      "into": "pkg/tiering",
+      "reason": "one object-store backend implementing the tier interface",
+      "evidence_files": ["pkg/tiering/obj/obj_backend.py"]
+    },
+    {
+      "path": "pkg/tiering/p2p",
+      "into": "pkg/tiering",
+      "reason": "one peer-to-peer backend implementing the tier interface",
+      "evidence_files": ["pkg/tiering/p2p/p2p_backend.py"]
+    },
+    {
+      "path": "pkg/tiering/cache",
+      "into": "pkg/tiering",
+      "reason": "in-memory cache layer of the same tiering unit",
+      "evidence_files": ["pkg/tiering/cache/cache_layer.py"]
+    },
+    {
+      "path": "pkg/tiering/policy",
+      "into": "pkg/tiering",
+      "reason": "eviction policy consulted only by the manager",
+      "evidence_files": ["pkg/tiering/policy/policy_engine.py"]
+    },
+    {
+      "path": "pkg/tiering/metrics",
+      "into": "pkg/tiering",
+      "reason": "metrics sink for the tiering unit",
+      "evidence_files": ["pkg/tiering/metrics/metrics_sink.py"]
+    }
+  ]
+}

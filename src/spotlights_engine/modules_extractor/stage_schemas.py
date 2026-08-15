@@ -7,14 +7,23 @@ than the public `ProjectTree`/`Module` schema:
 - `SourceRootDecision` (Stage 1) nests the canonical `Repository` model rather
   than duplicating its fields, and rejects unknown repository keys.
 - `Skeleton`/`SkeletonNode` (Stage 2) are the deterministic inventory.
-- `EnrichedTree` and friends (Stage 3) forbid extra fields, require non-empty
-  bounded descriptions, and at most 5 unique `main_files` — none of which the
-  public `Module` model enforces. The matching *lower* bound of 1 lives in
-  `coverage.validate_enriched_tree`, which can see the filesystem and so can
-  exempt a pure container directory that owns no file of its own.
+- Stage 3 has **two contracts** while the `ExtractorConfig.contract` migration
+  flag exists (`design/module_extractor_simplified.md`):
+  - the tree contract: `EnrichedTree` and friends — a module tree with a
+    `folds[]` ledger. Forbids extra fields, requires non-empty bounded
+    descriptions, and at most `MAX_MAIN_FILES` unique `main_files`; the
+    matching *lower* bound of 1 lives in `coverage.validate_enriched_tree`,
+    which can see the filesystem and so can exempt a pure container directory
+    that owns no file of its own.
+  - the assignment contract: Stage 3A returns an exhaustive
+    `AssignmentTree` (one `MODULE`/`PART` label per skeleton path plus a
+    decision per module), code resolves it into a `ResolvedAssignmentTree`,
+    and Stage 3B returns `ModuleMetadataBatch`es (descriptions + main files
+    for already-final module territories) united into a `ModuleMetadataMap`.
 
 The public serialized `ProjectTree` schema is unchanged; Stage 5 converts an
-`EnrichedTree` back into `ProjectTree` dicts via `modules_as_project_tree_dicts`.
+`EnrichedTree` (or resolved assignments + metadata, via `derive.py`) back into
+`ProjectTree` dicts.
 """
 
 from __future__ import annotations
@@ -24,6 +33,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from spotlights_engine.modules_extractor.constants import (
+    MAX_MAIN_FILES,
+    MAX_REPRESENTATIVE_FILES,
+)
 from spotlights_engine.schemas.project import Repository, _normalize_module_segment
 
 # Bounds — generous enough for honest descriptions, tight enough that a
@@ -137,7 +150,9 @@ class SkeletonNode(BaseModel):
     # Defaulted so skeletons serialized before the field existed still load.
     subtree_source_file_count: int = Field(default=0, ge=0)
     source_child_count: int = Field(ge=0)
-    representative_files: list[str] = Field(default_factory=list, max_length=5)
+    representative_files: list[str] = Field(
+        default_factory=list, max_length=MAX_REPRESENTATIVE_FILES
+    )
     required: bool
     required_reasons: list[str] = Field(default_factory=list)
     children: list[SkeletonNode] = Field(default_factory=list)
@@ -202,9 +217,10 @@ def _check_main_files(main_files: list[EnrichedFile]) -> None:
     # to cite once its children are emitted, so it legally cites none.
     # `validate_enriched_tree` holds every other module to ≥1, where it can see
     # the directory and say so precisely.
-    if len(main_files) > 5:
+    if len(main_files) > MAX_MAIN_FILES:
         raise ValueError(
-            f"main_files must have at most 5 entries, got {len(main_files)}"
+            f"main_files must have at most {MAX_MAIN_FILES} entries, "
+            f"got {len(main_files)}"
         )
     paths = [f.path for f in main_files]
     if len(set(paths)) != len(paths):
@@ -258,7 +274,12 @@ class EnrichedTopModule(BaseModel):
 
 
 class FoldRecord(BaseModel):
-    """A directory folded into an emitted ancestor's `main_files`."""
+    """A directory folded into an emitted ancestor module.
+
+    `evidence_files` must name ≥1 real source file under the folded path
+    (validated by Rule 8 in `coverage._validate_folds`); the evidence is not
+    required to appear in the target's `main_files`.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -336,7 +357,205 @@ EnrichedSubmodule.model_rebuild()
 EnrichedTopModule.model_rebuild()
 
 
+# ── Stage 3 — assignment contract ─────────────────────────────────────────
+
+AssignmentLabel = Literal["MODULE", "PART"]
+
+AssignmentOrigin = Literal[
+    "top_level_anchor", "size", "independent", "part", "qn_collision_part"
+]
+
+
+def _normalize_mapping_keys(raw: Any, field_name: str) -> Any:
+    """Normalize a raw dict's keys with `_structural_relpath`, collision-safe.
+
+    Two distinct raw keys that normalize to the same path (`a/b` and `a//b`)
+    are rejected instead of silently overwriting one — a Pydantic **parse**
+    failure, not a separate validation class. Exact duplicate raw JSON object
+    keys were already collapsed by the standard JSON parser; "exactly once"
+    means the post-parse mapping checked here.
+    """
+    if not isinstance(raw, dict):
+        return raw
+    out: dict[str, Any] = {}
+    first_raw: dict[str, Any] = {}
+    for key, value in raw.items():
+        norm = _structural_relpath(str(key))
+        if norm in out:
+            raise ValueError(
+                f"{field_name} keys {first_raw[norm]!r} and {key!r} both "
+                f"normalize to {norm!r}"
+            )
+        out[norm] = value
+        first_raw[norm] = key
+    return out
+
+
+class ModuleDecision(BaseModel):
+    """The per-module decision record accompanying a `MODULE` label.
+
+    `keep_reason` is required (non-null) only for a non-anchor module at or
+    below the merge threshold — enforced by V3 in `assignments.py`, which can
+    see the skeleton counts. Here it is merely stripped, bounded, and non-empty
+    when present.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    keep_reason: str | None = Field(default=None, max_length=_MAX_REASON)
+
+    @model_validator(mode="after")
+    def _strip_reason(self) -> ModuleDecision:
+        if self.keep_reason is not None:
+            stripped = self.keep_reason.strip()
+            if not stripped:
+                raise ValueError("keep_reason, when present, must be non-empty")
+            object.__setattr__(self, "keep_reason", stripped)
+        return self
+
+
+class AssignmentTree(BaseModel):
+    """Raw Stage-3A model output: one label for every skeleton path in scope.
+
+    - `assignments` values are the closed `MODULE`/`PART` enum, never paths.
+    - `module_decisions` keys must equal the `MODULE`-labeled paths exactly
+      (the bijection is enforced by V3, which owns label semantics).
+    - No descriptions, main files, folds, or evidence exist in this pass.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    assignments: dict[str, AssignmentLabel]
+    module_decisions: dict[str, ModuleDecision]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_keys(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = {**data}
+            for field_name in ("assignments", "module_decisions"):
+                if field_name in data:
+                    data[field_name] = _normalize_mapping_keys(
+                        data[field_name], field_name
+                    )
+        return data
+
+    def module_paths(self) -> set[str]:
+        return {p for p, label in self.assignments.items() if label == "MODULE"}
+
+    def part_paths(self) -> set[str]:
+        return {p for p, label in self.assignments.items() if label == "PART"}
+
+
+class ResolvedAssignmentTree(BaseModel):
+    """Canonical post-validation Stage-3A artifact: labels + derived maps.
+
+    `owners` maps every path to its owning module (a `MODULE` owns itself; a
+    `PART` is owned by its deepest strict ancestor labeled `MODULE`).
+    `origins` records why each path carries its label; `collision_precedence`
+    maps each forced-`PART` normalized-name-collision loser to its winning
+    path. The derived maps are audit data: every load must recompute and
+    compare them against the full skeleton (`derive.verify_resolved_assignments`)
+    rather than trust the persisted values.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    assignments: dict[str, AssignmentLabel]
+    module_decisions: dict[str, ModuleDecision]
+    owners: dict[str, str]
+    origins: dict[str, AssignmentOrigin]
+    collision_precedence: dict[str, str] = Field(default_factory=dict)
+    merge_threshold: int = Field(ge=0)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_keys(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = {**data}
+            for field_name in (
+                "assignments",
+                "module_decisions",
+                "owners",
+                "origins",
+                "collision_precedence",
+            ):
+                if field_name in data:
+                    data[field_name] = _normalize_mapping_keys(
+                        data[field_name], field_name
+                    )
+        return data
+
+    @model_validator(mode="after")
+    def _check_key_agreement(self) -> ResolvedAssignmentTree:
+        keys = set(self.assignments)
+        if set(self.owners) != keys:
+            raise ValueError("owners keys must equal assignments keys")
+        if set(self.origins) != keys:
+            raise ValueError("origins keys must equal assignments keys")
+        modules = {p for p, label in self.assignments.items() if label == "MODULE"}
+        if set(self.module_decisions) != modules:
+            raise ValueError(
+                "module_decisions keys must equal MODULE-labeled paths exactly"
+            )
+        return self
+
+    def module_paths(self) -> set[str]:
+        return {p for p, label in self.assignments.items() if label == "MODULE"}
+
+
+class ModuleInfo(BaseModel):
+    """Stage-3B metadata for one final module territory."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    description: str = Field(min_length=1, max_length=_MAX_DESCRIPTION)
+    # `max_length` (not a custom validator) so the generated Claude JSON
+    # Schema carries `maxItems` and prompt/schema cannot drift.
+    main_files: list[EnrichedFile] = Field(max_length=MAX_MAIN_FILES)
+
+    @model_validator(mode="after")
+    def _unique_main_files(self) -> ModuleInfo:
+        paths = [f.path for f in self.main_files]
+        if len(set(paths)) != len(paths):
+            raise ValueError(f"main_files paths must be unique: {paths}")
+        return self
+
+
+class ModuleMetadataBatch(BaseModel):
+    """One Stage-3B response: metadata for exactly the requested module set."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    modules: dict[str, ModuleInfo]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_keys(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "modules" in data:
+            data = {**data, "modules": _normalize_mapping_keys(data["modules"], "modules")}
+        return data
+
+
+class ModuleMetadataMap(BaseModel):
+    """The checked global Stage-3B union across accepted batches."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    modules: dict[str, ModuleInfo]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalize_keys(cls, data: Any) -> Any:
+        if isinstance(data, dict) and "modules" in data:
+            data = {**data, "modules": _normalize_mapping_keys(data["modules"], "modules")}
+        return data
+
+
 __all__ = [
+    "AssignmentLabel",
+    "AssignmentOrigin",
+    "AssignmentTree",
     "EnrichedFile",
     "EnrichedSubmodule",
     "EnrichedTopModule",
@@ -344,6 +563,11 @@ __all__ = [
     "ExcludedSourcePath",
     "ExclusionReason",
     "FoldRecord",
+    "ModuleDecision",
+    "ModuleInfo",
+    "ModuleMetadataBatch",
+    "ModuleMetadataMap",
+    "ResolvedAssignmentTree",
     "Skeleton",
     "SkeletonNode",
     "SourceRootDecision",

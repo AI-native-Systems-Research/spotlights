@@ -6,7 +6,16 @@ Stage 4 semantic review, since removed; assembly keeps its Stage-5 numbering):
 
 1. Claude + Python — repository metadata and source root.
 2. Python — deterministic directory inventory / skeleton.
-3. Claude + Python — enrichment, strict filesystem validation, coverage gate.
+3. Claude + Python — Stage-3 enrichment under one of two contracts while the
+   `ExtractorConfig.contract` migration flag exists
+   (`design/module_extractor_simplified.md`):
+   - `"tree"` — the historical `EnrichedTree` + folds contract, with strict
+     filesystem validation and the coverage gate; or
+   - `"assignments"` — Stage 3A labels every skeleton path `MODULE`/`PART`
+     (single call or sharded, with V1–V3 + path-only V5 validation and the
+     bounded repair budget), code resolves owners, then Stage 3B fetches
+     descriptions/main files for final module territories in deterministic
+     batches (V4 + final V5).
 5. Python — deterministic final `ProjectTree` assembly and re-validation.
 
 The public return type (`ExtractionRunResult`) and the serialized `ProjectTree`
@@ -30,6 +39,17 @@ from spotlights_engine.modules_extractor.agent import (
     ExtractionInvocation,
     ExtractionRunResult,
 )
+from spotlights_engine.modules_extractor.assignments import (
+    AssignmentIssue,
+    CollisionPrecedence,
+    compute_assignment_coverage,
+    compute_collision_precedence,
+    compute_metadata_coverage,
+    format_assignment_issues,
+    validate_assignment_labels,
+    validate_assignment_paths,
+    validate_metadata_entries,
+)
 from spotlights_engine.modules_extractor.claude_stage import (
     ClaudeStageResult,
     add_optional_float,
@@ -47,6 +67,14 @@ from spotlights_engine.modules_extractor.coverage import (
     validate_enriched_tree,
     validate_source_root_decision,
 )
+from spotlights_engine.modules_extractor.derive import (
+    compute_assignment_lints,
+    derive_metadata_batches,
+    derive_module_forest,
+    derive_project_tree,
+    resolve_assignments,
+    verify_resolved_assignments,
+)
 from spotlights_engine.modules_extractor.errors import (
     ExtractorArtifactError,
     ExtractorCoverageError,
@@ -54,21 +82,33 @@ from spotlights_engine.modules_extractor.errors import (
 )
 from spotlights_engine.modules_extractor.normalize import normalize_enriched_tree
 from spotlights_engine.modules_extractor.prompts import (
+    render_assignment_prompt,
+    render_assignment_shard_prompt,
     render_enrich_prompt,
     render_enrich_shard_prompt,
     render_identify_source_root_prompt,
+    render_metadata_prompt,
 )
 from spotlights_engine.modules_extractor.sharding import (
+    AssignmentShard,
+    AssignmentShardPlan,
     EnrichShard,
     ShardPlan,
+    assignment_branch_coverage,
+    assignment_owning_shard,
+    assignment_shard_weight,
     branch_coverage,
     covers_entire_skeleton,
+    derive_assignment_shards,
     derive_enrich_shards,
     has_several_source_roots,
+    merge_assignment_fragments,
     merge_fragments,
     owning_shard,
+    render_assignment_shard_plan_markdown,
     render_shard_plan_markdown,
     shard_weight,
+    validate_assignment_shard_scope,
     validate_promotion_parent,
     validate_shard_scope,
     validate_spine_main_files,
@@ -80,20 +120,31 @@ from spotlights_engine.modules_extractor.skeleton import (
     scan_source_files,
 )
 from spotlights_engine.modules_extractor.stage_schemas import (
+    AssignmentTree,
     EnrichedTree,
     ExcludedSourcePath,
+    ModuleInfo,
+    ModuleMetadataBatch,
+    ModuleMetadataMap,
+    ResolvedAssignmentTree,
     Skeleton,
     SourceRootDecision,
 )
 from spotlights_engine.modules_extractor.tree_report import (
     build_tree_decision_report,
+    build_tree_decision_report_v2,
     render_markdown,
+    render_markdown_v2,
 )
 from spotlights_engine.schemas.project import (
     ProjectTree,
 )
 
 if TYPE_CHECKING:
+    from spotlights_engine.modules_extractor.derive import (
+        AssignmentLint,
+        MetadataBatch,
+    )
     from spotlights_engine.modules_extractor.extractor import ExtractorConfig
 
 _STAGE_REPAIR_PAYLOAD_MAX_CHARS = 60_000
@@ -345,6 +396,11 @@ def run_two_phase_extraction(
     """
     base = artifacts_dir
     telemetry = _Telemetry()
+    _required_write_json(
+        base,
+        "extractor_config.json",
+        config.model_dump(mode="json", exclude={"artifacts_dir"}),
+    )
 
     # Repo-wide safe source scan + fingerprint, shared by Stage 1 and Stage 5.
     repo_scan = scan_source_files(repo_path, "")
@@ -369,6 +425,33 @@ def run_two_phase_extraction(
     skeleton = _stage2_skeleton(
         repo_path, decision, base=base, on_event=on_event
     )
+
+    # ── Assignment contract (v2) — Stage 3A/3B + Stage 5 ──────────────────
+    if config.contract == "assignments":
+        tree = _run_assignment_extraction(
+            repo_path,
+            repository,
+            decision,
+            skeleton,
+            base=base,
+            config=config,
+            telemetry=telemetry,
+            repo_fingerprint=repo_fingerprint,
+            on_event=on_event,
+        )
+        _persist_sessions(base, telemetry)
+        invocation = ExtractionInvocation(
+            session_id=telemetry.accepted_session_id,
+            duration_s=telemetry.total_duration_s,
+            cost_usd=telemetry.total_cost_usd,
+            input_tokens=telemetry.total_input_tokens,
+            output_tokens=telemetry.total_output_tokens,
+        )
+        return ExtractionRunResult(
+            project_tree=tree,
+            invocation=invocation,
+            raw_payload=tree.model_dump_json(indent=2),
+        )
 
     # ── Stage 3 — enrichment + coverage gate ──────────────────────────────
     stage3 = _stage3_enrich(
@@ -807,9 +890,7 @@ def _stage3_enrich_single(
             f"{attempt_rel}/enriched_tree.json",
             result.parsed.model_dump(mode="json"),
         )
-        enriched, norm_report = normalize_enriched_tree(
-            result.parsed, repo_path, skeleton=skeleton
-        )
+        enriched, norm_report = normalize_enriched_tree(result.parsed)
         _required_write_json(
             base,
             f"{attempt_rel}/normalization.json",
@@ -1104,8 +1185,6 @@ async def _enrich_shard_attempts(
         )
         fragment, norm_report = normalize_enriched_tree(
             result.parsed,
-            repo_path,
-            skeleton=shard.subtree,
             protected_paths=shard.rule4_exempt_paths,
         )
         _required_write_json(
@@ -1341,9 +1420,7 @@ def _merge_and_gate(
     # no single shard could see — e.g. a one-child chain whose spine locally
     # deferred Rule 4 for its promotion parent. Normalize the merged whole
     # before the final gate; the pass is idempotent on already-clean trees.
-    merged, merged_norm = normalize_enriched_tree(
-        merged_raw, repo_path, skeleton=skeleton
-    )
+    merged, merged_norm = normalize_enriched_tree(merged_raw)
     _required_write_json(
         base,
         "03_enrich/merged/normalization.json",
@@ -1407,6 +1484,50 @@ def _merge_and_gate(
 # ── Stage 5 ───────────────────────────────────────────────────────────────
 
 
+def _verify_repo_unchanged(
+    repo_path: Path,
+    decision: SourceRootDecision,
+    skeleton: Skeleton,
+    *,
+    repo_fingerprint: str,
+) -> None:
+    """Stage-5 concurrent-mutation defenses, shared by both contracts:
+    re-run Stage-1 exclusion validation on a fresh scan, compare the repo-wide
+    content fingerprint, rebuild the skeleton, and compare its fingerprint."""
+    fresh_scan = scan_source_files(repo_path, "")
+    try:
+        validate_source_root_decision(decision, repo_path, fresh_scan.files)
+    except CrossArtifactError as exc:
+        raise ExtractorValidationError(
+            "source-root decision no longer validates at assembly "
+            f"(repository changed during extraction?): {exc}",
+            stage="assemble",
+        ) from exc
+    fresh_repo_fingerprint = compute_fingerprint(
+        repo_path, fresh_scan.files, extra_paths=fresh_scan.skipped_symlinks
+    )
+    if fresh_repo_fingerprint != repo_fingerprint:
+        raise ExtractorValidationError(
+            "repository source content changed during extraction "
+            "(repo-wide fingerprint mismatch)",
+            stage="assemble",
+        )
+
+    excluded_dirs, excluded_files = _split_exclusions(repo_path, decision)
+    fresh_skeleton = build_skeleton(
+        repo_path,
+        decision.repository.source_root,
+        excluded_dirs=excluded_dirs,
+        excluded_files=excluded_files,
+    )
+    if fresh_skeleton.inventory_fingerprint != skeleton.inventory_fingerprint:
+        raise ExtractorValidationError(
+            "repository inventory changed during extraction "
+            "(skeleton fingerprint mismatch)",
+            stage="assemble",
+        )
+
+
 def _stage5_assemble(
     repo_path: Path,
     repository: Any,
@@ -1445,40 +1566,12 @@ def _stage5_assemble(
             stage="assemble",
         )
 
-    # Re-run Stage-1 exclusion validation and Stage-2 walk; require both
-    # fingerprints to match (defense against concurrent mutation).
-    fresh_scan = scan_source_files(repo_path, "")
-    try:
-        validate_source_root_decision(decision, repo_path, fresh_scan.files)
-    except CrossArtifactError as exc:
-        raise ExtractorValidationError(
-            "source-root decision no longer validates at assembly "
-            f"(repository changed during extraction?): {exc}",
-            stage="assemble",
-        ) from exc
-    fresh_repo_fingerprint = compute_fingerprint(
-        repo_path, fresh_scan.files, extra_paths=fresh_scan.skipped_symlinks
-    )
-    if fresh_repo_fingerprint != repo_fingerprint:
-        raise ExtractorValidationError(
-            "repository source content changed during extraction "
-            "(repo-wide fingerprint mismatch)",
-            stage="assemble",
-        )
-
-    excluded_dirs, excluded_files = _split_exclusions(repo_path, decision)
-    fresh_skeleton = build_skeleton(
+    _verify_repo_unchanged(
         repo_path,
-        decision.repository.source_root,
-        excluded_dirs=excluded_dirs,
-        excluded_files=excluded_files,
+        decision,
+        skeleton,
+        repo_fingerprint=repo_fingerprint,
     )
-    if fresh_skeleton.inventory_fingerprint != skeleton.inventory_fingerprint:
-        raise ExtractorValidationError(
-            "repository inventory changed during extraction "
-            "(skeleton fingerprint mismatch)",
-            stage="assemble",
-        )
 
     if base is not None:
         try:
@@ -1534,6 +1627,1476 @@ def _repair_prompt(
         parts.append("\n\nPrevious output:\n")
         parts.append(_bounded(previous_payload))
     return "".join(parts) + "\n"
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Stage 3 — assignment contract (v2)
+# ══════════════════════════════════════════════════════════════════════════
+
+
+def _assignment_coverage_repair_errors(missing: list[str]) -> str:
+    """Coverage-repair message for the assignment contract: a plain
+    missing-label list. (The tree contract's non-recursive-fold reminder has
+    no analogue here — every path gets exactly one label.)"""
+    return (
+        "Missing assignment labels for these skeleton paths — `assignments` "
+        "must contain every SKELETON path exactly once: " + ", ".join(missing)
+    )
+
+
+def _write_tree_decisions_v2(
+    base: Path | None,
+    *,
+    required: bool,
+    skeleton: Skeleton,
+    assignments: AssignmentTree | None,
+    resolved: ResolvedAssignmentTree | None,
+    metadata: dict[str, ModuleInfo] | None,
+    coverage: Any,
+    lints: list[AssignmentLint] | None,
+    issues: list[AssignmentIssue] | None,
+    decision: SourceRootDecision | None,
+    merge_threshold: int,
+    on_event: Callable[[str], None] | None,
+) -> None:
+    """The v2 decision report, on the success (`required=True`) or failure
+    (best-effort) path. The best-effort form must never mask the in-flight
+    stage error, so build + serialize stay inside the guard."""
+    if base is None:
+        return
+    try:
+        report = build_tree_decision_report_v2(
+            skeleton,
+            assignments=assignments,
+            resolved=resolved,
+            metadata=metadata,
+            coverage=coverage,
+            lints=lints,
+            issues=issues,
+            decision=decision,
+            merge_threshold=merge_threshold,
+        )
+        payload = report.model_dump(mode="json")
+        markdown = render_markdown_v2(report)
+    except Exception as exc:  # noqa: BLE001 - must not mask the original error
+        if required:
+            raise
+        notify(
+            on_event,
+            f"extractor: failed to build tree_decisions during error handling: {exc}",
+        )
+        return
+    if required:
+        _required_write_json(base, "tree_decisions.json", payload)
+        _required_write_text(base, "tree_decisions.md", markdown)
+    else:
+        _best_effort_write_json(base, "tree_decisions.json", payload, on_event)
+        _best_effort_write_text(base, "tree_decisions.md", markdown, on_event)
+
+
+# ── Stage 3A — single call ────────────────────────────────────────────────
+
+
+def _stage3a_single(
+    repo_path: Path,
+    repository: Any,
+    skeleton: Skeleton,
+    precedence: CollisionPrecedence,
+    *,
+    base: Path | None,
+    config: ExtractorConfig,
+    telemetry: _Telemetry,
+    decision: SourceRootDecision | None,
+    on_event: Callable[[str], None] | None,
+) -> AssignmentTree:
+    """One whole-repository assignment call with the bounded repair budget.
+
+    V2 (totality) is a preflight with precedence over V1/V3/V5: a missing
+    label plus its now-orphan decision must not consume both the coverage and
+    validation repairs. Once totality holds, V1, V3, and the path-only V5
+    (`derive_module_forest`) run together.
+    """
+    repo_data = repository.model_dump(mode="json")
+    skel_data = skeleton.model_dump(mode="json")
+    scope = {
+        "whole_repository": True,
+        "root_path": skeleton.source_root,
+        "forced_part_paths": sorted(precedence.forced_part),
+    }
+    base_prompt = render_assignment_prompt(
+        repository=repo_data,
+        skeleton=skel_data,
+        scope=scope,
+        merge_threshold=config.merge_threshold,
+    )
+    _required_write_text(base, "03_enrich/prompt.md", base_prompt)
+    _required_write_json(
+        base,
+        "03_enrich/data_blocks.json",
+        {"repository": repo_data, "skeleton": skel_data, "scope": scope},
+    )
+
+    anchor_paths = {n.path for n in skeleton.nodes}
+    prompt = base_prompt
+    repaired_kinds: set[str] = set()
+    last_parsed: AssignmentTree | None = None
+    last_issues: list[AssignmentIssue] | None = None
+    for attempt in range(1, _MAX_STAGE3_ATTEMPTS + 1):
+        attempt_rel = f"03_enrich/attempt_{attempt:02d}"
+        attempt_dir = base / attempt_rel if base is not None else None
+        result: ClaudeStageResult[AssignmentTree] = run_structured_claude_stage(
+            output_type=AssignmentTree,
+            repo_path=repo_path,
+            prompt=prompt,
+            stage_name="assign",
+            attempt_dir=attempt_dir,
+            claude_bin=config.claude_bin,
+            max_turns=config.max_turns,
+            timeout_s=config.timeout_s,
+            on_event=on_event,
+        )
+        telemetry.add_claude("03_enrich", result)
+        _persist_sessions(base, telemetry)
+
+        if result.parsed is None:
+            detail = str(result.validation_error)
+            _required_write_json(
+                base,
+                f"{attempt_rel}/validation.json",
+                {"ok": False, "kind": "parse", "detail": detail},
+            )
+            if _spend_repair("parse", repaired_kinds, attempt):
+                notify(on_event, "extractor: stage-3A parse failed; repairing")
+                prompt = _repair_prompt(
+                    base_prompt, detail, previous_payload=result.raw_payload
+                )
+                continue
+            if last_parsed is not None:
+                _write_tree_decisions_v2(
+                    base,
+                    required=False,
+                    skeleton=skeleton,
+                    assignments=last_parsed,
+                    resolved=None,
+                    metadata=None,
+                    coverage=compute_assignment_coverage(
+                        last_parsed, skeleton, invalid=last_issues
+                    ),
+                    lints=None,
+                    issues=last_issues,
+                    decision=decision,
+                    merge_threshold=config.merge_threshold,
+                    on_event=on_event,
+                )
+            raise ExtractorValidationError(
+                f"assignment tree failed to parse after {attempt} attempts: "
+                f"{result.validation_error}",
+                stage="enrich",
+            )
+
+        parsed = result.parsed
+        last_parsed = parsed
+        last_issues = None
+        _required_write_json(
+            base,
+            f"{attempt_rel}/assignment_tree.json",
+            parsed.model_dump(mode="json"),
+        )
+
+        # V2 preflight — totality before any label semantics.
+        coverage = compute_assignment_coverage(parsed, skeleton)
+        _required_write_json(
+            base, f"{attempt_rel}/coverage.json", coverage.model_dump(mode="json")
+        )
+        if coverage.missing:
+            _required_write_json(
+                base,
+                f"{attempt_rel}/validation.json",
+                {
+                    "ok": False,
+                    "kind": "coverage",
+                    "detail": f"{len(coverage.missing)} unlabeled inventory path(s)",
+                },
+            )
+            if _spend_repair("coverage", repaired_kinds, attempt):
+                notify(
+                    on_event,
+                    f"extractor: stage-3A missing {len(coverage.missing)} "
+                    "labels; repairing",
+                )
+                prompt = _repair_prompt(
+                    base_prompt,
+                    _assignment_coverage_repair_errors(coverage.missing),
+                    previous_payload=result.raw_payload,
+                )
+                continue
+            _write_tree_decisions_v2(
+                base,
+                required=False,
+                skeleton=skeleton,
+                assignments=parsed,
+                resolved=None,
+                metadata=None,
+                coverage=coverage,
+                lints=None,
+                issues=None,
+                decision=decision,
+                merge_threshold=config.merge_threshold,
+                on_event=on_event,
+            )
+            raise ExtractorCoverageError(
+                f"{len(coverage.missing)} inventory paths unlabeled",
+                missing=coverage.missing,
+                stage="enrich",
+            )
+
+        issues = validate_assignment_paths(parsed, skeleton, repo_path)
+        issues += validate_assignment_labels(
+            parsed,
+            skeleton,
+            merge_threshold=config.merge_threshold,
+            precedence=precedence,
+            anchor_paths=anchor_paths,
+            require_owner_in_scope=True,
+        )
+        if not issues:
+            try:
+                derive_module_forest(repository, parsed)
+            except ValueError as exc:
+                issues.append(
+                    AssignmentIssue(
+                        code="public_tree_invalid",
+                        detail=f"provisional public tree failed validation: {exc}",
+                    )
+                )
+        last_issues = issues or None
+        _required_write_json(
+            base,
+            f"{attempt_rel}/validation.json",
+            {
+                "ok": not issues,
+                "kind": "validation" if issues else None,
+                "issues": [i.model_dump(mode="json") for i in issues],
+            },
+        )
+        if issues:
+            if _spend_repair("validation", repaired_kinds, attempt):
+                notify(on_event, "extractor: stage-3A validation failed; repairing")
+                prompt = _repair_prompt(
+                    base_prompt,
+                    format_assignment_issues(issues),
+                    previous_payload=result.raw_payload,
+                )
+                continue
+            _write_tree_decisions_v2(
+                base,
+                required=False,
+                skeleton=skeleton,
+                assignments=parsed,
+                resolved=None,
+                metadata=None,
+                coverage=compute_assignment_coverage(
+                    parsed, skeleton, invalid=issues
+                ),
+                lints=None,
+                issues=issues,
+                decision=decision,
+                merge_threshold=config.merge_threshold,
+                on_event=on_event,
+            )
+            raise ExtractorValidationError(
+                "assignment tree failed validation: "
+                f"{format_assignment_issues(issues)}",
+                stage="enrich",
+            )
+
+        telemetry.accepted_session_id = result.telemetry.session_id
+        return parsed
+
+    raise AssertionError("unreachable: stage-3A attempt loop exhausted")
+
+
+# ── Stage 3A — sharded ────────────────────────────────────────────────────
+
+
+@dataclass
+class _AssignmentShardOutcome:
+    shard: AssignmentShard
+    fragment: AssignmentTree
+    session_id: str | None
+    attempts: int
+
+
+@dataclass
+class _AssignmentFailureSnapshot:
+    fragment: AssignmentTree
+    issues: list[AssignmentIssue] | None
+
+
+def _assignment_scope_dict(
+    shard: AssignmentShard, precedence: CollisionPrecedence
+) -> dict[str, Any]:
+    in_scope = shard.subtree.all_paths()
+    return {
+        "key": shard.key,
+        "root_path": shard.root_path,
+        "is_branch_root": shard.is_branch_root,
+        "is_subshard": shard.is_subshard,
+        "parent_key": shard.parent_key,
+        "depth": shard.depth,
+        "promoted_children": list(shard.promoted_children),
+        "promotion_parent": shard.promotion_parent,
+        # Full-skeleton-derived collision policy, restricted to this scope so
+        # precedence is identical under every partition.
+        "forced_part_paths": sorted(
+            p for p in precedence.forced_part if p in in_scope
+        ),
+    }
+
+
+def _assignment_shard_plan_dict(plan: AssignmentShardPlan) -> dict[str, Any]:
+    return {
+        "branch_roots": dict(plan.branch_roots),
+        "not_split_reasons": dict(plan.not_split_reasons),
+        "shards": [
+            {
+                "key": s.key,
+                "root_path": s.root_path,
+                "is_branch_root": s.is_branch_root,
+                "is_subshard": s.is_subshard,
+                "parent_key": s.parent_key,
+                "depth": s.depth,
+                "promoted_children": list(s.promoted_children),
+                "promotion_parent": s.promotion_parent,
+                "inventory_nodes": len(s.subtree.all_paths()),
+            }
+            for s in plan.shards
+        ],
+    }
+
+
+def _validate_assignment_fragment(
+    shard: AssignmentShard,
+    fragment: AssignmentTree,
+    *,
+    repo_path: Path,
+    repository: Any,
+    precedence: CollisionPrecedence,
+    merge_threshold: int,
+) -> list[AssignmentIssue]:
+    """Locally decidable validation for one fragment: scope keys, V1, V3 (a
+    nested root may be `PART`; owners resolve after union), and path-only V5."""
+    issues: list[AssignmentIssue] = []
+    try:
+        validate_assignment_shard_scope(shard, fragment)
+    except CrossArtifactError as exc:
+        issues.append(AssignmentIssue(code="out_of_scope", detail=str(exc)))
+    issues += validate_assignment_paths(fragment, shard.subtree, repo_path)
+    issues += validate_assignment_labels(
+        fragment,
+        shard.subtree,
+        merge_threshold=merge_threshold,
+        precedence=precedence,
+        anchor_paths={shard.root_path} if shard.is_branch_root else set(),
+        require_owner_in_scope=False,
+    )
+    if not issues:
+        try:
+            derive_module_forest(repository, fragment)
+        except ValueError as exc:
+            issues.append(
+                AssignmentIssue(
+                    code="public_tree_invalid",
+                    detail=f"provisional public tree failed validation: {exc}",
+                )
+            )
+    return issues
+
+
+async def _assignment_shard_attempts(
+    shard: AssignmentShard,
+    *,
+    repo_path: Path,
+    repository: Any,
+    skeleton: Skeleton,
+    precedence: CollisionPrecedence,
+    base: Path | None,
+    config: ExtractorConfig,
+    telemetry: _Telemetry,
+    failure_snapshots: dict[str, _AssignmentFailureSnapshot],
+    on_event: Callable[[str], None] | None,
+) -> _AssignmentShardOutcome:
+    shard_rel = f"03_enrich/{shard.key}"
+    repo_data = repository.model_dump(mode="json")
+    subtree_data = shard.subtree.model_dump(mode="json")
+    scope = _assignment_scope_dict(shard, precedence)
+    base_prompt = render_assignment_shard_prompt(
+        repository=repo_data,
+        subtree=subtree_data,
+        scope=scope,
+        merge_threshold=config.merge_threshold,
+    )
+    _required_write_json(base, f"{shard_rel}/scope.json", scope)
+    _required_write_json(base, f"{shard_rel}/subtree_skeleton.json", subtree_data)
+    _required_write_text(base, f"{shard_rel}/prompt.md", base_prompt)
+
+    # Same deadline rule as the tree contract, under assignment weights: a
+    # shard derivation could not cut down to size keeps the full budget.
+    cut_down_to_size = (
+        assignment_shard_weight(shard) <= config.enrich_subshard_threshold
+    )
+    timeout_s = (
+        _effective_timeout(config.enrich_timeout_s, config.timeout_s)
+        if cut_down_to_size and not covers_entire_skeleton(shard, skeleton)
+        else config.timeout_s
+    )
+
+    prompt = base_prompt
+    repaired_kinds: set[str] = set()
+    last_parsed: AssignmentTree | None = None
+    last_issues: list[AssignmentIssue] | None = None
+
+    def _record_failure() -> None:
+        if last_parsed is None:
+            return
+        failure_snapshots[shard.key] = _AssignmentFailureSnapshot(
+            fragment=last_parsed,
+            issues=last_issues,
+        )
+
+    for attempt in range(1, _MAX_STAGE3_ATTEMPTS + 1):
+        attempt_rel = f"{shard_rel}/attempt_{attempt:02d}"
+        attempt_dir = base / attempt_rel if base is not None else None
+        repair_tag = "" if attempt == 1 else "#repair" + (
+            str(attempt - 1) if attempt > 2 else ""
+        )
+        stage_tag = f"03_enrich[{shard.key}]{repair_tag}"
+        result: ClaudeStageResult[AssignmentTree] = await asyncio.to_thread(
+            run_structured_claude_stage,
+            output_type=AssignmentTree,
+            repo_path=repo_path,
+            prompt=prompt,
+            stage_name=f"assign:{shard.key}",
+            attempt_dir=attempt_dir,
+            claude_bin=config.claude_bin,
+            max_turns=config.max_turns,
+            timeout_s=timeout_s,
+            on_event=on_event,
+        )
+        telemetry.add_claude(stage_tag, result)
+
+        if result.parsed is None:
+            detail = str(result.validation_error)
+            _required_write_json(
+                base,
+                f"{attempt_rel}/validation.json",
+                {"ok": False, "kind": "parse", "detail": detail},
+            )
+            _persist_sessions(base, telemetry)
+            if _spend_repair("parse", repaired_kinds, attempt):
+                notify(
+                    on_event,
+                    f"extractor: shard {shard.key} parse failed; repairing",
+                )
+                prompt = _repair_prompt(
+                    base_prompt, detail, previous_payload=result.raw_payload
+                )
+                continue
+            _record_failure()
+            raise ExtractorValidationError(
+                f"shard {shard.key!r} failed to parse after {attempt} attempts: "
+                f"{result.validation_error}",
+                stage="enrich",
+                shard=shard.key,
+            )
+
+        fragment = result.parsed
+        last_parsed = fragment
+        last_issues = None
+        _required_write_json(
+            base,
+            f"{attempt_rel}/assignment_tree.json",
+            fragment.model_dump(mode="json"),
+        )
+
+        # V2 preflight against this shard's slice inventory.
+        coverage = compute_assignment_coverage(fragment, shard.subtree)
+        _required_write_json(
+            base, f"{attempt_rel}/coverage.json", coverage.model_dump(mode="json")
+        )
+        _persist_sessions(base, telemetry)
+        if coverage.missing:
+            _required_write_json(
+                base,
+                f"{attempt_rel}/validation.json",
+                {
+                    "ok": False,
+                    "kind": "coverage",
+                    "detail": f"{len(coverage.missing)} unlabeled path(s)",
+                },
+            )
+            if _spend_repair("coverage", repaired_kinds, attempt):
+                notify(
+                    on_event,
+                    f"extractor: shard {shard.key} missing "
+                    f"{len(coverage.missing)} labels; repairing",
+                )
+                prompt = _repair_prompt(
+                    base_prompt,
+                    _assignment_coverage_repair_errors(coverage.missing),
+                    previous_payload=result.raw_payload,
+                )
+                continue
+            _record_failure()
+            raise ExtractorCoverageError(
+                f"shard {shard.key!r}: {len(coverage.missing)} paths unlabeled",
+                missing=coverage.missing,
+                stage="enrich",
+                shard=shard.key,
+            )
+
+        issues = _validate_assignment_fragment(
+            shard,
+            fragment,
+            repo_path=repo_path,
+            repository=repository,
+            precedence=precedence,
+            merge_threshold=config.merge_threshold,
+        )
+        last_issues = issues or None
+        _required_write_json(
+            base,
+            f"{attempt_rel}/validation.json",
+            {
+                "ok": not issues,
+                "kind": "validation" if issues else None,
+                "issues": [i.model_dump(mode="json") for i in issues],
+            },
+        )
+        if issues:
+            if _spend_repair("validation", repaired_kinds, attempt):
+                notify(
+                    on_event,
+                    f"extractor: shard {shard.key} validation failed; repairing",
+                )
+                prompt = _repair_prompt(
+                    base_prompt,
+                    format_assignment_issues(issues),
+                    previous_payload=result.raw_payload,
+                )
+                continue
+            _record_failure()
+            raise ExtractorValidationError(
+                f"shard {shard.key!r} failed validation: "
+                f"{format_assignment_issues(issues)}",
+                stage="enrich",
+                shard=shard.key,
+            )
+
+        _required_write_json(
+            base,
+            f"{shard_rel}/assignment_fragment.json",
+            fragment.model_dump(mode="json"),
+        )
+        return _AssignmentShardOutcome(
+            shard=shard,
+            fragment=fragment,
+            session_id=result.telemetry.session_id,
+            attempts=attempt,
+        )
+
+    raise AssertionError("unreachable: assignment shard attempt loop exhausted")
+
+
+async def _run_one_assignment_shard(
+    shard: AssignmentShard,
+    *,
+    sem: asyncio.Semaphore,
+    cancel: _CancelFlag,
+    **kwargs: Any,
+) -> _AssignmentShardOutcome:
+    async with sem:
+        if cancel.cancelled:
+            raise asyncio.CancelledError(
+                f"shard {shard.key!r} cancelled after a sibling failed"
+            )
+        try:
+            return await _assignment_shard_attempts(shard, **kwargs)
+        except BaseException:
+            cancel.cancelled = True
+            raise
+
+
+async def _run_assignment_shards_async(
+    shards: list[AssignmentShard], *, sem: asyncio.Semaphore, **kwargs: Any
+) -> list[_AssignmentShardOutcome]:
+    cancel = _CancelFlag()
+    tasks = [
+        asyncio.create_task(
+            _run_one_assignment_shard(s, sem=sem, cancel=cancel, **kwargs)
+        )
+        for s in shards
+    ]
+    try:
+        return list(await asyncio.gather(*tasks))
+    except BaseException:
+        cancel.cancelled = True
+        for t in tasks:
+            t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+
+
+def _stage3a_sharded(
+    repo_path: Path,
+    repository: Any,
+    skeleton: Skeleton,
+    precedence: CollisionPrecedence,
+    *,
+    base: Path | None,
+    config: ExtractorConfig,
+    telemetry: _Telemetry,
+    decision: SourceRootDecision | None,
+    on_event: Callable[[str], None] | None,
+) -> AssignmentTree:
+    plan = derive_assignment_shards(skeleton, config)
+    _required_write_json(
+        base, "03_enrich/shards.json", _assignment_shard_plan_dict(plan)
+    )
+    _required_write_text(
+        base, "03_enrich/sharding.md", render_assignment_shard_plan_markdown(plan)
+    )
+    notify(
+        on_event,
+        f"extractor: stage-3A sharded into {len(plan.shards)} shard(s) "
+        f"across {len(plan.branch_roots)} top-level branch(es)",
+    )
+    failure_snapshots: dict[str, _AssignmentFailureSnapshot] = {}
+
+    async def _run() -> list[_AssignmentShardOutcome]:
+        return await _run_assignment_shards_async(
+            plan.shards,
+            sem=asyncio.Semaphore(config.max_parallel_enrich_shards),
+            repo_path=repo_path,
+            repository=repository,
+            skeleton=skeleton,
+            precedence=precedence,
+            base=base,
+            config=config,
+            telemetry=telemetry,
+            failure_snapshots=failure_snapshots,
+            on_event=on_event,
+        )
+
+    try:
+        outcomes = _run_event_loop(_run())
+    except BaseException:
+        _best_effort_write_json(base, "sessions.json", telemetry.as_dict(), on_event)
+        if failure_snapshots:
+            failed_key = min(failure_snapshots)
+            snapshot = failure_snapshots[failed_key]
+            _write_tree_decisions_v2(
+                base,
+                required=False,
+                skeleton=skeleton,
+                assignments=snapshot.fragment,
+                resolved=None,
+                metadata=None,
+                coverage=compute_assignment_coverage(
+                    snapshot.fragment, skeleton, invalid=snapshot.issues
+                ),
+                lints=None,
+                issues=snapshot.issues,
+                decision=decision,
+                merge_threshold=config.merge_threshold,
+                on_event=on_event,
+            )
+        raise
+    _persist_sessions(base, telemetry)
+
+    pairs = [(o.shard, o.fragment) for o in outcomes]
+    accepted = {o.shard.key: o.session_id for o in outcomes}
+
+    # Per-branch totality precheck: cheap losslessness + blame localizer.
+    for branch_key in plan.branch_keys():
+        branch_pairs = [
+            (s, f) for s, f in pairs if plan.branch_key_of(s) == branch_key
+        ]
+        report = assignment_branch_coverage(plan, branch_key, branch_pairs)
+        _required_write_json(
+            base,
+            f"03_enrich/branches/{branch_key}/coverage.json",
+            report.model_dump(mode="json"),
+        )
+        if report.missing:
+            owners = {
+                p: (
+                    assignment_owning_shard(p, [s for s, _ in branch_pairs])
+                    or branch_pairs[0][0]
+                ).key
+                for p in report.missing
+            }
+            raise ExtractorCoverageError(
+                f"branch {branch_key!r} is missing {len(report.missing)} "
+                f"label(s) after union: {owners}",
+                missing=report.missing,
+                stage="enrich",
+                branch=branch_key,
+            )
+
+    merged = merge_assignment_fragments(pairs)
+    _required_write_json(
+        base,
+        "03_enrich/merged/assignment_tree.json",
+        merged.model_dump(mode="json"),
+    )
+
+    primary = plan.primary_shard()
+    telemetry.accepted_session_id = (
+        accepted.get(primary.key) if primary is not None else None
+    )
+    notify(
+        on_event,
+        f"extractor: united {len(pairs)} assignment fragment(s) covering "
+        f"{len(merged.assignments)} path(s)",
+    )
+    return merged
+
+
+# ── Stage 3B — metadata batches ───────────────────────────────────────────
+
+
+@dataclass
+class _MetadataFailureSnapshot:
+    modules: dict[str, ModuleInfo] | None
+    issues: list[AssignmentIssue] | None
+
+
+async def _metadata_batch_attempts(
+    batch: MetadataBatch,
+    *,
+    repo_path: Path,
+    repository: Any,
+    resolved: ResolvedAssignmentTree,
+    failure_snapshots: dict[str, _MetadataFailureSnapshot],
+    base: Path | None,
+    config: ExtractorConfig,
+    telemetry: _Telemetry,
+    on_event: Callable[[str], None] | None,
+) -> tuple[MetadataBatch, dict[str, ModuleInfo], str | None]:
+    batch_rel = f"03_enrich/metadata/{batch.key}"
+    repo_data = repository.model_dump(mode="json")
+    scope_payload = {
+        "key": batch.key,
+        "requested_modules": list(batch.module_paths),
+        "modules": [s.model_dump(mode="json") for s in batch.scopes],
+    }
+    base_prompt = render_metadata_prompt(
+        repository=repo_data, scopes=scope_payload
+    )
+    _required_write_json(base, f"{batch_rel}/scope.json", scope_payload)
+    _required_write_text(base, f"{batch_rel}/prompt.md", base_prompt)
+
+    requested = set(batch.module_paths)
+    module_paths = resolved.module_paths()
+    timeout_s = (
+        config.timeout_s
+        if batch.use_full_timeout
+        else _effective_timeout(config.enrich_timeout_s, config.timeout_s)
+    )
+
+    prompt = base_prompt
+    repaired_kinds: set[str] = set()
+    last_modules: dict[str, ModuleInfo] | None = None
+    last_issues: list[AssignmentIssue] | None = None
+
+    def _record_failure() -> None:
+        failure_snapshots[batch.key] = _MetadataFailureSnapshot(
+            modules=last_modules,
+            issues=last_issues,
+        )
+
+    for attempt in range(1, _MAX_STAGE3_ATTEMPTS + 1):
+        attempt_rel = f"{batch_rel}/attempt_{attempt:02d}"
+        attempt_dir = base / attempt_rel if base is not None else None
+        repair_tag = "" if attempt == 1 else "#repair" + (
+            str(attempt - 1) if attempt > 2 else ""
+        )
+        stage_tag = f"03_metadata[{batch.key}]{repair_tag}"
+        result: ClaudeStageResult[ModuleMetadataBatch] = await asyncio.to_thread(
+            run_structured_claude_stage,
+            output_type=ModuleMetadataBatch,
+            repo_path=repo_path,
+            prompt=prompt,
+            stage_name=f"metadata:{batch.key}",
+            attempt_dir=attempt_dir,
+            claude_bin=config.claude_bin,
+            max_turns=config.max_turns,
+            timeout_s=timeout_s,
+            on_event=on_event,
+        )
+        telemetry.add_claude(stage_tag, result)
+
+        if result.parsed is None:
+            detail = str(result.validation_error)
+            _required_write_json(
+                base,
+                f"{attempt_rel}/validation.json",
+                {"ok": False, "kind": "parse", "detail": detail},
+            )
+            _persist_sessions(base, telemetry)
+            if _spend_repair("parse", repaired_kinds, attempt):
+                notify(
+                    on_event,
+                    f"extractor: metadata batch {batch.key} parse failed; repairing",
+                )
+                prompt = _repair_prompt(
+                    base_prompt, detail, previous_payload=result.raw_payload
+                )
+                continue
+            _record_failure()
+            raise ExtractorValidationError(
+                f"metadata batch {batch.key!r} failed to parse after {attempt} "
+                f"attempts: {result.validation_error}",
+                stage="metadata",
+                batch=batch.key,
+            )
+
+        parsed = result.parsed
+        last_modules = dict(parsed.modules)
+        last_issues = None
+        _required_write_json(
+            base,
+            f"{attempt_rel}/module_metadata.json",
+            parsed.model_dump(mode="json"),
+        )
+        coverage = compute_metadata_coverage(parsed.modules, requested)
+        _required_write_json(
+            base,
+            f"{attempt_rel}/metadata_coverage.json",
+            coverage.model_dump(mode="json"),
+        )
+        _persist_sessions(base, telemetry)
+
+        if coverage.missing:
+            last_issues = [
+                AssignmentIssue(
+                    code="metadata_missing",
+                    path=path,
+                    detail=f"requested module {path!r} has no metadata entry",
+                )
+                for path in coverage.missing
+            ]
+            _required_write_json(
+                base,
+                f"{attempt_rel}/validation.json",
+                {
+                    "ok": False,
+                    "kind": "coverage",
+                    "detail": (
+                        f"missing metadata for {len(coverage.missing)} "
+                        "requested module(s)"
+                    ),
+                },
+            )
+            if _spend_repair("coverage", repaired_kinds, attempt):
+                notify(
+                    on_event,
+                    f"extractor: metadata batch {batch.key} missing "
+                    f"{len(coverage.missing)} module(s); repairing",
+                )
+                prompt = _repair_prompt(
+                    base_prompt,
+                    "Missing metadata for these requested modules — `modules` "
+                    "must contain exactly the requested module set: "
+                    + ", ".join(coverage.missing),
+                    previous_payload=result.raw_payload,
+                )
+                continue
+            _record_failure()
+            raise ExtractorCoverageError(
+                f"metadata batch {batch.key!r}: {len(coverage.missing)} "
+                "requested module(s) missing",
+                missing=coverage.missing,
+                stage="metadata",
+                batch=batch.key,
+            )
+
+        issues = validate_metadata_entries(
+            parsed.modules, requested, module_paths, repo_path
+        )
+        last_issues = issues or None
+        _required_write_json(
+            base,
+            f"{attempt_rel}/validation.json",
+            {
+                "ok": not issues,
+                "kind": "validation" if issues else None,
+                "issues": [i.model_dump(mode="json") for i in issues],
+            },
+        )
+        if issues:
+            if _spend_repair("validation", repaired_kinds, attempt):
+                notify(
+                    on_event,
+                    f"extractor: metadata batch {batch.key} validation failed; "
+                    "repairing",
+                )
+                prompt = _repair_prompt(
+                    base_prompt,
+                    format_assignment_issues(issues),
+                    previous_payload=result.raw_payload,
+                )
+                continue
+            _record_failure()
+            raise ExtractorValidationError(
+                f"metadata batch {batch.key!r} failed validation: "
+                f"{format_assignment_issues(issues)}",
+                stage="metadata",
+                batch=batch.key,
+            )
+
+        _required_write_json(
+            base,
+            f"{batch_rel}/module_metadata.json",
+            parsed.model_dump(mode="json"),
+        )
+        return batch, dict(parsed.modules), result.telemetry.session_id
+
+    raise AssertionError("unreachable: metadata batch attempt loop exhausted")
+
+
+async def _run_one_metadata_batch(
+    batch: MetadataBatch,
+    *,
+    sem: asyncio.Semaphore,
+    cancel: _CancelFlag,
+    **kwargs: Any,
+) -> tuple[MetadataBatch, dict[str, ModuleInfo], str | None]:
+    async with sem:
+        if cancel.cancelled:
+            raise asyncio.CancelledError(
+                f"metadata batch {batch.key!r} cancelled after a sibling failed"
+            )
+        try:
+            return await _metadata_batch_attempts(batch, **kwargs)
+        except BaseException:
+            cancel.cancelled = True
+            raise
+
+
+def _stage3b_metadata(
+    repo_path: Path,
+    repository: Any,
+    skeleton: Skeleton,
+    resolved: ResolvedAssignmentTree,
+    *,
+    base: Path | None,
+    config: ExtractorConfig,
+    telemetry: _Telemetry,
+    decision: SourceRootDecision | None,
+    assignment_tree: AssignmentTree,
+    coverage: Any,
+    lints: list[AssignmentLint],
+    on_event: Callable[[str], None] | None,
+) -> dict[str, ModuleInfo]:
+    """Run the deterministic metadata batches and gate their exact union.
+
+    Batching is derived from final territories (never the Stage-3A shard
+    plan), so a nested assignment shard that resolved `PART` contributes its
+    files to the external owner's scope automatically.
+    """
+    plan = derive_metadata_batches(resolved, skeleton, config)
+    _required_write_json(
+        base, "03_enrich/metadata/plan.json", plan.model_dump(mode="json")
+    )
+    module_paths = resolved.module_paths()
+
+    outcomes: list[tuple[MetadataBatch, dict[str, ModuleInfo], str | None]] = []
+    failure_snapshots: dict[str, _MetadataFailureSnapshot] = {}
+    if plan.batches:
+        notify(
+            on_event,
+            f"extractor: stage-3B batched {len(module_paths)} module(s) into "
+            f"{len(plan.batches)} metadata call(s)",
+        )
+
+        async def _run() -> list[
+            tuple[MetadataBatch, dict[str, ModuleInfo], str | None]
+        ]:
+            cancel = _CancelFlag()
+            sem = asyncio.Semaphore(config.max_parallel_enrich_shards)
+            tasks = [
+                asyncio.create_task(
+                    _run_one_metadata_batch(
+                        b,
+                        sem=sem,
+                        cancel=cancel,
+                        repo_path=repo_path,
+                        repository=repository,
+                        resolved=resolved,
+                        failure_snapshots=failure_snapshots,
+                        base=base,
+                        config=config,
+                        telemetry=telemetry,
+                        on_event=on_event,
+                    )
+                )
+                for b in plan.batches
+            ]
+            try:
+                return list(await asyncio.gather(*tasks))
+            except BaseException:
+                cancel.cancelled = True
+                for t in tasks:
+                    t.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                raise
+
+        try:
+            outcomes = _run_event_loop(_run())
+        except BaseException:
+            _best_effort_write_json(
+                base, "sessions.json", telemetry.as_dict(), on_event
+            )
+            if failure_snapshots:
+                failed_key = min(failure_snapshots)
+                snapshot = failure_snapshots[failed_key]
+                _write_tree_decisions_v2(
+                    base,
+                    required=False,
+                    skeleton=skeleton,
+                    assignments=assignment_tree,
+                    resolved=resolved,
+                    metadata=snapshot.modules,
+                    coverage=coverage,
+                    lints=lints,
+                    issues=snapshot.issues,
+                    decision=decision,
+                    merge_threshold=config.merge_threshold,
+                    on_event=on_event,
+                )
+            else:
+                _best_effort_tree_decisions_v2_metadata_failure(
+                    base,
+                    skeleton=skeleton,
+                    assignment_tree=assignment_tree,
+                    resolved=resolved,
+                    coverage=coverage,
+                    lints=lints,
+                    decision=decision,
+                    merge_threshold=config.merge_threshold,
+                    on_event=on_event,
+                )
+            raise
+        _persist_sessions(base, telemetry)
+
+    # Exact disjoint union in stable batch/path order.
+    union: dict[str, ModuleInfo] = {}
+    for _batch, modules, _session in sorted(outcomes, key=lambda o: o[0].key):
+        for path in sorted(modules):
+            if path in union:
+                raise ExtractorValidationError(
+                    f"metadata batches both returned {path!r}; the batch "
+                    "partition is broken",
+                    stage="metadata",
+                )
+            union[path] = modules[path]
+
+    metadata_cov = compute_metadata_coverage(union, module_paths)
+    _required_write_json(
+        base,
+        "03_enrich/metadata/metadata_coverage.json",
+        metadata_cov.model_dump(mode="json"),
+    )
+    _required_write_json(
+        base, "metadata_coverage.json", metadata_cov.model_dump(mode="json")
+    )
+
+    claimed: dict[str, str] = {}
+    issues = validate_metadata_entries(
+        union, module_paths, module_paths, repo_path, claimed=claimed
+    )
+    v5_error: str | None = None
+    if not issues and not metadata_cov.missing and not metadata_cov.extra:
+        try:
+            derive_project_tree(repository, resolved, union)
+        except (CrossArtifactError, ValueError) as exc:
+            v5_error = str(exc)
+    _required_write_json(
+        base,
+        "03_enrich/metadata/validation.json",
+        {
+            "ok": not issues and metadata_cov.ok and not metadata_cov.extra
+            and v5_error is None,
+            "issues": [i.model_dump(mode="json") for i in issues],
+            "v5_error": v5_error,
+        },
+    )
+
+    if metadata_cov.missing or metadata_cov.extra or issues or v5_error:
+        _write_tree_decisions_v2(
+            base,
+            required=False,
+            skeleton=skeleton,
+            assignments=assignment_tree,
+            resolved=resolved,
+            metadata=union,
+            coverage=coverage,
+            lints=lints,
+            issues=issues or None,
+            decision=decision,
+            merge_threshold=config.merge_threshold,
+            on_event=on_event,
+        )
+        problems: list[str] = []
+        if metadata_cov.missing:
+            problems.append(f"missing metadata for {metadata_cov.missing}")
+        if metadata_cov.extra:
+            problems.append(f"metadata for unrequested {metadata_cov.extra}")
+        if issues:
+            problems.append(format_assignment_issues(issues))
+        if v5_error:
+            problems.append(v5_error)
+        raise ExtractorValidationError(
+            f"metadata union failed the final gate: {'; '.join(problems)}",
+            stage="metadata",
+        )
+
+    payload = ModuleMetadataMap(modules=union).model_dump(mode="json")
+    _required_write_json(base, "03_enrich/module_metadata.json", payload)
+    _required_write_json(base, "module_metadata.json", payload)
+    return union
+
+
+def _best_effort_tree_decisions_v2_metadata_failure(
+    base: Path | None,
+    *,
+    skeleton: Skeleton,
+    assignment_tree: AssignmentTree,
+    resolved: ResolvedAssignmentTree,
+    coverage: Any,
+    lints: list[AssignmentLint],
+    decision: SourceRootDecision | None,
+    merge_threshold: int,
+    on_event: Callable[[str], None] | None,
+) -> None:
+    """An exhausted metadata batch still gets the assignment-side report."""
+    _write_tree_decisions_v2(
+        base,
+        required=False,
+        skeleton=skeleton,
+        assignments=assignment_tree,
+        resolved=resolved,
+        metadata=None,
+        coverage=coverage,
+        lints=lints,
+        issues=None,
+        decision=decision,
+        merge_threshold=merge_threshold,
+        on_event=on_event,
+    )
+
+
+# ── Stage 5 — assignment assembly ─────────────────────────────────────────
+
+
+def _stage5_assignments_assemble(
+    repo_path: Path,
+    repository: Any,
+    decision: SourceRootDecision,
+    skeleton: Skeleton,
+    resolved: ResolvedAssignmentTree,
+    metadata: dict[str, ModuleInfo],
+    *,
+    base: Path | None,
+    repo_fingerprint: str,
+    on_event: Callable[[str], None] | None,
+) -> ProjectTree:
+    """Deterministic final assembly with the full defense set: recompute and
+    compare the resolved maps, revalidate metadata and the derived tree, then
+    the shared repo-mutation defenses, then — and only then — the write."""
+    try:
+        verify_resolved_assignments(resolved, skeleton)
+    except CrossArtifactError as exc:
+        raise ExtractorValidationError(
+            f"resolved assignments failed recomputation at assembly: {exc}",
+            stage="assemble",
+        ) from exc
+
+    module_paths = resolved.module_paths()
+    metadata_cov = compute_metadata_coverage(metadata, module_paths)
+    issues = validate_metadata_entries(
+        metadata, module_paths, module_paths, repo_path
+    )
+    if metadata_cov.missing or metadata_cov.extra or issues:
+        raise ExtractorValidationError(
+            "metadata failed revalidation at assembly: "
+            f"missing={metadata_cov.missing} extra={metadata_cov.extra} "
+            f"{format_assignment_issues(issues)}",
+            stage="assemble",
+        )
+
+    try:
+        tree = derive_project_tree(repository, resolved, metadata)
+    except (CrossArtifactError, ValueError) as exc:
+        raise ExtractorValidationError(
+            f"final tree failed validation at assembly: {exc}",
+            stage="assemble",
+        ) from exc
+
+    _verify_repo_unchanged(
+        repo_path, decision, skeleton, repo_fingerprint=repo_fingerprint
+    )
+
+    if base is not None:
+        try:
+            tree.to_json(base / "project_tree.json")
+        except OSError as exc:
+            raise ExtractorArtifactError(
+                f"failed to write project_tree.json: {exc}",
+                artifact="project_tree.json",
+            ) from exc
+    notify(on_event, f"extractor: assembled {len(tree.modules)} top-level modules")
+    return tree
+
+
+# ── Assignment pipeline ───────────────────────────────────────────────────
+
+
+def _run_assignment_extraction(
+    repo_path: Path,
+    repository: Any,
+    decision: SourceRootDecision,
+    skeleton: Skeleton,
+    *,
+    base: Path | None,
+    config: ExtractorConfig,
+    telemetry: _Telemetry,
+    repo_fingerprint: str,
+    on_event: Callable[[str], None] | None,
+) -> ProjectTree:
+    """Stage 3A (assignment), resolution, Stage 3B (metadata), and Stage 5."""
+    stage_dir = base / "03_enrich" if base is not None else None
+    if stage_dir is not None:
+        stage_dir.mkdir(parents=True, exist_ok=True)
+    # Deterministic collision preflight — before any Stage-3 Claude call.
+    precedence = compute_collision_precedence(skeleton)
+    if precedence.fatal:
+        classes = "; ".join(
+            ", ".join(repr(p) for p in group)
+            for group in precedence.top_level_collisions
+        )
+        detail = (
+            "top-level skeleton paths collide on their normalized public "
+            f"qualified name and cannot both be modules: {classes}. This is a "
+            "limitation of the existing public naming contract, not a "
+            "repairable model choice."
+        )
+        _write_tree_decisions_v2(
+            base,
+            required=False,
+            skeleton=skeleton,
+            assignments=None,
+            resolved=None,
+            metadata=None,
+            coverage=None,
+            lints=None,
+            issues=[AssignmentIssue(code="top_level_qn_collision", detail=detail)],
+            decision=decision,
+            merge_threshold=config.merge_threshold,
+            on_event=on_event,
+        )
+        raise ExtractorValidationError(detail, stage="enrich")
+
+    # ── Stage 3A ──────────────────────────────────────────────────────────
+    if config.enrich_sharding == "single" and not has_several_source_roots(skeleton):
+        assignment_tree = _stage3a_single(
+            repo_path,
+            repository,
+            skeleton,
+            precedence,
+            base=base,
+            config=config,
+            telemetry=telemetry,
+            decision=decision,
+            on_event=on_event,
+        )
+    else:
+        assignment_tree = _stage3a_sharded(
+            repo_path,
+            repository,
+            skeleton,
+            precedence,
+            base=base,
+            config=config,
+            telemetry=telemetry,
+            decision=decision,
+            on_event=on_event,
+        )
+    _persist_sessions(base, telemetry)
+
+    # Full V1/V2/V3/path-only-V5 gate on the accepted/merged assignment. For
+    # the single path this re-checks what its repair loop already accepted;
+    # for the sharded path it is the authoritative global gate.
+    coverage = compute_assignment_coverage(assignment_tree, skeleton)
+    issues = validate_assignment_paths(assignment_tree, skeleton, repo_path)
+    issues += validate_assignment_labels(
+        assignment_tree,
+        skeleton,
+        merge_threshold=config.merge_threshold,
+        precedence=precedence,
+        anchor_paths={n.path for n in skeleton.nodes},
+        require_owner_in_scope=True,
+    )
+    v5_error: str | None = None
+    if not issues and not coverage.missing:
+        try:
+            derive_module_forest(repository, assignment_tree)
+        except ValueError as exc:
+            v5_error = str(exc)
+    _required_write_json(
+        base, "03_enrich/coverage.json", coverage.model_dump(mode="json")
+    )
+    _required_write_json(
+        base,
+        "03_enrich/validation.json",
+        {
+            "ok": not issues and not coverage.missing and v5_error is None,
+            "issues": [i.model_dump(mode="json") for i in issues],
+            "v5_error": v5_error,
+        },
+    )
+    if coverage.missing or issues or v5_error:
+        _write_tree_decisions_v2(
+            base,
+            required=False,
+            skeleton=skeleton,
+            assignments=assignment_tree,
+            resolved=None,
+            metadata=None,
+            coverage=compute_assignment_coverage(
+                assignment_tree, skeleton, invalid=issues
+            ),
+            lints=None,
+            issues=issues or None,
+            decision=decision,
+            merge_threshold=config.merge_threshold,
+            on_event=on_event,
+        )
+        if coverage.missing:
+            raise ExtractorCoverageError(
+                f"{len(coverage.missing)} inventory paths unlabeled after "
+                "Stage 3A",
+                missing=coverage.missing,
+                stage="enrich",
+            )
+        raise ExtractorValidationError(
+            "merged assignment failed validation: "
+            + (format_assignment_issues(issues) if issues else str(v5_error)),
+            stage="enrich",
+        )
+
+    try:
+        resolved = resolve_assignments(
+            assignment_tree, skeleton, config.merge_threshold
+        )
+    except CrossArtifactError as exc:
+        _write_tree_decisions_v2(
+            base,
+            required=False,
+            skeleton=skeleton,
+            assignments=assignment_tree,
+            resolved=None,
+            metadata=None,
+            coverage=coverage,
+            lints=None,
+            issues=None,
+            decision=decision,
+            merge_threshold=config.merge_threshold,
+            on_event=on_event,
+        )
+        raise ExtractorValidationError(
+            f"assignment resolution failed: {exc}", stage="enrich"
+        ) from exc
+
+    lints = compute_assignment_lints(resolved, skeleton)
+    _required_write_json(
+        base, "03_enrich/assignment_tree.json", assignment_tree.model_dump(mode="json")
+    )
+    _required_write_json(
+        base,
+        "03_enrich/resolved_assignments.json",
+        resolved.model_dump(mode="json"),
+    )
+    _required_write_json(
+        base,
+        "03_enrich/assignment_lints.json",
+        [lint.model_dump(mode="json") for lint in lints],
+    )
+    _required_write_json(
+        base, "assignment_tree.json", assignment_tree.model_dump(mode="json")
+    )
+    _required_write_json(
+        base, "resolved_assignments.json", resolved.model_dump(mode="json")
+    )
+    _required_write_json(base, "coverage.json", coverage.model_dump(mode="json"))
+    _required_write_json(
+        base,
+        "assignment_lints.json",
+        [lint.model_dump(mode="json") for lint in lints],
+    )
+    notify(
+        on_event,
+        f"extractor: resolved {len(resolved.module_paths())} module(s) over "
+        f"{len(resolved.assignments)} path(s); {len(lints)} lint(s)",
+    )
+
+    # ── Stage 3B ──────────────────────────────────────────────────────────
+    metadata = _stage3b_metadata(
+        repo_path,
+        repository,
+        skeleton,
+        resolved,
+        base=base,
+        config=config,
+        telemetry=telemetry,
+        decision=decision,
+        assignment_tree=assignment_tree,
+        coverage=coverage,
+        lints=lints,
+        on_event=on_event,
+    )
+    _persist_sessions(base, telemetry)
+
+    # ── Stage 5 ───────────────────────────────────────────────────────────
+    tree = _stage5_assignments_assemble(
+        repo_path,
+        repository,
+        decision,
+        skeleton,
+        resolved,
+        metadata,
+        base=base,
+        repo_fingerprint=repo_fingerprint,
+        on_event=on_event,
+    )
+
+    _write_tree_decisions_v2(
+        base,
+        required=True,
+        skeleton=skeleton,
+        assignments=assignment_tree,
+        resolved=resolved,
+        metadata=metadata,
+        coverage=coverage,
+        lints=lints,
+        issues=None,
+        decision=decision,
+        merge_threshold=config.merge_threshold,
+        on_event=on_event,
+    )
+    return tree
 
 
 __all__ = ["run_two_phase_extraction"]

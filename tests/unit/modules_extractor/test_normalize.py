@@ -1,4 +1,4 @@
-"""Deterministic normalization tests: single-child collapse + evidence sync.
+"""Deterministic normalization tests: single-child collapse.
 
 The synthetic repo mirrors the observed vllm failure shape: ``pkg/worker`` with
 direct files and exactly one child directory ``gpu``, which itself has two
@@ -6,6 +6,10 @@ substantial children. Attempt 1 of the real run emitted that chain and was
 rejected only on Rule 4; the normalizer must accept it mechanically — collapse
 ``gpu`` into ``worker``, keep every required path covered, and leave the tree
 valid under the unchanged ``validate_enriched_tree``.
+
+(The old fold-evidence sync was deleted with the Level-1 receipt decoupling:
+Rule 8 validates ``evidence_files`` directly against the filesystem, so there
+is no `main_files` cross-reference left to repair.)
 """
 
 from __future__ import annotations
@@ -119,7 +123,7 @@ def test_collapse_absorbs_single_child_and_stays_covered(tmp_path: Path) -> None
     skel = build_skeleton(repo, "pkg")
     tree = _single_child_tree()
 
-    normalized, report = normalize_enriched_tree(tree, repo, skeleton=skel)
+    normalized, report = normalize_enriched_tree(tree)
 
     kinds = [a.kind for a in report.actions]
     assert "collapse_single_child" in kinds
@@ -129,26 +133,27 @@ def test_collapse_absorbs_single_child_and_stays_covered(tmp_path: Path) -> None
     assert any(f.path == "pkg/worker/gpu" for f in normalized.folds)
 
     # The normalized tree passes the unchanged validator and full coverage —
-    # this is the vllm attempt-1 salvage.
+    # this is the vllm attempt-1 salvage. The synthesized fold's evidence (the
+    # child's own citations) satisfies Rule 8 without touching main_files.
     validate_enriched_tree(normalized, repo, _repository(), skel)
     cov = compute_coverage(normalized, skel)
     assert cov.missing == []
     assert "pkg/worker/gpu" in cov.folded
 
 
-def test_collapse_syncs_child_evidence_into_parent_main_files(
-    tmp_path: Path,
-) -> None:
+def test_collapse_does_not_touch_parent_main_files(tmp_path: Path) -> None:
+    # Level 1: fold evidence is validated in place; the collapse must no longer
+    # copy the absorbed child's files into the parent's main_files.
     repo = _worker_repo(tmp_path)
     skel = build_skeleton(repo, "pkg")
 
-    normalized, report = normalize_enriched_tree(
-        _single_child_tree(), repo, skeleton=skel
-    )
+    normalized, _report = normalize_enriched_tree(_single_child_tree())
 
     worker = normalized.modules[0]
-    assert any(f.path == "pkg/worker/gpu/gpu_worker.py" for f in worker.main_files)
-    assert any(a.kind == "sync_fold_evidence" for a in report.actions)
+    assert [f.path for f in worker.main_files] == ["pkg/worker/base.py"]
+    gpu_fold = next(f for f in normalized.folds if f.path == "pkg/worker/gpu")
+    assert gpu_fold.evidence_files == ["pkg/worker/gpu/gpu_worker.py"]
+    validate_enriched_tree(normalized, repo, _repository(), skel)
 
 
 def test_collapse_walks_chains_to_fixpoint(tmp_path: Path) -> None:
@@ -211,7 +216,7 @@ def test_collapse_walks_chains_to_fixpoint(tmp_path: Path) -> None:
         }
     )
 
-    normalized, report = normalize_enriched_tree(tree, tmp_path, skeleton=skel)
+    normalized, report = normalize_enriched_tree(tree)
 
     a = normalized.modules[0]
     assert {s.name for s in a.submodules} == {"x", "y"}
@@ -222,13 +227,12 @@ def test_collapse_walks_chains_to_fixpoint(tmp_path: Path) -> None:
 
 
 def test_protected_paths_are_never_collapsed(tmp_path: Path) -> None:
-    repo = _worker_repo(tmp_path)
-    skel = build_skeleton(repo, "pkg")
+    _worker_repo(tmp_path)
 
     # As a spine's promotion parent, pkg/worker may legitimately show a single
     # local child — its other children return at merge.
     normalized, report = normalize_enriched_tree(
-        _single_child_tree(), repo, skeleton=skel, protected_paths={"pkg/worker"}
+        _single_child_tree(), protected_paths={"pkg/worker"}
     )
     assert report.actions == []
     assert normalized.modules[0].submodules[0].name == "gpu"
@@ -236,7 +240,7 @@ def test_protected_paths_are_never_collapsed(tmp_path: Path) -> None:
     # As the absorbee, the protected path must stay emitted (merge grafts into
     # it by path), so the collapse is skipped too.
     normalized, report = normalize_enriched_tree(
-        _single_child_tree(), repo, skeleton=skel, protected_paths={"pkg/worker/gpu"}
+        _single_child_tree(), protected_paths={"pkg/worker/gpu"}
     )
     assert all(a.kind != "collapse_single_child" for a in report.actions)
     assert normalized.modules[0].submodules[0].name == "gpu"
@@ -259,7 +263,7 @@ def test_collapse_retargets_folds_into_absorbed_child(tmp_path: Path) -> None:
     ]
     tree = EnrichedTree.model_validate(data)
 
-    normalized, _report = normalize_enriched_tree(tree, repo, skeleton=skel)
+    normalized, _report = normalize_enriched_tree(tree)
 
     metrics_fold = next(
         f for f in normalized.folds if f.path == "pkg/worker/gpu/metrics"
@@ -270,14 +274,13 @@ def test_collapse_retargets_folds_into_absorbed_child(tmp_path: Path) -> None:
 
 
 def test_description_merge_is_capped(tmp_path: Path) -> None:
-    repo = _worker_repo(tmp_path)
-    skel = build_skeleton(repo, "pkg")
+    _worker_repo(tmp_path)
     data = _single_child_tree().model_dump(mode="json")
     data["modules"][0]["description"] = "W" * 1990
     data["modules"][0]["submodules"][0]["description"] = "G" * 1990
     tree = EnrichedTree.model_validate(data)
 
-    normalized, _report = normalize_enriched_tree(tree, repo, skeleton=skel)
+    normalized, _report = normalize_enriched_tree(tree)
 
     assert len(normalized.modules[0].description) <= 2000
     # The result still round-trips through the strict schema.
@@ -285,107 +288,8 @@ def test_description_merge_is_capped(tmp_path: Path) -> None:
 
 
 def test_clean_tree_is_untouched(tmp_path: Path) -> None:
-    repo = _worker_repo(tmp_path)
-    skel = build_skeleton(repo, "pkg")
-    normalized, report = normalize_enriched_tree(
-        _single_child_tree(), repo, skeleton=skel
-    )
-    again, report2 = normalize_enriched_tree(normalized, repo, skeleton=skel)
+    _worker_repo(tmp_path)
+    normalized, _report = normalize_enriched_tree(_single_child_tree())
+    again, report2 = normalize_enriched_tree(normalized)
     assert report2.actions == []
     assert again.model_dump(mode="json") == normalized.model_dump(mode="json")
-
-
-# ── Fold-evidence sync ────────────────────────────────────────────────────
-
-
-def _fold_repo(tmp_path: Path) -> Path:
-    _write(tmp_path / "pkg" / "core" / "engine.py")
-    _write(tmp_path / "pkg" / "core" / "runner.py")
-    _write(tmp_path / "pkg" / "core" / "util" / "helper.py")
-    _write(tmp_path / "pkg" / "other" / "o1.py")
-    _write(tmp_path / "pkg" / "other" / "o2.py")
-    return tmp_path
-
-
-def _forgotten_evidence_tree() -> EnrichedTree:
-    """The fold's evidence file is valid but absent from core's main_files —
-    the Rule-7 bookkeeping slip seen three times in the batch."""
-    return EnrichedTree.model_validate(
-        {
-            "modules": [
-                {
-                    "name": "core",
-                    "path": "pkg/core",
-                    "description": "Core.",
-                    "main_files": [{"path": "pkg/core/engine.py", "role": "E."}],
-                },
-                {
-                    "name": "other",
-                    "path": "pkg/other",
-                    "description": "Other.",
-                    "main_files": [{"path": "pkg/other/o1.py", "role": "O."}],
-                },
-            ],
-            "folds": [
-                {
-                    "path": "pkg/core/util",
-                    "into": "pkg/core",
-                    "reason": "single-file helper",
-                    "evidence_files": ["pkg/core/util/helper.py"],
-                }
-            ],
-        }
-    )
-
-
-def test_evidence_sync_appends_when_slot_free(tmp_path: Path) -> None:
-    repo = _fold_repo(tmp_path)
-    skel = build_skeleton(repo, "pkg")
-
-    normalized, report = normalize_enriched_tree(
-        _forgotten_evidence_tree(), repo, skeleton=skel
-    )
-
-    core = normalized.modules[0]
-    assert any(f.path == "pkg/core/util/helper.py" for f in core.main_files)
-    assert [a.kind for a in report.actions] == ["sync_fold_evidence"]
-    validate_enriched_tree(normalized, repo, _repository(), skel)
-
-
-def test_evidence_sync_replaces_when_main_files_full(tmp_path: Path) -> None:
-    repo = _fold_repo(tmp_path)
-    for i in range(3):
-        _write(repo / "pkg" / "core" / f"extra{i}.py")
-    skel = build_skeleton(repo, "pkg")
-
-    data = _forgotten_evidence_tree().model_dump(mode="json")
-    data["modules"][0]["main_files"] = [
-        {"path": "pkg/core/engine.py", "role": "E."},
-        {"path": "pkg/core/runner.py", "role": "R."},
-        {"path": "pkg/core/extra0.py", "role": "X."},
-        {"path": "pkg/core/extra1.py", "role": "X."},
-        {"path": "pkg/core/extra2.py", "role": "X."},
-    ]
-    tree = EnrichedTree.model_validate(data)
-
-    normalized, report = normalize_enriched_tree(tree, repo, skeleton=skel)
-
-    core = normalized.modules[0]
-    assert len(core.main_files) == 5
-    assert any(f.path == "pkg/core/util/helper.py" for f in core.main_files)
-    assert any(a.kind == "sync_fold_evidence" for a in report.actions)
-    validate_enriched_tree(normalized, repo, _repository(), skel)
-
-
-def test_evidence_sync_skips_invalid_evidence(tmp_path: Path) -> None:
-    repo = _fold_repo(tmp_path)
-    skel = build_skeleton(repo, "pkg")
-    data = _forgotten_evidence_tree().model_dump(mode="json")
-    data["folds"][0]["evidence_files"] = ["pkg/core/util/missing.py"]
-    tree = EnrichedTree.model_validate(data)
-
-    normalized, report = normalize_enriched_tree(tree, repo, skeleton=skel)
-
-    # Nothing mechanical to do: the validator must still report this fold.
-    assert report.actions == []
-    assert normalized.modules[0].main_files == tree.modules[0].main_files

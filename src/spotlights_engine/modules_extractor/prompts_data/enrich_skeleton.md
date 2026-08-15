@@ -57,9 +57,7 @@ Inspect the repository source and emit a strict `EnrichedTree`:
     container of sub-directories, such as a Go `cmd/` or a namespace package —
     and you emit its children as submodules, every file beneath it belongs to a
     child, so give it `"main_files": []`. Do NOT cite a child's file, and do NOT
-    fold real children away just to have something to cite. If instead you fold
-    a child into such a container, that fold's evidence file goes in
-    `main_files` as usual.
+    fold real children away just to have something to cite.
 - Record fold decisions.
 
 ### Coverage rules (hard)
@@ -69,10 +67,9 @@ Inspect the repository source and emit a strict `EnrichedTree`:
   hard failure.
 - A fold is **NOT recursive**: a `folds[]` record covers ONLY its own `path`.
   Every `required` descendant of a folded directory must still be individually
-  emitted or given its own `folds[]` record — and since each fold needs its own
-  evidence file in the target's `main_files` (max 5 entries), folding a
-  directory with several required descendants is effectively impossible. Emit
-  such a directory (or its children) instead of folding it.
+  emitted or given its own `folds[]` record. When a directory has several
+  required descendants, prefer emitting it (or its children) over writing one
+  fold per descendant.
 - Initially-foldable (non-required) inventory paths MAY be promoted to modules
   when source inspection shows an independent responsibility, or folded, or left
   unaccounted.
@@ -85,22 +82,22 @@ Inspect the repository source and emit a strict `EnrichedTree`:
   independent responsibility).
   - A fold always targets a **strict emitted ancestor** — never a sibling and
     never a synthetic merged path. Record it in `folds[]` with `path`, `into`,
-    `reason`, and `evidence_files` (≥1 real source file under `path`). At least
-    one evidence file MUST also appear in the target module's `main_files` —
-    EXCEPT for a passthrough directory with no substantive direct file of its
-    own: one whose only direct source file is an `__init__.py`, or one holding
-    no direct source file at all (a Java package chain like
-    `src/main/java/org/example`, a pure container of sub-directories). Such a
-    passthrough has nothing of its own to cite, so list its `__init__.py` (or
-    any real file under it) as the evidence file; it need not appear in
-    `main_files`.
+    `reason`, and `evidence_files` (≥1 real source file under `path`, outside
+    any separately emitted module — proof you inspected the folded content).
+    Evidence files do NOT go into the target's `main_files`; several sibling
+    folds into one target are legal and consume no `main_files` slots. For a
+    passthrough directory with no substantive direct file of its own — one
+    whose only direct source file is an `__init__.py`, or one holding no
+    direct source file at all (a Java package chain like
+    `src/main/java/org/example`, a pure container of sub-directories) — list
+    its `__init__.py` (or any real file under it) as the evidence file.
   - **Collapse a small cohesive subtree into one LEAF.** When a directory and
     its entire subtree implement a single responsibility and the subtree is
     small (`subtree_source_file_count` ≲ 12 and children are shallow), emit
     the parent as a LEAF and fold **each** child directory into it — even
-    children with 2–3 files, and even `required` ones: a `folds[]` record with
-    an evidence file in the parent's `main_files` fully satisfies the coverage
-    rule. The classic shape: a parent holding the abstractions (`abstract.py`,
+    children with 2–3 files, and even `required` ones: a `folds[]` record per
+    child fully satisfies the coverage rule. The classic shape: a parent
+    holding the abstractions (`abstract.py`,
     `backend.py`) with child directories holding the implementation halves (a
     `backends/` with one concrete backend, a `worker/` with the async
     executor). Those children are not independent modules; they are the
@@ -110,14 +107,13 @@ Inspect the repository source and emit a strict `EnrichedTree`:
     the subtree is one module.
   - A module with **exactly one** source-bearing child directory violates the
     zero-or-≥2 rule below if it emits that child. If the child has NO required
-    descendants, either fold the child into the parent (cite its files in the
-    parent's `main_files`), or — if the parent is a pure passthrough with no
-    responsibility of its own — emit the child as the module and fold the
-    parent away. If the child HAS required descendants, do NOT fold the child
+    descendants, either fold the child into the parent, or — if the parent is
+    a pure passthrough with no responsibility of its own — emit the child as
+    the module and fold the parent away. If the child HAS required
+    descendants, do NOT fold the child
     wholesale (folds are not recursive — its required descendants would all go
     missing): emit the child's children directly as the parent's submodules and
-    fold only the child itself, with one of its direct files as evidence in the
-    parent's `main_files`.
+    fold only the child itself, citing one of its direct files as evidence.
 - **LEAF** — one cohesive submodule; no `submodules` key.
 - **SPLIT** — a directory with 2+ real nested source-bearing child directories,
   each its own logical unit. A parent has zero or ≥2 children, never exactly

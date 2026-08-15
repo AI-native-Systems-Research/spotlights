@@ -279,6 +279,32 @@ def hash_pydantic_excluding(model: BaseModel | None, *, exclude: set[str]) -> st
     return _stable_hash(payload)
 
 
+def extractor_semantic_payload(extractor_cfg: BaseModel) -> dict[str, Any]:
+    """The extractor config payload that actually determines behavior.
+
+    Adding the defaulted `contract`/`merge_threshold` migration fields to
+    `ExtractorConfig` would otherwise change every serialized hash and
+    invalidate every pre-migration resume. In tree mode both fields are
+    semantically inert (`merge_threshold` is ignored entirely), so they are
+    dropped and the hash stays byte-for-byte compatible with pre-migration
+    defaults. In assignment mode both are included, because they change the
+    produced tree. After the temporary flag is removed at cutover, this
+    helper keeps injecting the literal contract value so assignment-mode A/B
+    hashes remain stable.
+    """
+    payload = extractor_cfg.model_dump(mode="json", exclude={"artifacts_dir"})
+    if payload.get("contract", "tree") == "tree":
+        payload.pop("contract", None)
+        payload.pop("merge_threshold", None)
+    return payload
+
+
+def extractor_semantic_hash(extractor_cfg: BaseModel) -> str:
+    """Stable semantic hash of an `ExtractorConfig` (see
+    `extractor_semantic_payload`)."""
+    return _stable_hash(extractor_semantic_payload(extractor_cfg))
+
+
 def build_input_fingerprint(
     *,
     repo_path: Path,
@@ -315,9 +341,7 @@ def build_config_fingerprint(
         "module_filter": (
             module_filter.model_dump(mode="json") if module_filter is not None else None
         ),
-        "extractor_hash": hash_pydantic_excluding(
-            extractor_cfg, exclude={"artifacts_dir"}
-        ),
+        "extractor_hash": extractor_semantic_hash(extractor_cfg),
         "discovery_hash": hash_pydantic_excluding(
             effective_discovery_cfg, exclude={"artifacts_dir", "repo_path"}
         ),
@@ -773,6 +797,8 @@ __all__ = [
     "clear_proposal_from_finding_artifacts",
     "clear_usage_records",
     "default_agent_proposals_hash",
+    "extractor_semantic_hash",
+    "extractor_semantic_payload",
     "init_manifest",
     "read_extractor_outputs",
     "read_manifest",

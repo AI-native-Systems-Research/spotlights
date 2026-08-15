@@ -53,6 +53,24 @@ def _build_argparser() -> argparse.ArgumentParser:
         default="claude",
         help="Claude Code binary to invoke (default: claude).",
     )
+    # `default=None` on both so a library-default flip propagates: the values
+    # are passed to ExtractorConfig only when explicitly supplied, never
+    # silently pinned by an old argparse default.
+    p.add_argument(
+        "--contract",
+        choices=["tree", "assignments"],
+        default=None,
+        help="Stage-3 contract (default: the library default).",
+    )
+    p.add_argument(
+        "--merge-threshold",
+        type=int,
+        default=None,
+        help=(
+            "Assignment-contract size threshold (default: the library "
+            "default). Ignored under the tree contract."
+        ),
+    )
     return p
 
 
@@ -62,11 +80,28 @@ def main() -> None:
     args.artifacts_dir.mkdir(parents=True, exist_ok=True)
 
     inp = ModulesExtractorInput(repo_path=args.repo)
-    cfg = ExtractorConfig(
+    cfg_kwargs: dict = dict(
         artifacts_dir=args.artifacts_dir,
         claude_bin=args.claude_bin,
         max_turns=args.max_turns,
         timeout_s=args.timeout_s,
+    )
+    if args.contract is not None:
+        cfg_kwargs["contract"] = args.contract
+    if args.merge_threshold is not None:
+        cfg_kwargs["merge_threshold"] = args.merge_threshold
+    cfg = ExtractorConfig(**cfg_kwargs)
+
+    # Persist the effective config at the run level so an offline reader can
+    # recover the contract/threshold a run actually used.
+    args.artifacts_dir.joinpath("extractor_config.json").write_text(
+        json.dumps(
+            cfg.model_dump(mode="json", exclude={"artifacts_dir"}),
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
     )
 
     result = extract_with_telemetry(inp, config=cfg)

@@ -9,6 +9,7 @@ folded`` with no ancestor inference and no implicit folds.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -116,14 +117,14 @@ def test_unverified_fold_string_does_not_clear_missing(tmp_path: Path) -> None:
     skel = build_skeleton(tmp_path, "pkg")
     data = _full_tree()
     data["modules"][0]["submodules"] = []
-    # Try to "cover" kv_offload with a fold whose evidence is not in main_files
-    # and whose target does not list it.
+    # Try to "cover" kv_offload with a fold whose evidence names a file that
+    # does not exist in the folded territory.
     data["folds"].append(
         {
             "path": "pkg/core/kv_offload",
             "into": "pkg/core",
             "reason": "hand-wave",
-            "evidence_files": ["pkg/core/kv_offload/a.py"],
+            "evidence_files": ["pkg/core/kv_offload/nope.py"],
         }
     )
     tree = EnrichedTree.model_validate(data)
@@ -156,14 +157,15 @@ def test_emitting_only_descendant_does_not_cover_ancestor(tmp_path: Path) -> Non
     assert "pkg/core" in cov.missing
 
 
-def test_fold_clears_missing_only_with_valid_evidence_in_main_files(
-    tmp_path: Path,
-) -> None:
+def test_fold_clears_missing_with_valid_evidence(tmp_path: Path) -> None:
     _repo(tmp_path)
     skel = build_skeleton(tmp_path, "pkg")
     data = _full_tree()
     tree = EnrichedTree.model_validate(data)
-    # Valid: util folded into core, evidence file present in core.main_files.
+    # Valid: util folded into core with a real evidence file under it. (This
+    # tree also happens to cite the evidence in core.main_files — the
+    # compatibility property: everything the old receipt-coupled validator
+    # accepted, the Level-1 validator still accepts.)
     validate_enriched_tree(tree, tmp_path, _repository(), skel)
     cov = compute_coverage(tree, skel)
     assert "pkg/core/util" not in cov.missing
@@ -504,6 +506,35 @@ def test_optional_fold_accepted_and_reported(tmp_path: Path) -> None:
     assert "pkg/core/extra" not in cov.required
 
 
+# ── Level-1 receipt-budget regression (committed tiering fixture) ──────────
+
+_FIXTURES = Path(__file__).resolve().parents[2] / "fixtures" / "modules_extractor"
+
+
+def test_six_folds_into_one_module_need_no_receipt_slots() -> None:
+    # The vLLM `tiering` shape: one leaf module absorbing six child directories.
+    # Under the old receipt rule this needed six evidence entries in the
+    # target's five `main_files` slots — structurally impossible. Level 1
+    # validates evidence in place, so the module passes with its two genuine
+    # main files.
+    repo = _FIXTURES / "tiering"
+    skel = build_skeleton(repo, "pkg")
+    tree = EnrichedTree.model_validate(
+        json.loads(
+            (_FIXTURES / "tiering_enriched_tree.json").read_text(encoding="utf-8")
+        )
+    )
+    assert len(tree.folds) == 6
+    assert len(tree.modules[0].main_files) <= 5
+
+    validate_enriched_tree(
+        tree, repo, Repository(name="tiering", summary="s", source_root="pkg"), skel
+    )
+    cov = compute_coverage(tree, skel)
+    assert cov.ok
+    assert len(cov.folded) == 6
+
+
 # ── forced_repository_level_files ──────────────────────────────────────────
 
 
@@ -603,18 +634,73 @@ def test_fold_of_dir_without_direct_source_waives_mainfiles_evidence(
     assert "pkg/mod/java" in cov.folded
 
 
-def test_fold_of_dir_with_direct_source_still_requires_mainfiles_evidence(
-    tmp_path: Path,
-) -> None:
-    # Negative control for the waiver: `pkg/core/util` HAS a direct source
-    # file, so the fold must still cite it in the target's main_files.
+def test_fold_evidence_need_not_be_in_target_main_files(tmp_path: Path) -> None:
+    # Level 1: the fold's evidence file is validated against the filesystem in
+    # place — removing it from the target's main_files no longer invalidates
+    # the fold. (Under the old receipt rule this exact tree was rejected.)
     _repo(tmp_path)
     skel = build_skeleton(tmp_path, "pkg")
     data = _full_tree()
-    # Remove the fold's evidence file from core's main_files.
     data["modules"][0]["main_files"] = [
         {"path": "pkg/core/engine.py", "role": "Engine."}
     ]
+    tree = EnrichedTree.model_validate(data)
+    validate_enriched_tree(tree, tmp_path, _repository(), skel)
+    cov = compute_coverage(tree, skel)
+    assert cov.ok
+    assert "pkg/core/util" in cov.folded
+
+
+def test_fold_evidence_owned_by_emitted_descendant_is_invalid(
+    tmp_path: Path,
+) -> None:
+    # Evidence must prove inspection of the *folded* territory. A file that the
+    # nearest-owner rule assigns to a separately emitted descendant module
+    # cannot serve: it belongs to that module, not to the folded remainder.
+    _repo(tmp_path)
+    _write(tmp_path / "pkg" / "core" / "extra" / "x.py")
+    _write(tmp_path / "pkg" / "core" / "extra" / "deep" / "d1.py")
+    _write(tmp_path / "pkg" / "core" / "extra" / "deep" / "d2.py")
+    skel = build_skeleton(tmp_path, "pkg")
+    data = _full_tree()
+    # Emit extra/deep as a module, then fold extra citing only deep's file.
+    data["modules"][0]["submodules"].append(
+        {
+            "name": "deep",
+            "path": "pkg/core/extra/deep",
+            "description": "Deep.",
+            "main_files": [{"path": "pkg/core/extra/deep/d1.py", "role": "D1."}],
+        }
+    )
+    data["folds"].append(
+        {
+            "path": "pkg/core/extra",
+            "into": "pkg/core",
+            "reason": "thin wrapper",
+            "evidence_files": ["pkg/core/extra/deep/d2.py"],
+        }
+    )
+    tree = EnrichedTree.model_validate(data)
+    with pytest.raises(CrossArtifactError, match="no valid evidence file"):
+        validate_enriched_tree(tree, tmp_path, _repository(), skel)
+
+
+def test_symlink_fold_evidence_is_invalid(tmp_path: Path) -> None:
+    _repo(tmp_path)
+    _write(tmp_path / "pkg" / "core" / "extra" / "real_helper.py")
+    (tmp_path / "pkg" / "core" / "extra" / "link.py").symlink_to(
+        tmp_path / "pkg" / "core" / "engine.py"
+    )
+    skel = build_skeleton(tmp_path, "pkg")
+    data = _full_tree()
+    data["folds"].append(
+        {
+            "path": "pkg/core/extra",
+            "into": "pkg/core",
+            "reason": "helper",
+            "evidence_files": ["pkg/core/extra/link.py"],
+        }
+    )
     tree = EnrichedTree.model_validate(data)
     with pytest.raises(CrossArtifactError, match="no valid evidence file"):
         validate_enriched_tree(tree, tmp_path, _repository(), skel)

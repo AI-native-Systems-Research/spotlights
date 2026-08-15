@@ -20,6 +20,7 @@ from pathlib import Path, PurePosixPath
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from spotlights_engine.modules_extractor.constants import MAX_MAIN_FILES
 from spotlights_engine.modules_extractor.skeleton import is_source_file
 from spotlights_engine.modules_extractor.stage_schemas import (
     EnrichedTree,
@@ -338,7 +339,8 @@ def validate_enriched_tree(
             if _dir_has_direct_file(repo_path, module_path):
                 problems.append(
                     f"module {module_path!r} cites no main_files, but its "
-                    "directory holds direct files; cite 1–5 of them"
+                    f"directory holds direct files; cite 1–{MAX_MAIN_FILES} "
+                    "of them"
                 )
             continue
         for f in main_files:
@@ -493,16 +495,11 @@ def _validate_folds(
             cur = obj_parent.get(cur)
         return False
 
-    # main_files per emitted module (normalized).
-    main_files_of: dict[str, set[str]] = {}
-    for path, files in _iter_module_mainfiles(enriched):
-        main_files_of[path] = {f.path for f in files}
-
     # Organizational-only passthroughs (skeleton-classified: only direct source
     # is `__init__.py` and fewer than two source-bearing children). Their real
-    # content lives in an emitted descendant, so no substantive source file of
-    # their own can appear in the target's main_files — the Rule 7 in-main_files
-    # requirement is unsatisfiable for them and is waived below.
+    # content lives in an emitted descendant, so they have no substantive
+    # source of their own to prove inspection with — the Rule-8 evidence gate
+    # is unsatisfiable for them and is waived below.
     organizational = set(skeleton.organizational_only)
 
     seen_paths: set[str] = set()
@@ -543,24 +540,24 @@ def _validate_folds(
                 )
         # An organizational-only passthrough (its real source emitted as a child
         # module, itself holding only an `__init__.py`) has no substantive source
-        # of its own to cite, so the in-main_files requirement below cannot be
-        # met. Accept the fold on the strength of the structural checks already
+        # of its own, so the evidence gate below cannot be met substantively.
+        # Accept the fold on the strength of the structural checks already
         # passed; the descendant emission is what actually covers the content.
         if fpath in organizational:
             continue
         # Same reasoning, filesystem-determined: a folded directory holding no
         # direct source-extension file at all (a Java package chain like
         # `src/.../org/apache/kafka`, a pure container of sub-directories) has
-        # nothing of its own to put in the target's main_files, so requiring it
-        # is unsatisfiable. Coverage still holds its required descendants to
-        # account individually, so the waiver folds away only the passthrough
-        # node itself, never its content.
+        # nothing substantive of its own to cite as evidence. Coverage still
+        # holds its required descendants to account individually, so the waiver
+        # folds away only the passthrough node itself, never its content.
         if not _dir_has_direct_source_file(repo_path, fpath):
             continue
-        # Rule 7: ≥1 unique non-symlink inventoried source file under the folded
-        # path, outside any separately emitted descendant, present in the
-        # target's main_files.
-        target_mains = main_files_of.get(into, set())
+        # Rule 8: ≥1 real non-symlink source file under the folded path, outside
+        # any separately emitted descendant — proof the folded content was
+        # inspected. (The old receipt rule additionally required the file in the
+        # target's `main_files`; Level 1 decoupled evidence from documentation,
+        # so several sibling folds no longer compete for the five slots.)
         valid_evidence = False
         for ev in fold.evidence_files:
             ev = _norm(ev)
@@ -572,13 +569,13 @@ def _validate_folds(
             if owner is not None and owner != into and _is_ancestor(owner, ev):
                 # owned by a separately emitted descendant
                 continue
-            if ev in target_mains:
-                valid_evidence = True
-                break
+            valid_evidence = True
+            break
         if not valid_evidence:
             raise CrossArtifactError(
                 f"fold {fpath!r} into {into!r} has no valid evidence file "
-                "present in the target's main_files"
+                "(a real non-symlink source file under the folded path, "
+                "outside separately emitted modules)"
             )
 
 

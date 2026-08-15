@@ -20,15 +20,22 @@ class ExtractorAgentError(ModulesExtractorError):
 
 
 class ExtractorValidationError(ModulesExtractorError):
-    """The agent's response did not validate against `ProjectTree`."""
+    """A model response failed schema or cross-artifact validation.
+
+    Raised for both Stage-3 contracts: a tree-contract `EnrichedTree` that
+    fails the filesystem/shape/fold rules, or an assignment-contract response
+    that fails V1/V3–V5 (paths, label policy, metadata territory, or the
+    public-tree gate).
+    """
 
 
 class ExtractorCoverageError(ModulesExtractorError):
-    """The enriched tree is structurally valid but omits required directories.
+    """A structurally valid response omits paths it had to account for.
 
-    Carries the sorted `missing` paths — deterministically-required,
-    non-symlink source directories that were neither emitted nor validly
-    folded — in `context["missing"]`.
+    Carries the sorted `missing` paths in `context["missing"]`: under the
+    tree contract, required directories neither emitted nor validly folded;
+    under the assignment contract, inventory paths without a label (or
+    requested modules without metadata).
     """
 
 

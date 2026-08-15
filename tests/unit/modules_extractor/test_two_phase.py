@@ -186,8 +186,9 @@ def test_happy_path_two_sessions(tmp_path, monkeypatch) -> None:
     out2 = tmp_path / "expected.json"
     run.project_tree.to_json(out2)
     assert written == out2.read_text(encoding="utf-8")
-
-
+    effective = json.loads((artifacts / "extractor_config.json").read_text())
+    assert effective["contract"] == "tree"
+    assert effective["merge_threshold"] == 15
 def test_stage_order_and_cwd(tmp_path, monkeypatch) -> None:
     repo = _repo(tmp_path)
     claude = _FakeClaude([
@@ -348,9 +349,13 @@ def test_single_child_tree_is_normalized_not_repaired(tmp_path, monkeypatch) -> 
     # kv_offload was absorbed: core is a leaf, its path covered by a fold.
     assert run.project_tree.modules[0].submodules == []
     norm = json.loads(
-        (artifacts / "03_enrich" / "attempt_01" / "normalization.json").read_text(
-            encoding="utf-8"
-        )
+        (
+            artifacts
+            / "03_enrich"
+            / "pkg__core"
+            / "attempt_01"
+            / "normalization.json"
+        ).read_text(encoding="utf-8")
     )
     kinds = [a["kind"] for a in norm["actions"]]
     assert "collapse_single_child" in kinds
@@ -526,6 +531,10 @@ def test_tree_decisions_best_effort_on_merged_failure(tmp_path) -> None:
             "evidence_files": ["pkg/core/scheduler/s1.py"],
         }
     )
+    # Merged normalization now repairs the single-child shape. Keep this as a
+    # merged failure-path test by injecting a separate cross-artifact defect
+    # that normalization cannot fix.
+    fragment["modules"][0]["main_files"][0]["path"] = "pkg/core/missing.py"
     fragments = {
         s.key: EnrichedTree.model_validate(fragment) for s in plan.shards
     }

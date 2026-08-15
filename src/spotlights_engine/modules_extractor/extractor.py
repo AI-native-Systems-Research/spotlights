@@ -21,12 +21,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from spotlights_engine.modules_extractor.agent import (
     ExtractionInvocation,
     run_extraction,
 )
+from spotlights_engine.modules_extractor.constants import MERGE_THRESHOLD_DEFAULT
 from spotlights_engine.modules_extractor.errors import ExtractorSetupError
 from spotlights_engine.modules_extractor.prompts import EXTRACTION_PROMPT
 from spotlights_engine.schemas.pipeline import ModulesExtractorInput
@@ -60,6 +61,31 @@ class ExtractorConfig(BaseModel):
     # legacy single-shot path.
     two_phase: bool = True
     source_root_max_turns: int = Field(default=15, ge=1)
+
+    # ── Stage-3 contract (temporary migration flag) ───────────────────────
+    # "tree" is the historical EnrichedTree + folds contract; "assignments"
+    # is the exhaustive MODULE/PART labeling with a separate metadata pass
+    # (`design/module_extractor_simplified.md`). The flag exists only for the
+    # A/B window and is removed at cutover.
+    contract: Literal["tree", "assignments"] = "tree"
+    # Assignment-contract size rule: a folder whose subtree_source_file_count
+    # exceeds this must be a MODULE; at or below it a MODULE needs a
+    # keep_reason. Compared against the skeleton's raw subtree counts, so the
+    # rule is local and identical in whole-repository and pruned-shard
+    # prompts. Semantically ignored (and excluded from the manager's semantic
+    # fingerprint) in tree mode.
+    merge_threshold: int = Field(default=MERGE_THRESHOLD_DEFAULT, ge=0)
+
+    @model_validator(mode="after")
+    def _contract_requires_two_phase(self) -> ExtractorConfig:
+        # `two_phase=False, contract="assignments"` would silently ignore the
+        # contract; reject the combination instead.
+        if self.contract == "assignments" and not self.two_phase:
+            raise ValueError(
+                'contract="assignments" requires two_phase=True; the legacy '
+                "single-shot path has no assignment contract"
+            )
+        return self
 
     # ── Stage-3 sharding strategy ─────────────────────────────────────────
     # Enrichment is sharded by top-level skeleton node and run under a bounded

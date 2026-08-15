@@ -2,14 +2,21 @@
 
 Pure Python. Enumerates every non-ignored, non-excluded, non-symlink directory
 under the selected source root whose subtree contains a non-`__init__` source
-file, classifies each as mandatory (`required`) or foldable, and computes a
-content fingerprint over the accepted source files so Stage 5 can detect
-concurrent repository mutation.
+file, classifies each (`required` plus reasons), and computes a content
+fingerprint over the accepted source files so Stage 5 can detect concurrent
+repository mutation.
 
-The completeness guarantee is structural: a `required` directory must be
-emitted or validly folded by Stage 3, and Stage 5 recomputes this inventory and
-its fingerprint before accepting a tree. See
-`design/module_extraction_fix_impl_plan.md` (Stage 2).
+What `required` means depends on the Stage-3 contract in force:
+
+- tree contract: the completeness guarantee is structural — a `required`
+  directory must be emitted or validly folded by Stage 3
+  (`design/module_extraction_fix_impl_plan.md`, Stage 2);
+- assignment contract: totality covers the **full** inventory (every path
+  gets a label), so `required` and its reasons are audit metadata for reports
+  and diagnostics, not an emit/fold obligation.
+
+Stage 5 recomputes this inventory and its fingerprint before accepting a tree
+under either contract.
 """
 
 from __future__ import annotations
@@ -18,6 +25,7 @@ import hashlib
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
+from spotlights_engine.modules_extractor.constants import MAX_REPRESENTATIVE_FILES
 from spotlights_engine.modules_extractor.stage_schemas import Skeleton, SkeletonNode
 
 # Version the extension set + walk profile together: both affect the coverage
@@ -54,6 +62,16 @@ _INIT_BASENAME = "__init__.py"
 
 def is_source_file(name: str) -> bool:
     return PurePosixPath(name).suffix.lower() in SOURCE_EXTENSIONS
+
+
+def is_entry_file(rel: str) -> bool:
+    """Entry-point heuristic shared by every deterministic reading-seed order
+    (skeleton representatives and the Stage-3B territory seeds)."""
+    base = PurePosixPath(rel).name
+    if base == _INIT_BASENAME:
+        return True
+    stem = PurePosixPath(base).stem
+    return stem in ("index", "main")
 
 
 def _is_init(name: str) -> bool:
@@ -259,18 +277,11 @@ def _build_raw(
 
 
 def _representative_files(raw: _RawDir) -> list[str]:
-    """Deterministic reading seed: entry files first, then lexical, at most 5."""
-
-    def _is_entry(rel: str) -> bool:
-        base = PurePosixPath(rel).name
-        if base == _INIT_BASENAME:
-            return True
-        stem = PurePosixPath(base).stem
-        return stem in ("index", "main")
-
-    entry = sorted(f for f in raw.direct_all_source_files if _is_entry(f))
-    rest = sorted(f for f in raw.direct_all_source_files if not _is_entry(f))
-    return (entry + rest)[:5]
+    """Deterministic reading seed: entry files first, then lexical, capped at
+    `MAX_REPRESENTATIVE_FILES`."""
+    entry = sorted(f for f in raw.direct_all_source_files if is_entry_file(f))
+    rest = sorted(f for f in raw.direct_all_source_files if not is_entry_file(f))
+    return (entry + rest)[:MAX_REPRESENTATIVE_FILES]
 
 
 def _organizational_only(raw: _RawDir) -> bool:
@@ -401,6 +412,7 @@ __all__ = [
     "ScanResult",
     "build_skeleton",
     "compute_fingerprint",
+    "is_entry_file",
     "is_source_file",
     "scan_source_files",
 ]
