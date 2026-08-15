@@ -279,29 +279,6 @@ def hash_pydantic_excluding(model: BaseModel | None, *, exclude: set[str]) -> st
     return _stable_hash(payload)
 
 
-def extractor_semantic_payload(extractor_cfg: BaseModel) -> dict[str, Any]:
-    """The extractor config payload that actually determines behavior.
-
-    The Stage-3 contract is now unconditionally assignments-based. Injecting
-    the literal keeps hashes compatible with assignment-mode runs created
-    during the migration window, when `contract="assignments"` was an
-    explicit config field.
-    """
-    payload = extractor_cfg.model_dump(mode="json", exclude={"artifacts_dir"})
-    if payload.get("two_phase", True):
-        payload["contract"] = "assignments"
-    else:
-        # The independent single-shot path never reads the assignment policy.
-        payload.pop("merge_threshold", None)
-    return payload
-
-
-def extractor_semantic_hash(extractor_cfg: BaseModel) -> str:
-    """Stable semantic hash of an `ExtractorConfig` (see
-    `extractor_semantic_payload`)."""
-    return _stable_hash(extractor_semantic_payload(extractor_cfg))
-
-
 def build_input_fingerprint(
     *,
     repo_path: Path,
@@ -338,7 +315,9 @@ def build_config_fingerprint(
         "module_filter": (
             module_filter.model_dump(mode="json") if module_filter is not None else None
         ),
-        "extractor_hash": extractor_semantic_hash(extractor_cfg),
+        "extractor_hash": hash_pydantic_excluding(
+            extractor_cfg, exclude={"artifacts_dir"}
+        ),
         "discovery_hash": hash_pydantic_excluding(
             effective_discovery_cfg, exclude={"artifacts_dir", "repo_path"}
         ),
@@ -794,8 +773,6 @@ __all__ = [
     "clear_proposal_from_finding_artifacts",
     "clear_usage_records",
     "default_agent_proposals_hash",
-    "extractor_semantic_hash",
-    "extractor_semantic_payload",
     "init_manifest",
     "read_extractor_outputs",
     "read_manifest",

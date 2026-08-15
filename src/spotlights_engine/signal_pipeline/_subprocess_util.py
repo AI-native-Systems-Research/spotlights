@@ -267,6 +267,9 @@ def run_streaming_claude(
         bufsize=1,
         **popen_kwargs,
     )
+    proc.stdin.write(prompt)
+    proc.stdin.close()
+
     stdout_chunks: list[str] = []
     stderr_chunks: list[str] = []
 
@@ -300,17 +303,6 @@ def run_streaming_claude(
     )
     t_out.start()
     t_err.start()
-
-    # Written only after the drain threads are running: a prompt larger than the
-    # OS pipe buffer can otherwise deadlock against a child that fills its
-    # stdout pipe before finishing stdin. A child that dies before consuming the
-    # prompt closes the pipe — swallow that here and let the exit-code path
-    # below report the real failure with the captured stderr.
-    try:
-        proc.stdin.write(prompt)
-        proc.stdin.close()
-    except OSError:
-        pass
 
     deadline = start + timeout_s
     timed_out = False
