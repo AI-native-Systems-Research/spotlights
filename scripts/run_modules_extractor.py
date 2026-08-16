@@ -53,6 +53,12 @@ def _build_argparser() -> argparse.ArgumentParser:
         default="claude",
         help="Claude Code binary to invoke (default: claude).",
     )
+    p.add_argument(
+        "--merge-threshold",
+        type=int,
+        default=None,
+        help="MODULE/PART size threshold (default: the library default).",
+    )
     return p
 
 
@@ -62,11 +68,26 @@ def main() -> None:
     args.artifacts_dir.mkdir(parents=True, exist_ok=True)
 
     inp = ModulesExtractorInput(repo_path=args.repo)
-    cfg = ExtractorConfig(
+    cfg_kwargs: dict = dict(
         artifacts_dir=args.artifacts_dir,
         claude_bin=args.claude_bin,
         max_turns=args.max_turns,
         timeout_s=args.timeout_s,
+    )
+    if args.merge_threshold is not None:
+        cfg_kwargs["merge_threshold"] = args.merge_threshold
+    cfg = ExtractorConfig(**cfg_kwargs)
+
+    # Persist the effective config at the run level so an offline reader can
+    # recover the threshold a run actually used.
+    args.artifacts_dir.joinpath("extractor_config.json").write_text(
+        json.dumps(
+            cfg.model_dump(mode="json", exclude={"artifacts_dir"}),
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
     )
 
     result = extract_with_telemetry(inp, config=cfg)

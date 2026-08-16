@@ -1,0 +1,43 @@
+# Default repo set for scripts/run_modules_extractor_batch.py.
+#
+# Format (validated by the pydantic models inside the batch script):
+#
+#   defaults:              # optional; any ExtractorConfig field by name,
+#     timeout_s: 5400      # applied to every repo (per-repo `overrides` win)
+#     enrich_sharding: auto
+#
+#   repos:                 # exactly one of `path` / `url` per repo
+#     - name: <unique>     # filesystem-safe ([A-Za-z0-9._-]+); output sub-folder
+#       path: <local dir>  # relative paths resolve against the spotlight-engine root
+#       overrides: {}      # optional per-repo ExtractorConfig overrides
+#     - name: <unique>
+#       url: <git url>     # cloned on demand into <output_root>/_clones/<name>
+#       ref: <branch|tag|sha>  # optional; default = remote HEAD
+
+repos:
+  - name: vllm
+    path: /Users/ophir/PycharmProjects/vllm
+
+  - name: kafka
+    path: /Users/ophir/PycharmProjects/kafka
+
+  - name: latest_vllm
+    path: /Users/ophir/PycharmProjects/vllm_latest
+
+  - name: colpali
+    path: /Users/ophir/PycharmProjects/colpali
+
+  - name: llm-d-router
+    path: /Users/ophir/GoProjects/llm-d-router
+
+  - name: dynamo
+    path: /Users/ophir/PycharmProjects/dynamo
+
+  - name: qiskit
+    path: /Users/ophir/PycharmProjects/qiskit
+
+    
+
+    
+
+

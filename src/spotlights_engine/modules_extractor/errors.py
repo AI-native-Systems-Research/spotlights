@@ -20,11 +20,35 @@ class ExtractorAgentError(ModulesExtractorError):
 
 
 class ExtractorValidationError(ModulesExtractorError):
-    """The agent's response did not validate against `ProjectTree`."""
+    """A model response failed schema or cross-artifact validation.
+
+    Raised when assignments or metadata fail V1/V3–V5 (paths, label policy,
+    metadata territory, or the public-tree gate).
+    """
+
+
+class ExtractorCoverageError(ModulesExtractorError):
+    """A structurally valid response omits paths it had to account for.
+
+    Carries the sorted `missing` paths in `context["missing"]`: under the
+    inventory paths without a label, or requested modules without metadata.
+    """
+
+
+class ExtractorArtifactError(ModulesExtractorError):
+    """A required artifact write failed on an otherwise successful stage.
+
+    Only raised when artifact persistence is enabled (`artifacts_dir` set):
+    silently succeeding would contradict the enabled artifact contract. An
+    artifact-write failure *during* error handling never masks the original
+    stage error (it is attached/logged instead).
+    """
 
 
 __all__ = [
     "ExtractorAgentError",
+    "ExtractorArtifactError",
+    "ExtractorCoverageError",
     "ExtractorSetupError",
     "ExtractorValidationError",
     "ModulesExtractorError",

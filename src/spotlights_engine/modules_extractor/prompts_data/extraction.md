@@ -63,15 +63,13 @@ Return ONLY this JSON, no markdown fences, no commentary. The shape mirrors the
   "repository": {
     "name": "string — repo name",
     "summary": "2–4 sentences: what the repo does, its project type (e.g. 'Python ML library', 'Rust CLI tool', 'Node.js GraphQL API'), the primary languages/frameworks, and the high-level architectural shape (layered, hexagonal, monorepo with packages, microservices, MVC, etc.)",
-    "source_root": "repo-relative directory the package(s) live under, used to derive qualified names (qualified name = module path relative to source_root). 'src' for a src-layout, '' (empty) when packages sit at the repo root, 'lib' if that is the package dir. No leading/trailing slash.",
-    "external_dependencies": ["primary external packages, frameworks, and key libraries the repo depends on — flat list of names"]
+    "source_root": "repo-relative directory the package(s) live under, used to derive qualified names (qualified name = module path relative to source_root). 'src' for a src-layout, '' (empty) when packages sit at the repo root, 'lib' if that is the package dir. No leading/trailing slash."
   },
   "modules": [
     {
       "name": "string — must match ^[a-z][a-z0-9_]*$; defaults to the basename of `path`",
       "path": "path/from/repo/root",
       "description": "1–2 sentences on responsibility",
-      "depends_on": ["source-root-relative qualified names of other modules it imports from (e.g. 'vllm/attention' for a root-layout repo, 'spotlights_engine/schemas' for a src-layout one), or names of entries from repository.external_dependencies"],
       "main_files": [
         { "path": "full/path/from/repo/root.ext", "role": "what this file does" }
       ],
@@ -105,7 +103,5 @@ PARENT — the directory contains 2+ logical units that each deserve their own e
 - Submodule `path` must be a real nested path below its parent, not the parent's own path. Never use conceptual labels as `name` values unless the same label is also the normalized basename of the emitted `path`.
 - A LEAF submodule has no `submodules` key at all (or an empty list). A PARENT submodule has `submodules` with ≥2 entries. Never emit a parent with only one child — collapse it. `main_files` on a parent lists files that belong to the parent itself, not files that belong to any child.
 - `main_files` is required and 1–5 entries, on every module and every submodule. If you cannot name a central file, it isn't a (sub)module.
-- Top-level modules use the full schema with `depends_on`. Submodules omit `depends_on` (it is implied by the parent module's dependencies).
 - Aim for 5–15 top-level modules. If the repo is genuinely flatter or larger, follow the code.
-- `depends_on` lists peer top-level modules by their source-root-relative qualified name (e.g. `vllm/attention`, `spotlights_engine/schemas` — not the bare `attention`) and/or entries from `repository.external_dependencies`. Empty array if none.
 - Output valid JSON, parseable by `JSON.parse` — no trailing commas, no comments.

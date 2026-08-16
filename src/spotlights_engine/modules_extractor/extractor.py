@@ -19,14 +19,15 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from spotlights_engine.modules_extractor.agent import (
     ExtractionInvocation,
-    ExtractionRunResult,
     run_extraction,
 )
+from spotlights_engine.modules_extractor.constants import MERGE_THRESHOLD_DEFAULT
 from spotlights_engine.modules_extractor.errors import ExtractorSetupError
 from spotlights_engine.modules_extractor.prompts import EXTRACTION_PROMPT
 from spotlights_engine.schemas.pipeline import ModulesExtractorInput
@@ -38,7 +39,7 @@ class ExtractorConfig(BaseModel):
 
     Holds only fields outside the architectural `ModulesExtractorInput`
     contract: optional `artifacts_dir` for persisting prompt/schema/raw
-    output, plus tunable agent budgets.
+    output, tunable agent budgets, and the two-phase strategy knobs.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -46,7 +47,86 @@ class ExtractorConfig(BaseModel):
     artifacts_dir: Path | None = None
     claude_bin: str = "claude"
     max_turns: int = Field(default=60, ge=1)
-    timeout_s: int = Field(default=1800, ge=1)
+    # Per-Claude-stage subprocess deadline. The two-phase Stage-3 enrichment is a
+    # single repo-wide call that must explore and emit the full module tree; on a
+    # large monorepo (e.g. vLLM: ~345 required modules across vllm/, rust/, csrc/)
+    # the 1800s default was too small and the enrichment was killed mid-generation
+    # before writing assignment and coverage artifacts. 5400s gives that call the
+    # headroom to finish while every stage still enforces a hard subprocess
+    # timeout.
+    timeout_s: int = Field(default=5400, ge=1)
+
+    # Two-phase (Idea 4) strategy. Default on: the deterministic-skeleton +
+    # LLM-enrichment path is the standard extractor now; set False for the
+    # independent direct-ProjectTree single-shot path.
+    two_phase: bool = True
+    source_root_max_turns: int = Field(default=15, ge=1)
+
+    # Stage-3 size rule: a folder whose subtree_source_file_count
+    # exceeds this must be a MODULE; at or below it a MODULE needs a
+    # keep_reason. Compared against the skeleton's raw subtree counts, so the
+    # rule is local and identical in whole-repository and pruned-shard
+    # prompts.
+    merge_threshold: int = Field(default=MERGE_THRESHOLD_DEFAULT, ge=0)
+
+    # ── Stage-3 sharding strategy ─────────────────────────────────────────
+    # Enrichment is sharded by top-level skeleton node and run under a bounded
+    # concurrency executor; see `sharding.py` and
+    # `design/module_extraction_fix_impl__top_level_plan.md`. Always-on rather
+    # than threshold-gated: a repo with one top-level source-bearing node
+    # degenerates to exactly one shard = today's single call, so there is one
+    # code path instead of a mode switch whose branches diverge exactly where
+    # bugs hide (merge, telemetry, artifacts).
+    #
+    #   "auto"            top-level sharding + size-gated sub-sharding
+    #   "top_level_only"  shard by top-level, never sub-shard
+    #   "single"          one monolithic assignment call (small repos); with
+    #                     several top-level source roots it falls back to
+    #                     per-branch sharding without sub-sharding
+    enrich_sharding: Literal["auto", "top_level_only", "single"] = "auto"
+    # Concurrent enrich sessions share one API key's token budget. At 10-wide
+    # on a 40-shard repo (vLLM) the key's rate window was drained and the
+    # late shards starved: every request 429'd until the CLI gave up. 5 keeps
+    # the fan-out useful without turning stage 3 into a self-inflicted
+    # rate-limit storm.
+    max_parallel_enrich_shards: int = Field(default=5, ge=1)
+
+    # Retry budget for API-level stage failures (429 rate limit, request
+    # timeout, server overload) during concurrent enrichment. The CLI already
+    # spends its own internal retries (~3 min of backoff) before surfacing
+    # such a failure, so each orchestrator retry starts a fresh session after
+    # `enrich_api_backoff_s * 2**n` seconds — sized to outlive a token
+    # rate-limit window rather than to dodge a blip. 0 retries restores
+    # fail-fast.
+    enrich_api_retries: int = Field(default=2, ge=0)
+    enrich_api_backoff_s: float = Field(default=60.0, ge=0.0)
+
+    # Stage-specific deadlines that decouple from the coarse `timeout_s`.
+    # `None` means "inherit `timeout_s`". The fields are `int | None` rather
+    # than ints with a truthy default on purpose: with a truthy default,
+    # `enrich_timeout_s or timeout_s` would never fall through, so a caller who
+    # only bumped `timeout_s` would be silently ignored.
+    source_root_timeout_s: int | None = Field(default=None, ge=1)
+    # Per-shard enrichment deadline. Shards are far smaller than the whole repo,
+    # so this is deliberately below the 5400s monolithic budget — but a shard
+    # whose scope IS the entire skeleton still gets `timeout_s` (see
+    # `sharding.covers_entire_skeleton`), so the degenerate single-shard repo
+    # does not newly time out. So does any shard whose weight derivation could
+    # not push below `enrich_subshard_threshold` (see
+    # `sharding.assignment_shard_weight`):
+    # an unsplittable wide flat branch, a depth- or budget-capped split, or a
+    # heavy spine residue must not inherit a deadline sized for a small slice.
+    enrich_timeout_s: int | None = Field(default=1800, ge=1)
+
+    # Recursive sub-sharding of an oversized top-level branch. `weight` is the
+    # number of inventoried paths, because Stage 3A labels every path.
+    enrich_subshard_threshold: int = Field(default=40, ge=1)
+    enrich_subshard_child_min: int = Field(default=2, ge=1)
+    enrich_subshard_max_depth: int = Field(default=2, ge=1)
+    # Target ceiling for derived Stage-3A shards. Every top-level branch still
+    # receives one shard, so a repository with more top-level branches may
+    # exceed this value; only recursive shards consume the remaining budget.
+    enrich_max_shards: int = Field(default=40, ge=2)
 
 
 class ExtractorResult(BaseModel):
@@ -97,6 +177,24 @@ def extract_with_telemetry(
     else:
         run_dir = None
 
+    if cfg.two_phase:
+        # Lazy import: two_phase pulls in skeleton machinery that the direct
+        # path (and the Stage-02 safety-order test) must not require at module
+        # top.
+        from spotlights_engine.modules_extractor.two_phase import (
+            run_two_phase_extraction,
+        )
+
+        run = run_two_phase_extraction(
+            repo,
+            config=cfg,
+            on_event=on_event,
+            artifacts_dir=run_dir,
+        )
+        return ExtractorResult(
+            project_tree=run.project_tree, invocation=run.invocation
+        )
+
     run_kwargs: dict = dict(
         repo_path=repo,
         prompt=EXTRACTION_PROMPT,
@@ -107,7 +205,7 @@ def extract_with_telemetry(
     )
     if on_event is not None:
         run_kwargs["on_event"] = on_event
-    run: ExtractionRunResult = run_extraction(**run_kwargs)
+    run = run_extraction(**run_kwargs)
 
     return ExtractorResult(project_tree=run.project_tree, invocation=run.invocation)
 

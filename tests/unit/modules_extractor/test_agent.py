@@ -30,14 +30,12 @@ def _invalid_conceptual_split_payload() -> dict:
             "name": "inference-sim",
             "summary": "A Go simulator.",
             "source_root": "",
-            "external_dependencies": [],
         },
         "modules": [
             {
                 "name": "sim",
                 "path": "sim",
                 "description": "Simulation runtime.",
-                "depends_on": [],
                 "main_files": [
                     {"path": "sim/simulator.go", "role": "Drives simulation."}
                 ],
@@ -62,14 +60,12 @@ def _valid_leaf_payload() -> dict:
             "name": "inference-sim",
             "summary": "A Go simulator.",
             "source_root": "",
-            "external_dependencies": [],
         },
         "modules": [
             {
                 "name": "sim",
                 "path": "sim",
                 "description": "Simulation runtime.",
-                "depends_on": [],
                 "main_files": [
                     {"path": "sim/simulator.go", "role": "Drives simulation."}
                 ],
