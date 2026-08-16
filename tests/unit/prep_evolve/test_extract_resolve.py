@@ -14,6 +14,9 @@ from spotlights_engine.prep_evolve.extract import (
     parse_performance_oracle,
 )
 from spotlights_engine.prep_evolve.resolve import (
+    find_candidate,
+    iter_candidates,
+    load_ranking,
     load_result,
     parse_repo_path_from_index,
     resolve_candidate,
@@ -205,3 +208,142 @@ def test_resolve_repo_path_repo_wins(tmp_path: Path) -> None:
 def test_resolve_repo_path_none_resolves(tmp_path: Path) -> None:
     with pytest.raises(RepoResolutionError):
         resolve_repo_path(None, None)
+
+
+from spotlights_engine.prep_evolve.resolve import resolve_result_location
+
+
+def test_resolve_location_run_directory(tmp_path: Path) -> None:
+    fx.write_result(tmp_path)
+    fx.write_index(tmp_path, tmp_path)
+    loc = resolve_result_location(tmp_path)
+    assert loc.result_json == tmp_path / "result.json"
+    assert loc.run_dir == tmp_path
+    assert loc.index == tmp_path / "index.md"
+    assert loc.ranking is None
+
+
+def test_resolve_location_result_json_file(tmp_path: Path) -> None:
+    rj = fx.write_result(tmp_path)
+    loc = resolve_result_location(rj)
+    assert loc.result_json == rj
+    assert loc.run_dir == tmp_path
+    assert loc.index is None
+    assert loc.ranking is None
+
+
+def test_resolve_location_arbitrary_file_is_result_json(tmp_path: Path) -> None:
+    # A non-standard filename is still treated as the result.json itself.
+    payload = fx.make_result_dict()
+    rj = tmp_path / "custom_result.json"
+    rj.write_text(__import__("json").dumps(payload), encoding="utf-8")
+    loc = resolve_result_location(rj)
+    assert loc.result_json == rj
+    assert loc.run_dir == tmp_path
+
+
+def test_resolve_location_index_md(tmp_path: Path) -> None:
+    fx.write_result(tmp_path)
+    index = fx.write_index(tmp_path, tmp_path)
+    loc = resolve_result_location(index)
+    assert loc.result_json == tmp_path / "result.json"
+    assert loc.run_dir == tmp_path
+    assert loc.index == index
+    assert loc.ranking is None
+
+
+def test_resolve_location_sorted_dir(tmp_path: Path) -> None:
+    fx.write_result(tmp_path)
+    sorted_dir = fx.write_sorted(tmp_path, ["cand-v1_attention-0002"])
+    loc = resolve_result_location(sorted_dir)
+    assert loc.result_json == tmp_path / "result.json"
+    assert loc.run_dir == tmp_path
+    assert loc.ranking == sorted_dir / "sorted_candidates.json"
+
+
+def test_resolve_location_sorted_json_file(tmp_path: Path) -> None:
+    fx.write_result(tmp_path)
+    sorted_dir = fx.write_sorted(tmp_path, ["cand-v1_attention-0002"])
+    loc = resolve_result_location(sorted_dir / "sorted_candidates.json")
+    assert loc.result_json == tmp_path / "result.json"
+    assert loc.run_dir == tmp_path
+    assert loc.ranking == sorted_dir / "sorted_candidates.json"
+
+
+def test_resolve_location_sorted_md_file(tmp_path: Path) -> None:
+    fx.write_result(tmp_path)
+    sorted_dir = fx.write_sorted(tmp_path, ["cand-v1_attention-0002"])
+    loc = resolve_result_location(sorted_dir / "sorted_candidates.md")
+    assert loc.ranking == sorted_dir / "sorted_candidates.json"
+    assert loc.run_dir == tmp_path
+
+
+def test_resolve_location_sorted_md_without_json(tmp_path: Path) -> None:
+    fx.write_result(tmp_path)
+    sorted_dir = fx.write_sorted(tmp_path, ["cand-v1_attention-0002"], md=True)
+    (sorted_dir / "sorted_candidates.json").unlink()
+    with pytest.raises(SelectionError):
+        resolve_result_location(sorted_dir / "sorted_candidates.md")
+
+
+def test_resolve_location_dir_without_artifacts(tmp_path: Path) -> None:
+    with pytest.raises(SelectionError):
+        resolve_result_location(tmp_path)  # empty dir
+
+
+def test_resolve_location_index_without_result_json(tmp_path: Path) -> None:
+    index = fx.write_index(tmp_path, tmp_path)  # no result.json alongside
+    with pytest.raises(SelectionError):
+        resolve_result_location(index)
+
+
+def test_resolve_location_missing_path(tmp_path: Path) -> None:
+    with pytest.raises(SelectionError):
+        resolve_result_location(tmp_path / "nope")
+
+
+def _loaded_with_second_candidate(tmp_path: Path):
+    """A LoadedResult whose single module run has two candidates."""
+    payload = fx.make_result_dict()
+    run = payload["module_runs"]["v1/attention"]
+    second = dict(run["candidates"]["candidates"][0])
+    second["id"] = "cand-v1_attention-0003"
+    run["candidates"]["candidates"].append(second)
+    result_json = tmp_path / "result.json"
+    result_json.write_text(__import__("json").dumps(payload), encoding="utf-8")
+    return load_result(result_json)
+
+
+def test_find_candidate_locates_module(tmp_path: Path) -> None:
+    loaded = load_result(fx.write_result(tmp_path))
+    sel = find_candidate(loaded, "cand-v1_attention-0002")
+    assert sel.qn == "v1/attention"
+    assert sel.candidate.id == "cand-v1_attention-0002"
+    assert isinstance(sel.run, dict)
+
+
+def test_find_candidate_missing(tmp_path: Path) -> None:
+    loaded = load_result(fx.write_result(tmp_path))
+    with pytest.raises(SelectionError):
+        find_candidate(loaded, "cand-does-not-exist-9999")
+
+
+def test_iter_candidates_enumerates_all(tmp_path: Path) -> None:
+    loaded = _loaded_with_second_candidate(tmp_path)
+    selections = iter_candidates(loaded)
+    ids = [s.candidate.id for s in selections]
+    assert ids == ["cand-v1_attention-0002", "cand-v1_attention-0003"]
+    assert all(s.qn == "v1/attention" for s in selections)
+
+
+def test_load_ranking_orders_by_rank(tmp_path: Path) -> None:
+    sorted_dir = fx.write_sorted(tmp_path, ["cand-a-0001", "cand-b-0002", "cand-c-0003"])
+    ids = load_ranking(sorted_dir / "sorted_candidates.json")
+    assert ids == ["cand-a-0001", "cand-b-0002", "cand-c-0003"]
+
+
+def test_load_ranking_empty_errors(tmp_path: Path) -> None:
+    bad = tmp_path / "sorted_candidates.json"
+    bad.write_text('{"candidates": []}', encoding="utf-8")
+    with pytest.raises(SelectionError):
+        load_ranking(bad)

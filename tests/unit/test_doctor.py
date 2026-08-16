@@ -51,7 +51,7 @@ def test_probe_cli_unpriced_model_fails(monkeypatch):
     assert res.ok is False
     assert "aws/claude-opus-4-7" in res.detail
     assert doctor.RATES_ENV_VAR in res.detail
-    assert "README" in res.detail
+    assert "docs/cost-and-manifest.md" in res.detail
 
 
 def test_probe_cli_codex_family_fallback_ok(monkeypatch):
