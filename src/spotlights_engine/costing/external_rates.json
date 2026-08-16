@@ -8,6 +8,14 @@
     "unit": "per_token",
     "note": "Public Anthropic API list price: Claude Opus 4.8 $5.00/MTok input, $25.00/MTok output, $0.50/MTok cache read (~0.1x), $6.25/MTok 5m cache write (1.25x). Keyed by the CLI-reported model id (the bedrock 'aws/' prefix is what the CLI emits even for direct billing comparison). Override for 1h cache writes."
   },
+  "anthropic:aws/claude-opus-5": {
+    "input": 0.000005,
+    "output": 0.000025,
+    "cache_read": 0.0000005,
+    "cache_create": 0.00000625,
+    "unit": "per_token",
+    "note": "Public Anthropic API list price: Claude Opus 5 $5.00/MTok input, $25.00/MTok output, $0.50/MTok cache read, $6.25/MTok 5m cache write (1.25x). Keyed by the CLI-reported model id (the bedrock 'aws/' prefix is what the CLI emits even for direct billing comparison). Override for 1h cache writes ($10/MTok)."
+  },
   "openai:codex": {
     "input": 0.000005,
     "output": 0.00003,

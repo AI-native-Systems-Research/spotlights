@@ -8,6 +8,14 @@
     "unit": "per_token",
     "note": "LiteLLM (bedrock) rate as of 2026-07-07: Claude Opus 4.8 $3.80/MTok input, $19/MTok output, $0.38/MTok cache read, $4.75/MTok cache write. Keyed by the CLI-reported model id (bedrock 'aws/' prefix). Override for a different contract or 1h cache writes ($10/MTok)."
   },
+  "anthropic:aws/claude-opus-5": {
+    "input": 0.0000038,
+    "output": 0.000019,
+    "cache_read": 0.00000038,
+    "cache_create": 0.00000475,
+    "unit": "per_token",
+    "note": "LiteLLM (bedrock) rate: Claude Opus 5 $3.80/MTok input, $19/MTok output, $0.38/MTok cache read, $4.75/MTok cache write. Keyed by the CLI-reported model id (bedrock 'aws/' prefix). Override for a different contract or 1h cache writes."
+  },
   "openai:codex": {
     "input": 0.0000025,
     "output": 0.000015,
