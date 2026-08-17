@@ -318,7 +318,7 @@ def _evaluator_file(evolver: str) -> str:
     if evolver == "skydiscover":
         return "evaluator.py"
     if evolver == "coral":
-        return "eval/grader.py"
+        return "grader/grader.py"
     return "ground_truth in campaign.yaml"
 
 

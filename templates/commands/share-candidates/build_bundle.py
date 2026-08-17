@@ -390,8 +390,9 @@ ENGINES: dict[str, dict] = {
         "pip_warn": None,
         "quickstart": (
             "Open the target repo (make sure task.yaml's repo_path points to the same "
-            "location — update it if needed), then just ask Claude Code:",
-            "use coral to optimize this — start from the bundle at {path} Don't change "
+            "location — update it if needed), then ask Claude Code — replacing "
+            "<CORAL_BUNDLE_PATH> with the path to wherever you unpacked this bundle:",
+            "use coral to optimize this — start from the bundle at {path}. Don't change "
             "what task.yaml defines — the goal, in-scope file, oracle, metric, and "
             "direction are fixed. Fill only the gaps: write the grader, set up the seed, "
             "and add whatever's needed so the grader cleanly scores the seed. The seed "
