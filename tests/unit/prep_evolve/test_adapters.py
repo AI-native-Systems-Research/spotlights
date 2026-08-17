@@ -109,7 +109,7 @@ def test_coral_task_yaml_mapping(tmp_path: Path) -> None:
     files = _by_path(CoralAdapter().render(spec))
     task = yaml.safe_load(files["task.yaml"].text)
     assert task["grader"]["direction"] == "minimize"
-    # CORAL auto-discovers eval/grader.py — no entrypoint / package install.
+    # CORAL auto-discovers grader/grader.py — no entrypoint / package install.
     assert "entrypoint" not in task["grader"]
     assert "setup" not in task["grader"]
     assert task["grader"]["timeout"] == 600
