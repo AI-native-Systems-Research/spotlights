@@ -101,3 +101,59 @@ Re-runs resume cleanly: an existing bundle directory is skipped (not an error)
 unless `--force` is set. With `--force`, every generated file in that bundle is
 overwritten — including a hand-edited evaluator/grader — so copy out any evaluator
 work you want to keep before re-running.
+
+### Evolver reference
+
+The `--evolver` flag selects one of three external evolvers. They differ in edit
+scope, what you must hand-author, and how they install — all three share the same
+prerequisites (bottom of section).
+
+#### `skydiscover`
+
+LLM-driven evolutionary search over a single marked code region.
+
+- **Repository:** https://github.com/skydiscover-ai/skydiscover
+- **Edit scope:** single file — only the region between `# EVOLVE-BLOCK-START` and `# EVOLVE-BLOCK-END` changes.
+- **Native config:** `config.yaml` + `seed.<ext>`
+- **You must write:** `evaluator.py` ([what to write](https://github.com/skydiscover-ai/skydiscover/blob/main/README.md#%EF%B8%8F-what-you-write))
+- **Install:** `pip install skydiscover`
+- **Run:** `skydiscover-run seed.<ext> evaluator.py -c config.yaml`
+
+#### `coral`
+
+Agentic multi-file evolver — an LLM agent edits a git worktree of the repo.
+
+- **Repository:** https://github.com/Human-Agent-Society/CORAL
+- **Edit scope:** multi-file — the agent may edit any in-scope file in a git worktree.
+- **Native config:** `task.yaml`
+- **You must write:** the grader (`grader/grader.py`) + seed directories
+- **Install:**
+  ```bash
+  # Shell installer
+  curl -fsSL https://raw.githubusercontent.com/Human-Agent-Society/CORAL/main/install.sh | sh
+  ```
+  ```text
+  # Claude Code plugin
+  /plugin marketplace add Human-Agent-Society/CORAL
+  /plugin install coral@coral-marketplace
+  ```
+- **Run:** `coral start --config task.yaml`
+- **Quickstart:** open the target repo (make sure `task.yaml`'s `repo_path` points to the same location — update it if needed), then ask Claude Code — replacing `<CORAL_BUNDLE_PATH>` with the path to wherever you unpacked this bundle:
+  > use coral to optimize this — start from the bundle at `<CORAL_BUNDLE_PATH>`. Don't change what task.yaml defines — the goal, in-scope file, oracle, metric, and direction are fixed. Fill only the gaps: write the grader, set up the seed, and add whatever's needed so the grader cleanly scores the seed. The seed should be the full repo so the agent can read everything, but the grader must reject any attempt that modifies or adds a file outside the allowlist — configured as `target_files` (or `allowed_paths`) under `grader.args` in `task.yaml`.
+
+#### `nous` (alias `agentic-strategy-evolution`)
+
+Runs experiment "arms" that apply `code_changes[]` across the target.
+
+- **Repository:** https://github.com/AI-native-Systems-Research/agentic-strategy-evolution
+- **Edit scope:** multi-file — experiment arms with `code_changes[]`.
+- **Native config:** `campaign.yaml` + `bundle.yaml` + `prompts/methodology/`
+- **You must write:** nothing to hand-author — the agents discover metrics and evaluate on their own.
+- **Install:** `pip install "git+https://github.com/AI-native-Systems-Research/agentic-strategy-evolution.git@reflective"`
+- **Run:** `NOUS_CAMPAIGN_PARENT=$PWD/nous_runs nous run campaign.yaml --bundle bundle.yaml`
+
+#### Prerequisites (all evolvers)
+
+Python 3, an LLM API key for the model named in the config (e.g. `ANTHROPIC_API_KEY`),
+the target repo checked out at the run's commit, and a server with all the hardware
+the benchmark needs (e.g. a GPU) to build and measure the target.
