@@ -39,7 +39,7 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             {
               echo 'prompt<<PROMPT_EOF'
-              echo '/code-review:code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
+              echo '/code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
               echo ''
               echo 'When posting the review comment prefix it with ## 🤖 Claude Code Review'
               echo 'PROMPT_EOF'
