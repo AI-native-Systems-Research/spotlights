@@ -115,6 +115,16 @@ For LiteLLM gateway config and a quick response check, see [docs/agent-cli-setup
 
 **1. Install the engine**
 
+Quick install — puts `spotlights-engine` on your PATH (in `~/.local/bin`) via [uv](https://docs.astral.sh/uv/):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/AI-native-Systems-Research/spotlights/main/install.sh | sh
+```
+
+Pin a version (any git tag, branch, or commit) with `SPOTLIGHTS_VERSION=<ref> sh`. No shell activation needed after this.
+
+Or install from source for development (editable):
+
 ```bash
 git clone https://github.com/AI-native-Systems-Research/spotlights.git
 cd spotlights
