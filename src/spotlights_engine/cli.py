@@ -1,7 +1,8 @@
 """Public CLI for `spotlights-engine`.
 
 Thin shim over `spotlights_manager.run_with_telemetry`. Architectural inputs
-(`--repo`, `--objective`, `--hint`, `--max-findings-per-module`) bind to
+(`--repo`, `--objective`, `--hint`, `--max-findings-per-module`,
+`--no-deep-research`) bind to
 `SpotlightsManagerInput` / `SpotlightContext`; runtime/infra knobs
 (`--output-folder`, `--artifacts-dir`, parallelism, debug caps, `--no-resume`)
 bind to `SpotlightsManagerConfig`. Library users construct those types
@@ -192,6 +193,21 @@ def _build_argparser() -> argparse.ArgumentParser:
     )
 
     p.add_argument(
+        "--no-deep-research",
+        dest="enable_deep_research",
+        action="store_false",
+        help=(
+            "Skip step 3 (module_deep_research) entirely: no research CLI "
+            "session, no findings, step 4 short-circuits to zero proposals. "
+            "Steps 1, 2 and 5 still run. The step-3-only knobs "
+            "(--enable-claude-search, --no-candidate-hotspots, "
+            "--max-findings-per-module) become no-ops but still take part in "
+            "the resume fingerprint, so a run must be resumed with the same "
+            "flags it was started with. Default: deep research is enabled."
+        ),
+    )
+
+    p.add_argument(
         "--no-resume",
         dest="resume",
         action="store_false",
@@ -373,6 +389,7 @@ def _build_input(args: argparse.Namespace) -> SpotlightsManagerInput:
         input_kwargs["max_findings_per_module"] = args.max_findings_per_module
     input_kwargs["include_candidate_hotspots"] = args.include_candidate_hotspots
     input_kwargs["enable_claude_search"] = args.enable_claude_search
+    input_kwargs["enable_deep_research"] = args.enable_deep_research
     return SpotlightsManagerInput(**input_kwargs)
 
 
@@ -430,8 +447,17 @@ def _write_result_json(result: SpotlightsManagerResult, output_folder: Path) -> 
     return path
 
 
-def _print_summary(result: SpotlightsManagerResult) -> None:
-    """Render the §2 stdout shape from a completed run."""
+def _print_summary(
+    result: SpotlightsManagerResult,
+    *,
+    deep_research_enabled: bool = True,
+) -> None:
+    """Render the §2 stdout shape from a completed run.
+
+    `deep_research_enabled=False` (i.e. `--no-deep-research`) makes the [3/5]
+    line read "disabled" instead of "0 findings", which would otherwise be
+    indistinguishable from "research ran and found nothing".
+    """
     qns = list(result.module_runs.keys())
     if qns:
         kept_label = f"{len(qns)} module{'s' if len(qns) != 1 else ''} kept"
@@ -465,7 +491,10 @@ def _print_summary(result: SpotlightsManagerResult) -> None:
             else 0
         )
         print(f"[2/5] candidate_discovery ({qn}) … {n_cands} candidates")
-        print(f"[3/5] module_deep_research ({qn}) … {n_findings} findings")
+        if deep_research_enabled:
+            print(f"[3/5] module_deep_research ({qn}) … {n_findings} findings")
+        else:
+            print(f"[3/5] module_deep_research ({qn}) … disabled")
         print(
             f"[4/5] proposal_from_finding_creator ({qn}) … "
             f"{n_proposals} proposals attached"
@@ -604,6 +633,28 @@ def main(argv: list[str] | None = None) -> int:
     if args.max_cost is not None and args.max_cost <= 0:
         _build_argparser().error("--max-cost must be > 0")
 
+    # Warn (never error) so wrapper scripts that always pass step-3 knobs keep
+    # working. Checked before the --dry-run return so a dry run still reports it.
+    if not args.enable_deep_research:
+        ignored = []
+        if args.enable_claude_search:
+            ignored.append("--enable-claude-search")
+        if not args.include_candidate_hotspots:
+            ignored.append("--no-candidate-hotspots")
+        if args.max_findings_per_module is not None:
+            ignored.append("--max-findings-per-module")
+        if ignored:
+            # Printed, not logged: `spotlights_engine/__init__.py` installs a
+            # NullHandler on the package logger, so `logging.lastResort` never
+            # fires and a pre-`_configure_logging` warning would be swallowed.
+            verb = "is" if len(ignored) == 1 else "are"
+            print(
+                f"warning: --no-deep-research: {', '.join(ignored)} {verb} "
+                f"step-3-only and {verb} ignored "
+                f"(but still recorded in the resume fingerprint)",
+                file=sys.stderr,
+            )
+
     if args.dry_run:
         include = _flatten_include(args.include)
         scope = ", ".join(include) if include else "(all modules)"
@@ -614,6 +665,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  max-parallel:{args.max_parallel}")
         if args.max_cost is not None:
             print(f"  max-cost:    ${args.max_cost:.2f}")
+        if not args.enable_deep_research:
+            print("  deep-research: DISABLED (step 3 skipped, step 4 empty)")
         return 0
 
     _configure_logging(args)
@@ -622,7 +675,7 @@ def main(argv: list[str] | None = None) -> int:
     cfg = _build_config(args)
 
     result = run_with_telemetry(inp, config=cfg)
-    _print_summary(result)
+    _print_summary(result, deep_research_enabled=inp.enable_deep_research)
     if isinstance(result, SpotlightsManagerResult):
         json_path = _write_result_json(result, args.output_folder)
         print(f"result json: {json_path}")

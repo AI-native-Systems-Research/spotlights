@@ -1148,7 +1148,26 @@ async def _run_module(
                 module_paths, session_index=session_index
             )
 
-        if run_step3:
+        if run_step3 and not mgr_input.enable_deep_research:
+            # --no-deep-research: substitute an empty output instead of running
+            # the step. The empty sidecar MUST be written, otherwise every
+            # resume sees `state.deep_research is None`, re-enters step 3 and
+            # (via redo_step3) clears + re-runs steps 4 and 5. Deliberately no
+            # StepIssue (that would downgrade the module to DEGRADED) and no
+            # usage records (no CLI session ran).
+            _log.info("[%s] deep_research: disabled — substituting empty output", qn)
+            research_output = ModuleDeepResearchOutput()
+            P.write_deep_research(module_paths, research_output, 0.0)
+            P.write_deep_research_search_log(module_paths, research_output, qn)
+            cp = _now_checkpoint(
+                qn=qn,
+                status="DEEP_RESEARCHED",
+                last_step="module_deep_research",
+                started_at=plan.started_at,
+            )
+            P.write_checkpoint(module_paths, cp)
+            await _update_module_in_manifest(paths, manifest, manifest_lock, qn, cp)
+        elif run_step3:
             _log.info("[%s] deep_research: start", qn)
             try:
                 research_output, dr_duration, dr_usages = await _do_step3(
@@ -1719,6 +1738,7 @@ async def _run_async(
         continue_on_module_failure=input.continue_on_module_failure,
         include_candidate_hotspots=input.include_candidate_hotspots,
         enable_claude_search=input.enable_claude_search,
+        enable_deep_research=input.enable_deep_research,
     )
     config_fp = P.build_config_fingerprint(
         module_filter=config.module_filter,

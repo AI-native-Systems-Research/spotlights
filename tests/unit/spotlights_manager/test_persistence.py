@@ -274,3 +274,34 @@ def test_input_fingerprint_changes_with_enable_claude_search() -> None:
     assert off["enable_claude_search"] is False
     assert on["enable_claude_search"] is True
     assert off != on
+
+
+def test_input_fingerprint_omits_enable_deep_research_when_enabled() -> None:
+    """Backward compatibility: a default (enabled) run must produce exactly the
+    fingerprint it produced before the flag existed, so pre-existing run dirs
+    keep resuming. See design/disable_deep_research.md §6."""
+    kwargs = dict(
+        repo_path=Path("/tmp/example-repo"),
+        context=SpotlightContext(objective="reduce latency"),
+        max_findings_per_module=30,
+        continue_on_module_failure=True,
+    )
+    default = P.build_input_fingerprint(**kwargs)
+    explicit = P.build_input_fingerprint(**kwargs, enable_deep_research=True)
+
+    assert "enable_deep_research" not in default
+    assert default == explicit
+
+
+def test_input_fingerprint_changes_when_deep_research_disabled() -> None:
+    kwargs = dict(
+        repo_path=Path("/tmp/example-repo"),
+        context=SpotlightContext(objective="reduce latency"),
+        max_findings_per_module=30,
+        continue_on_module_failure=True,
+    )
+    on = P.build_input_fingerprint(**kwargs, enable_deep_research=True)
+    off = P.build_input_fingerprint(**kwargs, enable_deep_research=False)
+
+    assert off["enable_deep_research"] is False
+    assert off != on

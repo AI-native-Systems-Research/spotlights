@@ -287,8 +287,9 @@ def build_input_fingerprint(
     continue_on_module_failure: bool,
     include_candidate_hotspots: bool = True,
     enable_claude_search: bool = False,
+    enable_deep_research: bool = True,
 ) -> dict[str, Any]:
-    return {
+    fp: dict[str, Any] = {
         "repo_path": str(repo_path),
         "context_hash": _stable_hash(context.model_dump(mode="json")),
         "max_findings_per_module": max_findings_per_module,
@@ -296,6 +297,11 @@ def build_input_fingerprint(
         "include_candidate_hotspots": include_candidate_hotspots,
         "enable_claude_search": enable_claude_search,
     }
+    # Omitted when enabled (the default) so run dirs created before this flag
+    # existed still resume; see design/disable_deep_research.md §6.
+    if not enable_deep_research:
+        fp["enable_deep_research"] = False
+    return fp
 
 
 def build_config_fingerprint(

@@ -129,10 +129,13 @@ def make_research_output(
     )
 
 
-def make_input(repo_path: Path) -> SpotlightsManagerInput:
+def make_input(
+    repo_path: Path, *, enable_deep_research: bool = True
+) -> SpotlightsManagerInput:
     return SpotlightsManagerInput(
         repo_path=repo_path,
         context=SpotlightContext(objective="reduce latency"),
+        enable_deep_research=enable_deep_research,
     )
 
 
