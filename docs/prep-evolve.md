@@ -147,10 +147,10 @@ Runs experiment "arms" that apply `code_changes[]` across the target.
 
 - **Repository:** https://github.com/AI-native-Systems-Research/agentic-strategy-evolution
 - **Edit scope:** multi-file — experiment arms with `code_changes[]`.
-- **Native config:** `campaign.yaml` + `bundle.yaml` + `prompts/methodology/`
+- **Native config:** `campaign.yaml`
 - **You must write:** nothing to hand-author — the agents discover metrics and evaluate on their own.
 - **Install:** `pip install "git+https://github.com/AI-native-Systems-Research/agentic-strategy-evolution.git@reflective"`
-- **Run:** `NOUS_CAMPAIGN_PARENT=$PWD/nous_runs nous run campaign.yaml --bundle bundle.yaml`
+- **Run:** `NOUS_CAMPAIGN_PARENT=$PWD/nous_runs nous run campaign.yaml`
 
 #### Prerequisites (all evolvers)
 
