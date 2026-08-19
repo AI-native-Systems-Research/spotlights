@@ -8,7 +8,7 @@ Spotlights decides *what* to optimize; **evolvers** (evolutionary code-search ba
 |---|---|---|---|
 | [`skydiscover`](https://github.com/skydiscover-ai/skydiscover) | single file (mutates the `# EVOLVE-BLOCK-START/END` region) | `config.yaml` + `seed.<ext>` (you write `evaluator.py`) | `skydiscover-run seed.<ext> evaluator.py -c config.yaml` |
 | [`coral`](https://github.com/Human-Agent-Society/CORAL) | multi-file (agent edits a git worktree) | `task.yaml` (you write `grader/grader.py`) | `coral start --config task.yaml` |
-| [`nous`](https://github.com/AI-native-Systems-Research/agentic-strategy-evolution) (alias `agentic-strategy-evolution`) | multi-file (experiment arms with `code_changes[]`) | `campaign.yaml` + `bundle.yaml` + `prompts/methodology/` | `NOUS_CAMPAIGN_PARENT=$PWD/nous_runs nous run campaign.yaml` |
+| [`nous`](https://github.com/AI-native-Systems-Research/agentic-strategy-evolution) (alias `agentic-strategy-evolution`) | multi-file (experiment arms with `code_changes[]`) | `campaign.yaml` | `NOUS_CAMPAIGN_PARENT=$PWD/nous_runs nous run campaign.yaml` |
 
 Pass `--evolver all` to emit one bundle per compatible evolver (skydiscover is reported as skipped for multi-file selections).
 
