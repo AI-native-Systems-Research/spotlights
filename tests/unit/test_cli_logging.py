@@ -136,6 +136,129 @@ def test_enable_claude_search_flag_turns_on() -> None:
     assert cli._build_input(args).enable_claude_search is True
 
 
+def test_deep_research_enabled_by_default() -> None:
+    args = cli._build_argparser().parse_args(["--repo", "."])
+
+    assert args.enable_deep_research is True
+    assert cli._build_input(args).enable_deep_research is True
+
+
+def test_no_deep_research_flag_disables() -> None:
+    args = cli._build_argparser().parse_args(["--repo", ".", "--no-deep-research"])
+
+    assert args.enable_deep_research is False
+    assert cli._build_input(args).enable_deep_research is False
+
+
+def test_dry_run_reports_disabled_deep_research(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rc = cli.main(
+        [
+            "--repo",
+            str(tmp_path),
+            "--artifacts-dir",
+            str(tmp_path / "artifacts"),
+            "--output-folder",
+            str(tmp_path / "output"),
+            "--no-deep-research",
+            "--dry-run",
+        ]
+    )
+
+    assert rc == 0
+    assert "deep-research: DISABLED" in capsys.readouterr().out
+
+
+def test_dry_run_omits_deep_research_line_by_default(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    rc = cli.main(
+        [
+            "--repo",
+            str(tmp_path),
+            "--artifacts-dir",
+            str(tmp_path / "artifacts"),
+            "--output-folder",
+            str(tmp_path / "output"),
+            "--dry-run",
+        ]
+    )
+
+    assert rc == 0
+    assert "deep-research" not in capsys.readouterr().out
+
+
+def test_no_deep_research_warns_about_ignored_step3_flags(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Warning, not `parser.error`: wrapper scripts that always pass
+    `--enable-claude-search` must keep working. It goes to stderr rather than
+    through `logging` because the package logger carries a NullHandler and
+    `_configure_logging` has not run yet at this point in `main()`."""
+    rc = cli.main(
+        [
+            "--repo",
+            str(tmp_path),
+            "--artifacts-dir",
+            str(tmp_path / "artifacts"),
+            "--output-folder",
+            str(tmp_path / "output"),
+            "--no-deep-research",
+            "--enable-claude-search",
+            "--no-candidate-hotspots",
+            "--max-findings-per-module",
+            "5",
+            "--dry-run",
+        ]
+    )
+
+    assert rc == 0
+    err = capsys.readouterr().err
+    assert "--no-deep-research" in err
+    assert "--enable-claude-search" in err
+    assert "--no-candidate-hotspots" in err
+    assert "--max-findings-per-module" in err
+
+
+def test_no_warning_when_deep_research_enabled(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cli.main(
+        [
+            "--repo",
+            str(tmp_path),
+            "--artifacts-dir",
+            str(tmp_path / "artifacts"),
+            "--output-folder",
+            str(tmp_path / "output"),
+            "--enable-claude-search",
+            "--dry-run",
+        ]
+    )
+
+    assert capsys.readouterr().err == ""
+
+
+def test_no_deep_research_alone_does_not_warn(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cli.main(
+        [
+            "--repo",
+            str(tmp_path),
+            "--artifacts-dir",
+            str(tmp_path / "artifacts"),
+            "--output-folder",
+            str(tmp_path / "output"),
+            "--no-deep-research",
+            "--dry-run",
+        ]
+    )
+
+    assert capsys.readouterr().err == ""
+
+
 def test_main_preserves_summary_stdout_contract(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -156,7 +279,7 @@ def test_main_preserves_summary_stdout_contract(
         return _FakeResult()
 
     monkeypatch.setattr(cli, "run_with_telemetry", _fake_run)
-    monkeypatch.setattr(cli, "_print_summary", lambda result: print("summary"))
+    monkeypatch.setattr(cli, "_print_summary", lambda result, **_kw: print("summary"))
 
     rc = cli.main(
         [

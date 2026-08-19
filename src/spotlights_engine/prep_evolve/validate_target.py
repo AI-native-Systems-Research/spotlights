@@ -28,20 +28,88 @@ from spotlights_engine.utils.schema_compat import primary_file, primary_span
 # check is intentionally heuristic.
 _SYMBOL_WINDOW = 5
 
-# Splits a recorded symbol into its component identifiers. A `region`
-# candidate's symbol is a *compound* qualified name describing the multiple
-# symbols the region spans, e.g. "GatewayQueue.sloDeadline/dequeueFromBandSLODeadline"
-# names a receiver type plus two methods. The recorded string never appears
-# verbatim in source (Go writes `func (q *GatewayQueue) sloDeadline(...)`), so
-# the staleness check tokenizes on the structural separators ("." "/" "::" "#"
-# and whitespace) and confirms the components are present, rather than matching
-# the whole string.
+# Recorded symbols are rarely clean qualified names. Discovery labels region
+# candidates with prose annotations ("STRInference.do_predict (ROI extraction
+# and detection-reuse policy)", "AngleDetectorManager.__init__ self.detectors
+# registry", "region: DSIZE / RotatePadFitTransform / rotate_image"), and may
+# record a Python private method in its *mangled* form
+# ("Detector._Detector__combine_channels"), which never appears in source. The
+# recorded string therefore never matches verbatim; the gate matches
+# identifier-shaped tokens extracted from it, demangling private names.
+_IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+
+# Structural separators of a qualified name ("." "/" "#" "::" and whitespace),
+# used to split the symbol's leading qualified name into container components.
 _SYMBOL_SEPARATORS = re.compile(r"[./#\s]+|::")
 
+# A mangled private-attribute reference (`_ClassName__member`); source spells
+# it `__member`.
+_MANGLED = re.compile(r"_[A-Za-z][A-Za-z0-9_]*?(__[A-Za-z0-9_]+)")
 
-def _symbol_components(symbol: str) -> list[str]:
-    """Split a (possibly compound/qualified) symbol into component identifiers."""
-    return [part for part in _SYMBOL_SEPARATORS.split(symbol) if part]
+# Tokens too common in code or in annotation prose to serve as evidence that
+# the recorded range is the described code ("for" is a substring of every
+# loop). Closed-class words only, not an attempt to enumerate English:
+# annotation nouns ("policy", "loop") stay, they just rarely match anything.
+_GENERIC_TOKENS = frozenset(
+    {
+        "and",
+        "the",
+        "for",
+        "with",
+        "from",
+        "into",
+        "over",
+        "self",
+        "cls",
+        "not",
+        "all",
+        "any",
+        "per",
+        "via",
+        "non",
+        "new",
+        "old",
+    }
+)
+
+
+def _demangled_forms(token: str) -> tuple[str, ...]:
+    """The token itself plus, for a mangled private name, its in-source form."""
+    mangled = _MANGLED.fullmatch(token)
+    return (token, mangled.group(1)) if mangled else (token,)
+
+
+def _found(token: str, text: str) -> bool:
+    return any(form in text for form in _demangled_forms(token))
+
+
+def _evidence_tokens(symbol: str) -> list[str]:
+    """Identifier tokens of the symbol usable as evidence near the range.
+
+    Prefers specific tokens (length >= 3, not a generic word); falls back to
+    all identifier tokens when the filter would leave nothing to check.
+    """
+    tokens = _IDENTIFIER.findall(symbol)
+    specific = [t for t in tokens if len(t) >= 3 and t.lower() not in _GENERIC_TOKENS]
+    return specific or tokens
+
+
+def _container_tokens(symbol: str) -> list[str]:
+    """Container components of the symbol's leading qualified name.
+
+    For "AngleDetectorManager.__init__ self.detectors registry" the leading
+    whitespace-chunk is "AngleDetectorManager.__init__" and the containers are
+    ["AngleDetectorManager"]: a container (class/type) is expected somewhere in
+    the file — at its declaration — even when the recorded range covers only a
+    method body. Annotation text after the first whitespace never produces
+    containers, and non-identifier fragments (e.g. a "region:" prefix) are
+    dropped rather than required.
+    """
+    chunks = symbol.split()
+    if not chunks:
+        return []
+    parts = [p for p in _SYMBOL_SEPARATORS.split(chunks[0]) if p]
+    return [p for p in parts[:-1] if _IDENTIFIER.fullmatch(p)]
 
 
 @dataclass
@@ -105,34 +173,40 @@ def validate_candidate_target(
     excerpt = "\n".join(lines[start - 1 : end])
     digest = hashlib.sha256(excerpt.encode("utf-8")).hexdigest()
 
-    # Staleness heuristic: the recorded symbol should appear within the slice
-    # (plus a small window) so we don't wrap an EVOLVE-BLOCK around the wrong
-    # code.
+    # Staleness heuristic, two independent checks (see the token helpers
+    # above for why the symbol string is never matched verbatim):
+    #  1. at least one identifier token of the recorded symbol — annotation
+    #     words included, private names demangled — must appear within
+    #     `_SYMBOL_WINDOW` lines of the recorded range, so we don't wrap an
+    #     EVOLVE-BLOCK around the wrong code;
+    #  2. the containers of the leading qualified name (the class in
+    #     `Class.method`) must appear somewhere in the file — a container may
+    #     legitimately sit far above the range, but one that is gone entirely
+    #     means the file no longer holds the recorded symbol.
     win_start = max(0, start - 1 - _SYMBOL_WINDOW)
     win_end = min(n, end + _SYMBOL_WINDOW)
     window_text = "\n".join(lines[win_start:win_end])
-    # Tokenize the (possibly compound) symbol. A whole-string match would
-    # false-positive on `region` candidates whose symbol is a qualified name
-    # spanning several symbols (e.g. "Type.methodA/methodB"), which never
-    # appears verbatim. The recorded range covers the *leaf* symbol being
-    # evolved (a method/function body), so require the leaf near the range but
-    # allow container identifiers (a class/type name, which sits at its
-    # declaration far above the method) to appear anywhere in the file. A
-    # container that is truly gone still trips the gate.
-    components = _symbol_components(span.symbol) if span.symbol else []
-    missing: list[str] = []
-    if components:
-        *containers, leaf = components
-        file_text = "\n".join(lines)
-        if leaf not in window_text:
-            missing.append(leaf)
-        missing.extend(c for c in containers if c not in file_text)
-    if missing:
+    file_text = "\n".join(lines)
+    problems: list[str] = []
+    if span.symbol:
+        evidence = _evidence_tokens(span.symbol)
+        if evidence and not any(_found(t, window_text) for t in evidence):
+            problems.append(
+                f"no component of the symbol ({', '.join(evidence)}) appears "
+                f"within {_SYMBOL_WINDOW} lines of the range"
+            )
+        missing = [c for c in _container_tokens(span.symbol) if not _found(c, file_text)]
+        if missing:
+            problems.append(
+                f"container component(s) {', '.join(missing)} no longer "
+                f"appear anywhere in the file"
+            )
+    if problems:
         raise StalenessError(
             f"recorded symbol {span.symbol!r} not found near lines "
-            f"[{start}, {end}] of {cand_file} (missing component(s): "
-            f"{', '.join(missing)}). result.json is stale relative to the repo; "
-            f"re-run spotlights or correct the selected result."
+            f"[{start}, {end}] of {cand_file} ({'; '.join(problems)}). "
+            f"result.json is stale relative to the repo; re-run spotlights or "
+            f"correct the selected result."
         )
 
     return ValidatedCandidate(

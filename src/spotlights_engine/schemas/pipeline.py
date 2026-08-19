@@ -159,6 +159,10 @@ class SpotlightsManagerInput(BaseModel):
     max_findings_per_module: int = Field(default=30, ge=0)
     include_candidate_hotspots: bool = True
     enable_claude_search: bool = False
+    # False -> step 3 (module_deep_research) is not run for any module; the
+    # manager substitutes an empty ModuleDeepResearchOutput and step 4 takes
+    # its zero-findings short-circuit.
+    enable_deep_research: bool = True
     continue_on_module_failure: bool = True
 
 
