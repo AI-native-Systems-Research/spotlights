@@ -30,7 +30,11 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 from spotlights_engine.costing.usage import AgentUsage
-from spotlights_engine.one_shot_fix.claude_exec import FixRunResult, run_fix_claude
+from spotlights_engine.one_shot_fix.claude_exec import (
+    FixRunResult,
+    ensure_claude_available,
+    run_fix_claude,
+)
 from spotlights_engine.one_shot_fix.errors import OneShotFixError
 from spotlights_engine.one_shot_fix.notes import render_fix_notes
 from spotlights_engine.one_shot_fix.prompts import build_fix_prompt
@@ -108,6 +112,7 @@ class PromptPreview(BaseModel):
     candidate_id: str
     module_qualified_name: str
     worktree: str
+    worktree_parent: str
     base_sha: str
     prompt: str
 
@@ -229,11 +234,16 @@ def _write_artifacts(
             f"# module:    {sel.qn}\n"
             f"# repo:      {repo_path}\n"
             f"# base:      {base_sha}\n"
-            f"# apply with: git -C {repo_path} checkout {base_sha} && "
-            f"git -C {repo_path} apply {PATCH_NAME}\n"
+            f"# apply with (from the directory containing this patch):\n"
+            f"#   git -C {repo_path} checkout {base_sha}\n"
+            f'#   git -C {repo_path} apply "$PWD/{PATCH_NAME}"\n'
         )
         (out_dir / PATCH_NAME).write_text(header + patch, encoding="utf-8")
         files.append(PATCH_NAME)
+    else:
+        # A rerun that concludes no fix must not leave a previous session's
+        # patch behind — the notes below explicitly deny one exists.
+        (out_dir / PATCH_NAME).unlink(missing_ok=True)
 
     notes = render_fix_notes(
         spec=spec,
@@ -279,16 +289,18 @@ def _process_candidate(
         prompt = build_fix_prompt(spec=spec, worktree=worktree.path)
 
         if input.print_prompt:
-            keep_worktree = True
-            result.prompts.append(
-                PromptPreview(
-                    candidate_id=sel.candidate.id,
-                    module_qualified_name=sel.qn,
-                    worktree=str(worktree.path),
-                    base_sha=base_sha,
-                    prompt=prompt,
-                )
+            preview = PromptPreview(
+                candidate_id=sel.candidate.id,
+                module_qualified_name=sel.qn,
+                worktree=str(worktree.path),
+                worktree_parent=str(worktree.parent),
+                base_sha=base_sha,
+                prompt=prompt,
             )
+            result.prompts.append(preview)
+            # Only set once the handoff has actually succeeded, so a leaked
+            # worktree can never coexist with a swallowed exception.
+            keep_worktree = True
             return
 
         run = claude_runner(
@@ -303,8 +315,9 @@ def _process_candidate(
         if not keep_worktree:
             remove_worktree(worktree)
 
+    out_dir = _fix_dir(base, sel.qn, sel.candidate.id)
     files, patch_produced = _write_artifacts(
-        out_dir=_fix_dir(base, sel.qn, sel.candidate.id),
+        out_dir=out_dir,
         spec=spec,
         sel=sel,
         repo_path=repo_path,
@@ -317,7 +330,7 @@ def _process_candidate(
         FixArtifact(
             candidate_id=sel.candidate.id,
             module_qualified_name=sel.qn,
-            path=str(_fix_dir(base, sel.qn, sel.candidate.id)),
+            path=str(out_dir),
             files=files,
             patch_produced=patch_produced,
             base_sha=base_sha,
@@ -333,6 +346,19 @@ def one_shot_fix(
     claude_runner: ClaudeRunner | None = None,
 ) -> OneShotFixResult:
     """Turn one (or every) candidate into a patch plus its notes."""
+    if input.print_prompt and input.candidate is None:
+        raise SelectionError(
+            "--print-prompt requires --candidate: without one, a sweep would "
+            "leave one worktree per candidate registered in the target repo "
+            "with nothing to clean them up"
+        )
+
+    # Setup-time check, mirroring agent_proposals/proposal_from_finding_creator.
+    # Skipped for injected runners (every test) and --print-prompt (runs no
+    # agent) — neither needs the `claude` binary on PATH.
+    if claude_runner is None and not input.print_prompt:
+        ensure_claude_available()
+
     config = config or OneShotFixConfig()
     captured_at = config.captured_at or _now_iso()
     runner = claude_runner or run_fix_claude

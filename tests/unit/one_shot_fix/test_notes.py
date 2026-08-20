@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -94,24 +95,111 @@ def test_includes_the_apply_and_verify_recipe(spec_and_repo) -> None:
     spec, repo = spec_and_repo
     notes = _notes(spec_and_repo)
     assert f"git -C {repo} checkout {BASE_SHA}" in notes
-    assert f"git -C {repo} apply --check fix.patch" in notes
-    assert f"git -C {repo} apply fix.patch" in notes
+    assert f'git -C {repo} apply --check "$PWD/fix.patch"' in notes
+    assert f'git -C {repo} apply "$PWD/fix.patch"' in notes
     assert f"git -C {repo} apply -3" in notes
     assert "patch -p1 < fix.patch" in notes
     assert "repo root" in notes
+    # Prose anchoring $PWD to where fix.patch (and this file) actually live.
+    assert "directory containing" in notes
 
 
 def test_apply_recipe_is_not_location_dependent(spec_and_repo) -> None:
-    """Regression guard: every `git apply` invocation must carry `-C {repo}`.
+    """Regression guard against BOTH previously-shipped broken forms.
 
-    A bare `git apply --check fix.patch` (no `-C`) either fails with "not a
-    git repository" when run from wherever FIX-NOTES.md was saved, or —
-    worse — silently applies against whatever unrelated git repo happens to
-    contain that directory. See the finding this test encodes.
+    Form 1 (bare, no `-C`): `git apply --check fix.patch` either fails with
+    "not a git repository" when run from wherever FIX-NOTES.md was saved, or
+    — worse — silently applies against whatever unrelated git repo happens to
+    contain that directory.
+
+    Form 2 (`-C` but a bare patch path): `git -C {repo} apply --check
+    fix.patch` chdirs into `{repo}` first, so git then resolves the
+    *relative* `fix.patch` under `{repo}` — not under the artifact directory
+    where the file actually lives. Verified in a scratch repo: this fails
+    with "can't open patch 'fix.patch': No such file or directory" (exit
+    128) when run from the artifact directory. This was the state after the
+    first "fix" of this finding — neither form worked.
+
+    The correct form keeps `-C {repo}` for repo targeting and anchors the
+    patch path with `$PWD` so it resolves regardless of git's chdir.
     """
+    spec, repo = spec_and_repo
     notes = _notes(spec_and_repo)
     assert "git apply --check fix.patch" not in notes
     assert "git apply fix.patch" not in notes
+    assert f"git -C {repo} apply --check fix.patch" not in notes
+    assert f"git -C {repo} apply fix.patch" not in notes
+
+
+def test_the_emitted_apply_recipe_actually_applies_from_the_artifact_directory(
+    spec_and_repo, tmp_path: Path
+) -> None:
+    """Prove the recipe works: execute the emitted lines against a real repo.
+
+    A recipe nobody executed is how this bug survived two review rounds. This
+    builds an independent target repo, produces a real patch against it,
+    lands the patch in a separate artifact directory (never the repo itself),
+    extracts the `git -C ... checkout` / `git -C ... apply` lines verbatim
+    from the rendered notes, and runs them via `subprocess` with the artifact
+    directory as cwd — exactly how a human would follow the recipe.
+    """
+    spec, _unused_repo = spec_and_repo
+
+    target_repo = tmp_path / "target-repo"
+    target_repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=target_repo, check=True)
+    tracked = target_repo / "f.txt"
+    tracked.write_text("line1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=target_repo, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t.t", "-c", "user.name=t", "commit", "-qm", "init"],
+        cwd=target_repo,
+        check=True,
+    )
+    base_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=target_repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+
+    tracked.write_text("line1\nline2\n", encoding="utf-8")
+    patch_text = subprocess.run(
+        ["git", "diff"], cwd=target_repo, capture_output=True, text=True, check=True
+    ).stdout
+    subprocess.run(["git", "checkout", "-q", "--", "f.txt"], cwd=target_repo, check=True)
+    assert tracked.read_text(encoding="utf-8") == "line1\n"
+
+    notes = render_fix_notes(
+        spec=spec,
+        candidate_id=CAND_ID,
+        module_qn="v1/attention",
+        base_sha=base_sha,
+        repo=target_repo,
+        change_summary="did the thing",
+        patch_produced=True,
+        agent_error=None,
+    )
+
+    artifact_dir = tmp_path / "artifact"
+    artifact_dir.mkdir()
+    (artifact_dir / "fix.patch").write_text(patch_text, encoding="utf-8")
+
+    bash_block = notes.split("```bash\n", 1)[1].split("```", 1)[0]
+    apply_lines = [
+        ln for ln in bash_block.splitlines() if ln.startswith("git -C")
+    ]
+    assert len(apply_lines) == 2  # the checkout line + the check-and-apply line
+    script = "\n".join(apply_lines)
+
+    completed = subprocess.run(
+        ["bash", "-c", script],
+        cwd=artifact_dir,
+        capture_output=True,
+        text=True,
+    )
+    assert completed.returncode == 0, (
+        f"emitted apply recipe failed:\nSCRIPT:\n{script}\n"
+        f"STDOUT:\n{completed.stdout}\nSTDERR:\n{completed.stderr}"
+    )
+    assert tracked.read_text(encoding="utf-8") == "line1\nline2\n"
 
 
 def test_includes_findings_with_urls(spec_and_repo) -> None:

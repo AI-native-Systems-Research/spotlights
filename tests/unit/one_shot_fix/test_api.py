@@ -2,18 +2,20 @@
 
 from __future__ import annotations
 
+import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from spotlights_engine.agent_proposals.errors import AgentProposalsSetupError
 from spotlights_engine.one_shot_fix.api import (
     OneShotFixInput,
     one_shot_fix,
 )
 from spotlights_engine.one_shot_fix.claude_exec import FixRunResult
 from spotlights_engine.one_shot_fix.errors import NotAGitRepoError
-from spotlights_engine.prep_evolve.errors import StalenessError
+from spotlights_engine.prep_evolve.errors import SelectionError, StalenessError
 from tests.unit.prep_evolve._fixtures import (
     CAND_FILE,
     make_repo,
@@ -23,6 +25,16 @@ from tests.unit.prep_evolve._fixtures import (
 )
 
 CAND_ID = "cand-v1_attention-0002"
+
+
+def _git_only_path(tmp_path: Path) -> str:
+    """A PATH containing only a `git` shim — no `claude`, however the real PATH is set up."""
+    bin_dir = tmp_path / "git-only-bin"
+    bin_dir.mkdir()
+    git_real = shutil.which("git")
+    assert git_real is not None
+    (bin_dir / "git").symlink_to(git_real)
+    return str(bin_dir)
 
 
 def _worktrees(repo: Path) -> list[str]:
@@ -196,6 +208,26 @@ def test_no_edit_produces_notes_but_no_patch(run) -> None:
     assert not (Path(fix.path) / "fix.patch").exists()
 
 
+def test_a_rerun_that_produces_no_patch_removes_the_stale_patch(run) -> None:
+    """A previous session's fix.patch must not survive a rerun that concludes no fix."""
+    run_dir, repo = run
+    first = one_shot_fix(
+        OneShotFixInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+        claude_runner=_runner(),
+    )
+    out_dir = Path(first.fixes[0].path)
+    assert (out_dir / "fix.patch").exists()
+
+    second = one_shot_fix(
+        OneShotFixInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+        claude_runner=_runner(edit=None, summary="cannot be done within scope"),
+    )
+    fix = second.fixes[0]
+    assert fix.patch_produced is False
+    assert fix.files == ["FIX-NOTES.md"]
+    assert not (out_dir / "fix.patch").exists()
+
+
 def test_non_git_repo_raises(tmp_path: Path) -> None:
     run_dir = tmp_path / "spotlights-out"
     run_dir.mkdir()
@@ -233,11 +265,67 @@ def test_print_prompt_leaves_the_worktree_and_runs_no_agent(run) -> None:
     assert (worktree / CAND_FILE).is_file()
     assert CAND_FILE in preview.prompt
     assert len(_worktrees(repo)) == 2  # main tree + the one left for the caller
+    assert Path(preview.worktree_parent) == worktree.parent
 
     # Not our job to clean up under --print-prompt, but don't leak in the test.
     subprocess.run(
         ["git", "worktree", "remove", "--force", str(worktree)], cwd=repo, check=True
     )
+
+
+def test_print_prompt_without_a_candidate_raises_and_leaves_no_worktree(run) -> None:
+    """A sweep under --print-prompt would leave one worktree per candidate; refuse it."""
+    run_dir, repo = run
+    before = _worktrees(repo)
+
+    with pytest.raises(SelectionError):
+        one_shot_fix(
+            OneShotFixInput(result=run_dir, repo=str(repo), print_prompt=True),
+            claude_runner=_runner(),
+        )
+
+    assert _worktrees(repo) == before
+
+
+def test_missing_claude_binary_raises_before_the_loop_with_the_real_runner(
+    run, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    run_dir, repo = run
+    monkeypatch.setenv("PATH", _git_only_path(tmp_path))
+    with pytest.raises(AgentProposalsSetupError):
+        one_shot_fix(OneShotFixInput(result=run_dir, repo=str(repo), candidate=CAND_ID))
+
+
+def test_print_prompt_does_not_require_claude_on_path(
+    run, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    run_dir, repo = run
+    monkeypatch.setenv("PATH", _git_only_path(tmp_path))
+
+    result = one_shot_fix(
+        OneShotFixInput(result=run_dir, repo=str(repo), candidate=CAND_ID, print_prompt=True)
+    )
+
+    assert len(result.prompts) == 1
+    subprocess.run(
+        ["git", "worktree", "remove", "--force", result.prompts[0].worktree],
+        cwd=repo,
+        check=True,
+    )
+
+
+def test_injected_runner_does_not_require_claude_on_path(
+    run, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    run_dir, repo = run
+    monkeypatch.setenv("PATH", _git_only_path(tmp_path))
+
+    result = one_shot_fix(
+        OneShotFixInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+        claude_runner=_runner(),
+    )
+
+    assert len(result.fixes) == 1
 
 
 def test_top_n_over_a_ranking_selects_the_ranked_prefix(run) -> None:
