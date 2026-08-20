@@ -11,14 +11,32 @@ See `docs/superpowers/specs/2026-08-20-one-shot-claude-code-fix-design.md`.
 
 from __future__ import annotations
 
+from spotlights_engine.one_shot_fix.api import (
+    FixArtifact,
+    OneShotFixConfig,
+    OneShotFixInput,
+    OneShotFixResult,
+    PromptPreview,
+    SkippedFix,
+    one_shot_fix,
+)
 from spotlights_engine.one_shot_fix.errors import (
     NotAGitRepoError,
     OneShotFixError,
     WorktreeError,
 )
+from spotlights_engine.one_shot_fix.prompts import build_fix_prompt
 
 __all__ = [
+    "FixArtifact",
     "NotAGitRepoError",
+    "OneShotFixConfig",
     "OneShotFixError",
+    "OneShotFixInput",
+    "OneShotFixResult",
+    "PromptPreview",
+    "SkippedFix",
     "WorktreeError",
+    "build_fix_prompt",
+    "one_shot_fix",
 ]
