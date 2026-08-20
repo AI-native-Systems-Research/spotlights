@@ -21,6 +21,7 @@ from spotlights_engine.one_shot_fix.api import (
     one_shot_fix,
 )
 from spotlights_engine.one_shot_fix.errors import (
+    ClaudeUnavailableError,
     NotAGitRepoError,
     OneShotFixError,
     WorktreeError,
@@ -28,6 +29,7 @@ from spotlights_engine.one_shot_fix.errors import (
 from spotlights_engine.one_shot_fix.prompts import build_fix_prompt
 
 __all__ = [
+    "ClaudeUnavailableError",
     "FixArtifact",
     "NotAGitRepoError",
     "OneShotFixConfig",

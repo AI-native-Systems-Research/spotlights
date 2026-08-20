@@ -29,13 +29,14 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from spotlights_engine.agent_proposals.errors import AgentProposalsSetupError
 from spotlights_engine.costing.usage import AgentUsage
 from spotlights_engine.one_shot_fix.claude_exec import (
     FixRunResult,
     ensure_claude_available,
     run_fix_claude,
 )
-from spotlights_engine.one_shot_fix.errors import OneShotFixError
+from spotlights_engine.one_shot_fix.errors import ClaudeUnavailableError, OneShotFixError
 from spotlights_engine.one_shot_fix.notes import render_fix_notes
 from spotlights_engine.one_shot_fix.prompts import build_fix_prompt
 from spotlights_engine.one_shot_fix.worktree import (
@@ -353,12 +354,6 @@ def one_shot_fix(
             "with nothing to clean them up"
         )
 
-    # Setup-time check, mirroring agent_proposals/proposal_from_finding_creator.
-    # Skipped for injected runners (every test) and --print-prompt (runs no
-    # agent) — neither needs the `claude` binary on PATH.
-    if claude_runner is None and not input.print_prompt:
-        ensure_claude_available()
-
     config = config or OneShotFixConfig()
     captured_at = config.captured_at or _now_iso()
     runner = claude_runner or run_fix_claude
@@ -372,6 +367,18 @@ def one_shot_fix(
     repo_path = resolve_repo_path(input.repo, input.index or location.index)
     ensure_repo_dir(repo_path)
     base_sha = require_git_repo(repo_path)
+
+    # Setup-time check, mirroring agent_proposals/proposal_from_finding_creator.
+    # Skipped for injected runners (every test) and --print-prompt (runs no
+    # agent) — neither needs the `claude` binary on PATH. Runs after the
+    # cheaper, more fundamental checks above (result location, repo dir,
+    # git-ness) so those errors are never masked by this one — but still
+    # before any worktree is created.
+    if claude_runner is None and not input.print_prompt:
+        try:
+            ensure_claude_available()
+        except AgentProposalsSetupError as exc:
+            raise ClaudeUnavailableError(str(exc)) from exc
 
     base = input.out or location.run_dir
 

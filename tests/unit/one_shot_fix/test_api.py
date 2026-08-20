@@ -8,13 +8,16 @@ from pathlib import Path
 
 import pytest
 
-from spotlights_engine.agent_proposals.errors import AgentProposalsSetupError
 from spotlights_engine.one_shot_fix.api import (
     OneShotFixInput,
     one_shot_fix,
 )
 from spotlights_engine.one_shot_fix.claude_exec import FixRunResult
-from spotlights_engine.one_shot_fix.errors import NotAGitRepoError
+from spotlights_engine.one_shot_fix.errors import (
+    ClaudeUnavailableError,
+    NotAGitRepoError,
+    OneShotFixError,
+)
 from spotlights_engine.prep_evolve.errors import SelectionError, StalenessError
 from tests.unit.prep_evolve._fixtures import (
     CAND_FILE,
@@ -90,9 +93,20 @@ def test_single_candidate_writes_patch_and_notes(run) -> None:
     out_dir = Path(fix.path)
     assert out_dir == run_dir / "fix" / "v1_attention" / CAND_ID
     assert sorted(fix.files) == ["FIX-NOTES.md", "fix.patch"]
-    assert "# agent edit" in (out_dir / "fix.patch").read_text(encoding="utf-8")
+    patch_text = (out_dir / "fix.patch").read_text(encoding="utf-8")
+    assert "# agent edit" in patch_text
     assert "did the thing" in (out_dir / "FIX-NOTES.md").read_text(encoding="utf-8")
     assert fix.patch_produced is True
+
+    # The header's apply recipe must use the $PWD-anchored patch path, not one
+    # of the two broken forms that regressed twice (bare `git apply fix.patch`,
+    # or `git -C {repo} apply fix.patch` with a relative, cwd-dependent path).
+    # `repo_path` in the header is resolve()d by resolve_repo_path, so compare
+    # against the resolved form here too.
+    repo_resolved = repo.resolve()
+    assert f'git -C {repo_resolved} apply "$PWD/fix.patch"' in patch_text
+    assert "git apply fix.patch" not in patch_text
+    assert f"git -C {repo_resolved} apply fix.patch" not in patch_text
 
 
 def test_added_file_appears_in_the_patch(run) -> None:
@@ -271,6 +285,10 @@ def test_print_prompt_leaves_the_worktree_and_runs_no_agent(run) -> None:
     subprocess.run(
         ["git", "worktree", "remove", "--force", str(worktree)], cwd=repo, check=True
     )
+    # `worktree_parent` exists precisely so a --print-prompt consumer can clean
+    # up the temp scaffolding; use it here too, or the test leaks an empty
+    # spotlights-fix-XXXXXXXX/ under the system temp dir on every run.
+    shutil.rmtree(preview.worktree_parent, ignore_errors=True)
 
 
 def test_print_prompt_without_a_candidate_raises_and_leaves_no_worktree(run) -> None:
@@ -292,7 +310,38 @@ def test_missing_claude_binary_raises_before_the_loop_with_the_real_runner(
 ) -> None:
     run_dir, repo = run
     monkeypatch.setenv("PATH", _git_only_path(tmp_path))
-    with pytest.raises(AgentProposalsSetupError):
+    with pytest.raises(ClaudeUnavailableError):
+        one_shot_fix(OneShotFixInput(result=run_dir, repo=str(repo), candidate=CAND_ID))
+
+    # This is the property the (not-yet-written) CLI depends on: it catches
+    # `(PrepEvolveError, OneShotFixError)` once and maps both to a clean
+    # stderr message. A bare RuntimeError subclass (AgentProposalsSetupError)
+    # would slip past that catch and surface as a traceback.
+    try:
+        one_shot_fix(OneShotFixInput(result=run_dir, repo=str(repo), candidate=CAND_ID))
+    except OneShotFixError:
+        pass
+    else:
+        pytest.fail("expected a OneShotFixError to be raised")
+
+
+def test_missing_claude_is_masked_by_a_non_git_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The git check is cheaper and more fundamental; it must win.
+
+    Task 7's planned CLI test asserts a non-git repo yields exit 2 with "git"
+    in stderr, and passes no fake runner — so on any machine or CI runner
+    lacking `claude`, the claude preflight must not fire before the git
+    check, or that test would fail on the wrong error.
+    """
+    run_dir = tmp_path / "spotlights-out"
+    run_dir.mkdir()
+    write_result(run_dir)
+    repo = make_repo(tmp_path, git=False)
+    monkeypatch.setenv("PATH", _git_only_path(tmp_path))
+
+    with pytest.raises(NotAGitRepoError):
         one_shot_fix(OneShotFixInput(result=run_dir, repo=str(repo), candidate=CAND_ID))
 
 
@@ -312,6 +361,7 @@ def test_print_prompt_does_not_require_claude_on_path(
         cwd=repo,
         check=True,
     )
+    shutil.rmtree(result.prompts[0].worktree_parent, ignore_errors=True)
 
 
 def test_injected_runner_does_not_require_claude_on_path(
