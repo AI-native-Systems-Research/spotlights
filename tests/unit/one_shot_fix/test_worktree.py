@@ -112,3 +112,63 @@ def test_collect_patch_is_empty_when_nothing_changed(tmp_path: Path) -> None:
         remove_worktree(wt)
     assert patch == ""
     assert summary is None
+
+
+def test_remove_worktree_never_raises_even_when_git_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`remove_worktree`'s docstring promises it never raises.
+
+    `_run_git`'s `try/except` re-raises `OSError`/`SubprocessError` (including
+    a timeout) as `WorktreeError` regardless of `check=False` — `check` only
+    guards the return-code check, not the exception boundary. So if the
+    underlying git call blows up (e.g. it times out), `remove_worktree` must
+    still swallow it: it runs in a `finally`, so letting the exception through
+    would mask whatever error triggered the cleanup in the first place.
+
+    We monkeypatch `_run_git` itself to always raise `WorktreeError`, rather
+    than forcing a real timeout or corrupting the worktree path on disk: it
+    exercises the exact boundary the finding describes (a `WorktreeError`
+    escaping the git call inside `remove_worktree`) deterministically and
+    without a 120s wait or brittle filesystem tricks.
+    """
+    import spotlights_engine.one_shot_fix.worktree as worktree_mod
+
+    repo = make_repo(tmp_path)
+    wt = create_worktree(repo, require_git_repo(repo))
+
+    def _always_raise(*args: object, **kwargs: object) -> None:
+        raise worktree_mod.WorktreeError("simulated git failure")
+
+    monkeypatch.setattr(worktree_mod, "_run_git", _always_raise)
+
+    remove_worktree(wt)  # must not raise, despite every _run_git call failing
+
+    # Cleanup didn't happen via monkeypatched git calls, but rmtree still runs.
+    assert not wt.parent.exists()
+
+
+def test_collect_patch_survives_non_utf8_bytes_in_a_diff(tmp_path: Path) -> None:
+    """Non-UTF8 bytes in an edited file must not crash `collect_patch`.
+
+    `_run_git` decodes `git diff`'s output with `text=True` and strict
+    decoding by default. If the agent's edit introduces bytes invalid under
+    the locale's encoding, `git diff` still emits them verbatim on stdout, and
+    strict decoding raises `UnicodeDecodeError` (a `ValueError`, not caught by
+    `_run_git`'s `except (OSError, subprocess.SubprocessError)`), so it
+    propagates out of `collect_patch` unwrapped. The patch should still be
+    collected — degraded but present — rather than lost entirely.
+    """
+    repo = make_repo(tmp_path)
+    wt = create_worktree(repo, require_git_repo(repo))
+    try:
+        target = wt.path / CAND_FILE
+        # Append invalid UTF-8 bytes (no NUL byte, so git still treats the
+        # file as text and includes the raw bytes in the diff rather than
+        # reporting it as binary).
+        target.write_bytes(target.read_bytes() + b"\n# bad bytes: \xff\xfe end\n")
+        patch, _ = collect_patch(wt)  # must not raise UnicodeDecodeError
+    finally:
+        remove_worktree(wt)
+    assert CAND_FILE in patch
+    assert "bad bytes" in patch

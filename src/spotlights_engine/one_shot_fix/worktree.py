@@ -46,6 +46,7 @@ def _run_git(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedP
             cwd=cwd,
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=_GIT_TIMEOUT_S,
             check=False,
         )
@@ -99,9 +100,21 @@ def remove_worktree(wt: Worktree) -> None:
     This runs in a `finally`, including after a timeout or a crash. Without the
     prune, a failed run leaves a stale entry in `.git/worktrees` — and a sweep
     over N candidates leaves N of them.
+
+    `check=False` only suppresses `_run_git`'s return-code check; it does not
+    stop `_run_git` from raising `WorktreeError` when the underlying
+    `subprocess.run` itself blows up (`OSError`, or a `SubprocessError` such as
+    a timeout). Each git call is therefore wrapped individually so no such
+    exception escapes this function.
     """
-    _run_git(wt.repo, "worktree", "remove", "--force", str(wt.path), check=False)
-    _run_git(wt.repo, "worktree", "prune", check=False)
+    try:
+        _run_git(wt.repo, "worktree", "remove", "--force", str(wt.path), check=False)
+    except WorktreeError:
+        pass
+    try:
+        _run_git(wt.repo, "worktree", "prune", check=False)
+    except WorktreeError:
+        pass
     shutil.rmtree(wt.parent, ignore_errors=True)
 
 
