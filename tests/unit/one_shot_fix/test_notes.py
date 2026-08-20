@@ -94,9 +94,24 @@ def test_includes_the_apply_and_verify_recipe(spec_and_repo) -> None:
     spec, repo = spec_and_repo
     notes = _notes(spec_and_repo)
     assert f"git -C {repo} checkout {BASE_SHA}" in notes
-    assert "git apply --check fix.patch" in notes
-    assert "git apply -3" in notes
+    assert f"git -C {repo} apply --check fix.patch" in notes
+    assert f"git -C {repo} apply fix.patch" in notes
+    assert f"git -C {repo} apply -3" in notes
     assert "patch -p1 < fix.patch" in notes
+    assert "repo root" in notes
+
+
+def test_apply_recipe_is_not_location_dependent(spec_and_repo) -> None:
+    """Regression guard: every `git apply` invocation must carry `-C {repo}`.
+
+    A bare `git apply --check fix.patch` (no `-C`) either fails with "not a
+    git repository" when run from wherever FIX-NOTES.md was saved, or —
+    worse — silently applies against whatever unrelated git repo happens to
+    contain that directory. See the finding this test encodes.
+    """
+    notes = _notes(spec_and_repo)
+    assert "git apply --check fix.patch" not in notes
+    assert "git apply fix.patch" not in notes
 
 
 def test_includes_findings_with_urls(spec_and_repo) -> None:

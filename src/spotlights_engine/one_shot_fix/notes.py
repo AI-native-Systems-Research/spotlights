@@ -93,14 +93,15 @@ def _outcome_section(
 
 ```bash
 git -C {repo} checkout {base_sha}
-git apply --check fix.patch && git apply fix.patch
+git -C {repo} apply --check fix.patch && git -C {repo} apply fix.patch
 
 # the recorded correctness oracle — run it on a machine that can:
 {oracle_cmd}
 ```
 
-If the patch does not apply cleanly, `git apply -3 fix.patch` falls back to a
-three-way merge. Without git, `patch -p1 < fix.patch` works from the repo root.
+If the patch does not apply cleanly, `git -C {repo} apply -3 fix.patch` falls
+back to a three-way merge. Without git, `patch -p1 < fix.patch` works from the
+repo root.
 """
 
 
