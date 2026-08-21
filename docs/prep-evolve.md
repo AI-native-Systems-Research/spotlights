@@ -4,6 +4,15 @@ Spotlights decides *what* to optimize; **evolvers** (evolutionary code-search ba
 
 ← Back to [README](../README.md)
 
+> [!TIP]
+> **Not every candidate needs a search.** Every bundle below ships with a
+> deliberately unfinished evaluator (the "evaluation gap"), and completing it is
+> project-specific work. When a candidate warrants *one attempt* rather than an
+> evolutionary search, [`spotlights-engine fix`](one-shot-fix.md) is the cheap
+> arm: one Claude Code session in a throwaway worktree produces `fix.patch` plus
+> the recorded verification recipe — a proposal faithfully implemented, with no
+> fitness loop. Use an evolver when you need a *measured* win.
+
 | Evolver (`--evolver`) | Edit scope | Native config | Run command |
 |---|---|---|---|
 | [`skydiscover`](https://github.com/skydiscover-ai/skydiscover) | single file (mutates the `# EVOLVE-BLOCK-START/END` region) | `config.yaml` + `seed.<ext>` (you write `evaluator.py`) | `skydiscover-run seed.<ext> evaluator.py -c config.yaml` |

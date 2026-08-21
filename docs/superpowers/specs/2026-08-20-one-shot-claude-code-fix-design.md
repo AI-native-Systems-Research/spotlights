@@ -215,16 +215,21 @@ commit**, in-scope files with line ranges, what changed and why, findings used
 with URLs, **the oracles verbatim** (correctness commands and performance
 metrics), an explicit statement that nothing was verified here, and:
 
+Run this from the directory containing `fix.patch` — `-C <repo>` chdirs before
+resolving the patch path, so a bare relative `fix.patch` would resolve under
+`<repo>` instead:
+
 ```bash
 git -C <repo> checkout <base-sha>
-git -C <repo> apply --check fix.patch && git -C <repo> apply fix.patch
+git -C <repo> apply --check "$PWD/fix.patch" && git -C <repo> apply "$PWD/fix.patch"
 pytest tests/v1/worker/test_gpu_model_runner.py   # ← the recorded oracle
 ```
 
-`git apply -3` falls back to a three-way merge if the patch does not apply
-cleanly; `patch -p1 < fix.patch` works without git. Recording the base commit is
-load-bearing: `git diff` embeds no base, and applied to the wrong commit a patch
-either fails or misapplies.
+`git -C <repo> apply -3 "$PWD/fix.patch"` falls back to a three-way merge if
+the patch does not apply cleanly; `patch -p1 < fix.patch` works without git,
+run from the repo root. Recording the base commit is load-bearing: `git diff`
+embeds no base, and applied to the wrong commit a patch either fails or
+misapplies.
 
 ## Tests
 
