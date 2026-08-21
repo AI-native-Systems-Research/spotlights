@@ -70,8 +70,14 @@ def test_non_positive_max_turns_or_wallclock_exits_2(
             value,
         ]
     )
+    err = capsys.readouterr().err
     assert code == 2
-    assert "fix:" in capsys.readouterr().err
+    assert "fix:" in err
+    # The message must name the CLI flag the user actually typed, not the
+    # pydantic model field (e.g. "wallclock_s") or its multi-line dump.
+    assert flag in err
+    assert "https://errors.pydantic.dev" not in err
+    assert err.strip().count("\n") == 0
 
 
 def test_non_git_repo_exits_2(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:

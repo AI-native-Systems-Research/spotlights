@@ -126,6 +126,31 @@ def _parse_top_n(raw: str) -> int | None:
     return n
 
 
+# Maps `OneShotFixInput` field names to the CLI flag that sets them, so a
+# pydantic validation error can name what the user actually typed instead of
+# the model's internal field name.
+_FIELD_TO_FLAG = {
+    "wallclock_s": "--wallclock",
+    "max_turns": "--max-turns",
+    "top_n": "--top-n",
+}
+
+
+def _format_validation_error(exc: ValidationError) -> str:
+    """One `fix: --flag: <constraint>, got <value>` line per pydantic error.
+
+    Deliberately drops pydantic's multi-line dump and its
+    `https://errors.pydantic.dev/...` URL, and swaps the model field name
+    (e.g. `wallclock_s`) for the CLI flag the user typed (`--wallclock`).
+    """
+    lines = []
+    for err in exc.errors():
+        field = str(err["loc"][0]) if err["loc"] else "arguments"
+        flag = _FIELD_TO_FLAG.get(field, f"--{field.replace('_', '-')}")
+        lines.append(f"fix: {flag}: {err['msg']}, got {err.get('input')!r}")
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _build_argparser().parse_args(argv)
 
@@ -154,7 +179,7 @@ def main(argv: list[str] | None = None) -> int:
             print_prompt=args.print_prompt,
         )
     except ValidationError as exc:
-        print(f"fix: invalid arguments: {exc}", file=sys.stderr)
+        print(_format_validation_error(exc), file=sys.stderr)
         return 2
 
     try:

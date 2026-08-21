@@ -57,7 +57,7 @@ prevent.
    MODULE:    <qn>
    BASE:      <sha>
    WORKTREE:  <path>
-   WORKTREE_PARENT: <path>
+   WORKTREE_PARENT:  <path>
    PROMPT:
    <the prompt body>
    ```
@@ -78,17 +78,41 @@ prevent.
    there; never touch the user's own checkout of the repo, which may be dirty
    mid-work and is none of your business.
 
-4. **Collect the artifacts.** From the worktree:
+4. **Collect the artifacts.** `fix.patch` must carry a header naming the
+   candidate, module, repo, and base commit — a bare `git diff` embeds none of
+   that, and a patch that travels on its own without its base commit either
+   fails to apply or misapplies silently. Write the header first, then append
+   the diff, from the worktree:
 
    ```bash
    cd "<WORKTREE>"
    git add -N .                 # REQUIRED: without it, files you ADDED vanish from the diff
-   git diff > "<run-dir>/fix/<module-slug>/<cand-id>/fix.patch"
+   mkdir -p "<run-dir>/fix/<module-slug>/<cand-id>"
+   cat > "<run-dir>/fix/<module-slug>/<cand-id>/fix.patch" <<'HEADER'
+   # spotlights one-shot fix
+   # candidate: <cand-id>
+   # module:    <qn>
+   # repo:      <repo>
+   # base:      <BASE>
+   # apply with (from the directory containing this patch):
+   #   git -C <repo> checkout <BASE>
+   #   git -C <repo> apply "$PWD/fix.patch"
+   HEADER
+   git diff >> "<run-dir>/fix/<module-slug>/<cand-id>/fix.patch"
    ```
 
-   Create the output directory first. `<module-slug>` is the module's slash-form
-   qualified name with `/` replaced by `_` (e.g. `v1/attention` → `v1_attention`).
-   Then write `FIX-NOTES.md` beside the patch containing:
+   Use the quoted `<<'HEADER'` heredoc exactly as shown — quoting the
+   delimiter stops the shell from expanding `$PWD` while writing the header,
+   so the literal text `"$PWD/fix.patch"` lands in the file. Fill in `<qn>`
+   with the module's slash-form qualified name from `MODULE:` (not the slug),
+   and `<repo>` / `<BASE>` from the same printed block. This is the exact
+   header `spotlights-engine fix` itself writes, field for field, so both
+   paths produce the same artifact.
+
+   `<module-slug>` is the module's slash-form qualified name with every
+   character outside `[A-Za-z0-9._-]` (including `/`) replaced by `_` (e.g.
+   `v1/attention` → `v1_attention`). Then write `FIX-NOTES.md` beside the
+   patch containing:
 
    - candidate id, module, objective, and the **base commit** from `BASE:`
    - the in-scope files with their line ranges
