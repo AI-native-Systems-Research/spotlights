@@ -12,6 +12,7 @@ The notes never claim a result. Nothing was executed here (see the design's
 
 from __future__ import annotations
 
+import posixpath
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -60,8 +61,32 @@ def _oracle_lines(target: Target) -> str:
     return "\n".join(lines)
 
 
+def _normalize_scope_path(path: str) -> str:
+    """Canonicalize a repo-relative path for scope comparison.
+
+    `validate_target.py` only checks containment and existence, so a declared
+    target spelled `./pkg/attn/tile.py` or `pkg/attn/../attn/tile.py`
+    validates and is stored verbatim — while git always emits the canonical
+    POSIX relative path in the diff. Without normalizing both sides, such a
+    target falsely reports **OUT OF SCOPE** against the candidate's own file
+    (over-reporting only, never under — but a callout that cries wolf is one
+    reviewers learn to skip). Backslashes are normalized too, in case a
+    target was recorded with Windows-style separators.
+    """
+    return posixpath.normpath(path.replace("\\", "/"))
+
+
+def _escape_pipe(text: str) -> str:
+    """Escape `|` so a path containing one can't break a GFM table row.
+
+    Backticks (used to set the path in code font) do not escape pipes in GFM
+    tables; an un-escaped `|` renders as extra columns.
+    """
+    return text.replace("|", "\\|")
+
+
 def _declared_scope(spec: EvolveSpec) -> set[str]:
-    return {t.file for t in spec.targets}
+    return {_normalize_scope_path(t.file) for t in spec.targets}
 
 
 def out_of_scope_files(spec: EvolveSpec, manifest: Sequence[FileChange]) -> list[str]:
@@ -72,13 +97,19 @@ def out_of_scope_files(spec: EvolveSpec, manifest: Sequence[FileChange]) -> list
     between the notes renderer and the CLI so the two never compute it twice.
     """
     declared = _declared_scope(spec)
-    return [c.path for c in manifest if c.path not in declared]
+    return [c.path for c in manifest if _normalize_scope_path(c.path) not in declared]
 
 
 def _change_row(change: FileChange, declared: set[str]) -> str:
     path = f"{change.old_path} → {change.path}" if change.old_path else change.path
-    lines = "binary" if change.binary else f"+{change.insertions}/-{change.deletions}"
-    scope = "in scope" if change.path in declared else "**OUT OF SCOPE**"
+    path = _escape_pipe(path)
+    if change.binary:
+        lines = "binary"
+    elif not change.counts_known:
+        lines = "?"
+    else:
+        lines = f"+{change.insertions}/-{change.deletions}"
+    scope = "in scope" if _normalize_scope_path(change.path) in declared else "**OUT OF SCOPE**"
     return f"| `{path}` | {change.change_kind} | {lines} | {scope} |"
 
 
@@ -92,19 +123,46 @@ def _manifest_section(
     difference between them is exactly what a reviewer needs to catch before
     applying a patch they cannot otherwise see without applying it.
     """
-    if not patch_produced or not manifest:
+    if not patch_produced:
         return (
             "## Files changed\n\n"
             "_(no patch was produced — there is no diff for this section to describe)_\n"
+        )
+
+    if not manifest:
+        # A non-empty patch with an empty manifest means manifest collection
+        # itself degraded (see `worktree.collect_patch`'s exception handling)
+        # — not that nothing changed. Saying "no patch was produced" here
+        # would be a second false claim layered on the first; say plainly
+        # that the breakdown is unavailable and point at the real diff.
+        return (
+            "## Files changed\n\n"
+            "_(a patch was produced, but the per-file breakdown could not be "
+            "collected — see `fix.patch` directly for what changed)_\n"
         )
 
     declared = _declared_scope(spec)
     out_of_scope = out_of_scope_files(spec, manifest)
     rows = "\n".join(_change_row(c, declared) for c in manifest)
     total_files = len(manifest)
-    total_ins = sum(c.insertions or 0 for c in manifest)
-    total_del = sum(c.deletions or 0 for c in manifest)
+    unknown = [c for c in manifest if not c.counts_known]
+    known_text = [c for c in manifest if c.counts_known and not c.binary]
+    total_ins = sum(c.insertions or 0 for c in known_text)
+    total_del = sum(c.deletions or 0 for c in known_text)
     plural = "s" if total_files != 1 else ""
+
+    if unknown:
+        # Never print a totals number that silently excludes files whose
+        # counts are unknown — that understates the real change. Say so
+        # explicitly instead of a clean-looking (but false) "+X/-Y".
+        unknown_plural = "s" if len(unknown) != 1 else ""
+        totals_line = (
+            f"**Totals:** {total_files} file{plural} changed. Line counts "
+            f"unavailable for {len(unknown)} file{unknown_plural}; known "
+            f"subset: +{total_ins}/-{total_del}."
+        )
+    else:
+        totals_line = f"**Totals:** {total_files} file{plural} changed, +{total_ins}/-{total_del}."
 
     section = f"""## Files changed
 
@@ -116,7 +174,7 @@ is exactly what a reviewer needs to see before applying this patch.
 | --- | --- | --- | --- |
 {rows}
 
-**Totals:** {total_files} file{plural} changed, +{total_ins}/-{total_del}.
+{totals_line}
 """
     if out_of_scope:
         listed = ", ".join(f"`{p}`" for p in out_of_scope)
@@ -190,7 +248,7 @@ def render_fix_notes(
     change_summary: str | None,
     patch_produced: bool,
     agent_error: str | None,
-    manifest: Sequence[FileChange] = (),
+    manifest: Sequence[FileChange],
 ) -> str:
     """Render `FIX-NOTES.md` for one candidate.
 

@@ -208,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
             print(
                 f"warning: {fix.candidate_id}: patch touches files outside the "
                 f"declared scope: {', '.join(fix.out_of_scope_files)} — see "
-                f"{fix.path}/{NOTES_NAME}",
+                f"{Path(fix.path) / NOTES_NAME}",
                 file=sys.stderr,
             )
 

@@ -119,6 +119,33 @@ def test_added_file_appears_in_the_patch(run) -> None:
     assert "pkg/attn/table.py" in patch
 
 
+def test_a_tab_in_a_created_filename_does_not_abort_the_run(run) -> None:
+    """Critical 1, end to end: a tab in a filename the agent created used to
+
+    raise an uncaught `ValueError` out of `collect_patch` — which runs inside
+    the `try` whose `finally` removes the worktree — so the whole session's
+    work (patch and notes) was lost before `_write_artifacts` ever ran, and
+    in a sweep, the bare `ValueError` would escape `api.py`'s
+    `(PrepEvolveError, OneShotFixError)` handler entirely and abort the rest
+    of the candidates too. The run must complete, the patch must be written,
+    and the odd file must be represented in the notes.
+    """
+    run_dir, repo = run
+    odd_name = "tab\tname.py"
+    result = one_shot_fix(
+        OneShotFixInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+        claude_runner=_runner(new_file=odd_name),
+    )
+    assert len(result.fixes) == 1
+    fix = result.fixes[0]
+    assert fix.patch_produced is True
+    out_dir = Path(fix.path)
+    patch = (out_dir / "fix.patch").read_text(encoding="utf-8")
+    assert "tab\\tname.py" in patch  # C-quoted in the plain patch text
+    notes = (out_dir / "FIX-NOTES.md").read_text(encoding="utf-8")
+    assert odd_name in notes  # the manifest row carries the real path
+
+
 def test_out_of_scope_edit_is_flagged_on_the_artifact_and_in_the_notes(run) -> None:
     """The manifest is derived from the diff, not from spec.targets — this is
 

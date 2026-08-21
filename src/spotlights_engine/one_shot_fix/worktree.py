@@ -128,6 +128,12 @@ class FileChange:
     `insertions`/`deletions` are `None` for binary files: `git diff --numstat`
     reports `-` for both rather than a count. `old_path` is set only when
     `change_kind == "renamed"`.
+
+    `counts_known` distinguishes "this file is binary, so line counts do not
+    apply" (`binary=True`) from "line counts could not be determined" (a
+    degraded record — `counts_known=False`, `binary=False`). Both leave
+    `insertions`/`deletions` as `None`; conflating them made a degraded
+    record render as a false "binary" claim (see Important 3).
     """
 
     path: str
@@ -135,6 +141,7 @@ class FileChange:
     insertions: int | None
     deletions: int | None
     binary: bool
+    counts_known: bool = True
     old_path: str | None = None
 
 
@@ -182,23 +189,63 @@ def _parse_name_status_z(raw: str) -> list[tuple[str, str, str | None]]:
     return records
 
 
-def _parse_numstat_z(raw: str) -> list[tuple[int | None, int | None]]:
-    """Parse `git diff --numstat -z` into `(added, deleted)` pairs, in record order.
+def _parse_count(token: str) -> tuple[int | None, bool]:
+    """Parse one numstat count field. Returns `(value, ok)`.
 
-    Binary files report `-` for both counts, mapped to `None` here. A
-    rename/copy record has an empty path field followed by two more
-    NUL-separated path tokens (old, then new) — this only needs the counts,
-    so those extra tokens are skipped; `_parse_name_status_z` is the source of
-    truth for paths.
+    `-` is git's own binary sentinel: mapped to `(None, True)` — a known,
+    deliberate absence. Anything else that fails to parse as an int degrades
+    to `(None, False)` — unknown, never raises. This is the hardening half of
+    Critical 1: a malformed count field must degrade a single record, not
+    crash the whole collection.
+    """
+    if token == "-":
+        return None, True
+    try:
+        return int(token), True
+    except ValueError:
+        return None, False
+
+
+def _parse_numstat_z(raw: str) -> list[tuple[int | None, int | None, bool, bool]]:
+    """Parse `git diff --numstat -z` into `(added, deleted, binary, counts_known)`
+    tuples, in record order.
+
+    Binary files report `-` for both counts (`binary=True`, `counts_known=True`
+    — the absence is expected, not degraded). A rename/copy record has an
+    empty path field followed by two more NUL-separated path tokens (old,
+    then new) — this only needs the counts, so those extra tokens are
+    skipped; `_parse_name_status_z` is the source of truth for paths.
+
+    `-z` disables git's C-quoting, so a path containing a literal tab (legal
+    on POSIX) makes the count line itself contain a tab
+    (`"1\\t0\\ttab\\tname.py"`). `split("\\t", maxsplit=2)` is load-bearing:
+    it keeps exactly 3 fields regardless of how many tabs are embedded in the
+    path, where an unbounded `split("\\t")` raised `ValueError: too many
+    values to unpack`. The path field itself is discarded here regardless
+    (see above), so no unquoting or further handling of that tab is needed.
     """
     tokens = _split_z(raw)
-    records: list[tuple[int | None, int | None]] = []
+    records: list[tuple[int | None, int | None, bool, bool]] = []
     i = 0
     while i < len(tokens):
-        added_s, deleted_s, path = tokens[i].split("\t")
-        added = None if added_s == "-" else int(added_s)
-        deleted = None if deleted_s == "-" else int(deleted_s)
-        records.append((added, deleted))
+        parts = tokens[i].split("\t", 2)
+        if len(parts) != 3:
+            # Should be unreachable — every numstat record has at least the
+            # two tab-separated counts — but a malformed record degrades
+            # rather than crashes, and by itself carries no reliable
+            # rename/copy path-token count, so it cannot be paired past this
+            # single token.
+            records.append((None, None, False, False))
+            i += 1
+            continue
+        added_s, deleted_s, path = parts
+        added, added_ok = _parse_count(added_s)
+        deleted, deleted_ok = _parse_count(deleted_s)
+        binary = added_s == "-" and deleted_s == "-"
+        counts_known = binary or (added_ok and deleted_ok)
+        if not counts_known:
+            added, deleted = None, None
+        records.append((added, deleted, binary, counts_known))
         i += 1 if path != "" else 3
     return records
 
@@ -227,17 +274,20 @@ def _build_manifest(name_status_raw: str, numstat_raw: str) -> list[FileChange]:
         # back to back with no intervening change — but a degraded manifest
         # (paths and kinds right, counts unknown) beats crashing the whole
         # collection over a git output surprise.
-        counts = [(None, None)] * len(statuses)
+        counts = [(None, None, False, False)] * len(statuses)
 
     manifest: list[FileChange] = []
-    for (status, path, old_path), (added, deleted) in zip(statuses, counts, strict=True):
+    for (status, path, old_path), (added, deleted, binary, counts_known) in zip(
+        statuses, counts, strict=True
+    ):
         manifest.append(
             FileChange(
                 path=path,
                 change_kind=_change_kind(status),
                 insertions=added,
                 deletions=deleted,
-                binary=added is None and deleted is None,
+                binary=binary,
+                counts_known=counts_known,
                 old_path=old_path,
             )
         )
@@ -251,22 +301,37 @@ def collect_patch(wt: Worktree) -> PatchCollection:
     1. read + delete `CHANGE-SUMMARY.md`, so the agent's rationale reaches
        FIX-NOTES.md but never appears in the patch (or the manifest);
     2. `git add -N .` so *added* files show up in the diff;
-    3. `git diff HEAD` (patch text) plus `git diff HEAD --name-status -z` and
-       `git diff HEAD --numstat -z` (the manifest) against the base commit
-       already checked out.
+    3. `git diff <base_sha>` (patch text) plus `git diff <base_sha>
+       --name-status -z` and `git diff <base_sha> --numstat -z` (the
+       manifest) — diffed against `wt.base_sha`, the exact commit the
+       worktree was created at and the same value recorded in `fix.patch`'s
+       header and `FIX-NOTES.md`.
 
-    `HEAD` (not a bare `git diff`, which is index-vs-worktree only) is load-
-    bearing: `git add -N .`'s pathspec (`.`) does not just intent-to-add new
-    paths — for a path that matches and no longer exists on disk, plain `git
-    add` (this is standard `add` semantics since git 2.0, unrelated to `-N`)
-    stages its deletion *fully*, not as intent-to-add. A bare `git diff`
-    (index vs worktree) then finds nothing to show for that path, so a
-    deleted file — and the delete-half of a rename, which is a deletion plus
-    an addition of matching content — silently vanishes. `git diff HEAD`
-    compares the worktree directly against the base commit regardless of
-    what got staged along the way, so it sees the deletion (and the rename)
-    correctly while still matching a bare `git diff` byte-for-byte for the
-    modified/added cases that were already covered.
+    `wt.base_sha` (not a bare `git diff`, which is index-vs-worktree only,
+    and not `HEAD`) is load-bearing on two counts:
+
+    - `git add -N .`'s pathspec (`.`) does not just intent-to-add new
+      paths — for a path that matches and no longer exists on disk, plain
+      `git add` (this is standard `add` semantics since git 2.0, unrelated to
+      `-N`) stages its deletion *fully*, not as intent-to-add. A bare
+      `git diff` (index vs worktree) then finds nothing to show for that
+      path, so a deleted file — and the delete-half of a rename, which is a
+      deletion plus an addition of matching content — silently vanishes.
+      Diffing against a commit compares the worktree directly against that
+      commit regardless of what got staged along the way, so it sees the
+      deletion (and the rename) correctly while still matching a bare
+      `git diff` byte-for-byte for the modified/added cases that were
+      already covered. This still requires `git add -N .` first: `git diff
+      <commit>` does not surface untracked files on its own.
+    - `claude_exec.py` deliberately permits `git reset` from inside the
+      worktree (see its module docstring): on a detached worktree it only
+      rewrites that worktree's own private HEAD/index, so it "cannot
+      escape". That reasoning holds only if the diff base doesn't move with
+      it. `git reset --soft` moves HEAD without touching the working tree,
+      so a plain `git diff HEAD` after such a reset silently changes what
+      the diff (and thus `fix.patch`) is relative to — while the header and
+      `FIX-NOTES.md` still (correctly) claim `base_sha`. Diffing against
+      `wt.base_sha` directly is immune to HEAD moving underneath it.
     """
     summary_path = wt.path / CHANGE_SUMMARY_NAME
     summary: str | None = None
@@ -275,10 +340,39 @@ def collect_patch(wt: Worktree) -> PatchCollection:
         summary_path.unlink()
 
     _run_git(wt.path, "add", "-N", ".")
-    patch = _run_git(wt.path, "diff", "HEAD").stdout
-    name_status_raw = _run_git(wt.path, "diff", "HEAD", "--name-status", "-z").stdout
-    numstat_raw = _run_git(wt.path, "diff", "HEAD", "--numstat", "-z").stdout
-    manifest = _build_manifest(name_status_raw, numstat_raw)
+    patch = _run_git(wt.path, "diff", wt.base_sha).stdout
+
+    # The patch above is the deliverable; nothing past this point may be
+    # allowed to lose it. A manifest-parsing surprise (git output nobody
+    # anticipated) degrades to the best manifest still recoverable — paths
+    # and kinds from the simpler, NUL-delimited name-status output, counts
+    # marked unknown — rather than raising and discarding the patch that was
+    # already collected (see Critical 1).
+    manifest: list[FileChange] = []
+    name_status_raw = ""
+    try:
+        name_status_raw = _run_git(
+            wt.path, "diff", wt.base_sha, "--name-status", "-z"
+        ).stdout
+        numstat_raw = _run_git(wt.path, "diff", wt.base_sha, "--numstat", "-z").stdout
+        manifest = _build_manifest(name_status_raw, numstat_raw)
+    except Exception:
+        try:
+            manifest = [
+                FileChange(
+                    path=path,
+                    change_kind=_change_kind(status),
+                    insertions=None,
+                    deletions=None,
+                    binary=False,
+                    counts_known=False,
+                    old_path=old_path,
+                )
+                for status, path, old_path in _parse_name_status_z(name_status_raw)
+            ]
+        except Exception:
+            manifest = []
+
     return PatchCollection(patch=patch, change_summary=summary, manifest=manifest)
 
 

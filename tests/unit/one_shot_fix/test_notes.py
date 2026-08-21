@@ -186,6 +186,7 @@ def test_the_emitted_apply_recipe_actually_applies_from_the_artifact_directory(
         change_summary="did the thing",
         patch_produced=True,
         agent_error=None,
+        manifest=[],
     )
 
     artifact_dir = tmp_path / "artifact"
@@ -310,6 +311,109 @@ def test_manifest_section_is_coherent_when_no_patch_was_produced(spec_and_repo) 
     # It must not claim a change happened when none did.
     assert "**Totals:**" not in notes
     assert "OUT OF SCOPE" not in notes
+
+
+def test_manifest_section_never_claims_binary_or_a_false_total_for_unknown_counts(
+    spec_and_repo,
+) -> None:
+    """Important 3: the length-mismatch fallback used to set
+
+    `insertions=deletions=None`, and `binary` was *derived* from
+    `insertions is None and deletions is None` — so "counts unknown" was
+    indistinguishable from "is a binary file", and the totals line summed
+    `insertions or 0` for the unknown file too, silently reporting a total
+    that understates the real change. Both are false statements about the
+    one artifact a reviewer is told to trust.
+
+    `counts_known=False` (a real file, not binary, whose line counts could
+    not be determined) must render as neither "binary" nor a clean numeric
+    total.
+    """
+    manifest = [
+        FileChange(
+            path=CAND_FILE,
+            change_kind="modified",
+            insertions=None,
+            deletions=None,
+            binary=False,
+            counts_known=False,
+        ),
+        FileChange(
+            path="pkg/attn/extra.py",
+            change_kind="added",
+            insertions=5,
+            deletions=0,
+            binary=False,
+            counts_known=True,
+        ),
+    ]
+    notes = _notes(spec_and_repo, manifest=manifest)
+
+    # The unknown-counts file must not be mislabeled "binary" — it is a real
+    # file whose counts just could not be determined.
+    row_a = next(ln for ln in notes.splitlines() if f"`{CAND_FILE}`" in ln)
+    assert "binary" not in row_a
+    assert "?" in row_a
+
+    # The totals line must not silently sum in a 0 for the unknown file —
+    # that understates the real (unknown) change. It must say plainly that
+    # some counts are unavailable, and must not print a bare "+0/-0"-style
+    # total that omits the unknown file's contribution.
+    totals_line = next(ln for ln in notes.splitlines() if ln.startswith("**Totals:**"))
+    assert "unavailable" in totals_line
+    assert "1" in totals_line  # one file with unknown counts
+    assert "+0/-0" not in totals_line
+
+
+def test_declared_scope_normalizes_dot_and_dotdot_segments(spec_and_repo) -> None:
+    """Important 4: `_declared_scope` compared `t.file` verbatim against the
+
+    diff's canonical POSIX paths. `validate_target.py` only checks
+    containment and existence, so a declared target spelled
+    `./pkg/attn/tile.py` (or with a `..` segment) validates and is stored
+    as-is — then the diff's canonical `pkg/attn/tile.py` fails to match it,
+    producing a false "OUT OF SCOPE" callout on the candidate's own file.
+    """
+    spec, _repo = spec_and_repo
+    spec.targets[0].file = f"./{CAND_FILE}"
+    manifest = [
+        FileChange(path=CAND_FILE, change_kind="modified", insertions=1, deletions=0, binary=False)
+    ]
+    notes = _notes(spec_and_repo, manifest=manifest)
+    assert "**OUT OF SCOPE**" not in notes
+    assert out_of_scope_files(spec, manifest) == []
+
+
+def test_render_fix_notes_requires_manifest(spec_and_repo) -> None:
+    """Minor 7: `manifest` must be a required keyword, not `()`-defaulted.
+
+    A caller that passes `patch_produced=True` but forgets `manifest` used to
+    get a notes file claiming "no patch was produced" — actively lying about
+    a patch that *was* produced. Making the parameter required turns that
+    mistake into a `TypeError` at the call site instead of a wrong artifact.
+    """
+    import inspect
+
+    sig = inspect.signature(render_fix_notes)
+    assert sig.parameters["manifest"].default is inspect.Parameter.empty
+
+
+def test_change_row_escapes_a_pipe_in_the_path(spec_and_repo) -> None:
+    """Minor 8: GFM tables don't treat backticks as pipe-escapes — a path
+
+    containing `|` breaks the row into extra columns.
+    """
+    manifest = [
+        FileChange(
+            path="pkg/attn/weird|name.py",
+            change_kind="added",
+            insertions=1,
+            deletions=0,
+            binary=False,
+        )
+    ]
+    notes = _notes(spec_and_repo, manifest=manifest)
+    assert "weird\\|name.py" in notes
 
 
 def test_agent_error_is_recorded(spec_and_repo) -> None:
