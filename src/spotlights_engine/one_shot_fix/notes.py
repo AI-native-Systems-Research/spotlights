@@ -12,8 +12,10 @@ The notes never claim a result. Nothing was executed here (see the design's
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
+from spotlights_engine.one_shot_fix.worktree import FileChange
 from spotlights_engine.prep_evolve.spec import EvolveSpec, Target
 
 
@@ -56,6 +58,76 @@ def _oracle_lines(target: Target) -> str:
     perf = target.oracles.performance or "_(none recorded — see the objective)_"
     lines.append(f"\n**Performance:** {perf}")
     return "\n".join(lines)
+
+
+def _declared_scope(spec: EvolveSpec) -> set[str]:
+    return {t.file for t in spec.targets}
+
+
+def out_of_scope_files(spec: EvolveSpec, manifest: Sequence[FileChange]) -> list[str]:
+    """Files the patch actually touched that are not in `spec.targets`' declared scope.
+
+    This is the whole point of the manifest: derived from the diff, so it can
+    (and does, when the agent strays) disagree with what was declared. Shared
+    between the notes renderer and the CLI so the two never compute it twice.
+    """
+    declared = _declared_scope(spec)
+    return [c.path for c in manifest if c.path not in declared]
+
+
+def _change_row(change: FileChange, declared: set[str]) -> str:
+    path = f"{change.old_path} → {change.path}" if change.old_path else change.path
+    lines = "binary" if change.binary else f"+{change.insertions}/-{change.deletions}"
+    scope = "in scope" if change.path in declared else "**OUT OF SCOPE**"
+    return f"| `{path}` | {change.change_kind} | {lines} | {scope} |"
+
+
+def _manifest_section(
+    spec: EvolveSpec, manifest: Sequence[FileChange], patch_produced: bool
+) -> str:
+    """The patch's real blast radius: every file it touched, kind, size, and scope.
+
+    This is deliberately separate from "In-scope files" above: that section
+    documents what was *declared*; this one documents what was *done*. The
+    difference between them is exactly what a reviewer needs to catch before
+    applying a patch they cannot otherwise see without applying it.
+    """
+    if not patch_produced or not manifest:
+        return (
+            "## Files changed\n\n"
+            "_(no patch was produced — there is no diff for this section to describe)_\n"
+        )
+
+    declared = _declared_scope(spec)
+    out_of_scope = out_of_scope_files(spec, manifest)
+    rows = "\n".join(_change_row(c, declared) for c in manifest)
+    total_files = len(manifest)
+    total_ins = sum(c.insertions or 0 for c in manifest)
+    total_del = sum(c.deletions or 0 for c in manifest)
+    plural = "s" if total_files != 1 else ""
+
+    section = f"""## Files changed
+
+What the diff actually touched, derived from the patch itself — not from the
+declared scope above. Compare it against "In-scope files": any disagreement
+is exactly what a reviewer needs to see before applying this patch.
+
+| File | Change | Lines | Scope |
+| --- | --- | --- | --- |
+{rows}
+
+**Totals:** {total_files} file{plural} changed, +{total_ins}/-{total_del}.
+"""
+    if out_of_scope:
+        listed = ", ".join(f"`{p}`" for p in out_of_scope)
+        section += f"""
+> **This patch touches files outside the declared scope.** The agent was
+> instructed to edit only the files under "In-scope files" above, but the
+> diff also changes: {listed}. That was not declared and not permitted —
+> review those hunks specifically, on their own merits, before applying
+> anything in this patch.
+"""
+    return section
 
 
 def _outcome_section(
@@ -118,8 +190,14 @@ def render_fix_notes(
     change_summary: str | None,
     patch_produced: bool,
     agent_error: str | None,
+    manifest: Sequence[FileChange] = (),
 ) -> str:
-    """Render `FIX-NOTES.md` for one candidate."""
+    """Render `FIX-NOTES.md` for one candidate.
+
+    `manifest` is the per-file breakdown of what the patch actually touched
+    (see `worktree.collect_patch`) — always derived from the diff, never from
+    `spec.targets`, so it can surface a patch that strayed outside scope.
+    """
     target = _candidate_target(spec)
     return f"""# Fix notes — {candidate_id}
 
@@ -132,6 +210,8 @@ def render_fix_notes(
 ## In-scope files
 
 {_scope_lines(spec)}
+
+{_manifest_section(spec, manifest, patch_produced)}
 
 ## The proposal
 
@@ -168,4 +248,4 @@ verification recipe for a machine that can run them.
 )}"""
 
 
-__all__ = ["render_fix_notes"]
+__all__ = ["out_of_scope_files", "render_fix_notes"]

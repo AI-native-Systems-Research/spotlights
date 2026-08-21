@@ -19,6 +19,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from spotlights_engine.one_shot_fix.api import (
+    NOTES_NAME,
     OneShotFixConfig,
     OneShotFixInput,
     one_shot_fix,
@@ -203,6 +204,13 @@ def main(argv: list[str] | None = None) -> int:
     for fix in result.fixes:
         state = "patch + notes" if fix.patch_produced else "notes only (no patch)"
         print(f"{fix.candidate_id}: {fix.path} ({state})")
+        if fix.out_of_scope_files:
+            print(
+                f"warning: {fix.candidate_id}: patch touches files outside the "
+                f"declared scope: {', '.join(fix.out_of_scope_files)} — see "
+                f"{fix.path}/{NOTES_NAME}",
+                file=sys.stderr,
+            )
 
     if result.fixes:
         print(

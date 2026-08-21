@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from spotlights_engine.one_shot_fix.notes import render_fix_notes
+from spotlights_engine.one_shot_fix.notes import out_of_scope_files, render_fix_notes
+from spotlights_engine.one_shot_fix.worktree import FileChange
 from spotlights_engine.prep_evolve.extract import build_spec, infer_direction
 from spotlights_engine.prep_evolve.resolve import (
     find_candidate,
@@ -63,6 +64,15 @@ def _notes(spec_and_repo, **overrides) -> str:
         "change_summary": "Replaced the heuristic with a lookup table.",
         "patch_produced": True,
         "agent_error": None,
+        "manifest": [
+            FileChange(
+                path=CAND_FILE,
+                change_kind="modified",
+                insertions=3,
+                deletions=1,
+                binary=False,
+            )
+        ],
     }
     kwargs.update(overrides)
     return render_fix_notes(**kwargs)
@@ -221,6 +231,85 @@ def test_no_patch_case_is_stated_explicitly(spec_and_repo) -> None:
     assert "No patch was produced" in notes
     assert "outside scope" in notes
     assert "git apply" not in notes
+
+
+def test_manifest_section_lists_in_scope_changes_with_counts_and_totals(spec_and_repo) -> None:
+    notes = _notes(spec_and_repo)
+    assert "## Files changed" in notes
+    assert CAND_FILE in notes
+    assert "modified" in notes
+    assert "+3/-1" in notes
+    assert "in scope" in notes
+    assert "**Totals:** 1 file changed, +3/-1." in notes
+    # No false alarm when everything is in scope.
+    assert "outside the declared scope" not in notes
+
+
+def test_manifest_section_flags_out_of_scope_files_prominently(spec_and_repo) -> None:
+    manifest = [
+        FileChange(
+            path=CAND_FILE, change_kind="modified", insertions=3, deletions=1, binary=False
+        ),
+        FileChange(
+            path="pkg/attn/extra.py",
+            change_kind="added",
+            insertions=12,
+            deletions=0,
+            binary=False,
+        ),
+    ]
+    notes = _notes(spec_and_repo, manifest=manifest)
+    assert "pkg/attn/extra.py" in notes
+    assert "**OUT OF SCOPE**" in notes
+    assert "**Totals:** 2 files changed, +15/-1." in notes
+    # The callout must be prominent prose, not just a table cell.
+    assert "**This patch touches files outside the declared scope.**" in notes
+    assert "pkg/attn/extra.py" in notes.split("outside the declared scope", 1)[1]
+
+
+def test_out_of_scope_files_helper_matches_the_notes(spec_and_repo) -> None:
+    spec, _repo = spec_and_repo
+    manifest = [
+        FileChange(
+            path=CAND_FILE, change_kind="modified", insertions=1, deletions=0, binary=False
+        ),
+        FileChange(
+            path="pkg/attn/extra.py",
+            change_kind="added",
+            insertions=1,
+            deletions=0,
+            binary=False,
+        ),
+    ]
+    assert out_of_scope_files(spec, manifest) == ["pkg/attn/extra.py"]
+
+
+def test_manifest_section_renders_a_binary_file_without_line_counts(spec_and_repo) -> None:
+    manifest = [
+        FileChange(
+            path="pkg/attn/blob.bin",
+            change_kind="added",
+            insertions=None,
+            deletions=None,
+            binary=True,
+        )
+    ]
+    notes = _notes(spec_and_repo, manifest=manifest)
+    assert "pkg/attn/blob.bin" in notes
+    assert "binary" in notes
+
+
+def test_manifest_section_is_coherent_when_no_patch_was_produced(spec_and_repo) -> None:
+    notes = _notes(
+        spec_and_repo,
+        patch_produced=False,
+        change_summary="The proposal needs a change in a file outside scope.",
+        manifest=[],
+    )
+    assert "## Files changed" in notes
+    # It must not claim a change happened when none did.
+    assert "**Totals:**" not in notes
+    assert "OUT OF SCOPE" not in notes
 
 
 def test_agent_error_is_recorded(spec_and_repo) -> None:

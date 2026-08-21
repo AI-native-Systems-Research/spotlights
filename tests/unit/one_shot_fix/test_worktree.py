@@ -66,12 +66,12 @@ def test_collect_patch_includes_a_modified_file(tmp_path: Path) -> None:
     try:
         target = wt.path / CAND_FILE
         target.write_text(target.read_text() + "# appended\n", encoding="utf-8")
-        patch, summary = collect_patch(wt)
+        collection = collect_patch(wt)
     finally:
         remove_worktree(wt)
-    assert "# appended" in patch
-    assert CAND_FILE in patch
-    assert summary is None
+    assert "# appended" in collection.patch
+    assert CAND_FILE in collection.patch
+    assert collection.change_summary is None
 
 
 def test_collect_patch_includes_an_added_file(tmp_path: Path) -> None:
@@ -82,11 +82,11 @@ def test_collect_patch_includes_an_added_file(tmp_path: Path) -> None:
         (wt.path / "pkg" / "attn" / "table.py").write_text(
             "TILE_TABLE = {128: 64}\n", encoding="utf-8"
         )
-        patch, _ = collect_patch(wt)
+        collection = collect_patch(wt)
     finally:
         remove_worktree(wt)
-    assert "pkg/attn/table.py" in patch
-    assert "TILE_TABLE" in patch
+    assert "pkg/attn/table.py" in collection.patch
+    assert "TILE_TABLE" in collection.patch
 
 
 def test_collect_patch_extracts_and_excludes_the_change_summary(tmp_path: Path) -> None:
@@ -96,22 +96,129 @@ def test_collect_patch_extracts_and_excludes_the_change_summary(tmp_path: Path) 
         (wt.path / CHANGE_SUMMARY_NAME).write_text(
             "Swapped the heuristic for a table.\n", encoding="utf-8"
         )
-        patch, summary = collect_patch(wt)
+        collection = collect_patch(wt)
     finally:
         remove_worktree(wt)
-    assert summary == "Swapped the heuristic for a table.\n"
-    assert CHANGE_SUMMARY_NAME not in patch
+    assert collection.change_summary == "Swapped the heuristic for a table.\n"
+    assert CHANGE_SUMMARY_NAME not in collection.patch
+    assert all(c.path != CHANGE_SUMMARY_NAME for c in collection.manifest)
 
 
 def test_collect_patch_is_empty_when_nothing_changed(tmp_path: Path) -> None:
     repo = make_repo(tmp_path)
     wt = create_worktree(repo, require_git_repo(repo))
     try:
-        patch, summary = collect_patch(wt)
+        collection = collect_patch(wt)
     finally:
         remove_worktree(wt)
-    assert patch == ""
-    assert summary is None
+    assert collection.patch == ""
+    assert collection.change_summary is None
+    assert collection.manifest == []
+
+
+def test_manifest_records_a_modified_file_with_line_counts(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path)
+    wt = create_worktree(repo, require_git_repo(repo))
+    try:
+        target = wt.path / CAND_FILE
+        target.write_text(target.read_text() + "# appended\n", encoding="utf-8")
+        collection = collect_patch(wt)
+    finally:
+        remove_worktree(wt)
+    assert len(collection.manifest) == 1
+    change = collection.manifest[0]
+    assert change.path == CAND_FILE
+    assert change.change_kind == "modified"
+    assert change.insertions == 1
+    assert change.deletions == 0
+    assert change.binary is False
+    assert change.old_path is None
+
+
+def test_manifest_records_an_added_file(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path)
+    wt = create_worktree(repo, require_git_repo(repo))
+    try:
+        (wt.path / "pkg" / "attn" / "table.py").write_text(
+            "TILE_TABLE = {128: 64}\n", encoding="utf-8"
+        )
+        collection = collect_patch(wt)
+    finally:
+        remove_worktree(wt)
+    assert len(collection.manifest) == 1
+    change = collection.manifest[0]
+    assert change.path == "pkg/attn/table.py"
+    assert change.change_kind == "added"
+    assert change.insertions == 1
+    assert change.deletions == 0
+    assert change.binary is False
+
+
+def test_manifest_records_a_deleted_file(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path)
+    wt = create_worktree(repo, require_git_repo(repo))
+    try:
+        (wt.path / CAND_FILE).unlink()
+        collection = collect_patch(wt)
+    finally:
+        remove_worktree(wt)
+    assert len(collection.manifest) == 1
+    change = collection.manifest[0]
+    assert change.path == CAND_FILE
+    assert change.change_kind == "deleted"
+    assert change.binary is False
+    assert change.deletions is not None and change.deletions > 0
+
+
+def test_manifest_records_a_binary_file_with_no_line_counts(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path)
+    wt = create_worktree(repo, require_git_repo(repo))
+    try:
+        (wt.path / "pkg" / "attn" / "blob.bin").write_bytes(b"\x00\x01\x02binary\x00data")
+        collection = collect_patch(wt)
+    finally:
+        remove_worktree(wt)
+    assert len(collection.manifest) == 1
+    change = collection.manifest[0]
+    assert change.path == "pkg/attn/blob.bin"
+    assert change.change_kind == "added"
+    assert change.binary is True
+    assert change.insertions is None
+    assert change.deletions is None
+
+
+def test_manifest_records_a_renamed_file_with_the_new_path(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path)
+    wt = create_worktree(repo, require_git_repo(repo))
+    try:
+        target = wt.path / CAND_FILE
+        new_path = wt.path / "pkg" / "attn" / "tile_renamed.py"
+        target.rename(new_path)
+        collection = collect_patch(wt)
+    finally:
+        remove_worktree(wt)
+    assert len(collection.manifest) == 1
+    change = collection.manifest[0]
+    assert change.change_kind == "renamed"
+    assert change.path == "pkg/attn/tile_renamed.py"
+    assert change.old_path == CAND_FILE
+    assert change.binary is False
+
+
+def test_manifest_handles_a_path_with_spaces_without_truncation(tmp_path: Path) -> None:
+    repo = make_repo(tmp_path)
+    wt = create_worktree(repo, require_git_repo(repo))
+    try:
+        odd_dir = wt.path / "pkg" / "dir with space"
+        odd_dir.mkdir(parents=True)
+        (odd_dir / "file name.py").write_text("X = 1\n", encoding="utf-8")
+        collection = collect_patch(wt)
+    finally:
+        remove_worktree(wt)
+    assert len(collection.manifest) == 1
+    change = collection.manifest[0]
+    assert change.path == "pkg/dir with space/file name.py"
+    assert change.change_kind == "added"
 
 
 def test_remove_worktree_never_raises_even_when_git_fails(
@@ -167,8 +274,8 @@ def test_collect_patch_survives_non_utf8_bytes_in_a_diff(tmp_path: Path) -> None
         # file as text and includes the raw bytes in the diff rather than
         # reporting it as binary).
         target.write_bytes(target.read_bytes() + b"\n# bad bytes: \xff\xfe end\n")
-        patch, _ = collect_patch(wt)  # must not raise UnicodeDecodeError
+        collection = collect_patch(wt)  # must not raise UnicodeDecodeError
     finally:
         remove_worktree(wt)
-    assert CAND_FILE in patch
-    assert "bad bytes" in patch
+    assert CAND_FILE in collection.patch
+    assert "bad bytes" in collection.patch

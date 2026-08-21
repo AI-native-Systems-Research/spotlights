@@ -119,6 +119,52 @@ def test_added_file_appears_in_the_patch(run) -> None:
     assert "pkg/attn/table.py" in patch
 
 
+def test_out_of_scope_edit_is_flagged_on_the_artifact_and_in_the_notes(run) -> None:
+    """The manifest is derived from the diff, not from spec.targets — this is
+
+    the whole point: an edit outside the declared scope must still land in
+    the patch (never silently dropped) AND be visible both on `FixArtifact`
+    (for the CLI) and prominently in FIX-NOTES.md (for the reviewer).
+    """
+    run_dir, repo = run
+    result = one_shot_fix(
+        OneShotFixInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+        claude_runner=_runner(new_file="pkg/attn/extra.py"),
+    )
+    fix = result.fixes[0]
+    assert fix.out_of_scope_files == ["pkg/attn/extra.py"]
+
+    patch = (Path(fix.path) / "fix.patch").read_text(encoding="utf-8")
+    assert "pkg/attn/extra.py" in patch  # not amputated from the patch
+
+    notes = (Path(fix.path) / "FIX-NOTES.md").read_text(encoding="utf-8")
+    assert "pkg/attn/extra.py" in notes
+    assert "**This patch touches files outside the declared scope.**" in notes
+
+
+def test_in_scope_only_edit_has_no_out_of_scope_files(run) -> None:
+    run_dir, repo = run
+    result = one_shot_fix(
+        OneShotFixInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+        claude_runner=_runner(),
+    )
+    fix = result.fixes[0]
+    assert fix.out_of_scope_files == []
+    notes = (Path(fix.path) / "FIX-NOTES.md").read_text(encoding="utf-8")
+    assert "outside the declared scope" not in notes
+
+
+def test_no_patch_produced_has_no_out_of_scope_files(run) -> None:
+    run_dir, repo = run
+    result = one_shot_fix(
+        OneShotFixInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+        claude_runner=_runner(edit=None, summary="cannot be done within scope"),
+    )
+    fix = result.fixes[0]
+    assert fix.patch_produced is False
+    assert fix.out_of_scope_files == []
+
+
 def test_validation_runs_against_the_worktree_not_a_dirty_repo(run) -> None:
     """A dirty --repo must not affect the outcome: the gate reads worktree bytes."""
     run_dir, repo = run

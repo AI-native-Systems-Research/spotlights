@@ -135,6 +135,45 @@ def test_print_prompt_writes_the_prompt_and_worktree_to_stdout(
     assert not Path(worktree_parent).exists()
 
 
+def test_out_of_scope_files_are_flagged_on_stderr(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The operator running a sweep should see this without opening FIX-NOTES.md.
+
+    Everything but the `claude -p` call itself runs for real here (real repo,
+    real worktree, real notes rendering) — only the agent session is faked,
+    by monkeypatching the two module-level hooks `one_shot_fix` uses for it
+    (`ensure_claude_available`, `run_fix_claude`), the same seam the CLI has
+    no flag to bypass.
+    """
+    run_dir, repo = run
+    import spotlights_engine.one_shot_fix.api as api_mod
+    from spotlights_engine.one_shot_fix.claude_exec import FixRunResult
+
+    def _fake_run_fix_claude(
+        *, candidate_id: str, prompt: str, worktree: Path, max_turns: int, wallclock_s: int
+    ) -> FixRunResult:
+        target = worktree / CAND_FILE
+        target.write_text(target.read_text(encoding="utf-8") + "# in-scope\n", encoding="utf-8")
+        extra = worktree / "pkg" / "attn" / "extra.py"
+        extra.write_text("EXTRA = 1\n", encoding="utf-8")
+        (worktree / "CHANGE-SUMMARY.md").write_text(
+            "did the in-scope thing, plus an extra file", encoding="utf-8"
+        )
+        return FixRunResult(candidate_id=candidate_id, duration_s=0.01)
+
+    monkeypatch.setattr(api_mod, "ensure_claude_available", lambda: None)
+    monkeypatch.setattr(api_mod, "run_fix_claude", _fake_run_fix_claude)
+
+    code = fix_main(["--result", str(run_dir), "--repo", str(repo), "--candidate", CAND_ID])
+    captured = capsys.readouterr()
+
+    assert code == 0
+    assert f"{CAND_ID}:" in captured.out  # the machine-readable line stays on stdout
+    assert "pkg/attn/extra.py" in captured.err
+    assert "outside the declared scope" in captured.err
+
+
 def test_engine_dispatch_routes_fix_to_the_subcommand(
     run, capsys: pytest.CaptureFixture
 ) -> None:

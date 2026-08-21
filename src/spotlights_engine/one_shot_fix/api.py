@@ -37,9 +37,10 @@ from spotlights_engine.one_shot_fix.claude_exec import (
     run_fix_claude,
 )
 from spotlights_engine.one_shot_fix.errors import ClaudeUnavailableError, OneShotFixError
-from spotlights_engine.one_shot_fix.notes import render_fix_notes
+from spotlights_engine.one_shot_fix.notes import out_of_scope_files, render_fix_notes
 from spotlights_engine.one_shot_fix.prompts import build_fix_prompt
 from spotlights_engine.one_shot_fix.worktree import (
+    FileChange,
     Worktree,
     collect_patch,
     create_worktree,
@@ -105,6 +106,7 @@ class FixArtifact(BaseModel):
     patch_produced: bool
     base_sha: str
     usage: AgentUsage | None = None
+    out_of_scope_files: list[str] = Field(default_factory=list)
 
 
 class PromptPreview(BaseModel):
@@ -220,10 +222,16 @@ def _write_artifacts(
     repo_path: Path,
     base_sha: str,
     patch: str,
+    manifest: list[FileChange],
     change_summary: str | None,
     agent_error: str | None,
-) -> tuple[list[str], bool]:
-    """Write `fix.patch` (when non-empty) and `FIX-NOTES.md`. Returns (files, produced)."""
+) -> tuple[list[str], bool, list[str]]:
+    """Write `fix.patch` (when non-empty) and `FIX-NOTES.md`.
+
+    Returns `(files, produced, out_of_scope)` — `out_of_scope` is computed
+    once here, from `manifest` against `spec.targets`, and threaded to the
+    caller for `FixArtifact` so the CLI never recomputes it.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     files: list[str] = []
     patch_produced = bool(patch.strip())
@@ -255,11 +263,13 @@ def _write_artifacts(
         change_summary=change_summary,
         patch_produced=patch_produced,
         agent_error=agent_error,
+        manifest=manifest,
     )
     (out_dir / NOTES_NAME).write_text(notes, encoding="utf-8")
     files.append(NOTES_NAME)
 
-    return sorted(files), patch_produced
+    out_of_scope = out_of_scope_files(spec, manifest) if patch_produced else []
+    return sorted(files), patch_produced, out_of_scope
 
 
 def _process_candidate(
@@ -311,20 +321,21 @@ def _process_candidate(
             max_turns=input.max_turns,
             wallclock_s=input.wallclock_s,
         )
-        patch, change_summary = collect_patch(worktree)
+        collection = collect_patch(worktree)
     finally:
         if not keep_worktree:
             remove_worktree(worktree)
 
     out_dir = _fix_dir(base, sel.qn, sel.candidate.id)
-    files, patch_produced = _write_artifacts(
+    files, patch_produced, out_of_scope = _write_artifacts(
         out_dir=out_dir,
         spec=spec,
         sel=sel,
         repo_path=repo_path,
         base_sha=base_sha,
-        patch=patch,
-        change_summary=change_summary,
+        patch=collection.patch,
+        manifest=collection.manifest,
+        change_summary=collection.change_summary,
         agent_error=run.error,
     )
     result.fixes.append(
@@ -336,6 +347,7 @@ def _process_candidate(
             patch_produced=patch_produced,
             base_sha=base_sha,
             usage=run.usage,
+            out_of_scope_files=out_of_scope,
         )
     )
 

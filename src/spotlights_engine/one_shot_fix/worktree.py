@@ -16,13 +16,16 @@ from __future__ import annotations
 import shutil
 import subprocess
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from spotlights_engine.one_shot_fix.errors import NotAGitRepoError, WorktreeError
 from spotlights_engine.one_shot_fix.prompts import CHANGE_SUMMARY_NAME
 
 _GIT_TIMEOUT_S = 120
+
+ChangeKind = Literal["added", "modified", "deleted", "renamed"]
 
 
 @dataclass
@@ -118,14 +121,152 @@ def remove_worktree(wt: Worktree) -> None:
     shutil.rmtree(wt.parent, ignore_errors=True)
 
 
-def collect_patch(wt: Worktree) -> tuple[str, str | None]:
-    """Return `(patch_text, change_summary)` from the worktree's dirty state.
+@dataclass(frozen=True)
+class FileChange:
+    """One file's change, derived from the actual diff — never from a declared scope.
+
+    `insertions`/`deletions` are `None` for binary files: `git diff --numstat`
+    reports `-` for both rather than a count. `old_path` is set only when
+    `change_kind == "renamed"`.
+    """
+
+    path: str
+    change_kind: ChangeKind
+    insertions: int | None
+    deletions: int | None
+    binary: bool
+    old_path: str | None = None
+
+
+@dataclass(frozen=True)
+class PatchCollection:
+    """Result of `collect_patch`: the raw diff, the agent's rationale, and a manifest.
+
+    `manifest` is the per-file breakdown of exactly what `patch` contains —
+    derived from `git diff --name-status`/`--numstat`, not from any declared
+    scope, so it can catch a patch that disagrees with what was intended.
+    """
+
+    patch: str
+    change_summary: str | None
+    manifest: list[FileChange] = field(default_factory=list)
+
+
+def _split_z(raw: str) -> list[str]:
+    """Split `-z`-terminated git output into tokens, dropping the trailing empty one."""
+    tokens = raw.split("\0")
+    if tokens and tokens[-1] == "":
+        tokens = tokens[:-1]
+    return tokens
+
+
+def _parse_name_status_z(raw: str) -> list[tuple[str, str, str | None]]:
+    """Parse `git diff --name-status -z` into `(status, path, old_path)` triples.
+
+    With `-z`, a rename/copy record is `status<NUL>old_path<NUL>new_path<NUL>`;
+    every other record is `status<NUL>path<NUL>`. `-z` also disables git's
+    quoting of paths with spaces or non-ASCII bytes, so no unquoting is needed.
+    """
+    tokens = _split_z(raw)
+    records: list[tuple[str, str, str | None]] = []
+    i = 0
+    while i < len(tokens):
+        status = tokens[i]
+        if status[:1] in ("R", "C"):
+            old_path, new_path = tokens[i + 1], tokens[i + 2]
+            records.append((status, new_path, old_path))
+            i += 3
+        else:
+            records.append((status, tokens[i + 1], None))
+            i += 2
+    return records
+
+
+def _parse_numstat_z(raw: str) -> list[tuple[int | None, int | None]]:
+    """Parse `git diff --numstat -z` into `(added, deleted)` pairs, in record order.
+
+    Binary files report `-` for both counts, mapped to `None` here. A
+    rename/copy record has an empty path field followed by two more
+    NUL-separated path tokens (old, then new) — this only needs the counts,
+    so those extra tokens are skipped; `_parse_name_status_z` is the source of
+    truth for paths.
+    """
+    tokens = _split_z(raw)
+    records: list[tuple[int | None, int | None]] = []
+    i = 0
+    while i < len(tokens):
+        added_s, deleted_s, path = tokens[i].split("\t")
+        added = None if added_s == "-" else int(added_s)
+        deleted = None if deleted_s == "-" else int(deleted_s)
+        records.append((added, deleted))
+        i += 1 if path != "" else 3
+    return records
+
+
+def _change_kind(status: str) -> ChangeKind:
+    code = status[:1]
+    if code == "A":
+        return "added"
+    if code == "D":
+        return "deleted"
+    if code == "R":
+        return "renamed"
+    if code == "C":
+        # A copy creates a new path; the source is untouched. There is no
+        # "copied" kind in the manifest's vocabulary, so this is the closest
+        # honest label.
+        return "added"
+    return "modified"
+
+
+def _build_manifest(name_status_raw: str, numstat_raw: str) -> list[FileChange]:
+    statuses = _parse_name_status_z(name_status_raw)
+    counts = _parse_numstat_z(numstat_raw)
+    if len(counts) != len(statuses):
+        # Shouldn't happen — both come from the same worktree state, queried
+        # back to back with no intervening change — but a degraded manifest
+        # (paths and kinds right, counts unknown) beats crashing the whole
+        # collection over a git output surprise.
+        counts = [(None, None)] * len(statuses)
+
+    manifest: list[FileChange] = []
+    for (status, path, old_path), (added, deleted) in zip(statuses, counts, strict=True):
+        manifest.append(
+            FileChange(
+                path=path,
+                change_kind=_change_kind(status),
+                insertions=added,
+                deletions=deleted,
+                binary=added is None and deleted is None,
+                old_path=old_path,
+            )
+        )
+    return manifest
+
+
+def collect_patch(wt: Worktree) -> PatchCollection:
+    """Return the patch, the agent's rationale, and a per-file manifest.
 
     Order matters:
     1. read + delete `CHANGE-SUMMARY.md`, so the agent's rationale reaches
-       FIX-NOTES.md but never appears in the patch;
+       FIX-NOTES.md but never appears in the patch (or the manifest);
     2. `git add -N .` so *added* files show up in the diff;
-    3. `git diff` against the base commit already checked out.
+    3. `git diff HEAD` (patch text) plus `git diff HEAD --name-status -z` and
+       `git diff HEAD --numstat -z` (the manifest) against the base commit
+       already checked out.
+
+    `HEAD` (not a bare `git diff`, which is index-vs-worktree only) is load-
+    bearing: `git add -N .`'s pathspec (`.`) does not just intent-to-add new
+    paths — for a path that matches and no longer exists on disk, plain `git
+    add` (this is standard `add` semantics since git 2.0, unrelated to `-N`)
+    stages its deletion *fully*, not as intent-to-add. A bare `git diff`
+    (index vs worktree) then finds nothing to show for that path, so a
+    deleted file — and the delete-half of a rename, which is a deletion plus
+    an addition of matching content — silently vanishes. `git diff HEAD`
+    compares the worktree directly against the base commit regardless of
+    what got staged along the way, so it sees the deletion (and the rename)
+    correctly while still matching a bare `git diff` byte-for-byte for the
+    modified/added cases that were already covered.
     """
     summary_path = wt.path / CHANGE_SUMMARY_NAME
     summary: str | None = None
@@ -134,11 +275,16 @@ def collect_patch(wt: Worktree) -> tuple[str, str | None]:
         summary_path.unlink()
 
     _run_git(wt.path, "add", "-N", ".")
-    patch = _run_git(wt.path, "diff").stdout
-    return patch, summary
+    patch = _run_git(wt.path, "diff", "HEAD").stdout
+    name_status_raw = _run_git(wt.path, "diff", "HEAD", "--name-status", "-z").stdout
+    numstat_raw = _run_git(wt.path, "diff", "HEAD", "--numstat", "-z").stdout
+    manifest = _build_manifest(name_status_raw, numstat_raw)
+    return PatchCollection(patch=patch, change_summary=summary, manifest=manifest)
 
 
 __all__ = [
+    "FileChange",
+    "PatchCollection",
     "Worktree",
     "collect_patch",
     "create_worktree",
