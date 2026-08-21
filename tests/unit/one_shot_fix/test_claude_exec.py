@@ -112,6 +112,46 @@ def test_argv_carries_the_prompt_and_edit_permissions(
     assert "7" in argv  # --max-turns
 
 
+def test_argv_denies_git_write_commands_that_escape_the_worktree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--disallowedTools` must deny the git write commands whose effects reach
+    past the throwaway worktree into the main repository (or a remote) —
+    surviving `git worktree remove --force` + `git worktree prune`, or moving
+    the agent's work out of the working tree where `collect_patch` can see it.
+
+    File edits are already contained by `cwd`; this is the only guard on git.
+    """
+    repo = make_repo(tmp_path)
+    argv_file = tmp_path / "argv.txt"
+    monkeypatch.setenv("TEST_ARGV_FILE", str(argv_file))
+    prepend_to_path(
+        monkeypatch, write_fake_claude(tmp_path / "bin", script=FAKE_CLAUDE_ARGV_RECORDER).parent
+    )
+
+    run_fix_claude(
+        candidate_id="c1",
+        prompt="THE-PROMPT",
+        worktree=repo,
+        max_turns=7,
+        wallclock_s=30,
+    )
+
+    argv = argv_file.read_text(encoding="utf-8").splitlines()
+    assert "--disallowedTools" in argv
+    denied = argv[argv.index("--disallowedTools") + 1]
+    for pattern in (
+        "Bash(git commit:*)",
+        "Bash(git stash:*)",
+        "Bash(git branch:*)",
+        "Bash(git checkout:*)",
+        "Bash(git push:*)",
+        "Bash(git tag:*)",
+        "Bash(git worktree:*)",
+    ):
+        assert pattern in denied
+
+
 def test_timeout_is_reported_as_an_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

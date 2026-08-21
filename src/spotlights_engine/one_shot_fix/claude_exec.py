@@ -2,7 +2,7 @@
 
 Modeled on `agent_proposals.claude_exec` — same env scrubbing, same
 `shutil.which` resolution so a Windows `.CMD` shim is found, same stream-json
-usage capture for costing. Two deliberate differences:
+usage capture for costing. Three deliberate differences:
 
 - **No `--json-schema`.** The deliverable is edited files in the worktree, not
   a structured payload, so there is nothing to validate against a schema. A
@@ -11,6 +11,28 @@ usage capture for costing. Two deliberate differences:
 - **`--permission-mode acceptEdits`, not `plan`.** `agent_proposals` only
   proposes; this stage implements. The blast radius is a throwaway detached
   worktree under a temp dir, never the user's repo.
+- **`--disallowedTools` denies git write commands.** File edits are contained
+  by `cwd` (the throwaway worktree), but git is not: a worktree checkout
+  shares the main repository's object database and refs namespace (and, for
+  `git worktree`, its administrative metadata), so writes issued from inside
+  the worktree can land in the main repo and outlive
+  `git worktree remove --force` + `git worktree prune` — `git stash` puts an
+  entry in the main repo's `refs/stash`, `git branch`/`git tag` create refs
+  there, `git push` reaches a remote entirely outside the worktree, and
+  `git worktree` itself edits the shared worktree-admin state. `git commit`
+  and `git checkout` are milder (worktree-local) but still undermine the
+  contract another way: they move the agent's work out of the working tree,
+  so `collect_patch`'s `git diff` sees nothing and `FIX-NOTES.md` falsely
+  reports no patch was produced. The prompt in `prompts.py` already asks the
+  agent not to do this; `--disallowedTools` is what actually enforces it,
+  since whether the prose is even reachable depends on the invoking user's
+  Bash allowlist — including a `.claude/settings.json` the target repo may
+  ship, which is present inside the worktree because the worktree is a
+  checkout of that repo. `git reset` is deliberately NOT denied: on a
+  detached worktree it only rewrites that worktree's own, private HEAD/index
+  (cleaned up by `git worktree remove`), so it cannot escape — it can only
+  destroy the agent's own uncommitted edits, a quality risk, not a blast-
+  radius one.
 """
 
 from __future__ import annotations
@@ -37,6 +59,22 @@ _DROP_EXACT = frozenset(
     }
 )
 _DROP_PREFIX = ("VSCODE_", "OPTQUEST_", "SPOTLIGHTS_")
+
+# Git write commands whose effects can escape the throwaway worktree: they
+# either land in the main repository's shared refs/admin state (surviving
+# `git worktree remove --force` + `git worktree prune`) or move the agent's
+# work out of the working tree where `collect_patch` can no longer see it.
+# See the module docstring for the per-command reasoning, including why
+# `git reset` is deliberately absent.
+_DISALLOWED_GIT_WRITES = (
+    "Bash(git commit:*)",
+    "Bash(git stash:*)",
+    "Bash(git branch:*)",
+    "Bash(git checkout:*)",
+    "Bash(git push:*)",
+    "Bash(git tag:*)",
+    "Bash(git worktree:*)",
+)
 
 
 def _clean_env() -> dict[str, str]:
@@ -96,6 +134,8 @@ def run_fix_claude(
         "--verbose",
         "--permission-mode",
         "acceptEdits",
+        "--disallowedTools",
+        ",".join(_DISALLOWED_GIT_WRITES),
         "--max-turns",
         str(max_turns),
     ]
