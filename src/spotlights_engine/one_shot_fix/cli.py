@@ -16,6 +16,8 @@ import argparse
 import sys
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from spotlights_engine.one_shot_fix.api import (
     OneShotFixConfig,
     OneShotFixInput,
@@ -137,19 +139,23 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    inp = OneShotFixInput(
-        result=args.result,
-        index=args.index,
-        repo=args.repo,
-        module=args.module,
-        candidate=args.candidate,
-        out=args.out,
-        direction=args.direction,
-        top_n=top_n,
-        max_turns=args.max_turns,
-        wallclock_s=args.wallclock_s,
-        print_prompt=args.print_prompt,
-    )
+    try:
+        inp = OneShotFixInput(
+            result=args.result,
+            index=args.index,
+            repo=args.repo,
+            module=args.module,
+            candidate=args.candidate,
+            out=args.out,
+            direction=args.direction,
+            top_n=top_n,
+            max_turns=args.max_turns,
+            wallclock_s=args.wallclock_s,
+            print_prompt=args.print_prompt,
+        )
+    except ValidationError as exc:
+        print(f"fix: invalid arguments: {exc}", file=sys.stderr)
+        return 2
 
     try:
         result = one_shot_fix(inp, OneShotFixConfig())

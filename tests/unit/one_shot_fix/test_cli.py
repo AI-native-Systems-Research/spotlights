@@ -46,6 +46,34 @@ def test_unknown_candidate_exits_2(run, capsys: pytest.CaptureFixture) -> None:
     assert "fix:" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize(
+    ("flag", "value"),
+    [
+        ("--max-turns", "0"),
+        ("--wallclock", "0"),
+        ("--max-turns", "-1"),
+    ],
+)
+def test_non_positive_max_turns_or_wallclock_exits_2(
+    run, capsys: pytest.CaptureFixture, flag: str, value: str
+) -> None:
+    run_dir, repo = run
+    code = fix_main(
+        [
+            "--result",
+            str(run_dir),
+            "--repo",
+            str(repo),
+            "--candidate",
+            CAND_ID,
+            flag,
+            value,
+        ]
+    )
+    assert code == 2
+    assert "fix:" in capsys.readouterr().err
+
+
 def test_non_git_repo_exits_2(tmp_path: Path, capsys: pytest.CaptureFixture) -> None:
     run_dir = tmp_path / "spotlights-out"
     run_dir.mkdir()
@@ -78,14 +106,27 @@ def test_print_prompt_writes_the_prompt_and_worktree_to_stdout(
     assert "WORKTREE:" in out
     assert CAND_FILE in out
 
-    # The worktree is left in place for the caller; clean it up.
+    # The worktree is left in place for the caller; clean it up, including the
+    # temp-dir parent that WORKTREE_PARENT points at (create_worktree allocates
+    # it via tempfile.mkdtemp; only this cleanup removes it).
+    import shutil
     import subprocess
 
     worktree = next(
-        ln.split("WORKTREE:", 1)[1].strip() for ln in out.splitlines() if "WORKTREE:" in ln
+        ln.split("WORKTREE:", 1)[1].strip()
+        for ln in out.splitlines()
+        if ln.startswith("WORKTREE:")
+    )
+    worktree_parent = next(
+        ln.split("WORKTREE_PARENT:", 1)[1].strip()
+        for ln in out.splitlines()
+        if ln.startswith("WORKTREE_PARENT:")
     )
     assert Path(worktree).is_dir()
+    assert Path(worktree_parent).is_dir()
     subprocess.run(["git", "worktree", "remove", "--force", worktree], cwd=repo, check=True)
+    shutil.rmtree(worktree_parent, ignore_errors=True)
+    assert not Path(worktree_parent).exists()
 
 
 def test_engine_dispatch_routes_fix_to_the_subcommand(
