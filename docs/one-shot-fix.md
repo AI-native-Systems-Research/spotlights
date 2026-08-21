@@ -204,3 +204,43 @@ prompt *and* a created, validated worktree in one call, does the work
 in-session, then collects the same two artifacts and removes both the
 worktree and its `WORKTREE_PARENT` scaffolding directory. The prompt is shared
 between the two paths, so they cannot drift on the part that matters.
+
+### Naming the candidate up front
+
+Choosing a candidate is the skill's **only** interactive step. Invoked bare, it
+reads `<run>/sorted/sorted_candidates.json`, prints the ranked list, and asks
+which one you want.
+
+If you already know the id — from a module page, from `sorted_candidates.md`, or
+because a `fix --top-n` sweep skipped it — name it in the invocation and the
+picker never runs:
+
+```
+/spotlights-fix-candidate cand-vllm_v1_kv_offload-0002
+```
+
+The skill still needs the run directory and the target repo. It will ask for
+those if the conversation hasn't already established them, so supplying all
+three sends it straight to creating the worktree:
+
+```
+/spotlights-fix-candidate cand-vllm_v1_kv_offload-0002 --result ./spotlights-out --repo ../vllm
+```
+
+Everything after the command name is read by the skill, not parsed by argparse.
+`--result`/`--repo` are borrowed from the CLI because they are familiar; plain
+prose works identically:
+
+```
+/spotlights-fix-candidate implement cand-vllm_v1_kv_offload-0002 from ./spotlights-out against ../vllm
+```
+
+The id is the same value `spotlights-engine fix --candidate` takes, so you can
+move a candidate between the two paths without translating anything.
+
+> [!TIP]
+> Passing a candidate to the **skill** is how you stay in the loop on one fix.
+> Passing it to the **stage** (`spotlights-engine fix --candidate <id>`) runs the
+> same prompt unattended. Use `--print-prompt` if you want to inspect the prompt
+> and the validated worktree before deciding which way to go — it leaves the
+> worktree in place for you.
