@@ -309,14 +309,22 @@ def _write_artifacts(
         (out_dir / NOTES_NAME).write_text(notes, encoding="utf-8")
         files.append(NOTES_NAME)
     except OSError as exc:
-        # `write_bytes` is not atomic: an `ENOSPC` partway through a multi-MB
-        # patch leaves a truncated `fix.patch` on disk. Raising over it and
-        # leaving it there is the worst of the options — the directory then
-        # holds a file named `fix.patch` that `git apply` will reject, or (with
-        # bad luck at a hunk boundary) apply *partially*. Remove it, so the
-        # failure reads as "no patch here" rather than as a corrupt one.
-        with contextlib.suppress(OSError):
-            (out_dir / PATCH_NAME).unlink(missing_ok=True)
+        # Neither `write_bytes` nor `write_text` is atomic: an `ENOSPC` partway
+        # through a multi-MB patch leaves a truncated `fix.patch` on disk, and
+        # the same failure on the notes leaves a truncated `FIX-NOTES.md`.
+        # Raising over either and leaving it there is the worst of the options.
+        # The patch is the sharper edge — the directory would hold a file named
+        # `fix.patch` that `git apply` will reject, or (with bad luck at a hunk
+        # boundary) apply *partially* — but the notes matter too: a
+        # half-written one can lose the very "Applying and verifying" section
+        # that says which commit the patch belongs to, and this directory is
+        # also where a *previous* run's artifacts sit. Leaving last run's notes
+        # next to no patch is a directory that documents a patch which is not
+        # there. Remove both, so the failure reads as "nothing here" — the same
+        # invariant the empty-patch branch above maintains.
+        for name in (PATCH_NAME, NOTES_NAME):
+            with contextlib.suppress(OSError):
+                (out_dir / name).unlink(missing_ok=True)
         raise ArtifactWriteError(
             f"could not write fix artifacts for {sel.candidate.id} to {out_dir}: {exc}"
         ) from exc

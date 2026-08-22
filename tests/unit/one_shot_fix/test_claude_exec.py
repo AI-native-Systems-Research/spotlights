@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 import sys
 from pathlib import Path
 
@@ -218,15 +219,96 @@ def test_argv_denies_git_write_commands_that_escape_the_worktree(
     assert "--disallowedTools" in argv
     denied = argv[argv.index("--disallowedTools") + 1]
     for pattern in (
+        # Moves the work out of the working tree.
         "Bash(git commit:*)",
+        "Bash(git checkout:*)",
+        "Bash(git am:*)",
+        "Bash(git cherry-pick:*)",
+        "Bash(git revert:*)",
+        "Bash(git rebase:*)",
+        "Bash(git merge:*)",
+        # Writes the main repo's shared refs namespace.
         "Bash(git stash:*)",
         "Bash(git branch:*)",
-        "Bash(git checkout:*)",
-        "Bash(git push:*)",
         "Bash(git tag:*)",
+        "Bash(git update-ref:*)",
+        "Bash(git symbolic-ref:*)",
+        "Bash(git notes:*)",
+        "Bash(git replace:*)",
+        "Bash(git fetch:*)",
+        "Bash(git pull:*)",
+        "Bash(git push:*)",
+        # Writes the main repo's shared .git/config.
+        "Bash(git config:*)",
+        "Bash(git remote:*)",
+        "Bash(git submodule:*)",
+        # Shared admin state / object database.
         "Bash(git worktree:*)",
+        "Bash(git gc:*)",
+        "Bash(git prune:*)",
+        "Bash(git reflog:*)",
+        "Bash(git filter-branch:*)",
     ):
         assert pattern in denied
+
+    # The deliberate exclusions, asserted so a future "deny everything that
+    # writes" sweep cannot quietly take them: these touch only the worktree's
+    # own private HEAD/index and its files, all destroyed by
+    # `git worktree remove`. Denying them would cost the agent its ordinary
+    # working-tree operations for no containment gain.
+    for allowed in ("Bash(git reset", "Bash(git clean", "Bash(git add", "Bash(git apply"):
+        assert allowed not in denied
+
+
+def test_the_config_and_ref_writes_denied_by_argv_really_do_escape_a_worktree(
+    tmp_path: Path,
+) -> None:
+    """The premise behind `_DISALLOWED_GIT_WRITES`, asserted against real git.
+
+    The list is the security boundary (the prompt's prose is not — whether the
+    agent's Bash tool is even reachable depends on an allowlist the target repo
+    can ship in its own `.claude/settings.json`). A boundary justified only by
+    a docstring's claim about git's internals rots the moment that claim stops
+    being true, so this pins the claim itself: from inside a *detached linked
+    worktree*, `git config --local`, `git remote add` and `git update-ref` all
+    write the main repository's shared state and survive
+    `git worktree remove --force` + `git worktree prune`.
+
+    If git ever changes so that these are worktree-local, this test fails and
+    the corresponding entries can be reconsidered — which is the only honest
+    trigger for shortening the list.
+    """
+    main = tmp_path / "main"
+    main.mkdir()
+
+    def git(*args: str, cwd: Path) -> str:
+        return subprocess.run(
+            ["git", *args], cwd=cwd, capture_output=True, text=True, check=True
+        ).stdout.strip()
+
+    git("init", "-q", cwd=main)
+    git("config", "user.email", "a@b.c", cwd=main)
+    git("config", "user.name", "a", cwd=main)
+    (main / "f.py").write_text("hi\n", encoding="utf-8")
+    git("add", "f.py", cwd=main)
+    git("commit", "-qm", "init", cwd=main)
+    sha = git("rev-parse", "HEAD", cwd=main)
+
+    wt = tmp_path / "wt"
+    git("worktree", "add", "-q", "--detach", str(wt), sha, cwd=main)
+
+    # Exactly the three writes the argv list denies, issued from the worktree.
+    git("config", "--local", "spotlights.leaked", "yes", cwd=wt)
+    git("remote", "add", "escaped", "https://example.invalid/x.git", cwd=wt)
+    git("update-ref", "refs/heads/injected", sha, cwd=wt)
+
+    git("worktree", "remove", "--force", str(wt), cwd=main)
+    git("worktree", "prune", cwd=main)
+
+    # Every one of them is still in the *user's own* repo after teardown.
+    assert git("config", "--local", "--get", "spotlights.leaked", cwd=main) == "yes"
+    assert "example.invalid" in git("config", "--local", "--get", "remote.escaped.url", cwd=main)
+    assert sha in git("show-ref", "refs/heads/injected", cwd=main)
 
 
 def test_timeout_is_reported_as_an_error(

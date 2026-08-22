@@ -569,6 +569,42 @@ def test_a_patch_write_that_fails_partway_leaves_no_truncated_patch_behind(
     assert not (out_dir / "fix.patch").exists()
 
 
+def test_a_notes_write_that_fails_partway_leaves_neither_artifact_behind(
+    run, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The mirror case: the patch landed, then the notes write died.
+
+    `FIX-NOTES.md` is human-facing, so a truncated one cannot be misapplied the
+    way a truncated patch can — but it can lose the "Applying and verifying"
+    section that records *which commit* the patch belongs to, and a patch whose
+    base is unknown is not applicable. The directory must not be left holding
+    a `fix.patch` documented by half a page either, so the handler removes
+    both: the same "nothing here" invariant the empty-patch branch maintains.
+    """
+    run_dir, repo = run
+    real_write_text = Path.write_text
+
+    def _short_write(self: Path, data: str, *args: object, **kwargs: object) -> int:
+        if self.name != "FIX-NOTES.md":
+            return real_write_text(self, data, *args, **kwargs)  # type: ignore[arg-type]
+        real_write_text(self, data[: len(data) // 2], encoding="utf-8")
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(Path, "write_text", _short_write)
+
+    with pytest.raises(ArtifactWriteError):
+        one_shot_fix(
+            OneShotFixInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+            claude_runner=_runner(),
+        )
+
+    out_dir = run_dir / "fix" / "v1_attention" / CAND_ID
+    assert not (out_dir / "FIX-NOTES.md").exists()
+    # And the patch that *did* write successfully goes with it — a patch with
+    # no notes has no recorded base commit.
+    assert not (out_dir / "fix.patch").exists()
+
+
 def test_a_keyboard_interrupt_during_the_agent_session_leaks_no_worktree(run) -> None:
     """`KeyboardInterrupt` is a `BaseException`, and Ctrl-C is how a real sweep ends.
 

@@ -169,9 +169,19 @@ def _manifest_section(
     rows = "\n".join(_change_row(c, declared) for c in manifest)
     total_files = len(manifest)
     unknown = [c for c in manifest if not c.counts_known]
-    known_text = [c for c in manifest if c.counts_known and not c.binary]
-    total_ins = sum(c.insertions or 0 for c in known_text)
-    total_del = sum(c.deletions or 0 for c in known_text)
+    # No `or 0` fallback: a missing count summed as zero silently understates
+    # the change, which is the false-total bug `counts_known` exists to prevent.
+    # `FileChange.line_counts()` returns `None` for exactly the records that
+    # have nothing to add (binary, or degraded), and the `is not None` filter
+    # narrows the pairs to `int` — so the sum needs neither a fallback nor a
+    # `type: ignore`.
+    counted = [
+        p
+        for p in (c.line_counts() for c in manifest if c.counts_known and not c.binary)
+        if p is not None
+    ]
+    total_ins = sum(ins for ins, _ in counted)
+    total_del = sum(dels for _, dels in counted)
     plural = "s" if total_files != 1 else ""
 
     if unknown:

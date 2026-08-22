@@ -10,6 +10,7 @@ import pytest
 from spotlights_engine.one_shot_fix.errors import NotAGitRepoError
 from spotlights_engine.one_shot_fix.prompts import CHANGE_SUMMARY_NAME
 from spotlights_engine.one_shot_fix.worktree import (
+    FileChange,
     collect_patch,
     create_worktree,
     remove_worktree,
@@ -213,6 +214,69 @@ def test_manifest_records_a_binary_file_with_no_line_counts(tmp_path: Path) -> N
     assert change.binary is True
     assert change.insertions is None
     assert change.deletions is None
+
+
+def test_a_file_change_cannot_claim_known_counts_without_having_them() -> None:
+    """`counts_known and not binary` is a contract, not a convention.
+
+    `counts_known` defaults to `True`, so this state was constructible — and it
+    rendered as the nonsense `+None/-None`, and forced `notes` to carry an
+    `or 0` fallback in the totals that silently *understated* the change. That
+    is the exact false-total bug `counts_known` was introduced to prevent, so
+    the state is rejected where it originates rather than patched over at every
+    read site.
+    """
+    with pytest.raises(ValueError, match="counts_known"):
+        FileChange(
+            path="pkg/attn/tile.py",
+            change_kind="modified",
+            insertions=None,
+            deletions=None,
+            binary=False,  # counts_known defaults to True
+        )
+    with pytest.raises(ValueError, match="counts_known"):
+        FileChange(
+            path="pkg/attn/tile.py",
+            change_kind="modified",
+            insertions=3,
+            deletions=None,  # a half-`-` numstat record
+            binary=False,
+        )
+
+
+def test_the_two_legitimate_ways_to_have_no_line_counts_are_both_accepted() -> None:
+    """The guard must not reject the records the design *needs*.
+
+    A binary file (git writes `-` for both counts, an expected absence) and a
+    degraded record (`counts_known=False` — counts could not be determined) are
+    the two states that legitimately carry `None`, and `line_counts()` reports
+    `None` for both so neither contributes to a total.
+    """
+    binary = FileChange(
+        path="pkg/attn/blob.bin",
+        change_kind="added",
+        insertions=None,
+        deletions=None,
+        binary=True,
+    )
+    degraded = FileChange(
+        path="pkg/attn/tile.py",
+        change_kind="modified",
+        insertions=None,
+        deletions=None,
+        binary=False,
+        counts_known=False,
+    )
+    assert binary.line_counts() is None
+    assert degraded.line_counts() is None
+    counted = FileChange(
+        path="pkg/attn/tile.py",
+        change_kind="modified",
+        insertions=4,
+        deletions=1,
+        binary=False,
+    )
+    assert counted.line_counts() == (4, 1)
 
 
 def test_manifest_records_a_renamed_file_with_the_new_path(tmp_path: Path) -> None:

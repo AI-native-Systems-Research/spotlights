@@ -183,6 +183,16 @@ class FileChange:
     degraded record — `counts_known=False`, `binary=False`). Both leave
     `insertions`/`deletions` as `None`; conflating them made a degraded
     record render as a false "binary" claim (see Important 3).
+
+    `counts_known and not binary` therefore means "these two numbers are real",
+    and `__post_init__` makes that a *contract* rather than a convention of
+    `_parse_numstat_z`. It was only ever a convention: `counts_known` defaults
+    to `True`, so `FileChange(..., insertions=None, binary=False)` was
+    constructible and rendered as the nonsense `+None/-None`, and the totals
+    line in `notes` had to carry an `or 0` fallback that silently *understated*
+    the change — the exact false-total bug `counts_known` exists to prevent.
+    Rejecting the state at construction is what lets `line_counts` be typed as
+    present and the fallback be dropped.
     """
 
     path: str
@@ -192,6 +202,31 @@ class FileChange:
     binary: bool
     counts_known: bool = True
     old_path: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.counts_known and not self.binary:
+            if self.insertions is None or self.deletions is None:
+                raise ValueError(
+                    f"FileChange({self.path!r}) claims counts_known with a missing "
+                    f"count (insertions={self.insertions!r}, "
+                    f"deletions={self.deletions!r}); pass counts_known=False for a "
+                    f"degraded record, or binary=True for a binary file"
+                )
+
+    def line_counts(self) -> tuple[int, int] | None:
+        """`(insertions, deletions)` when both are real numbers, else `None`.
+
+        The `None` covers binary files and degraded records alike — neither has
+        a count to add to a total. Returning the pair rather than exposing the
+        two `int | None` fields is what makes a total type-check without either
+        an `or 0` fallback (which understates) or a `type: ignore` (which
+        silences the checker on the one line where the invariant matters): a
+        checker cannot narrow `c.insertions` through a filter over `c`, but it
+        narrows the comprehension variable itself just fine.
+        """
+        if self.insertions is None or self.deletions is None:
+            return None
+        return self.insertions, self.deletions
 
 
 @dataclass(frozen=True)

@@ -145,6 +145,41 @@ design.** It is what stops the agent editing the wrong function after a file
 has drifted. If it fails, check out the commit the run targeted (recorded in
 `run_manifest.json` under `target.commit_sha`) and try again.
 
+## What contains the agent
+
+"Your checkout is never modified" is two separate guarantees, enforced two
+different ways.
+
+**File edits** are contained by `cwd`: the session runs with the throwaway
+worktree as its working directory, and `--permission-mode acceptEdits` lets it
+edit freely *there*.
+
+**Git is not contained by `cwd`.** A linked worktree keeps only HEAD, the index
+and `refs/bisect`/`refs/worktree` privately — its config, refs namespace, object
+database and worktree-admin state all belong to the **main repository**, reached
+through the `.git` file the worktree carries in place of a directory. A
+`git config --local core.hooksPath …` run from inside the worktree writes your
+repo's `.git/config` and survives `git worktree remove --force` +
+`git worktree prune`, and then runs arbitrary code on your next commit. So `fix`
+passes `--disallowedTools` denying every git subcommand that reaches shared
+state: config writes (`config`, `remote`, `submodule`), ref writes (`stash`,
+`branch`, `tag`, `update-ref`, `symbolic-ref`, `notes`, `replace`, `fetch`,
+`pull`, `push`), and object-database or admin writes (`worktree`, `gc`, `prune`,
+`reflog`, `filter-branch`). `commit`, `checkout`, `am`, `cherry-pick`, `revert`,
+`rebase` and `merge` are denied for a different reason: they move the agent's
+work out of the working tree, where `collect_patch`'s `git diff` can no longer
+see it, and `FIX-NOTES.md` would then falsely report that no patch was produced.
+
+`git reset`, `git clean`, `git add` and `git apply` are deliberately **allowed** —
+they touch only the worktree's own private index and files, all destroyed with
+it, so the most they can cost is the agent's own uncommitted work.
+
+This is enforcement, not advice. The prompt asks the agent not to do any of it,
+but whether that prose is even reachable depends on the invoking user's Bash
+allowlist — including a `.claude/settings.json` the **target repo** ships, which
+is present inside the worktree because the worktree is a checkout of that repo.
+`--disallowedTools` is the boundary.
+
 ## Artifacts
 
 ```

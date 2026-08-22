@@ -15,27 +15,52 @@ costing. Four deliberate differences:
   proposes; this stage implements. The blast radius is a throwaway detached
   worktree under a temp dir, never the user's repo.
 - **`--disallowedTools` denies git write commands.** File edits are contained
-  by `cwd` (the throwaway worktree), but git is not: a worktree checkout
-  shares the main repository's object database and refs namespace (and, for
-  `git worktree`, its administrative metadata), so writes issued from inside
-  the worktree can land in the main repo and outlive
-  `git worktree remove --force` + `git worktree prune` — `git stash` puts an
-  entry in the main repo's `refs/stash`, `git branch`/`git tag` create refs
-  there, `git push` reaches a remote entirely outside the worktree, and
-  `git worktree` itself edits the shared worktree-admin state. `git commit`
-  and `git checkout` are milder (worktree-local) but still undermine the
-  contract another way: they move the agent's work out of the working tree,
-  so `collect_patch`'s `git diff` sees nothing and `FIX-NOTES.md` falsely
-  reports no patch was produced. The prompt in `prompts.py` already asks the
-  agent not to do this; `--disallowedTools` is what actually enforces it,
-  since whether the prose is even reachable depends on the invoking user's
-  Bash allowlist — including a `.claude/settings.json` the target repo may
-  ship, which is present inside the worktree because the worktree is a
-  checkout of that repo. `git reset` is deliberately NOT denied: on a
-  detached worktree it only rewrites that worktree's own, private HEAD/index
-  (cleaned up by `git worktree remove`), so it cannot escape — it can only
-  destroy the agent's own uncommitted edits, a quality risk, not a blast-
-  radius one.
+  by `cwd` (the throwaway worktree), but git is not: a linked worktree keeps
+  only HEAD, the index and `refs/bisect`/`refs/worktree` privately. Its
+  config, its refs namespace, its object database and its worktree-admin
+  state are the *main repository's*, reached through the `.git` **file** the
+  worktree checkout carries in place of a directory. So writes issued from
+  inside the worktree land in the user's own repo and outlive
+  `git worktree remove --force` + `git worktree prune`. Measured on git
+  2.50.1, from a detached worktree, all of these survived that teardown:
+
+  - **`.git/config`** — `git config --local`, `git remote add`, and
+    `git submodule` all write the *common* config file (`git config
+    --worktree` would not, but it needs `extensions.worktreeConfig`, off by
+    default). `core.hooksPath` is the sharpest edge on the whole list: set it
+    and arbitrary code runs on the user's next commit in their own checkout,
+    long after `fix` has exited.
+  - **refs** — `git stash` (`refs/stash`), `git branch`/`git tag`, and the
+    low-level `git update-ref`/`git symbolic-ref`, which supersede those two
+    by writing any ref directly. `git notes` and `git replace` are the same
+    mechanism, and `git replace` silently rewrites what the main repo's
+    history *looks like*. `git fetch`/`git pull` write remote-tracking refs
+    (and reach the network); `git push` reaches a remote entirely outside the
+    worktree.
+  - **object database and admin state** — `git worktree` itself, plus
+    `git gc`/`git prune`/`git reflog`/`git filter-branch`, which are
+    destructive on state shared with every other worktree.
+
+  `git commit` and `git checkout` are milder — worktree-local — but undermine
+  the contract another way: they move the agent's work out of the working
+  tree, so `collect_patch`'s `git diff` sees nothing and `FIX-NOTES.md`
+  falsely reports no patch was produced. `git am`, `git cherry-pick`,
+  `git revert`, `git rebase` and `git merge` are denied for that same reason,
+  not for blast radius.
+
+  The prompt in `prompts.py` already asks the agent not to do any of this;
+  `--disallowedTools` is what actually enforces it, since whether the prose is
+  even reachable depends on the invoking user's Bash allowlist — including a
+  `.claude/settings.json` the target repo may ship, which is present inside
+  the worktree because the worktree is a checkout of that repo. That is why
+  the list is the security boundary and not a politeness.
+
+  `git reset` and `git clean` are deliberately NOT denied: on a detached
+  worktree they only touch that worktree's own private HEAD/index and its
+  untracked files (all removed by `git worktree remove`), so they cannot
+  escape — they can only destroy the agent's own uncommitted edits, a quality
+  risk, not a blast-radius one. `git add` and `git apply` likewise write only
+  the private index and the worktree's files.
 """
 
 from __future__ import annotations
@@ -72,19 +97,48 @@ _DROP_EXACT = frozenset(
 _DROP_PREFIX = ("VSCODE_", "OPTQUEST_", "SPOTLIGHTS_")
 
 # Git write commands whose effects can escape the throwaway worktree: they
-# either land in the main repository's shared refs/admin state (surviving
-# `git worktree remove --force` + `git worktree prune`) or move the agent's
-# work out of the working tree where `collect_patch` can no longer see it.
-# See the module docstring for the per-command reasoning, including why
-# `git reset` is deliberately absent.
+# either land in the main repository's shared config/refs/object state
+# (surviving `git worktree remove --force` + `git worktree prune`) or move the
+# agent's work out of the working tree where `collect_patch` can no longer see
+# it. Grouped by *which* shared thing they reach, because that is the test for
+# whether a command belongs on this list at all — see the module docstring for
+# the reasoning, including why `git reset` and `git clean` are deliberately
+# absent.
 _DISALLOWED_GIT_WRITES = (
+    # Moves the work out of the working tree: `collect_patch`'s `git diff
+    # <base>` then sees nothing and `FIX-NOTES.md` falsely reports no patch.
     "Bash(git commit:*)",
+    "Bash(git checkout:*)",
+    "Bash(git am:*)",
+    "Bash(git cherry-pick:*)",
+    "Bash(git revert:*)",
+    "Bash(git rebase:*)",
+    "Bash(git merge:*)",
+    # Writes the main repository's shared refs namespace. Only HEAD, the index
+    # and `refs/bisect`/`refs/worktree` are per-worktree; everything else a
+    # linked worktree writes lands in the common `.git` and outlives it.
     "Bash(git stash:*)",
     "Bash(git branch:*)",
-    "Bash(git checkout:*)",
-    "Bash(git push:*)",
     "Bash(git tag:*)",
+    "Bash(git update-ref:*)",
+    "Bash(git symbolic-ref:*)",
+    "Bash(git notes:*)",
+    "Bash(git replace:*)",
+    "Bash(git fetch:*)",
+    "Bash(git pull:*)",
+    "Bash(git push:*)",
+    # Writes the main repository's shared `.git/config`. `core.hooksPath` is
+    # the sharpest edge here: it makes arbitrary code run on the *user's* next
+    # commit in their own checkout, long after `fix` has exited.
+    "Bash(git config:*)",
+    "Bash(git remote:*)",
+    "Bash(git submodule:*)",
+    # Shared administrative state and object database.
     "Bash(git worktree:*)",
+    "Bash(git gc:*)",
+    "Bash(git prune:*)",
+    "Bash(git reflog:*)",
+    "Bash(git filter-branch:*)",
 )
 
 
