@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from spotlights_engine.one_shot_fix import worktree as worktree_mod
 from spotlights_engine.one_shot_fix.api import (
     OneShotFixInput,
     one_shot_fix,
@@ -18,17 +20,20 @@ from spotlights_engine.one_shot_fix.errors import (
     ClaudeUnavailableError,
     NotAGitRepoError,
     OneShotFixError,
+    WorktreeError,
 )
 from spotlights_engine.prep_evolve.errors import SelectionError, StalenessError
 from tests.unit.prep_evolve._fixtures import (
     CAND_FILE,
     make_repo,
+    make_result_dict,
     write_index,
     write_result,
     write_sorted,
 )
 
 CAND_ID = "cand-v1_attention-0002"
+SECOND_CAND_ID = "cand-v1_attention-0003"
 
 
 def _git_only_path(tmp_path: Path) -> str:
@@ -562,3 +567,187 @@ def test_a_keyboard_interrupt_during_the_agent_session_leaks_no_worktree(run) ->
     # is what keeps `.git/worktrees` itself clean, so assert on that directly.
     admin = repo / ".git" / "worktrees"
     assert not admin.exists() or list(admin.iterdir()) == []
+
+
+def _break_the_diff(monkeypatch: pytest.MonkeyPatch, message: str) -> None:
+    """Make `collect_patch`'s `git diff` fail the way a real timeout would."""
+    real = worktree_mod._run_git_bytes
+
+    def _fake(cwd: Path, *args: str, check: bool = True) -> bytes:
+        if "diff" in args:
+            raise WorktreeError(message)
+        return real(cwd, *args, check=check)
+
+    monkeypatch.setattr(worktree_mod, "_run_git_bytes", _fake)
+
+
+def test_a_failed_diff_still_writes_notes_and_does_not_claim_no_patch(
+    run, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A `git diff` that fails is a lost session, not "the agent made no edit".
+
+    `collect_patch` runs as the last statement inside the `try` whose `finally`
+    destroys the worktree, and `_write_artifacts` is *after* that block. If the
+    diff raised, the whole candidate record went with the worktree: no
+    `FIX-NOTES.md`, no `run.error`, no usage — and in a sweep, a skip whose
+    reason is a git message with no hint that a paid session was thrown away.
+
+    Reporting it as `patch=b""` alone would be worse than nothing: the notes
+    would then state "No patch was produced. The agent made no in-scope edit."
+    about a session that may well have edited every file in scope. Hence the
+    separate `collect_error` channel.
+    """
+    run_dir, repo = run
+    _break_the_diff(monkeypatch, "git diff timed out after 60s")
+
+    result = one_shot_fix(
+        OneShotFixInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+        claude_runner=_runner(summary="rewrote the tile heuristic"),
+    )
+
+    assert result.skipped == []
+    fix = result.fixes[0]
+    assert fix.collection_error is not None
+    assert "timed out" in fix.collection_error
+    assert fix.patch_produced is False
+    assert fix.files == ["FIX-NOTES.md"]
+
+    notes = (Path(fix.path) / "FIX-NOTES.md").read_text(encoding="utf-8")
+    assert "No patch could be collected" in notes
+    assert "git diff timed out after 60s" in notes
+    # The false claim this whole channel exists to prevent.
+    assert "The agent made no in-scope edit" not in notes
+    # The agent's own summary is still recorded — flagged as a claim about work
+    # that was never captured, but not discarded.
+    assert "rewrote the tile heuristic" in notes
+    # And the worktree is still cleaned up.
+    assert len(_worktrees(repo)) == 1
+
+
+def test_a_failed_diff_keeps_the_agent_session_error(
+    run, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Both failures are recorded; the diff failure does not swallow the first."""
+    run_dir, repo = run
+    _break_the_diff(monkeypatch, "git diff timed out after 60s")
+
+    result = one_shot_fix(
+        OneShotFixInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+        claude_runner=_runner(error="claude exit=1: stderr=b'overloaded'"),
+    )
+
+    notes = (Path(result.fixes[0].path) / "FIX-NOTES.md").read_text(encoding="utf-8")
+    assert "overloaded" in notes
+    assert "git diff timed out after 60s" in notes
+
+
+def test_a_failed_diff_leaves_no_stale_patch_from_a_previous_run(
+    run, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The notes say the patch is unknown, so a previous session's must not sit there."""
+    run_dir, repo = run
+    first = one_shot_fix(
+        OneShotFixInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+        claude_runner=_runner(),
+    )
+    out_dir = Path(first.fixes[0].path)
+    assert (out_dir / "fix.patch").exists()
+
+    _break_the_diff(monkeypatch, "git diff timed out after 60s")
+    one_shot_fix(
+        OneShotFixInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+        claude_runner=_runner(),
+    )
+    assert not (out_dir / "fix.patch").exists()
+
+
+def _write_two_candidates(run_dir: Path) -> None:
+    """Rewrite result.json with a second candidate, cloned from the first."""
+    data = make_result_dict()
+    cands = data["module_runs"]["v1/attention"]["candidates"]["candidates"]
+    second = json.loads(json.dumps(cands[0]))
+    second["id"] = SECOND_CAND_ID
+    cands.append(second)
+    (run_dir / "result.json").write_text(json.dumps(data), encoding="utf-8")
+
+
+def test_an_unexpected_exception_in_a_sweep_skips_one_candidate_and_continues(
+    run,
+) -> None:
+    """Each candidate in a sweep costs a paid agent session; one bug must not burn the rest.
+
+    The batch loop caught only `(PrepEvolveError, OneShotFixError)`. Any other
+    exception type — a pydantic `ValidationError`, an `OSError` from somewhere
+    not already wrapped, a bug in this module — propagated out of
+    `one_shot_fix`, discarding every candidate still queued. Unlike
+    `prep_evolve`, whose equally narrow loop is free to re-run, that throws
+    away sessions that were never started.
+    """
+    run_dir, repo = run
+    _write_two_candidates(run_dir)
+
+    def _boom_on_the_first(*, candidate_id: str, prompt: str, worktree: Path,
+                           max_turns: int, wallclock_s: int) -> FixRunResult:
+        if candidate_id == CAND_ID:
+            raise RuntimeError("a bug nobody anticipated")
+        return _runner()(
+            candidate_id=candidate_id,
+            prompt=prompt,
+            worktree=worktree,
+            max_turns=max_turns,
+            wallclock_s=wallclock_s,
+        )
+
+    result = one_shot_fix(
+        OneShotFixInput(result=run_dir, repo=str(repo)),  # batch: no --candidate
+        claude_runner=_boom_on_the_first,
+    )
+
+    # The second candidate still ran.
+    assert [f.candidate_id for f in result.fixes] == [SECOND_CAND_ID]
+    assert result.fixes[0].patch_produced is True
+
+    assert len(result.skipped) == 1
+    skip = result.skipped[0]
+    assert skip.candidate_id == CAND_ID
+    # Worded so it cannot be mistaken for a candidate that legitimately could
+    # not be fixed.
+    assert "unexpected RuntimeError" in skip.reason
+    assert "bug" in skip.reason
+    assert "a bug nobody anticipated" in skip.reason
+
+    # Neither candidate leaked a worktree.
+    assert len(_worktrees(repo)) == 1
+
+
+def test_a_keyboard_interrupt_in_a_sweep_still_aborts_the_sweep(run) -> None:
+    """The widened handler is `except Exception`, never `BaseException`.
+
+    Ctrl-C through a ten-candidate sweep must stop it, not be recorded as ten
+    skips while the sweep keeps paying for sessions.
+    """
+    run_dir, repo = run
+    _write_two_candidates(run_dir)
+
+    def _interrupt(**kwargs):
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        one_shot_fix(
+            OneShotFixInput(result=run_dir, repo=str(repo)),  # batch
+            claude_runner=_interrupt,
+        )
+
+
+def test_an_unexpected_exception_still_raises_for_an_explicit_candidate(run) -> None:
+    """Single-candidate mode keeps the traceback: there is nothing to protect."""
+    run_dir, repo = run
+
+    def _boom(**kwargs):
+        raise RuntimeError("a bug nobody anticipated")
+
+    with pytest.raises(RuntimeError):
+        one_shot_fix(
+            OneShotFixInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+            claude_runner=_boom,
+        )

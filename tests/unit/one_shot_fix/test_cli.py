@@ -174,6 +174,48 @@ def test_out_of_scope_files_are_flagged_on_stderr(
     assert "outside the declared scope" in captured.err
 
 
+def test_a_failed_patch_collection_is_not_printed_as_notes_only(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """"notes only (no patch)" reads as a decision; a failed diff is a lost session.
+
+    The operator watching a sweep scroll past has only this one line per
+    candidate. Printing a `git diff` that timed out the same way as an agent
+    that deliberately made no edit hides the one case that needs a re-run.
+    """
+    import spotlights_engine.one_shot_fix.cli as cli_mod
+    from spotlights_engine.one_shot_fix.api import FixArtifact, OneShotFixResult
+
+    run_dir, repo = run
+    out_dir = run_dir / "fix" / "v1_attention" / CAND_ID
+    monkeypatch.setattr(
+        cli_mod,
+        "one_shot_fix",
+        lambda inp, cfg: OneShotFixResult(
+            fixes=[
+                FixArtifact(
+                    candidate_id=CAND_ID,
+                    module_qualified_name="v1/attention",
+                    path=str(out_dir),
+                    files=["FIX-NOTES.md"],
+                    patch_produced=False,
+                    base_sha="0" * 40,
+                    collection_error="git diff timed out after 60s",
+                )
+            ]
+        ),
+    )
+
+    code = fix_main(["--result", str(run_dir), "--repo", str(repo), "--candidate", CAND_ID])
+    captured = capsys.readouterr()
+
+    assert code == 0
+    assert "notes only (no patch)" not in captured.out
+    assert "patch collection FAILED" in captured.out
+    assert "git diff timed out after 60s" in captured.err
+    assert "re-run this candidate" in captured.err
+
+
 def test_engine_dispatch_routes_fix_to_the_subcommand(
     run, capsys: pytest.CaptureFixture
 ) -> None:

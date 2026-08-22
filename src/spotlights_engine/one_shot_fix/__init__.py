@@ -21,6 +21,7 @@ from spotlights_engine.one_shot_fix.api import (
     one_shot_fix,
 )
 from spotlights_engine.one_shot_fix.errors import (
+    ArtifactWriteError,
     ClaudeUnavailableError,
     NotAGitRepoError,
     OneShotFixError,
@@ -29,6 +30,7 @@ from spotlights_engine.one_shot_fix.errors import (
 from spotlights_engine.one_shot_fix.prompts import build_fix_prompt
 
 __all__ = [
+    "ArtifactWriteError",
     "ClaudeUnavailableError",
     "FixArtifact",
     "NotAGitRepoError",

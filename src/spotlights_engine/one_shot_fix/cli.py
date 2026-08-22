@@ -202,8 +202,24 @@ def main(argv: list[str] | None = None) -> int:
         print(preview.prompt)
 
     for fix in result.fixes:
-        state = "patch + notes" if fix.patch_produced else "notes only (no patch)"
+        # Three distinct states, not two: a failed diff also has no patch, but
+        # printing it as "notes only" would read as the benign "the agent chose
+        # not to edit anything" when the truth is that its edits were lost.
+        if fix.collection_error:
+            state = "notes only (patch collection FAILED)"
+        elif fix.patch_produced:
+            state = "patch + notes"
+        else:
+            state = "notes only (no patch)"
         print(f"{fix.candidate_id}: {fix.path} ({state})")
+        if fix.collection_error:
+            print(
+                f"warning: {fix.candidate_id}: could not collect the patch: "
+                f"{fix.collection_error} — the agent session ran but its edits "
+                f"were not captured and the worktree is gone; re-run this "
+                f"candidate. See {Path(fix.path) / NOTES_NAME}",
+                file=sys.stderr,
+            )
         if fix.out_of_scope_files:
             print(
                 f"warning: {fix.candidate_id}: patch touches files outside the "

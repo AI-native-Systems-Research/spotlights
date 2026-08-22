@@ -100,6 +100,7 @@ def _manifest_section(
     manifest: Sequence[FileChange],
     patch_produced: bool,
     out_of_scope: Sequence[str],
+    collect_error: str | None = None,
 ) -> str:
     """The patch's real blast radius: every file it touched, kind, size, and scope.
 
@@ -113,6 +114,15 @@ def _manifest_section(
     about two files must not open the notes and find three. One computation,
     in `api._write_artifacts`, feeds both.
     """
+    if collect_error:
+        # "The diff failed" and "the agent changed nothing" are different
+        # facts, and only one of them is knowable here.
+        return (
+            "## Files changed\n\n"
+            "_(unknown — the diff could not be taken, so there is no per-file "
+            "breakdown; see \"Outcome\" below)_\n"
+        )
+
     if not patch_produced:
         return (
             "## Files changed\n\n"
@@ -185,10 +195,29 @@ def _outcome_section(
     patch_produced: bool,
     agent_error: str | None,
     target: Target,
+    collect_error: str | None,
 ) -> str:
     summary = change_summary.strip() if change_summary else "_(the agent left no summary)_"
     if agent_error:
         summary = f"{summary}\n\n**Agent session error:** `{agent_error}`"
+
+    if collect_error:
+        # The one outcome this document must not describe as "no patch was
+        # produced": the session ran, may well have edited files, and the diff
+        # that would have captured them failed. Those edits are gone with the
+        # worktree, and saying so is the only honest report available.
+        return (
+            "## Outcome\n\n"
+            "**No patch could be collected — this is a failure, not a decision.** "
+            "The agent session finished, but taking the diff of its worktree "
+            "failed, so what it changed is unknown. The throwaway worktree has "
+            "since been removed, so those edits are not recoverable: re-run "
+            "this candidate.\n\n"
+            f"**Patch collection error:** `{collect_error}`\n\n"
+            "The agent's own summary, if it left one, follows — treat it as a "
+            "claim about work that was never captured.\n\n"
+            f"{summary}\n"
+        )
 
     if not patch_produced:
         return (
@@ -245,6 +274,7 @@ def render_fix_notes(
     agent_error: str | None,
     manifest: Sequence[FileChange],
     out_of_scope: Sequence[str],
+    collect_error: str | None = None,
 ) -> str:
     """Render `FIX-NOTES.md` for one candidate.
 
@@ -255,6 +285,11 @@ def render_fix_notes(
     `out_of_scope` is that comparison's verdict, computed once by the caller
     (`api._write_artifacts`) and shared with `FixArtifact`, so the notes and
     the CLI warning cannot disagree.
+
+    `collect_error` outranks `patch_produced`: when the diff itself could not
+    be taken, an empty patch says nothing about what the agent did, so both
+    the manifest and the outcome sections report the collection failure
+    instead of the (unknowable) claim that no edit was made.
     """
     target = candidate_target(spec)
     return f"""# Fix notes — {candidate_id}
@@ -269,7 +304,7 @@ def render_fix_notes(
 
 {scope_lines(spec)}
 
-{_manifest_section(spec, manifest, patch_produced, out_of_scope)}
+{_manifest_section(spec, manifest, patch_produced, out_of_scope, collect_error)}
 
 ## The proposal
 
@@ -302,6 +337,7 @@ verification recipe for a machine that can run them.
     change_summary=change_summary,
     patch_produced=patch_produced,
     agent_error=agent_error,
+    collect_error=collect_error,
     target=target,
 )}"""
 

@@ -190,11 +190,19 @@ class PatchCollection:
     `_run_git_bytes`). `change_summary` is `str` — it is the agent's prose,
     destined for a markdown document, where a lossy decode is the right
     trade.
+
+    `collect_error` is set when the diff itself could not be taken (e.g. the
+    `_GIT_TIMEOUT_S` timeout fired). It is *not* the same as an empty `patch`:
+    an empty patch means the agent made no edit, while `collect_error` means
+    what the agent did is unknown and now unrecoverable. Conflating the two
+    would make `FIX-NOTES.md` claim "the agent made no in-scope edit" about a
+    session whose edits were merely lost.
     """
 
     patch: bytes
     change_summary: str | None
     manifest: list[FileChange] = field(default_factory=list)
+    collect_error: str | None = None
 
 
 def _split_z(raw: str) -> list[str]:
@@ -355,6 +363,11 @@ def _build_manifest(name_status_raw: str, numstat_raw: str) -> list[FileChange]:
 def collect_patch(wt: Worktree) -> PatchCollection:
     """Return the patch, the agent's rationale, and a per-file manifest.
 
+    Never raises for a git failure: a diff that cannot be taken comes back as
+    `collect_error` on the result, because the caller's `finally` destroys the
+    worktree and an exception here would take the candidate's whole record with
+    it (see the comment on the diff below).
+
     Order matters:
     1. read + delete `CHANGE-SUMMARY.md`, so the agent's rationale reaches
        FIX-NOTES.md but never appears in the patch (or the manifest), then
@@ -408,8 +421,22 @@ def collect_patch(wt: Worktree) -> PatchCollection:
         # pathspec matches nothing and git exits 1 — a no-op, not a failure.
         _run_git(wt.path, "checkout", wt.base_sha, "--", CHANGE_SUMMARY_NAME, check=False)
 
-    _run_git(wt.path, "add", "-N", ".")
-    patch = _run_git_bytes(wt.path, "diff", wt.base_sha)
+    # `git add -N .` and the diff are the two steps that can fail outright
+    # (a 120 s `_GIT_TIMEOUT_S` timeout on a huge tree, a git that dies). The
+    # caller runs this inside the `try` whose `finally` destroys the worktree,
+    # so raising here would take the whole candidate's record down with the
+    # worktree: no `FIX-NOTES.md`, no recorded `run.error`, no usage numbers,
+    # and in a sweep, one skip line for a session that was already paid for.
+    # Report the failure instead, keeping the agent's own prose (already read
+    # above), and let the caller write notes that say plainly what is and is
+    # not known.
+    try:
+        _run_git(wt.path, "add", "-N", ".")
+        patch = _run_git_bytes(wt.path, "diff", wt.base_sha)
+    except WorktreeError as exc:
+        return PatchCollection(
+            patch=b"", change_summary=summary, manifest=[], collect_error=str(exc)
+        )
 
     # The patch above is the deliverable; nothing past this point may be
     # allowed to lose it. A manifest-parsing surprise (git output nobody

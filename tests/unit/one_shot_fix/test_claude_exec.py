@@ -14,8 +14,10 @@ from spotlights_engine.one_shot_fix.claude_exec import (
 )
 from tests.unit.one_shot_fix._fixtures import (
     FAKE_CLAUDE_ARGV_RECORDER,
+    FAKE_CLAUDE_ENV_RECORDER,
     FAKE_CLAUDE_FAILURE,
     FAKE_CLAUDE_NO_RESULT_EVENT,
+    FAKE_CLAUDE_STDIN_RECORDER,
     FAKE_CLAUDE_SUCCESS,
     prepend_to_path,
     write_fake_claude,
@@ -87,7 +89,7 @@ def test_missing_result_event_is_not_an_error(
     assert result.usage is None
 
 
-def test_argv_carries_the_prompt_and_edit_permissions(
+def test_argv_carries_the_edit_permissions_and_turn_cap(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     repo = make_repo(tmp_path)
@@ -107,9 +109,84 @@ def test_argv_carries_the_prompt_and_edit_permissions(
 
     argv = argv_file.read_text(encoding="utf-8").splitlines()
     assert "-p" in argv
-    assert "THE-PROMPT" in argv
     assert "acceptEdits" in argv  # must be able to edit; not --permission-mode plan
     assert "7" in argv  # --max-turns
+
+
+def test_prompt_travels_on_stdin_not_argv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A fix prompt embeds the whole findings digest and is unbounded in principle.
+
+    On argv it would hit a platform limit (Linux caps one argv element at
+    `MAX_ARG_STRLEN` = 128 KiB; macOS caps env + argv together at 1 MiB) and
+    fail at `execve` with a message that says nothing about prompt size — after
+    a worktree has already been created and validated. Stdin has no such cap,
+    which is also what `agent_proposals.claude_exec` does.
+    """
+    repo = make_repo(tmp_path)
+    argv_file = tmp_path / "argv.txt"
+    stdin_file = tmp_path / "stdin.txt"
+    monkeypatch.setenv("TEST_ARGV_FILE", str(argv_file))
+    monkeypatch.setenv("TEST_STDIN_FILE", str(stdin_file))
+    prepend_to_path(
+        monkeypatch, write_fake_claude(tmp_path / "bin", script=FAKE_CLAUDE_STDIN_RECORDER).parent
+    )
+
+    # Comfortably past Linux's 128 KiB per-argument ceiling, so this test would
+    # fail at process launch — not just on the assertion — if the prompt were
+    # ever moved back onto argv.
+    prompt = "THE-PROMPT " + ("x" * 200_000)
+
+    result = run_fix_claude(
+        candidate_id="c1",
+        prompt=prompt,
+        worktree=repo,
+        max_turns=7,
+        wallclock_s=30,
+    )
+
+    assert result.error is None
+    argv = argv_file.read_text(encoding="utf-8").splitlines()
+    assert not any("THE-PROMPT" in arg for arg in argv)
+    assert stdin_file.read_text(encoding="utf-8") == prompt
+
+
+def test_anthropic_auth_token_is_scrubbed_from_the_child_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Inherited, this token overrides the child's keychain credentials.
+
+    `fix` is designed to be launched from inside a Claude Code session (that is
+    what `/spotlights-fix-candidate` does), and such a session sets
+    `ANTHROPIC_AUTH_TOKEN` in the environment. Inherited by the spawned
+    `claude`, it wins over the keychain credentials and the session dies with
+    `401 Invalid bearer token`.
+    """
+    repo = make_repo(tmp_path)
+    env_file = tmp_path / "env.txt"
+    monkeypatch.setenv("TEST_ENV_FILE", str(env_file))
+    monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "sk-should-not-be-inherited")
+    monkeypatch.setenv("ANTHROPIC_BASE_URL", "http://should-not-be-inherited")
+    monkeypatch.setenv("VSCODE_SOMETHING", "should-not-be-inherited")
+    prepend_to_path(
+        monkeypatch, write_fake_claude(tmp_path / "bin", script=FAKE_CLAUDE_ENV_RECORDER).parent
+    )
+
+    run_fix_claude(
+        candidate_id="c1", prompt="p", worktree=repo, max_turns=5, wallclock_s=30
+    )
+
+    # Compare parsed keys, not raw text: a real developer environment can hold
+    # unrelated names that *contain* one of these (e.g. a personal
+    # `ANTHROPIC_AUTH_TOKEN_...`), and `_DROP_EXACT` is exact-match by design.
+    child_env = env_file.read_text(encoding="utf-8")
+    keys = {line.split("=", 1)[0] for line in child_env.splitlines() if "=" in line}
+    assert "should-not-be-inherited" not in child_env
+    assert "ANTHROPIC_AUTH_TOKEN" not in keys
+    assert "ANTHROPIC_BASE_URL" not in keys
+    assert "VSCODE_SOMETHING" not in keys
+    assert "PATH" in keys  # the env was scrubbed, not replaced wholesale
 
 
 def test_argv_denies_git_write_commands_that_escape_the_worktree(

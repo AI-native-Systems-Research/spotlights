@@ -1,8 +1,11 @@
 """Thin subprocess wrapper around `claude -p` for the one-shot fix session.
 
-Modeled on `agent_proposals.claude_exec` — same env scrubbing, same
-`shutil.which` resolution so a Windows `.CMD` shim is found, same stream-json
-usage capture for costing. Three deliberate differences:
+Modeled on `agent_proposals.claude_exec` — prompt on stdin, `shutil.which`
+resolution so a Windows `.CMD` shim is found, stream-json usage capture for
+costing. Four deliberate differences:
+
+- **`ANTHROPIC_AUTH_TOKEN` is scrubbed** in addition to the env vars
+  `agent_proposals` drops (see `_DROP_EXACT`).
 
 - **No `--json-schema`.** The deliverable is edited files in the worktree, not
   a structured payload, so there is nothing to validate against a schema. A
@@ -52,6 +55,14 @@ _DROP_EXACT = frozenset(
         "OPENAI_BASE_URL",
         "OPENAI_API_BASE",
         "ANTHROPIC_BASE_URL",
+        # Dropped for the reason `signal_pipeline/claude_subprocess.py` records:
+        # inside a Claude Code session this token is set in the environment, and
+        # inherited by a spawned `claude` it overrides the keychain credentials
+        # and the session fails with `401 Invalid bearer token`. `fix` is
+        # *designed* to be launched from such a session (that is what
+        # `/spotlights-fix-candidate` does), so this is the module where the
+        # leak is most likely, not least.
+        "ANTHROPIC_AUTH_TOKEN",
         "HTTP_PROXY",
         "HTTPS_PROXY",
         "ALL_PROXY",
@@ -125,10 +136,20 @@ def run_fix_claude(
     # "claude" → FileNotFoundError because subprocess on Windows doesn't
     # follow PATHEXT for unqualified argv[0].
     claude_resolved = shutil.which("claude") or "claude"
+    # The prompt goes on **stdin**, not argv — same as
+    # `agent_proposals.claude_exec`. A fix prompt embeds the whole findings
+    # digest (candidate spec, code excerpt, scope list, oracles) and is
+    # unbounded in principle. Linux caps a single argv element at
+    # `MAX_ARG_STRLEN` = 128 KiB regardless of `ARG_MAX`, and macOS caps env +
+    # argv together at 1 MiB (measured: `execve` of a ~1 MiB single argument
+    # fails with `OSError: [Errno 7] Argument list too long`). On argv, a large
+    # candidate therefore fails at process launch — surfacing as
+    # `could not launch claude: ...` after a worktree was already created and
+    # validated, with nothing about the message pointing at prompt size. Stdin
+    # has no such limit.
     argv = [
         claude_resolved,
         "-p",
-        prompt,
         "--output-format",
         "stream-json",
         "--verbose",
@@ -144,6 +165,7 @@ def run_fix_claude(
     try:
         completed = subprocess.run(
             argv,
+            input=prompt.encode("utf-8"),
             capture_output=True,
             env=env,
             cwd=str(worktree),

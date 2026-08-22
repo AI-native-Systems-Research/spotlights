@@ -51,6 +51,24 @@ printf '%s\\n' '{json.dumps(RESULT_EVENT)}'
 exit 0
 """
 
+# Records argv *and* stdin, so a test can assert the prompt travels on stdin
+# and never on argv (where a large prompt would hit the platform's argv limit).
+FAKE_CLAUDE_STDIN_RECORDER = f"""#!/bin/sh
+printf '%s\\n' "$@" > "$TEST_ARGV_FILE"
+cat > "$TEST_STDIN_FILE"
+printf '%s\\n' '{json.dumps(RESULT_EVENT)}'
+exit 0
+"""
+
+# Records the environment claude was actually spawned with, so a test can
+# assert on what `_clean_env` scrubbed. `env` is used rather than named
+# expansions so the assertion can cover any variable.
+FAKE_CLAUDE_ENV_RECORDER = f"""#!/bin/sh
+env > "$TEST_ENV_FILE"
+printf '%s\\n' '{json.dumps(RESULT_EVENT)}'
+exit 0
+"""
+
 
 def write_fake_claude(bin_dir: Path, *, script: str) -> Path:
     """Write an executable `claude` shim into `bin_dir` and return its path."""
@@ -68,8 +86,10 @@ def prepend_to_path(monkeypatch, bin_dir: Path) -> None:
 
 __all__ = [
     "FAKE_CLAUDE_ARGV_RECORDER",
+    "FAKE_CLAUDE_ENV_RECORDER",
     "FAKE_CLAUDE_FAILURE",
     "FAKE_CLAUDE_NO_RESULT_EVENT",
+    "FAKE_CLAUDE_STDIN_RECORDER",
     "FAKE_CLAUDE_SUCCESS",
     "RESULT_EVENT",
     "prepend_to_path",

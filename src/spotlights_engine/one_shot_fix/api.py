@@ -17,8 +17,13 @@ Two orchestration decisions carry the design's weight:
   worktree and the prompt in one call, so the staleness gate is never
   reimplemented in markdown.
 
-Failure semantics match `prep_evolve`'s batch loop: a single explicit
-`--candidate` raises; a sweep records a per-candidate skip and continues.
+Failure semantics follow `prep_evolve`'s batch loop in shape — a single
+explicit `--candidate` raises; a sweep records a per-candidate skip and
+continues — but the sweep's net is deliberately wider: it records *any*
+`Exception`, not only the two expected error hierarchies. Every candidate in a
+`fix` sweep costs a paid agent session, so an unexpected exception type on
+candidate 2 must not discard the eight that have not run yet. `prep_evolve`
+can afford the narrow handler because re-running it is free.
 """
 
 from __future__ import annotations
@@ -113,6 +118,11 @@ class FixArtifact(BaseModel):
     base_sha: str
     usage: AgentUsage | None = None
     out_of_scope_files: list[str] = Field(default_factory=list)
+    # Set when the diff could not be taken at all. `patch_produced` is False in
+    # that case too, but for a completely different reason — "the agent made no
+    # edit" vs "what the agent did is unknown and unrecoverable" — so a reader
+    # (and the CLI) must not treat the two as the same outcome.
+    collection_error: str | None = None
 
 
 class PromptPreview(BaseModel):
@@ -231,6 +241,7 @@ def _write_artifacts(
     manifest: list[FileChange],
     change_summary: str | None,
     agent_error: str | None,
+    collect_error: str | None = None,
 ) -> tuple[list[str], bool, list[str]]:
     """Write `fix.patch` (when non-empty) and `FIX-NOTES.md`.
 
@@ -238,6 +249,11 @@ def _write_artifacts(
     once here, from `manifest` against `spec.targets`, and threaded both into
     the notes and back to the caller for `FixArtifact`, so the notes, the
     artifact, and the CLI warning are one verdict rather than three.
+
+    `collect_error` is written even though it produces no patch: a session
+    whose diff failed still gets a `FIX-NOTES.md`, saying exactly that. It is
+    the one case where the notes must not read "no patch was produced" — the
+    agent may well have edited files, and they are gone with the worktree.
 
     Every filesystem write is wrapped: an `OSError` becomes an
     `ArtifactWriteError`, which the batch loop already knows how to record as
@@ -257,6 +273,7 @@ def _write_artifacts(
         agent_error=agent_error,
         manifest=manifest,
         out_of_scope=out_of_scope,
+        collect_error=collect_error,
     )
 
     # Shell-quoted for the same reason as the recipe in FIX-NOTES.md: these
@@ -370,6 +387,7 @@ def _process_candidate(
         manifest=collection.manifest,
         change_summary=collection.change_summary,
         agent_error=run.error,
+        collect_error=collection.collect_error,
     )
     result.fixes.append(
         FixArtifact(
@@ -381,6 +399,7 @@ def _process_candidate(
             base_sha=base_sha,
             usage=run.usage,
             out_of_scope_files=out_of_scope,
+            collection_error=collection.collect_error,
         )
     )
 
@@ -456,6 +475,38 @@ def one_shot_fix(
             result.skipped.append(
                 SkippedFix(
                     reason=str(exc),
+                    candidate_id=sel.candidate.id,
+                    module_qualified_name=sel.qn,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 — see below
+            # An unexpected exception type (a pydantic ValidationError, an
+            # OSError from somewhere not already wrapped, a bug in this module)
+            # must not abandon the candidates still queued: each one of those
+            # costs a paid agent session, and in a sweep they have not run yet.
+            # `prep_evolve`'s loop is deliberately narrow because re-running it
+            # is free; a `fix` sweep that dies on candidate 2 of 10 throws away
+            # eight sessions' worth of work that were never started, and the
+            # one already-finished patch is written before this point, so it
+            # survives.
+            #
+            # `Exception`, not `BaseException`: KeyboardInterrupt and
+            # SystemExit still abort the sweep immediately, which is what a
+            # Ctrl-C must do. And still `raise` for a single `--candidate`,
+            # where there is nothing to protect and the traceback is the
+            # useful output.
+            if not batch:
+                raise
+            result.skipped.append(
+                SkippedFix(
+                    # Worded so it cannot be read as a routine skip: an
+                    # unexpected type here means a bug, not a candidate that
+                    # legitimately could not be fixed.
+                    reason=(
+                        f"unexpected {type(exc).__name__} — this is a bug, not a "
+                        f"normal skip; the remaining candidates were still "
+                        f"attempted: {exc}"
+                    ),
                     candidate_id=sel.candidate.id,
                     module_qualified_name=sel.qn,
                 )
