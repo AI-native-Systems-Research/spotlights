@@ -495,36 +495,43 @@ def collect_patch(wt: Worktree) -> PatchCollection:
         try:
             summary_path.unlink()
         except OSError:
-            # The file stays and the diff reports it as a change. A spurious
-            # hunk that the manifest flags is a far smaller loss than raising,
-            # and there is no third option available here.
+            # Nothing more can be done for an *untracked* rationale file: the
+            # only way to keep it out of the diff is to remove it, and that is
+            # what just failed. The restore below is still attempted, because
+            # for a *tracked* path it does keep the patch clean by putting the
+            # committed content back over the agent's. Either way the file
+            # surfaces in the manifest, and since the collector's own path is
+            # never in the declared scope, it surfaces flagged **OUT OF
+            # SCOPE** rather than quietly.
             pass
-        else:
-            # Removing the rationale file keeps it out of the patch — unless
-            # the target repo *tracks* a file by that name, in which case the
-            # unlink is a deletion the diff below reports faithfully, and
-            # `fix.patch` ships a spurious hunk deleting one of the repo's own
-            # files. That is precisely the class of unintended edit the
-            # manifest exists to catch, introduced by the collector itself.
-            # Restoring the committed copy undoes exactly the collector's own
-            # edit and nothing else.
-            #
-            # `check=False` suppresses only the return-code check — in the
-            # normal case the file was untracked, so this pathspec matches
-            # nothing and git exits 1, a no-op rather than a failure. It does
-            # not stop `_spawn_git` from raising when the subprocess itself
-            # cannot run (an `OSError`, or a `_GIT_TIMEOUT_S` timeout), so the
-            # call is wrapped for the same reason `remove_worktree` wraps
-            # each of its own: this function must not raise for a git failure
-            # (see its docstring). Letting one escape here would destroy the
-            # whole record of an agent session that has already finished and
-            # already been paid for, over a best-effort restore.
-            try:
-                _run_git(
-                    wt.path, "checkout", wt.base_sha, "--", CHANGE_SUMMARY_NAME, check=False
-                )
-            except WorktreeError:
-                pass
+        # Removing the rationale file keeps it out of the patch — unless the
+        # target repo *tracks* a file by that name, in which case the unlink is
+        # a deletion the diff below reports faithfully, and `fix.patch` ships a
+        # spurious hunk deleting one of the repo's own files. That is precisely
+        # the class of unintended edit the manifest exists to catch, introduced
+        # by the collector itself. Restoring the committed copy undoes exactly
+        # the collector's own edit and nothing else.
+        #
+        # Deliberately not in an `else:` on the unlink. For a tracked path this
+        # restore is also what keeps a *failed* unlink out of the patch, by
+        # putting the committed content back over the agent's; skipping it
+        # there would give up the one case still recoverable. It is idempotent
+        # and a no-op whenever it cannot help.
+        #
+        # `check=False` suppresses only the return-code check — in the normal
+        # case the file was untracked, so this pathspec matches nothing and git
+        # exits 1, a no-op rather than a failure. It does not stop `_spawn_git`
+        # from raising when the subprocess itself cannot run (an `OSError`, or
+        # a `_GIT_TIMEOUT_S` timeout), so the call is wrapped for the same
+        # reason `remove_worktree` wraps each of its own: this function must
+        # not raise for a git failure (see its docstring). Letting one escape
+        # here would destroy the whole record of an agent session that has
+        # already finished and already been paid for, over a best-effort
+        # restore.
+        try:
+            _run_git(wt.path, "checkout", wt.base_sha, "--", CHANGE_SUMMARY_NAME, check=False)
+        except WorktreeError:
+            pass
 
     # `git add -N .` and the diff are the two steps that can fail outright
     # (a 120 s `_GIT_TIMEOUT_S` timeout on a huge tree, a git that dies). The

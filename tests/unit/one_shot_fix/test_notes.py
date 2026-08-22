@@ -292,6 +292,105 @@ def test_out_of_scope_files_helper_matches_the_notes(spec_and_repo) -> None:
     assert out_of_scope_files(spec, manifest) == ["pkg/attn/extra.py"]
 
 
+def test_a_rename_from_outside_the_scope_is_flagged_even_though_it_lands_inside(
+    spec_and_repo,
+) -> None:
+    """A rename touches two paths, and only one of them is `change.path`.
+
+    Renaming an undeclared file *into* the declared scope reads as plainly "in
+    scope" when the check is keyed on the destination — while what the patch
+    actually does is delete a file the agent was never permitted to touch. The
+    destination is a file the reviewer expected to change anyway; the source
+    disappearing from the repo is the unannounced half.
+    """
+    spec, _repo = spec_and_repo
+    manifest = [
+        FileChange(
+            path=CAND_FILE,
+            change_kind="renamed",
+            insertions=4,
+            deletions=0,
+            binary=False,
+            old_path="vendor/third_party/fast_attn.py",
+        ),
+    ]
+    notes = _notes(spec_and_repo, manifest=manifest)
+    row = next(ln for ln in notes.splitlines() if "fast_attn.py" in ln and ln.startswith("|"))
+    assert "**OUT OF SCOPE** (source)" in row, row
+    assert "| in scope |" not in row
+    # And the prose callout must name the source, not just the table cell.
+    assert "**This patch touches files outside the declared scope.**" in notes
+    assert "vendor/third_party/fast_attn.py" in notes.split("outside the declared scope", 1)[1]
+    assert out_of_scope_files(spec, manifest) == ["vendor/third_party/fast_attn.py"]
+
+
+def test_a_rename_out_of_the_declared_scope_names_the_destination(spec_and_repo) -> None:
+    """The mirror case: in-scope source, out-of-scope destination.
+
+    Both ends are checked, and the label says *which* strayed, because "the
+    patch deleted a file you did not declare" and "the patch created one
+    somewhere you did not declare" call for different scrutiny.
+    """
+    spec, _repo = spec_and_repo
+    manifest = [
+        FileChange(
+            path="vendor/third_party/fast_attn.py",
+            change_kind="renamed",
+            insertions=0,
+            deletions=0,
+            binary=False,
+            old_path=CAND_FILE,
+        ),
+    ]
+    notes = _notes(spec_and_repo, manifest=manifest)
+    row = next(ln for ln in notes.splitlines() if "fast_attn.py" in ln and ln.startswith("|"))
+    assert "**OUT OF SCOPE** (destination)" in row, row
+    assert out_of_scope_files(spec, manifest) == ["vendor/third_party/fast_attn.py"]
+
+
+def test_a_rename_with_both_ends_outside_the_scope_says_both(spec_and_repo) -> None:
+    spec, _repo = spec_and_repo
+    manifest = [
+        FileChange(
+            path="vendor/b.py",
+            change_kind="renamed",
+            insertions=0,
+            deletions=0,
+            binary=False,
+            old_path="vendor/a.py",
+        ),
+    ]
+    notes = _notes(spec_and_repo, manifest=manifest)
+    row = next(ln for ln in notes.splitlines() if "vendor/b.py" in ln and ln.startswith("|"))
+    assert "**OUT OF SCOPE** (both ends)" in row, row
+    # Each offending path is reported once, source first.
+    assert out_of_scope_files(spec, manifest) == ["vendor/a.py", "vendor/b.py"]
+
+
+def test_a_rename_entirely_inside_the_declared_scope_is_not_flagged(spec_and_repo) -> None:
+    """The guard against crying wolf: a rename between two declared files.
+
+    `_scope_cell` checks two paths now, so it has two chances to produce a
+    false callout — and a callout that cries wolf is one reviewers learn to
+    skip (see `normalize_scope_path`).
+    """
+    spec, _repo = spec_and_repo
+    declared = sorted(spec.targets, key=lambda t: t.file)
+    manifest = [
+        FileChange(
+            path=declared[0].file,
+            change_kind="renamed",
+            insertions=1,
+            deletions=0,
+            binary=False,
+            old_path=declared[0].file,
+        ),
+    ]
+    notes = _notes(spec_and_repo, manifest=manifest)
+    assert "OUT OF SCOPE" not in notes
+    assert out_of_scope_files(spec, manifest) == []
+
+
 def test_manifest_section_renders_a_binary_file_without_line_counts(spec_and_repo) -> None:
     manifest = [
         FileChange(

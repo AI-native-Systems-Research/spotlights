@@ -535,6 +535,40 @@ def test_an_unwritable_out_dir_raises_for_an_explicit_candidate(run, tmp_path: P
     assert len(_worktrees(repo)) == 1
 
 
+def test_a_patch_write_that_fails_partway_leaves_no_truncated_patch_behind(
+    run, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`write_bytes` is not atomic, and a half-written `fix.patch` is worse than none.
+
+    An `ENOSPC` (or a write error on a network mount) partway through a
+    multi-megabyte patch leaves a *prefix* of the diff on disk under the exact
+    name the docs tell a reviewer to apply. Raising over it and leaving the file
+    there is the worst outcome available: `git apply` either rejects it, or — at
+    an unlucky hunk boundary — applies part of it. Removing it makes the failure
+    read as "no patch here", which is true, and matches the empty-patch path
+    that already unlinks a stale `fix.patch`.
+    """
+    run_dir, repo = run
+    real_write_bytes = Path.write_bytes
+
+    def _short_write(self: Path, data: bytes) -> int:
+        if self.name != "fix.patch":
+            return real_write_bytes(self, data)
+        real_write_bytes(self, data[: len(data) // 2])  # the truncated prefix
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(Path, "write_bytes", _short_write)
+
+    with pytest.raises(ArtifactWriteError):
+        one_shot_fix(
+            OneShotFixInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+            claude_runner=_runner(),
+        )
+
+    out_dir = run_dir / "fix" / "v1_attention" / CAND_ID
+    assert not (out_dir / "fix.patch").exists()
+
+
 def test_a_keyboard_interrupt_during_the_agent_session_leaks_no_worktree(run) -> None:
     """`KeyboardInterrupt` is a `BaseException`, and Ctrl-C is how a real sweep ends.
 

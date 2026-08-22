@@ -112,6 +112,18 @@ A single explicit `--candidate` fails loudly (exit 2). A sweep records a
 per-candidate skip with a reason and continues — the same shape `prep-evolve`
 uses — and still exits 0 as long as *something* happened (a fix, a printed
 prompt, or a recorded skip). Exit 1 means the run produced nothing at all.
+
+**The exit code is not an artifact check, and automation must not use it as
+one.** A sweep is per-candidate: it can skip every candidate and still exit 0,
+and — more importantly — it can equally well exit 0 having produced patches for
+three candidates and skipped seven. No single exit code can answer "is there a
+`fix.patch` for candidate X", so a script that gates `git apply` on `$?` is
+asking the wrong question even when the code is 0 and every candidate
+succeeded. Gate on the artifacts instead: each fix prints one
+`<candidate-id>: <dir> (<state>)` line on stdout, where `<state>` distinguishes
+`patch + notes` from `notes only (no patch)` and `notes only (patch collection
+FAILED)`, and the corresponding `fix.patch` either exists in `<dir>` or does
+not.
 Worktrees are created and removed one at a time, and removal happens in a
 `finally`, so a timed-out or crashed run leaves nothing behind in
 `.git/worktrees`.

@@ -70,6 +70,28 @@ def declared_scope(spec: EvolveSpec) -> set[str]:
     return {normalize_scope_path(t.file) for t in spec.targets}
 
 
+def out_of_scope_paths(change: FileChange, declared: set[str]) -> list[str]:
+    """The paths `change` touches that `declared` does not permit — both ends of a rename.
+
+    A rename touches two paths, and `change.path` is only the destination. An
+    agent that renames an undeclared file *into* the declared scope has
+    deleted a file it was never permitted to touch, yet every check keyed on
+    the destination alone reports the row as in scope. The source is the more
+    consequential half there: the destination is a file the reviewer expected
+    to change anyway, while the source vanishing from the repo is entirely
+    unannounced.
+
+    Returns the offending paths in diff order (source before destination) so a
+    row can be labelled by *which* end strayed, not merely that one did.
+    """
+    offending: list[str] = []
+    if change.old_path is not None and normalize_scope_path(change.old_path) not in declared:
+        offending.append(change.old_path)
+    if normalize_scope_path(change.path) not in declared:
+        offending.append(change.path)
+    return offending
+
+
 def out_of_scope_files(spec: EvolveSpec, manifest: Sequence[FileChange]) -> list[str]:
     """Files the patch actually touched that are not in `spec.targets`' declared scope.
 
@@ -78,9 +100,13 @@ def out_of_scope_files(spec: EvolveSpec, manifest: Sequence[FileChange]) -> list
     Computed exactly once per candidate, in `api._write_artifacts`, and
     threaded from there into both `FixArtifact` and the notes renderer — so
     the artifact and the notes can never disagree about what strayed.
+
+    Counts *both* ends of a rename (see `out_of_scope_paths`), so a rename out
+    of the declared scope and a rename into it are each reported once for the
+    path that was not permitted.
     """
     declared = declared_scope(spec)
-    return [c.path for c in manifest if normalize_scope_path(c.path) not in declared]
+    return [p for c in manifest for p in out_of_scope_paths(c, declared)]
 
 
 __all__ = [
@@ -88,5 +114,6 @@ __all__ = [
     "declared_scope",
     "normalize_scope_path",
     "out_of_scope_files",
+    "out_of_scope_paths",
     "scope_lines",
 ]

@@ -20,7 +20,7 @@ from pathlib import Path
 from spotlights_engine.one_shot_fix.scope import (
     candidate_target,
     declared_scope,
-    normalize_scope_path,
+    out_of_scope_paths,
     scope_lines,
 )
 from spotlights_engine.one_shot_fix.worktree import FileChange
@@ -83,6 +83,28 @@ def _code_span(text: str) -> str:
     return f"{fence}{pad}{text}{pad}{fence}"
 
 
+def _scope_cell(change: FileChange, declared: set[str]) -> str:
+    """The Scope column, naming *which* end of a rename strayed.
+
+    A rename touches two paths and only one of them is `change.path`. Keyed on
+    the destination alone, a rename that drags an undeclared file *into* the
+    declared scope reads as plainly "in scope" — while what the patch actually
+    does is delete a file the agent was never permitted to touch. Both ends are
+    checked, and the label says which, because "the source" and "the
+    destination" call for completely different scrutiny from a reviewer.
+    """
+    offending = out_of_scope_paths(change, declared)
+    if not offending:
+        return "in scope"
+    if change.old_path is None:
+        return "**OUT OF SCOPE**"
+    source_strayed = change.old_path in offending
+    dest_strayed = change.path in offending
+    if source_strayed and dest_strayed:
+        return "**OUT OF SCOPE** (both ends)"
+    return f"**OUT OF SCOPE** ({'source' if source_strayed else 'destination'})"
+
+
 def _change_row(change: FileChange, declared: set[str]) -> str:
     path = f"{change.old_path} → {change.path}" if change.old_path else change.path
     if change.binary:
@@ -91,8 +113,10 @@ def _change_row(change: FileChange, declared: set[str]) -> str:
         lines = "?"
     else:
         lines = f"+{change.insertions}/-{change.deletions}"
-    scope = "in scope" if normalize_scope_path(change.path) in declared else "**OUT OF SCOPE**"
-    return f"| {_code_span(_escape_pipe(path))} | {change.change_kind} | {lines} | {scope} |"
+    return (
+        f"| {_code_span(_escape_pipe(path))} | {change.change_kind} | {lines} | "
+        f"{_scope_cell(change, declared)} |"
+    )
 
 
 def _manifest_section(
@@ -180,9 +204,11 @@ is exactly what a reviewer needs to see before applying this patch.
         section += f"""
 > **This patch touches files outside the declared scope.** The agent was
 > instructed to edit only the files under "In-scope files" above, but the
-> diff also changes: {listed}. That was not declared and not permitted —
+> diff also touches: {listed}. That was not declared and not permitted —
 > review those hunks specifically, on their own merits, before applying
-> anything in this patch.
+> anything in this patch. A path listed here as a rename's **source** is one
+> the patch *removes* from the repo, which the Change column's "renamed" can
+> otherwise make look routine.
 """
     return section
 

@@ -28,6 +28,7 @@ can afford the narrow handler because re-running it is free.
 
 from __future__ import annotations
 
+import contextlib
 import shlex
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -308,6 +309,14 @@ def _write_artifacts(
         (out_dir / NOTES_NAME).write_text(notes, encoding="utf-8")
         files.append(NOTES_NAME)
     except OSError as exc:
+        # `write_bytes` is not atomic: an `ENOSPC` partway through a multi-MB
+        # patch leaves a truncated `fix.patch` on disk. Raising over it and
+        # leaving it there is the worst of the options — the directory then
+        # holds a file named `fix.patch` that `git apply` will reject, or (with
+        # bad luck at a hunk boundary) apply *partially*. Remove it, so the
+        # failure reads as "no patch here" rather than as a corrupt one.
+        with contextlib.suppress(OSError):
+            (out_dir / PATCH_NAME).unlink(missing_ok=True)
         raise ArtifactWriteError(
             f"could not write fix artifacts for {sel.candidate.id} to {out_dir}: {exc}"
         ) from exc
