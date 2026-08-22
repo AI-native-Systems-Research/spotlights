@@ -219,8 +219,14 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
     for s in result.skipped:
-        who = f"{s.module_qualified_name}/{s.candidate_id} " if s.candidate_id else ""
-        print(f"  skipped {who}: {s.reason}", file=sys.stderr)
+        # A skip raised during *selection* — a ranked id that is no longer in
+        # result.json — knows the candidate id but not its module, so
+        # `module_qualified_name` is None. Joining only the parts that are set
+        # keeps that case reading as `skipped cand-xxxx:` rather than
+        # interpolating a literal `None/cand-xxxx`.
+        who = "/".join(p for p in (s.module_qualified_name, s.candidate_id) if p)
+        label = f"  skipped {who}: " if who else "  skipped: "
+        print(f"{label}{s.reason}", file=sys.stderr)
 
     produced = result.fixes or result.prompts or result.skipped
     return 0 if produced else 1

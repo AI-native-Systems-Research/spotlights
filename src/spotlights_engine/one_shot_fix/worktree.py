@@ -42,25 +42,57 @@ class Worktree:
     parent: Path
 
 
-def _run_git(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+def _spawn_git(cwd: Path, args: tuple[str, ...], *, text: bool) -> subprocess.CompletedProcess:
     try:
-        completed = subprocess.run(
+        return subprocess.run(
             ["git", *args],
             cwd=cwd,
             capture_output=True,
-            text=True,
-            errors="replace",
+            text=text,
+            errors="replace" if text else None,
             timeout=_GIT_TIMEOUT_S,
             check=False,
         )
     except (OSError, subprocess.SubprocessError) as exc:
         raise WorktreeError(f"git {' '.join(args)} failed in {cwd}: {exc}") from exc
+
+
+def _run_git(cwd: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+    """Run git and return the completed process, stdout decoded lossily.
+
+    `errors="replace"` keeps a surprising byte from crashing a *metadata*
+    read (`rev-parse`, `--name-status`, `--numstat`), where a mangled
+    character costs at most a cosmetically wrong manifest row. It must never
+    be used for the patch itself — see `_run_git_bytes`.
+    """
+    completed = _spawn_git(cwd, args, text=True)
     if check and completed.returncode != 0:
         raise WorktreeError(
             f"git {' '.join(args)} failed in {cwd} "
             f"(exit {completed.returncode}): {completed.stderr.strip()}"
         )
     return completed
+
+
+def _run_git_bytes(cwd: Path, *args: str, check: bool = True) -> bytes:
+    """Run git and return stdout as raw, undecoded bytes.
+
+    Required for `git diff`. A diff's context lines reproduce the file's bytes
+    verbatim, and a source file may legally contain bytes that are not valid
+    UTF-8. Decoding with `errors="replace"` turns each such byte into U+FFFD
+    (`ef bf bd`); writing that back out produces a `fix.patch` whose context
+    no longer matches the file it came from, and `git apply` rejects it with
+    "patch does not apply". `errors="strict"` is no better — it raises, losing
+    the patch entirely. The only correct handling is not to decode: collect
+    the diff as bytes and write it with `write_bytes`.
+    """
+    completed = _spawn_git(cwd, args, text=False)
+    if check and completed.returncode != 0:
+        raise WorktreeError(
+            f"git {' '.join(args)} failed in {cwd} (exit {completed.returncode}): "
+            f"{completed.stderr.decode('utf-8', 'replace').strip()}"
+        )
+    return completed.stdout
 
 
 def require_git_repo(repo: Path) -> str:
@@ -152,9 +184,15 @@ class PatchCollection:
     `manifest` is the per-file breakdown of exactly what `patch` contains —
     derived from `git diff --name-status`/`--numstat`, not from any declared
     scope, so it can catch a patch that disagrees with what was intended.
+
+    `patch` is deliberately `bytes`, not `str`: the diff must reach disk
+    byte-for-byte as git emitted it or it stops applying (see
+    `_run_git_bytes`). `change_summary` is `str` — it is the agent's prose,
+    destined for a markdown document, where a lossy decode is the right
+    trade.
     """
 
-    patch: str
+    patch: bytes
     change_summary: str | None
     manifest: list[FileChange] = field(default_factory=list)
 
@@ -173,19 +211,30 @@ def _parse_name_status_z(raw: str) -> list[tuple[str, str, str | None]]:
     With `-z`, a rename/copy record is `status<NUL>old_path<NUL>new_path<NUL>`;
     every other record is `status<NUL>path<NUL>`. `-z` also disables git's
     quoting of paths with spaces or non-ASCII bytes, so no unquoting is needed.
+
+    A trailing record whose path tokens are missing is *dropped*, not
+    unpacked. This is the truncation guard: a partial stream (git killed
+    mid-write, or a `_GIT_TIMEOUT_S` timeout whose captured stdout stops
+    mid-record) used to raise `IndexError` here, and `collect_patch`'s
+    fallback re-parses the same raw string — so the second attempt raised
+    too and the manifest degraded all the way to `[]`, silently switching
+    off the out-of-scope check for that patch. Returning the records that
+    did parse keeps the scope check alive for every complete record.
     """
     tokens = _split_z(raw)
     records: list[tuple[str, str, str | None]] = []
     i = 0
     while i < len(tokens):
         status = tokens[i]
-        if status[:1] in ("R", "C"):
+        needed = 3 if status[:1] in ("R", "C") else 2
+        if i + needed > len(tokens):
+            break
+        if needed == 3:
             old_path, new_path = tokens[i + 1], tokens[i + 2]
             records.append((status, new_path, old_path))
-            i += 3
         else:
             records.append((status, tokens[i + 1], None))
-            i += 2
+        i += needed
     return records
 
 
@@ -242,7 +291,16 @@ def _parse_numstat_z(raw: str) -> list[tuple[int | None, int | None, bool, bool]
         added, added_ok = _parse_count(added_s)
         deleted, deleted_ok = _parse_count(deleted_s)
         binary = added_s == "-" and deleted_s == "-"
-        counts_known = binary or (added_ok and deleted_ok)
+        # `counts_known` must imply both counts are present, not merely that
+        # each field parsed. Git always writes `-` for *both* counts of a
+        # binary file, so a half-`-` record is not reachable from real git
+        # output — but `_parse_count("-")` reports `ok=True` (a deliberate
+        # absence), so the earlier `binary or (added_ok and deleted_ok)` let
+        # a one-sided `-` through as "known" with a `None` count, which
+        # `notes._change_row` then rendered as the nonsense `+None/-5`.
+        counts_known = binary or (
+            added_ok and deleted_ok and added is not None and deleted is not None
+        )
         if not counts_known:
             added, deleted = None, None
         records.append((added, deleted, binary, counts_known))
@@ -299,9 +357,10 @@ def collect_patch(wt: Worktree) -> PatchCollection:
 
     Order matters:
     1. read + delete `CHANGE-SUMMARY.md`, so the agent's rationale reaches
-       FIX-NOTES.md but never appears in the patch (or the manifest);
+       FIX-NOTES.md but never appears in the patch (or the manifest), then
+       restore it from `base_sha` in case the repo tracked that path;
     2. `git add -N .` so *added* files show up in the diff;
-    3. `git diff <base_sha>` (patch text) plus `git diff <base_sha>
+    3. `git diff <base_sha>` (patch bytes) plus `git diff <base_sha>
        --name-status -z` and `git diff <base_sha> --numstat -z` (the
        manifest) — diffed against `wt.base_sha`, the exact commit the
        worktree was created at and the same value recorded in `fix.patch`'s
@@ -338,9 +397,19 @@ def collect_patch(wt: Worktree) -> PatchCollection:
     if summary_path.is_file():
         summary = summary_path.read_text(encoding="utf-8", errors="replace")
         summary_path.unlink()
+        # Removing the rationale file keeps it out of the patch — unless the
+        # target repo *tracks* a file by that name, in which case the unlink
+        # is a deletion the diff below reports faithfully, and `fix.patch`
+        # ships a spurious hunk deleting one of the repo's own files. That is
+        # precisely the class of unintended edit the manifest exists to
+        # catch, introduced by the collector itself. Restoring the committed
+        # copy undoes exactly the collector's own edit and nothing else.
+        # `check=False`: in the normal case the file was untracked, so this
+        # pathspec matches nothing and git exits 1 — a no-op, not a failure.
+        _run_git(wt.path, "checkout", wt.base_sha, "--", CHANGE_SUMMARY_NAME, check=False)
 
     _run_git(wt.path, "add", "-N", ".")
-    patch = _run_git(wt.path, "diff", wt.base_sha).stdout
+    patch = _run_git_bytes(wt.path, "diff", wt.base_sha)
 
     # The patch above is the deliverable; nothing past this point may be
     # allowed to lose it. A manifest-parsing surprise (git output nobody

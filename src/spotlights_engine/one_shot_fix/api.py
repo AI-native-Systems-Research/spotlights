@@ -23,6 +23,7 @@ Failure semantics match `prep_evolve`'s batch loop: a single explicit
 
 from __future__ import annotations
 
+import shlex
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
@@ -36,9 +37,14 @@ from spotlights_engine.one_shot_fix.claude_exec import (
     ensure_claude_available,
     run_fix_claude,
 )
-from spotlights_engine.one_shot_fix.errors import ClaudeUnavailableError, OneShotFixError
-from spotlights_engine.one_shot_fix.notes import out_of_scope_files, render_fix_notes
+from spotlights_engine.one_shot_fix.errors import (
+    ArtifactWriteError,
+    ClaudeUnavailableError,
+    OneShotFixError,
+)
+from spotlights_engine.one_shot_fix.notes import render_fix_notes
 from spotlights_engine.one_shot_fix.prompts import build_fix_prompt
+from spotlights_engine.one_shot_fix.scope import out_of_scope_files
 from spotlights_engine.one_shot_fix.worktree import (
     FileChange,
     Worktree,
@@ -221,7 +227,7 @@ def _write_artifacts(
     sel: CandidateSelection,
     repo_path: Path,
     base_sha: str,
-    patch: str,
+    patch: bytes,
     manifest: list[FileChange],
     change_summary: str | None,
     agent_error: str | None,
@@ -229,31 +235,17 @@ def _write_artifacts(
     """Write `fix.patch` (when non-empty) and `FIX-NOTES.md`.
 
     Returns `(files, produced, out_of_scope)` — `out_of_scope` is computed
-    once here, from `manifest` against `spec.targets`, and threaded to the
-    caller for `FixArtifact` so the CLI never recomputes it.
+    once here, from `manifest` against `spec.targets`, and threaded both into
+    the notes and back to the caller for `FixArtifact`, so the notes, the
+    artifact, and the CLI warning are one verdict rather than three.
+
+    Every filesystem write is wrapped: an `OSError` becomes an
+    `ArtifactWriteError`, which the batch loop already knows how to record as
+    a per-candidate skip. Left bare, it would propagate past that loop's
+    handler and abandon every candidate still queued.
     """
-    out_dir.mkdir(parents=True, exist_ok=True)
-    files: list[str] = []
     patch_produced = bool(patch.strip())
-
-    if patch_produced:
-        header = (
-            f"# spotlights one-shot fix\n"
-            f"# candidate: {sel.candidate.id}\n"
-            f"# module:    {sel.qn}\n"
-            f"# repo:      {repo_path}\n"
-            f"# base:      {base_sha}\n"
-            f"# apply with (from the directory containing this patch):\n"
-            f"#   git -C {repo_path} checkout {base_sha}\n"
-            f'#   git -C {repo_path} apply "$PWD/{PATCH_NAME}"\n'
-        )
-        (out_dir / PATCH_NAME).write_text(header + patch, encoding="utf-8")
-        files.append(PATCH_NAME)
-    else:
-        # A rerun that concludes no fix must not leave a previous session's
-        # patch behind — the notes below explicitly deny one exists.
-        (out_dir / PATCH_NAME).unlink(missing_ok=True)
-
+    out_of_scope = out_of_scope_files(spec, manifest) if patch_produced else []
     notes = render_fix_notes(
         spec=spec,
         candidate_id=sel.candidate.id,
@@ -264,11 +256,45 @@ def _write_artifacts(
         patch_produced=patch_produced,
         agent_error=agent_error,
         manifest=manifest,
+        out_of_scope=out_of_scope,
     )
-    (out_dir / NOTES_NAME).write_text(notes, encoding="utf-8")
-    files.append(NOTES_NAME)
 
-    out_of_scope = out_of_scope_files(spec, manifest) if patch_produced else []
+    # Shell-quoted for the same reason as the recipe in FIX-NOTES.md: these
+    # header lines are meant to be copy-pasted, and a repo path containing a
+    # space would otherwise be split by the shell.
+    repo_arg = shlex.quote(str(repo_path))
+    header = (
+        f"# spotlights one-shot fix\n"
+        f"# candidate: {sel.candidate.id}\n"
+        f"# module:    {sel.qn}\n"
+        f"# repo:      {repo_path}\n"
+        f"# base:      {base_sha}\n"
+        f"# apply with (from the directory containing this patch):\n"
+        f"#   git -C {repo_arg} checkout {base_sha}\n"
+        f'#   git -C {repo_arg} apply "$PWD/{PATCH_NAME}"\n'
+    )
+
+    files: list[str] = []
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        if patch_produced:
+            # `write_bytes`, not `write_text`: `patch` is undecoded git output
+            # and must land on disk exactly as git emitted it (see
+            # `worktree._run_git_bytes`). Only the header is ours to encode.
+            (out_dir / PATCH_NAME).write_bytes(header.encode("utf-8") + patch)
+            files.append(PATCH_NAME)
+        else:
+            # A rerun that concludes no fix must not leave a previous session's
+            # patch behind — the notes below explicitly deny one exists.
+            (out_dir / PATCH_NAME).unlink(missing_ok=True)
+
+        (out_dir / NOTES_NAME).write_text(notes, encoding="utf-8")
+        files.append(NOTES_NAME)
+    except OSError as exc:
+        raise ArtifactWriteError(
+            f"could not write fix artifacts for {sel.candidate.id} to {out_dir}: {exc}"
+        ) from exc
+
     return sorted(files), patch_produced, out_of_scope
 
 
@@ -286,9 +312,16 @@ def _process_candidate(
     result: OneShotFixResult,
 ) -> None:
     """Run the full per-candidate pipeline, appending to `result`."""
-    worktree = create_worktree(repo_path, base_sha)
+    # `create_worktree` is called *inside* the `try`, with `worktree` pre-set
+    # to None, so there is no window where a worktree exists but the `finally`
+    # that removes it has not been registered yet. A KeyboardInterrupt landing
+    # in that window used to leak both a stale `.git/worktrees` entry in the
+    # target repo and the temp directory holding it — once per interrupted
+    # candidate.
+    worktree: Worktree | None = None
     keep_worktree = False
     try:
+        worktree = create_worktree(repo_path, base_sha)
         spec = _build_spec_in_worktree(
             sel=sel,
             loaded=loaded,
@@ -323,7 +356,7 @@ def _process_candidate(
         )
         collection = collect_patch(worktree)
     finally:
-        if not keep_worktree:
+        if worktree is not None and not keep_worktree:
             remove_worktree(worktree)
 
     out_dir = _fix_dir(base, sel.qn, sel.candidate.id)

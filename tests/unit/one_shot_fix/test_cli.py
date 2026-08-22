@@ -183,3 +183,35 @@ def test_engine_dispatch_routes_fix_to_the_subcommand(
     )
     assert code == 2
     assert "--top-n" in capsys.readouterr().err
+
+
+def test_a_selection_skip_without_a_module_does_not_print_a_literal_none(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """A skip raised during *selection* has no module, and must not read `None/cand-…`.
+
+    `_select` records a `SkippedFix` for a ranked id that is no longer in
+    result.json — it knows the id but not the module, so
+    `module_qualified_name` is None. The old
+    `f"{s.module_qualified_name}/{s.candidate_id}"` interpolated that straight
+    into the operator's stderr as a literal `None/cand-xxxx`, which reads like
+    a real module named "None".
+    """
+    import spotlights_engine.one_shot_fix.cli as cli_mod
+    from spotlights_engine.one_shot_fix.api import OneShotFixResult, SkippedFix
+
+    run_dir, repo = run
+    monkeypatch.setattr(
+        cli_mod,
+        "one_shot_fix",
+        lambda inp, cfg: OneShotFixResult(
+            skipped=[SkippedFix(reason="no longer in result.json", candidate_id=CAND_ID)]
+        ),
+    )
+
+    code = fix_main(["--result", str(run_dir), "--repo", str(repo)])
+    err = capsys.readouterr().err
+
+    assert code == 0  # a recorded skip is still a produced outcome
+    assert f"skipped {CAND_ID}: no longer in result.json" in err
+    assert "None" not in err

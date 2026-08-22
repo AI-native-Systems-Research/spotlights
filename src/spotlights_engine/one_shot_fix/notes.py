@@ -12,32 +12,19 @@ The notes never claim a result. Nothing was executed here (see the design's
 
 from __future__ import annotations
 
-import posixpath
+import re
+import shlex
 from collections.abc import Sequence
 from pathlib import Path
 
+from spotlights_engine.one_shot_fix.scope import (
+    candidate_target,
+    declared_scope,
+    normalize_scope_path,
+    scope_lines,
+)
 from spotlights_engine.one_shot_fix.worktree import FileChange
 from spotlights_engine.prep_evolve.spec import EvolveSpec, Target
-
-
-def _candidate_target(spec: EvolveSpec) -> Target:
-    for t in spec.targets:
-        if t.scope_kind == "candidate":
-            return t
-    return spec.targets[0]
-
-
-def _scope_lines(spec: EvolveSpec) -> str:
-    """Same no-backtick rule as `prompts._scope_block` — see the note there."""
-    lines: list[str] = []
-    for t in spec.targets:
-        if t.scope_kind == "candidate" and t.line_start is not None:
-            sym = f" — {t.symbol}" if t.symbol else ""
-            lines.append(f"- {t.file}:{t.line_start}-{t.line_end}{sym}")
-        else:
-            role = f" — {t.role}" if t.role else ""
-            lines.append(f"- {t.file} (whole file{role})")
-    return "\n".join(lines)
 
 
 def _findings_lines(spec: EvolveSpec) -> str:
@@ -61,60 +48,58 @@ def _oracle_lines(target: Target) -> str:
     return "\n".join(lines)
 
 
-def _normalize_scope_path(path: str) -> str:
-    """Canonicalize a repo-relative path for scope comparison.
-
-    `validate_target.py` only checks containment and existence, so a declared
-    target spelled `./pkg/attn/tile.py` or `pkg/attn/../attn/tile.py`
-    validates and is stored verbatim — while git always emits the canonical
-    POSIX relative path in the diff. Without normalizing both sides, such a
-    target falsely reports **OUT OF SCOPE** against the candidate's own file
-    (over-reporting only, never under — but a callout that cries wolf is one
-    reviewers learn to skip). Backslashes are normalized too, in case a
-    target was recorded with Windows-style separators.
-    """
-    return posixpath.normpath(path.replace("\\", "/"))
-
-
 def _escape_pipe(text: str) -> str:
     """Escape `|` so a path containing one can't break a GFM table row.
 
     Backticks (used to set the path in code font) do not escape pipes in GFM
-    tables; an un-escaped `|` renders as extra columns.
+    tables; an un-escaped `|` renders as extra columns. GFM resolves `\\|`
+    to a literal pipe *before* inline parsing, so this is still correct for
+    text that then lands inside a code span.
     """
     return text.replace("|", "\\|")
 
 
-def _declared_scope(spec: EvolveSpec) -> set[str]:
-    return {_normalize_scope_path(t.file) for t in spec.targets}
+def _code_span(text: str) -> str:
+    """Wrap `text` in a code span that survives backticks inside it.
 
+    Paths in the manifest come from the diff, so an agent-created filename
+    containing a backtick (legal on POSIX) reaches this function. A plain
+    `` `...` `` wrapper would end the span at that backtick and spill the
+    rest of the path into the row as literal text — a broken table exactly
+    where a reviewer is looking for an out-of-scope edit.
 
-def out_of_scope_files(spec: EvolveSpec, manifest: Sequence[FileChange]) -> list[str]:
-    """Files the patch actually touched that are not in `spec.targets`' declared scope.
-
-    This is the whole point of the manifest: derived from the diff, so it can
-    (and does, when the agent strays) disagree with what was declared. Shared
-    between the notes renderer and the CLI so the two never compute it twice.
+    Escaping the backtick is not the fix: CommonMark (and so GFM) does not
+    honour backslash escapes inside a code span, so `` \\` `` would render
+    the backslash. The spec's own mechanism is a delimiter run longer than
+    any run in the content, plus one space of padding — stripped on render
+    when the content both starts and ends with a space — so a leading or
+    trailing backtick cannot merge with the fence.
     """
-    declared = _declared_scope(spec)
-    return [c.path for c in manifest if _normalize_scope_path(c.path) not in declared]
+    longest = max((len(run) for run in re.findall(r"`+", text)), default=0)
+    if longest == 0:
+        return f"`{text}`"
+    fence = "`" * (longest + 1)
+    pad = " " if text.startswith("`") or text.endswith("`") else ""
+    return f"{fence}{pad}{text}{pad}{fence}"
 
 
 def _change_row(change: FileChange, declared: set[str]) -> str:
     path = f"{change.old_path} → {change.path}" if change.old_path else change.path
-    path = _escape_pipe(path)
     if change.binary:
         lines = "binary"
     elif not change.counts_known:
         lines = "?"
     else:
         lines = f"+{change.insertions}/-{change.deletions}"
-    scope = "in scope" if _normalize_scope_path(change.path) in declared else "**OUT OF SCOPE**"
-    return f"| `{path}` | {change.change_kind} | {lines} | {scope} |"
+    scope = "in scope" if normalize_scope_path(change.path) in declared else "**OUT OF SCOPE**"
+    return f"| {_code_span(_escape_pipe(path))} | {change.change_kind} | {lines} | {scope} |"
 
 
 def _manifest_section(
-    spec: EvolveSpec, manifest: Sequence[FileChange], patch_produced: bool
+    spec: EvolveSpec,
+    manifest: Sequence[FileChange],
+    patch_produced: bool,
+    out_of_scope: Sequence[str],
 ) -> str:
     """The patch's real blast radius: every file it touched, kind, size, and scope.
 
@@ -122,6 +107,11 @@ def _manifest_section(
     documents what was *declared*; this one documents what was *done*. The
     difference between them is exactly what a reviewer needs to catch before
     applying a patch they cannot otherwise see without applying it.
+
+    `out_of_scope` is passed in, never recomputed here: `FixArtifact` (and so
+    the CLI warning) carries the same list, and a reader who sees the CLI warn
+    about two files must not open the notes and find three. One computation,
+    in `api._write_artifacts`, feeds both.
     """
     if not patch_produced:
         return (
@@ -141,8 +131,7 @@ def _manifest_section(
             "collected — see `fix.patch` directly for what changed)_\n"
         )
 
-    declared = _declared_scope(spec)
-    out_of_scope = out_of_scope_files(spec, manifest)
+    declared = declared_scope(spec)
     rows = "\n".join(_change_row(c, declared) for c in manifest)
     total_files = len(manifest)
     unknown = [c for c in manifest if not c.counts_known]
@@ -177,7 +166,7 @@ is exactly what a reviewer needs to see before applying this patch.
 {totals_line}
 """
     if out_of_scope:
-        listed = ", ".join(f"`{p}`" for p in out_of_scope)
+        listed = ", ".join(_code_span(p) for p in out_of_scope)
         section += f"""
 > **This patch touches files outside the declared scope.** The agent was
 > instructed to edit only the files under "In-scope files" above, but the
@@ -215,6 +204,12 @@ def _outcome_section(
         if target.oracles.correctness
         else "# (no correctness oracle was recorded for this candidate)"
     )
+    # These lines are copy-pasted into a shell, so the repo path has to be
+    # shell-quoted: an unquoted `/home/alice/my projects/vllm` makes the shell
+    # split the argument at the space, and `git -C /home/alice/my` fails (or,
+    # with an unlucky directory layout, targets the wrong repo). `shlex.quote`
+    # leaves an ordinary path untouched, so the common case reads the same.
+    repo_arg = shlex.quote(str(repo))
     return f"""## What changed and why
 
 {summary}
@@ -225,14 +220,14 @@ Run this from the directory containing this file — the same directory
 `fix.patch` sits in:
 
 ```bash
-git -C {repo} checkout {base_sha}
-git -C {repo} apply --check "$PWD/fix.patch" && git -C {repo} apply "$PWD/fix.patch"
+git -C {repo_arg} checkout {base_sha}
+git -C {repo_arg} apply --check "$PWD/fix.patch" && git -C {repo_arg} apply "$PWD/fix.patch"
 
 # the recorded correctness oracle — run it on a machine that can:
 {oracle_cmd}
 ```
 
-If the patch does not apply cleanly, `git -C {repo} apply -3 "$PWD/fix.patch"`
+If the patch does not apply cleanly, `git -C {repo_arg} apply -3 "$PWD/fix.patch"`
 falls back to a three-way merge. Without git, `patch -p1 < fix.patch` works
 from the repo root.
 """
@@ -249,14 +244,19 @@ def render_fix_notes(
     patch_produced: bool,
     agent_error: str | None,
     manifest: Sequence[FileChange],
+    out_of_scope: Sequence[str],
 ) -> str:
     """Render `FIX-NOTES.md` for one candidate.
 
     `manifest` is the per-file breakdown of what the patch actually touched
     (see `worktree.collect_patch`) — always derived from the diff, never from
     `spec.targets`, so it can surface a patch that strayed outside scope.
+
+    `out_of_scope` is that comparison's verdict, computed once by the caller
+    (`api._write_artifacts`) and shared with `FixArtifact`, so the notes and
+    the CLI warning cannot disagree.
     """
-    target = _candidate_target(spec)
+    target = candidate_target(spec)
     return f"""# Fix notes — {candidate_id}
 
 - **Candidate:** `{candidate_id}`
@@ -267,9 +267,9 @@ def render_fix_notes(
 
 ## In-scope files
 
-{_scope_lines(spec)}
+{scope_lines(spec)}
 
-{_manifest_section(spec, manifest, patch_produced)}
+{_manifest_section(spec, manifest, patch_produced, out_of_scope)}
 
 ## The proposal
 
@@ -306,4 +306,4 @@ verification recipe for a machine that can run them.
 )}"""
 
 
-__all__ = ["out_of_scope_files", "render_fix_notes"]
+__all__ = ["render_fix_notes"]

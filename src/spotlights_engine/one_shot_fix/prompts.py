@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from spotlights_engine.one_shot_fix.scope import candidate_target, scope_lines
 from spotlights_engine.prep_evolve.digest import render_digest
 from spotlights_engine.prep_evolve.spec import EvolveSpec, Target
 
@@ -23,31 +24,6 @@ from spotlights_engine.prep_evolve.spec import EvolveSpec, Target
 # reads it and removes it *before* `git add -N`, so it never lands in the
 # patch; `render_fix_notes` folds the text into FIX-NOTES.md.
 CHANGE_SUMMARY_NAME = "CHANGE-SUMMARY.md"
-
-
-def _candidate_target(spec: EvolveSpec) -> Target:
-    for t in spec.targets:
-        if t.scope_kind == "candidate":
-            return t
-    return spec.targets[0]
-
-
-def _scope_block(spec: EvolveSpec) -> str:
-    """The in-scope files, with validated line ranges. This is the hard bound.
-
-    Written WITHOUT backticks around `file:start-end` on purpose: the range is
-    a copy-pasteable location, and a trailing backtick between the path and the
-    colon breaks both grep-ability and the tests that assert on it.
-    """
-    lines: list[str] = []
-    for t in spec.targets:
-        if t.scope_kind == "candidate" and t.line_start is not None:
-            sym = f" — {t.symbol}" if t.symbol else ""
-            lines.append(f"- {t.file}:{t.line_start}-{t.line_end}{sym}")
-        else:
-            role = f" — {t.role}" if t.role else ""
-            lines.append(f"- {t.file} (whole file{role})")
-    return "\n".join(lines)
 
 
 def _oracle_block(target: Target) -> str:
@@ -74,7 +50,7 @@ def build_fix_prompt(*, spec: EvolveSpec, worktree: Path) -> str:
     `spec.run.repo_path` is the real target repo (identity); `worktree` is the
     detached, throwaway checkout the agent actually edits.
     """
-    target = _candidate_target(spec)
+    target = candidate_target(spec)
     base_sha = spec.source_revision.git_commit or "(unknown)"
     return f"""You are implementing ONE proposed optimization in an isolated git worktree.
 
@@ -86,7 +62,7 @@ extensions — nothing in it is runnable.
 {render_digest(spec)}
 
 ## In-scope files — do not edit anything else
-{_scope_block(spec)}
+{scope_lines(spec)}
 
 ## Oracles
 {_oracle_block(target)}

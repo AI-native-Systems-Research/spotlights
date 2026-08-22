@@ -14,6 +14,7 @@ from spotlights_engine.one_shot_fix.api import (
 )
 from spotlights_engine.one_shot_fix.claude_exec import FixRunResult
 from spotlights_engine.one_shot_fix.errors import (
+    ArtifactWriteError,
     ClaudeUnavailableError,
     NotAGitRepoError,
     OneShotFixError,
@@ -473,3 +474,91 @@ def test_out_overrides_the_artifact_base(run, tmp_path: Path) -> None:
         claude_runner=_runner(),
     )
     assert Path(result.fixes[0].path) == out / "fix" / "v1_attention" / CAND_ID
+
+
+def test_an_unwritable_out_dir_skips_one_candidate_instead_of_aborting_the_sweep(
+    run, tmp_path: Path
+) -> None:
+    """Artifact IO failures must be `OneShotFixError`s, or a sweep dies mid-way.
+
+    `_write_artifacts` runs `mkdir` and two writes. A bare `OSError` from any
+    of them propagates straight past the batch loop's
+    `except (PrepEvolveError, OneShotFixError)` handler and out of
+    `one_shot_fix` — so one unwritable path (full disk, read-only mount,
+    a name collision) silently discards every candidate still queued, after
+    their agent sessions were already paid for. Wrapping it in
+    `ArtifactWriteError` turns that into one recorded skip.
+
+    A regular file where the artifact tree needs a directory reproduces the
+    failure portably: `mkdir(parents=True)` raises `NotADirectoryError`
+    (an `OSError` subclass) without needing root or a special filesystem.
+    """
+    run_dir, repo = run
+    blocked = tmp_path / "blocked"
+    blocked.write_text("not a directory\n", encoding="utf-8")
+
+    result = one_shot_fix(
+        OneShotFixInput(result=run_dir, repo=str(repo), out=blocked),  # batch: no --candidate
+        claude_runner=_runner(),
+    )
+
+    assert result.fixes == []
+    assert len(result.skipped) == 1
+    assert result.skipped[0].candidate_id == CAND_ID
+    assert "could not write fix artifacts" in result.skipped[0].reason
+    # The worktree is still gone: cleanup happens before artifacts are written.
+    assert len(_worktrees(repo)) == 1
+
+
+def test_an_unwritable_out_dir_raises_for_an_explicit_candidate(run, tmp_path: Path) -> None:
+    """Same failure, single-candidate mode: raise, and as a `OneShotFixError`.
+
+    The CLI catches exactly `(PrepEvolveError, OneShotFixError)` and turns it
+    into `fix: <message>` with exit 2. A bare `OSError` would instead reach the
+    user as a traceback.
+    """
+    run_dir, repo = run
+    blocked = tmp_path / "blocked"
+    blocked.write_text("not a directory\n", encoding="utf-8")
+
+    with pytest.raises(ArtifactWriteError) as excinfo:
+        one_shot_fix(
+            OneShotFixInput(result=run_dir, repo=str(repo), candidate=CAND_ID, out=blocked),
+            claude_runner=_runner(),
+        )
+    assert isinstance(excinfo.value, OneShotFixError)
+    assert len(_worktrees(repo)) == 1
+
+
+def test_a_keyboard_interrupt_during_the_agent_session_leaks_no_worktree(run) -> None:
+    """`KeyboardInterrupt` is a `BaseException`, and Ctrl-C is how a real sweep ends.
+
+    A long `fix` sweep is interrupted by hand far more often than it fails, so
+    the cleanup has to sit in a `finally` — not in an `except Exception`, which
+    `KeyboardInterrupt` walks straight past — or each interrupted candidate
+    leaves both a stale `.git/worktrees` entry in the user's own repo and a
+    temp directory holding a full checkout.
+
+    This covers the interrupt-during-the-session half. The other half —
+    `create_worktree` being called *inside* the `try`, so no window exists
+    where the worktree is created but its `finally` is not yet registered — is
+    not reachable from a test (it is a handful of bytecodes wide); it is
+    enforced by the structure of `_process_candidate` and its comment.
+    """
+    run_dir, repo = run
+    before = _worktrees(repo)
+
+    def _interrupt(**kwargs):
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        one_shot_fix(
+            OneShotFixInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+            claude_runner=_interrupt,
+        )
+
+    assert _worktrees(repo) == before
+    # `git worktree list` can lag a manual rmtree; the prune in `remove_worktree`
+    # is what keeps `.git/worktrees` itself clean, so assert on that directly.
+    admin = repo / ".git" / "worktrees"
+    assert not admin.exists() or list(admin.iterdir()) == []

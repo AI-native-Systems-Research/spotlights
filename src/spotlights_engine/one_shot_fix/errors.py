@@ -43,7 +43,20 @@ class WorktreeError(OneShotFixError):
     """A `git worktree` / `git diff` invocation failed."""
 
 
+class ArtifactWriteError(OneShotFixError):
+    """Writing `fix.patch` / `FIX-NOTES.md` to the output directory failed.
+
+    An `OSError` here — a full disk, a read-only mount, a permission denial —
+    is a per-candidate failure, not a reason to abandon a sweep. Raised as a
+    `OneShotFixError` so the batch loop's existing handler records a
+    `SkippedFix` for the candidate that failed and moves on to the next one,
+    instead of the bare `OSError` propagating out and silently dropping every
+    remaining candidate.
+    """
+
+
 __all__ = [
+    "ArtifactWriteError",
     "ClaudeUnavailableError",
     "NotAGitRepoError",
     "OneShotFixError",

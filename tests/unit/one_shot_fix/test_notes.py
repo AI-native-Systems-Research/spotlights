@@ -7,7 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from spotlights_engine.one_shot_fix.notes import out_of_scope_files, render_fix_notes
+from spotlights_engine.one_shot_fix.notes import render_fix_notes
+from spotlights_engine.one_shot_fix.scope import out_of_scope_files
 from spotlights_engine.one_shot_fix.worktree import FileChange
 from spotlights_engine.prep_evolve.extract import build_spec, infer_direction
 from spotlights_engine.prep_evolve.resolve import (
@@ -75,6 +76,11 @@ def _notes(spec_and_repo, **overrides) -> str:
         ],
     }
     kwargs.update(overrides)
+    # `render_fix_notes` takes the out-of-scope verdict rather than deriving
+    # it, so the notes and `FixArtifact` can never disagree. Mirror what
+    # `api._write_artifacts` does, and derive it from whichever manifest the
+    # test supplied.
+    kwargs.setdefault("out_of_scope", out_of_scope_files(spec, kwargs["manifest"]))
     return render_fix_notes(**kwargs)
 
 
@@ -187,6 +193,7 @@ def test_the_emitted_apply_recipe_actually_applies_from_the_artifact_directory(
         patch_produced=True,
         agent_error=None,
         manifest=[],
+        out_of_scope=[],
     )
 
     artifact_dir = tmp_path / "artifact"
@@ -421,3 +428,95 @@ def test_agent_error_is_recorded(spec_and_repo) -> None:
         spec_and_repo, patch_produced=False, change_summary=None, agent_error="claude exit=3"
     )
     assert "claude exit=3" in notes
+
+
+def test_a_backtick_in_a_filename_does_not_break_the_manifest_table(spec_and_repo) -> None:
+    """A backtick in a diffed path must not end the row's code span early.
+
+    Paths come from the diff, so an agent-created filename containing a
+    backtick (legal on POSIX) reaches the renderer. A plain `` ` `` wrapper
+    closes at that backtick and spills the rest of the path into the row as
+    literal text — a broken table exactly where a reviewer looks for an
+    out-of-scope edit. Escaping it is not the fix: CommonMark ignores
+    backslash escapes inside a code span. The spec's mechanism is a longer
+    delimiter run, which is what the row must use.
+    """
+    odd = "pkg/attn/config`backup.py"
+    notes = _notes(
+        spec_and_repo,
+        manifest=[
+            FileChange(
+                path=odd, change_kind="modified", insertions=5, deletions=2, binary=False
+            )
+        ],
+    )
+    row = next(ln for ln in notes.splitlines() if "backup.py" in ln)
+    # The path survives intact...
+    assert odd in row
+    # ...inside a delimiter run long enough to contain it, so the span cannot
+    # close on the embedded backtick.
+    assert row.startswith("| `` ") or "``" in row
+    # Four cells, five pipes: the row is still a well-formed GFM table row.
+    assert row.count("|") == 5
+    # And it is still flagged, which is the point of the row existing.
+    assert "**OUT OF SCOPE**" in row
+
+
+def test_the_apply_recipe_survives_a_repo_path_containing_spaces(
+    spec_and_repo, tmp_path: Path
+) -> None:
+    """The recipe is copy-pasted into a shell, so the repo path must be quoted.
+
+    Unquoted, `git -C /home/alice/my projects/vllm checkout <sha>` is split by
+    the shell at the space: git gets `-C /home/alice/my` and treats the rest as
+    a pathspec. This builds a real repo under a directory with a space in it
+    and executes the emitted recipe, the same way a human would.
+    """
+    spec, _unused = spec_and_repo
+    target_repo = tmp_path / "my target repo"
+    target_repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=target_repo, check=True)
+    tracked = target_repo / "f.txt"
+    tracked.write_text("line1\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=target_repo, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t.t", "-c", "user.name=t", "commit", "-qm", "init"],
+        cwd=target_repo,
+        check=True,
+    )
+    base_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=target_repo, capture_output=True, text=True, check=True
+    ).stdout.strip()
+    tracked.write_text("line1\nline2\n", encoding="utf-8")
+    patch_text = subprocess.run(
+        ["git", "diff"], cwd=target_repo, capture_output=True, text=True, check=True
+    ).stdout
+    subprocess.run(["git", "checkout", "-q", "--", "f.txt"], cwd=target_repo, check=True)
+
+    notes = render_fix_notes(
+        spec=spec,
+        candidate_id=CAND_ID,
+        module_qn="v1/attention",
+        base_sha=base_sha,
+        repo=target_repo,
+        change_summary="did the thing",
+        patch_produced=True,
+        agent_error=None,
+        manifest=[],
+        out_of_scope=[],
+    )
+
+    artifact_dir = tmp_path / "artifact"
+    artifact_dir.mkdir()
+    (artifact_dir / "fix.patch").write_text(patch_text, encoding="utf-8")
+
+    bash_block = notes.split("```bash\n", 1)[1].split("```", 1)[0]
+    script = "\n".join(ln for ln in bash_block.splitlines() if ln.startswith("git -C"))
+    completed = subprocess.run(
+        ["bash", "-c", script], cwd=artifact_dir, capture_output=True, text=True
+    )
+    assert completed.returncode == 0, (
+        f"recipe failed for a path with a space:\nSCRIPT:\n{script}\n"
+        f"STDERR:\n{completed.stderr}"
+    )
+    assert tracked.read_text(encoding="utf-8") == "line1\nline2\n"

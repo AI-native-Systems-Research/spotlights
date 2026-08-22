@@ -69,8 +69,8 @@ def test_collect_patch_includes_a_modified_file(tmp_path: Path) -> None:
         collection = collect_patch(wt)
     finally:
         remove_worktree(wt)
-    assert "# appended" in collection.patch
-    assert CAND_FILE in collection.patch
+    assert b"# appended" in collection.patch
+    assert CAND_FILE.encode() in collection.patch
     assert collection.change_summary is None
 
 
@@ -85,8 +85,8 @@ def test_collect_patch_includes_an_added_file(tmp_path: Path) -> None:
         collection = collect_patch(wt)
     finally:
         remove_worktree(wt)
-    assert "pkg/attn/table.py" in collection.patch
-    assert "TILE_TABLE" in collection.patch
+    assert b"pkg/attn/table.py" in collection.patch
+    assert b"TILE_TABLE" in collection.patch
 
 
 def test_collect_patch_extracts_and_excludes_the_change_summary(tmp_path: Path) -> None:
@@ -100,7 +100,7 @@ def test_collect_patch_extracts_and_excludes_the_change_summary(tmp_path: Path) 
     finally:
         remove_worktree(wt)
     assert collection.change_summary == "Swapped the heuristic for a table.\n"
-    assert CHANGE_SUMMARY_NAME not in collection.patch
+    assert CHANGE_SUMMARY_NAME.encode() not in collection.patch
     assert all(c.path != CHANGE_SUMMARY_NAME for c in collection.manifest)
 
 
@@ -111,7 +111,7 @@ def test_collect_patch_is_empty_when_nothing_changed(tmp_path: Path) -> None:
         collection = collect_patch(wt)
     finally:
         remove_worktree(wt)
-    assert collection.patch == ""
+    assert collection.patch == b""
     assert collection.change_summary is None
     assert collection.manifest == []
 
@@ -171,8 +171,8 @@ def test_manifest_records_a_deleted_file(tmp_path: Path) -> None:
     # Important 5: the manifest can say "deleted" while the patch itself
     # regresses (e.g. back to a bare `git diff`, which silently drops staged
     # deletions) and every test still stays green. Assert the patch text too.
-    assert "deleted file mode" in collection.patch
-    assert CAND_FILE in collection.patch
+    assert b"deleted file mode" in collection.patch
+    assert CAND_FILE.encode() in collection.patch
 
 
 def test_manifest_records_a_binary_file_with_no_line_counts(tmp_path: Path) -> None:
@@ -210,8 +210,8 @@ def test_manifest_records_a_renamed_file_with_the_new_path(tmp_path: Path) -> No
     assert change.binary is False
     # Important 5: the delete half of a rename must also be visible in the
     # patch text itself, not only in the manifest's structured fields.
-    assert f"rename from {CAND_FILE}" in collection.patch
-    assert "rename to pkg/attn/tile_renamed.py" in collection.patch
+    assert f"rename from {CAND_FILE}".encode() in collection.patch
+    assert b"rename to pkg/attn/tile_renamed.py" in collection.patch
 
 
 def test_manifest_handles_a_path_with_spaces_without_truncation(tmp_path: Path) -> None:
@@ -290,8 +290,8 @@ def test_collect_patch_survives_a_tab_in_a_filename(tmp_path: Path) -> None:
     # literal tab shows up escaped (`\t`) inside a quoted path — that's git's
     # own standard patch format, not a bug. The manifest (built from the `-z`
     # forms, which disable quoting) is where the real, unescaped path lives.
-    assert "tab\\tname.py" in collection.patch
-    assert "X = 1" in collection.patch
+    assert b"tab\\tname.py" in collection.patch
+    assert b"X = 1" in collection.patch
     assert len(collection.manifest) == 1
     change = collection.manifest[0]
     assert change.path == odd_name
@@ -342,13 +342,13 @@ def test_collect_patch_diffs_against_base_sha_not_head(tmp_path: Path) -> None:
         collection = collect_patch(wt)
     finally:
         remove_worktree(wt)
-    assert "+# v3-agent" in collection.patch
+    assert b"+# v3-agent" in collection.patch
     # If the diff were (still, wrongly) HEAD-relative, HEAD now points at c1,
     # so the "# c2 marker" line added in c2 would show up as *newly added*
     # too (a "+" line). Diffing against base_sha (c2) must show it only as
     # unchanged context (or not at all), never as an addition, since it was
     # already present at c2.
-    assert "+# c2 marker" not in collection.patch
+    assert b"+# c2 marker" not in collection.patch
 
 
 def test_manifest_survives_a_malformed_numstat_record_without_crashing(
@@ -388,7 +388,7 @@ def test_manifest_survives_a_malformed_numstat_record_without_crashing(
     assert change.insertions is None
     assert change.deletions is None
     # The patch text itself is unaffected by the manifest-side corruption.
-    assert "# appended" in collection.patch
+    assert b"# appended" in collection.patch
 
 
 def test_collect_patch_preserves_the_patch_when_manifest_building_blows_up(
@@ -415,8 +415,8 @@ def test_collect_patch_preserves_the_patch_when_manifest_building_blows_up(
         collection = collect_patch(wt)  # must not raise
     finally:
         remove_worktree(wt)
-    assert "# appended" in collection.patch
-    assert CAND_FILE in collection.patch
+    assert b"# appended" in collection.patch
+    assert CAND_FILE.encode() in collection.patch
 
 
 def test_collect_patch_survives_non_utf8_bytes_in_a_diff(tmp_path: Path) -> None:
@@ -441,5 +441,161 @@ def test_collect_patch_survives_non_utf8_bytes_in_a_diff(tmp_path: Path) -> None
         collection = collect_patch(wt)  # must not raise UnicodeDecodeError
     finally:
         remove_worktree(wt)
-    assert CAND_FILE in collection.patch
-    assert "bad bytes" in collection.patch
+    assert CAND_FILE.encode() in collection.patch
+    assert b"bad bytes" in collection.patch
+
+
+def test_collected_patch_with_non_utf8_bytes_still_applies(tmp_path: Path) -> None:
+    """The patch must reach disk byte-for-byte, or `git apply` rejects it.
+
+    The pre-existing non-UTF8 test only asserted `collect_patch` does not
+    raise. It passed while the patch was being silently corrupted: `_run_git`
+    decoded git's stdout with `errors="replace"`, turning each invalid byte
+    into U+FFFD, so the diff's context lines no longer matched the bytes they
+    came from. Verified against real git: such a patch fails with "patch does
+    not apply".
+
+    This test closes that gap the only way that proves anything — write the
+    collected patch out and have git apply it to the repo it came from.
+    """
+    repo = make_repo(tmp_path)
+    base_sha = require_git_repo(repo)
+    wt = create_worktree(repo, base_sha)
+    try:
+        target = wt.path / CAND_FILE
+        # No NUL byte, so git still treats the file as text and emits the raw
+        # bytes as diff context rather than reporting a binary file.
+        target.write_bytes(target.read_bytes() + b"\n# bad bytes: \xff\xfe end\n")
+        collection = collect_patch(wt)
+    finally:
+        remove_worktree(wt)
+
+    assert b"\xff\xfe" in collection.patch, "the invalid bytes were re-encoded"
+    assert b"\xef\xbf\xbd" not in collection.patch, "U+FFFD replacement leaked in"
+
+    patch_file = tmp_path / "fix.patch"
+    patch_file.write_bytes(collection.patch)
+    applied = subprocess.run(
+        ["git", "apply", "--check", str(patch_file)],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    assert applied.returncode == 0, f"collected patch does not apply: {applied.stderr}"
+
+
+def test_a_change_summary_tracked_by_the_repo_is_not_deleted_by_the_patch(
+    tmp_path: Path,
+) -> None:
+    """`collect_patch` must not invent a deletion of one of the repo's own files.
+
+    Reading the agent's rationale means unlinking `CHANGE-SUMMARY.md`. If the
+    target repo happens to *track* a file by that name, `git add -N .` fully
+    stages that deletion and the diff-against-base faithfully reports it — so
+    `fix.patch` ships a hunk deleting a repo file the agent never touched.
+    Restoring the committed copy after the read undoes exactly the
+    collector's own edit.
+    """
+    repo = make_repo(tmp_path)
+    tracked = repo / CHANGE_SUMMARY_NAME
+    tracked.write_text("the repo's own changelog\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t.t", "-c", "user.name=t", "commit", "-qm", "add summary"],
+        cwd=repo,
+        check=True,
+    )
+    wt = create_worktree(repo, require_git_repo(repo))
+    try:
+        target = wt.path / CAND_FILE
+        target.write_text(target.read_text(encoding="utf-8") + "# appended\n", encoding="utf-8")
+        (wt.path / CHANGE_SUMMARY_NAME).write_text("agent rationale\n", encoding="utf-8")
+        collection = collect_patch(wt)
+    finally:
+        remove_worktree(wt)
+
+    assert collection.change_summary == "agent rationale\n"
+    assert CHANGE_SUMMARY_NAME.encode() not in collection.patch
+    assert b"deleted file mode" not in collection.patch
+    assert [c.path for c in collection.manifest] == [CAND_FILE]
+
+
+def test_a_half_binary_numstat_record_reports_unknown_counts_not_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`counts_known` must imply both counts are present.
+
+    Git always writes `-` for *both* counts of a binary file, so a one-sided
+    `-` is not reachable from real git output — but `_parse_count("-")`
+    reports it as a known, deliberate absence, so the record used to come
+    back with `counts_known=True` and a `None` count, which the notes
+    rendered as the nonsense `+None/-0`.
+    """
+    import spotlights_engine.one_shot_fix.worktree as worktree_mod
+
+    repo = make_repo(tmp_path)
+    wt = create_worktree(repo, require_git_repo(repo))
+    try:
+        (wt.path / "pkg" / "attn" / "table.py").write_text("X = 1\n", encoding="utf-8")
+
+        real_run_git = worktree_mod._run_git
+
+        def _half_binary_numstat(cwd, *args, **kwargs):
+            completed = real_run_git(cwd, *args, **kwargs)
+            if "--numstat" in args:
+                completed.stdout = completed.stdout.replace("1\t0\t", "-\t0\t", 1)
+            return completed
+
+        monkeypatch.setattr(worktree_mod, "_run_git", _half_binary_numstat)
+        collection = collect_patch(wt)
+    finally:
+        remove_worktree(wt)
+
+    change = collection.manifest[0]
+    assert change.binary is False
+    assert change.counts_known is False
+    assert change.insertions is None
+    assert change.deletions is None
+
+
+def test_a_truncated_name_status_stream_keeps_the_records_that_parsed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A partial `--name-status -z` stream must degrade, not empty the manifest.
+
+    Unpacking `tokens[i + 1]` without a bounds check raised `IndexError` on a
+    truncated stream (git killed mid-write, or a timeout whose captured
+    stdout stops mid-record). `collect_patch`'s fallback re-parses the *same*
+    raw string, so it raised again and the manifest degraded all the way to
+    `[]` — silently switching off the out-of-scope check for that patch.
+    """
+    import spotlights_engine.one_shot_fix.worktree as worktree_mod
+
+    repo = make_repo(tmp_path)
+    wt = create_worktree(repo, require_git_repo(repo))
+    try:
+        target = wt.path / CAND_FILE
+        target.write_text(target.read_text(encoding="utf-8") + "# appended\n", encoding="utf-8")
+        (wt.path / "pkg" / "attn" / "table.py").write_text("X = 1\n", encoding="utf-8")
+
+        real_run_git = worktree_mod._run_git
+
+        def _truncate_name_status(cwd, *args, **kwargs):
+            completed = real_run_git(cwd, *args, **kwargs)
+            if "--name-status" in args:
+                # Drop the final record's *path* token, leaving its status
+                # dangling — an odd token count, which is what unguarded
+                # `tokens[i + 1]` indexing walks off the end of.
+                kept = completed.stdout.split("\0")[:-2]
+                completed.stdout = "\0".join([*kept, ""])
+            return completed
+
+        monkeypatch.setattr(worktree_mod, "_run_git", _truncate_name_status)
+        collection = collect_patch(wt)  # must not raise IndexError
+    finally:
+        remove_worktree(wt)
+
+    # The complete records survive, so the scope check still has something to
+    # work with — the whole point of not degrading to [].
+    assert collection.manifest, "a truncated stream emptied the manifest"
+    assert b"# appended" in collection.patch
