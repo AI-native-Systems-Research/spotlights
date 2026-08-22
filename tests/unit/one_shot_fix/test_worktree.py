@@ -37,6 +37,29 @@ def test_require_git_repo_rejects_a_non_git_directory(tmp_path: Path) -> None:
         require_git_repo(repo)
 
 
+def test_require_git_repo_reports_a_missing_git_as_not_a_git_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A `git` that is not on PATH must still surface as `NotAGitRepoError`.
+
+    `check=False` suppresses only the return-code check, so `_spawn_git`'s
+    `OSError` handler turned this into a bare `WorktreeError` — past the
+    function's documented contract, and past `pytest.raises(NotAGitRepoError)`
+    for any caller that distinguishes the two.
+
+    An empty `PATH` is the real failure rather than a simulated one:
+    `subprocess.run(["git", ...])` raises `FileNotFoundError` for exactly the
+    reason a machine without git installed would.
+    """
+    repo = make_repo(tmp_path)
+    monkeypatch.setenv("PATH", "")
+    with pytest.raises(NotAGitRepoError) as caught:
+        require_git_repo(repo)
+    # The message must not claim the checkout is the problem — it is fine.
+    assert "not a git checkout" not in str(caught.value)
+    assert "git on PATH" in str(caught.value) or "PATH" in str(caught.value)
+
+
 def test_worktree_is_detached_and_creates_no_branch(tmp_path: Path) -> None:
     repo = make_repo(tmp_path)
     sha = require_git_repo(repo)
@@ -517,6 +540,87 @@ def test_a_change_summary_tracked_by_the_repo_is_not_deleted_by_the_patch(
     assert collection.change_summary == "agent rationale\n"
     assert CHANGE_SUMMARY_NAME.encode() not in collection.patch
     assert b"deleted file mode" not in collection.patch
+    assert [c.path for c in collection.manifest] == [CAND_FILE]
+
+
+def test_a_change_summary_tracked_by_the_repo_is_not_read_as_the_agents_rationale(
+    tmp_path: Path,
+) -> None:
+    """The other half of the tracked-`CHANGE-SUMMARY.md` case: the agent writes none.
+
+    A repo that tracks that path hands a copy to every worktree made from it,
+    so the file is on disk before the agent has run. A bare `is_file()` cannot
+    tell that copy apart from one the agent wrote, and read the repo's own
+    content into `FIX-NOTES.md`'s "What changed and why" as though the agent
+    had written it — a fabricated rationale in the document a reviewer relies
+    on to know what was actually done.
+
+    `change_summary is None` is the honest answer, and renders as "the agent
+    left no summary", which is exactly what happened.
+    """
+    repo = make_repo(tmp_path)
+    tracked = repo / CHANGE_SUMMARY_NAME
+    tracked.write_text("the repo's own changelog\n", encoding="utf-8")
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "-c", "user.email=t@t.t", "-c", "user.name=t", "commit", "-qm", "add summary"],
+        cwd=repo,
+        check=True,
+    )
+    wt = create_worktree(repo, require_git_repo(repo))
+    try:
+        target = wt.path / CAND_FILE
+        target.write_text(target.read_text(encoding="utf-8") + "# appended\n", encoding="utf-8")
+        # The agent edits the candidate file and writes no rationale at all.
+        collection = collect_patch(wt)
+    finally:
+        remove_worktree(wt)
+
+    assert collection.change_summary is None
+    # And the repo's own file is left exactly as committed: not read, not
+    # removed, and so not in the patch either way.
+    assert CHANGE_SUMMARY_NAME.encode() not in collection.patch
+    assert [c.path for c in collection.manifest] == [CAND_FILE]
+
+
+def test_collect_patch_survives_a_git_failure_while_restoring_the_change_summary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`collect_patch` promises never to raise for a git failure. The
+    best-effort
+
+    `git checkout` that puts a tracked `CHANGE-SUMMARY.md` back sat outside
+    every guard, and `check=False` does not stop `_spawn_git` from raising when
+    the subprocess itself cannot run (an `OSError`, or a `_GIT_TIMEOUT_S`
+    timeout on a large tree). The caller's `finally` then destroyed the
+    worktree, discarding the patch, the rationale already read, and the usage
+    numbers of an agent session that had already finished and already been
+    paid for.
+    """
+    import spotlights_engine.one_shot_fix.worktree as worktree_mod
+
+    repo = make_repo(tmp_path)
+    wt = create_worktree(repo, require_git_repo(repo))
+    real_run_git = worktree_mod._run_git
+
+    def _fail_on_checkout(cwd, *args, **kwargs):
+        if "checkout" in args:
+            raise worktree_mod.WorktreeError("simulated: git could not be run")
+        return real_run_git(cwd, *args, **kwargs)
+
+    try:
+        target = wt.path / CAND_FILE
+        target.write_text(target.read_text(encoding="utf-8") + "# appended\n", encoding="utf-8")
+        (wt.path / CHANGE_SUMMARY_NAME).write_text("agent rationale\n", encoding="utf-8")
+        monkeypatch.setattr(worktree_mod, "_run_git", _fail_on_checkout)
+        collection = collect_patch(wt)  # must not raise
+    finally:
+        monkeypatch.undo()
+        remove_worktree(wt)
+
+    # Everything the finished session produced still comes back.
+    assert collection.change_summary == "agent rationale\n"
+    assert b"# appended" in collection.patch
     assert [c.path for c in collection.manifest] == [CAND_FILE]
 
 

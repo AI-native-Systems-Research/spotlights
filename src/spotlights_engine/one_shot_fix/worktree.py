@@ -101,8 +101,25 @@ def require_git_repo(repo: Path) -> str:
     `prep-evolve` tolerates a non-git target and records a `None` commit. `fix`
     cannot: a worktree needs a commit, and the emitted patch is meaningless
     without a recorded base to apply it to.
+
+    `check=False` suppresses only the return-code check. `_spawn_git` still
+    raises `WorktreeError` when the subprocess cannot run at all — git absent
+    from `PATH` being the case that matters, since `ensure_repo_dir` has
+    already established that `repo` exists. That is the same "no usable git
+    checkout here" conclusion, so it is reported as `NotAGitRepoError` rather
+    than leaking a lower-level type past this function's documented contract.
+    The message distinguishes the two causes, because "not a git checkout" on
+    its own would be actively misleading when the checkout is fine and git is
+    what is missing.
     """
-    completed = _run_git(repo, "rev-parse", "HEAD", check=False)
+    try:
+        completed = _run_git(repo, "rev-parse", "HEAD", check=False)
+    except WorktreeError as exc:
+        raise NotAGitRepoError(
+            f"could not run git in {repo}: {exc}. `fix` needs a real git repo "
+            f"and a working `git` on PATH: it creates a detached worktree at "
+            f"the base commit and records that commit in the patch notes."
+        ) from exc
     sha = completed.stdout.strip()
     if completed.returncode != 0 or not sha:
         raise NotAGitRepoError(
@@ -343,8 +360,18 @@ def _build_manifest(name_status_raw: str, numstat_raw: str) -> list[FileChange]:
         counts = [(None, None, False, False)] * len(statuses)
 
     manifest: list[FileChange] = []
+    # `strict=False`, spelled out rather than implied (ruff's B905 requires an
+    # explicit value): the guard above has already equalized the two lengths in
+    # *both* of its branches, so a strict `zip` here could never raise. Keeping
+    # it would advertise a diagnostic this function does not actually offer,
+    # and invite a later reader to delete the guard on the strength of it.
+    # The guard is the single defence, and it does not swallow the failure:
+    # every degraded record surfaces in `notes._manifest_section` as an
+    # explicit "line counts unavailable for N files" line beside the totals,
+    # which is what a reader of the notes needs and an exception here — inside
+    # the block that must not lose an already-collected patch — is not.
     for (status, path, old_path), (added, deleted, binary, counts_known) in zip(
-        statuses, counts, strict=True
+        statuses, counts, strict=False
     ):
         manifest.append(
             FileChange(
@@ -360,6 +387,51 @@ def _build_manifest(name_status_raw: str, numstat_raw: str) -> list[FileChange]:
     return manifest
 
 
+def _summary_is_the_agents(wt: Worktree) -> bool:
+    """Did the agent write `CHANGE-SUMMARY.md`, or did the repo supply it?
+
+    The file's existence on disk says nothing on its own: a repo that *tracks*
+    a path by that name hands a copy to every worktree created from it, before
+    the agent has run at all. Reading that copy would put the repo's own
+    content into `FIX-NOTES.md`'s "What changed and why" as though it were the
+    agent's rationale — a false attribution in the one document whose entire
+    value is being trustworthy about what was and was not done.
+
+    Deliberately compares against `wt.base_sha` rather than using
+    `git status`, which compares against HEAD: `claude_exec` permits `git
+    reset` inside the worktree, and a `--soft` reset moves HEAD without
+    touching the working tree (see `collect_patch`'s docstring). Every
+    comparison in this module is anchored to the recorded base for that
+    reason.
+
+    Answers "yes" whenever git cannot say. A file present while the base
+    commit does not track that path is overwhelmingly the common case, and
+    dropping a real rationale is the worse trade: the wrong guess needs three
+    coincidences at once — the repo tracks the path, git failed, *and* the
+    agent left nothing.
+    """
+    try:
+        tracked = _run_git(
+            wt.path, "cat-file", "-e", f"{wt.base_sha}:{CHANGE_SUMMARY_NAME}", check=False
+        )
+    except WorktreeError:
+        return True
+    if tracked.returncode != 0:
+        # Not in the base commit, so nothing but the agent put it on disk.
+        return True
+    try:
+        # Tracked: only a difference from the committed copy is the agent's
+        # doing. `--quiet` exits 1 when they differ, 0 when they match; any
+        # other code means git could not tell us, which the `!= 0` treats as
+        # "the agent's" per the docstring above.
+        diff = _run_git(
+            wt.path, "diff", "--quiet", wt.base_sha, "--", CHANGE_SUMMARY_NAME, check=False
+        )
+    except WorktreeError:
+        return True
+    return diff.returncode != 0
+
+
 def collect_patch(wt: Worktree) -> PatchCollection:
     """Return the patch, the agent's rationale, and a per-file manifest.
 
@@ -369,9 +441,10 @@ def collect_patch(wt: Worktree) -> PatchCollection:
     it (see the comment on the diff below).
 
     Order matters:
-    1. read + delete `CHANGE-SUMMARY.md`, so the agent's rationale reaches
-       FIX-NOTES.md but never appears in the patch (or the manifest), then
-       restore it from `base_sha` in case the repo tracked that path;
+    1. read + delete `CHANGE-SUMMARY.md` *if the agent wrote it* (see
+       `_summary_is_the_agents`), so the agent's rationale reaches FIX-NOTES.md
+       but never appears in the patch (or the manifest), then restore it from
+       `base_sha` in case the repo tracked that path;
     2. `git add -N .` so *added* files show up in the diff;
     3. `git diff <base_sha>` (patch bytes) plus `git diff <base_sha>
        --name-status -z` and `git diff <base_sha> --numstat -z` (the
@@ -407,19 +480,51 @@ def collect_patch(wt: Worktree) -> PatchCollection:
     """
     summary_path = wt.path / CHANGE_SUMMARY_NAME
     summary: str | None = None
-    if summary_path.is_file():
-        summary = summary_path.read_text(encoding="utf-8", errors="replace")
-        summary_path.unlink()
-        # Removing the rationale file keeps it out of the patch — unless the
-        # target repo *tracks* a file by that name, in which case the unlink
-        # is a deletion the diff below reports faithfully, and `fix.patch`
-        # ships a spurious hunk deleting one of the repo's own files. That is
-        # precisely the class of unintended edit the manifest exists to
-        # catch, introduced by the collector itself. Restoring the committed
-        # copy undoes exactly the collector's own edit and nothing else.
-        # `check=False`: in the normal case the file was untracked, so this
-        # pathspec matches nothing and git exits 1 — a no-op, not a failure.
-        _run_git(wt.path, "checkout", wt.base_sha, "--", CHANGE_SUMMARY_NAME, check=False)
+    # `_summary_is_the_agents` and not a bare `is_file()`: see that function.
+    # When the file is the repo's own untouched copy, every step below is
+    # skipped — there is nothing to read, and nothing for the collector to
+    # remove and then put back.
+    if summary_path.is_file() and _summary_is_the_agents(wt):
+        try:
+            summary = summary_path.read_text(encoding="utf-8", errors="replace")
+        except OSError as exc:
+            # Not left as `None`: that renders as "the agent left no summary",
+            # a claim about the agent's behaviour that is false here. Nor
+            # raised — see the note on losing the whole record below.
+            summary = f"_({CHANGE_SUMMARY_NAME} exists but could not be read: {exc})_"
+        try:
+            summary_path.unlink()
+        except OSError:
+            # The file stays and the diff reports it as a change. A spurious
+            # hunk that the manifest flags is a far smaller loss than raising,
+            # and there is no third option available here.
+            pass
+        else:
+            # Removing the rationale file keeps it out of the patch — unless
+            # the target repo *tracks* a file by that name, in which case the
+            # unlink is a deletion the diff below reports faithfully, and
+            # `fix.patch` ships a spurious hunk deleting one of the repo's own
+            # files. That is precisely the class of unintended edit the
+            # manifest exists to catch, introduced by the collector itself.
+            # Restoring the committed copy undoes exactly the collector's own
+            # edit and nothing else.
+            #
+            # `check=False` suppresses only the return-code check — in the
+            # normal case the file was untracked, so this pathspec matches
+            # nothing and git exits 1, a no-op rather than a failure. It does
+            # not stop `_spawn_git` from raising when the subprocess itself
+            # cannot run (an `OSError`, or a `_GIT_TIMEOUT_S` timeout), so the
+            # call is wrapped for the same reason `remove_worktree` wraps
+            # each of its own: this function must not raise for a git failure
+            # (see its docstring). Letting one escape here would destroy the
+            # whole record of an agent session that has already finished and
+            # already been paid for, over a best-effort restore.
+            try:
+                _run_git(
+                    wt.path, "checkout", wt.base_sha, "--", CHANGE_SUMMARY_NAME, check=False
+                )
+            except WorktreeError:
+                pass
 
     # `git add -N .` and the diff are the two steps that can fail outright
     # (a 120 s `_GIT_TIMEOUT_S` timeout on a huge tree, a git that dies). The
