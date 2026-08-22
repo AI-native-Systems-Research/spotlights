@@ -199,7 +199,12 @@ def _outcome_section(
 ) -> str:
     summary = change_summary.strip() if change_summary else "_(the agent left no summary)_"
     if agent_error:
-        summary = f"{summary}\n\n**Agent session error:** `{agent_error}`"
+        # `_code_span`, not a bare `` `...` ``: `agent_error` carries the tail of
+        # the agent's own stderr (see `claude_exec.run_fix_claude`), so its
+        # content is arbitrary CLI output. One backtick in there closes a plain
+        # span early and spills the rest of the error into the document as
+        # prose — precisely the line a reader turns to this section for.
+        summary = f"{summary}\n\n**Agent session error:** {_code_span(agent_error)}"
 
     if collect_error:
         # The one outcome this document must not describe as "no patch was
@@ -213,7 +218,7 @@ def _outcome_section(
             "failed, so what it changed is unknown. The throwaway worktree has "
             "since been removed, so those edits are not recoverable: re-run "
             "this candidate.\n\n"
-            f"**Patch collection error:** `{collect_error}`\n\n"
+            f"**Patch collection error:** {_code_span(collect_error)}\n\n"
             "The agent's own summary, if it left one, follows — treat it as a "
             "claim about work that was never captured.\n\n"
             f"{summary}\n"

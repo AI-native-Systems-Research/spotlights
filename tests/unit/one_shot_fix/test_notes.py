@@ -430,6 +430,42 @@ def test_agent_error_is_recorded(spec_and_repo) -> None:
     assert "claude exit=3" in notes
 
 
+def test_a_backtick_in_the_agent_error_does_not_break_its_code_span(spec_and_repo) -> None:
+    """`agent_error` carries the tail of the agent's own stderr — arbitrary text.
+
+    `claude_exec.run_fix_claude` builds it as `claude exit=N: stderr=<repr>`, so
+    whatever the CLI wrote lands here, backticks included. A plain `` ` ``
+    wrapper closes at the first one and spills the rest of the error into the
+    document as prose, on the one line a reader came to this section for.
+    """
+    error = "claude exit=1: stderr=b'`git status` is not allowed here'"
+    notes = _notes(
+        spec_and_repo, patch_produced=False, change_summary=None, agent_error=error
+    )
+    line = next(ln for ln in notes.splitlines() if "Agent session error" in ln)
+    assert error in line
+    # The span must *open* with a delimiter run longer than any run inside the
+    # content, so it cannot close on an embedded backtick. Asserting on the
+    # opening fence, not merely that "``" appears somewhere: a single-backtick
+    # wrapper around content that itself ends in a backtick also produces
+    # "``" — by accident, in exactly the broken rendering this guards against.
+    span = line.split("**Agent session error:**", 1)[1].strip()
+    assert span.startswith("``")
+    assert span.endswith("``")
+
+
+def test_a_backtick_in_the_collection_error_does_not_break_its_code_span(
+    spec_and_repo,
+) -> None:
+    """Same for `collect_error`: a git message is not guaranteed backtick-free."""
+    error = "git diff HEAD failed: fatal: bad revision `HEAD@{1}`"
+    notes = _notes(spec_and_repo, collect_error=error)
+    line = next(ln for ln in notes.splitlines() if "Patch collection error" in ln)
+    assert error in line
+    span = line.split("**Patch collection error:**", 1)[1].strip()
+    assert span.startswith("``")
+
+
 def test_a_backtick_in_a_filename_does_not_break_the_manifest_table(spec_and_repo) -> None:
     """A backtick in a diffed path must not end the row's code span early.
 

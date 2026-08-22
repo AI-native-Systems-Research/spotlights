@@ -599,3 +599,36 @@ def test_a_truncated_name_status_stream_keeps_the_records_that_parsed(
     # work with — the whole point of not degrading to [].
     assert collection.manifest, "a truncated stream emptied the manifest"
     assert b"# appended" in collection.patch
+
+
+def test_a_numstat_rename_record_missing_its_path_tokens_keeps_every_count() -> None:
+    """`_parse_numstat_z` must keep a truncated rename record, not drop it.
+
+    The two streams are separate `git diff` invocations, so one can be cut
+    without the other. When only `--numstat` loses the two path tokens
+    following a rename's count record, the counts themselves are all present
+    and correctly ordered — appending the record and advancing past the
+    (missing) path tokens keeps `len(counts) == len(statuses)`, and every file
+    in the manifest keeps its real `+x/-y`.
+
+    Mirroring `_parse_name_status_z`'s "break before appending" guard here
+    instead — suggested in review, and superficially appealing as symmetry —
+    drops that record, which trips `_build_manifest`'s length-mismatch
+    fallback and replaces the counts of **every** file in the diff with
+    `unknown`. That is the failure this test exists to prevent, so read it
+    before making the two parsers look alike.
+    """
+    from spotlights_engine.one_shot_fix.worktree import _build_manifest
+
+    # `M<NUL>path<NUL>` then `R100<NUL>old<NUL>new<NUL>` — complete.
+    name_status = "M\0pkg/attn/tile.py\0R100\0pkg/attn/old.py\0pkg/attn/new.py\0"
+    # Same two records, but the rename's `old`/`new` tokens never arrived.
+    numstat = "3\t1\tpkg/attn/tile.py\0" + "5\t2\t\0"
+
+    manifest = _build_manifest(name_status, numstat)
+
+    assert [c.path for c in manifest] == ["pkg/attn/tile.py", "pkg/attn/new.py"]
+    assert all(c.counts_known for c in manifest)
+    assert (manifest[0].insertions, manifest[0].deletions) == (3, 1)
+    assert (manifest[1].insertions, manifest[1].deletions) == (5, 2)
+    assert manifest[1].change_kind == "renamed"
