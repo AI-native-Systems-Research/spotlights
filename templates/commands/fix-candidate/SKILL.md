@@ -98,8 +98,18 @@ prevent.
    #   git -C <repo> checkout <BASE>
    #   git -C <repo> apply "$PWD/fix.patch"
    HEADER
-   git diff >> "<run-dir>/fix/<module-slug>/<cand-id>/fix.patch"
+   git diff "<BASE>" >> "<run-dir>/fix/<module-slug>/<cand-id>/fix.patch"
    ```
+
+   Diff against `<BASE>`, never a bare `git diff`. `git add -N .`'s `.`
+   pathspec does not merely intent-to-add new paths: for a path that no longer
+   exists on disk it stages the *deletion in full*, so a bare index-vs-worktree
+   `git diff` has nothing left to report for a file you deleted — or for the
+   delete-half of a rename — and that half silently vanishes from the patch.
+   `git diff <commit>` compares the working tree against the commit regardless
+   of what got staged, so it sees both, and matches the modified/added cases
+   byte-for-byte. The `git add -N .` is still required: `git diff <commit>`
+   does not surface untracked files on its own.
 
    Use the quoted `<<'HEADER'` heredoc exactly as shown — quoting the
    delimiter stops the shell from expanding `$PWD` while writing the header,
@@ -129,9 +139,12 @@ prevent.
      git -C <repo> checkout <BASE>
      git -C <repo> apply --check "$PWD/fix.patch" && git -C <repo> apply "$PWD/fix.patch"
 
-     # the recorded correctness oracle — run it on a machine that can:
-     <the recorded correctness oracle>
+     # the recorded correctness oracle(s) — run them on a machine that can:
+     <every recorded correctness oracle, one command per line>
      ```
+
+     Every one of them, not just the first: a candidate can record several,
+     and the one you drop may be the suite covering the code you changed.
 
      If the patch does not apply cleanly, the fallback is
      `git -C <repo> apply -3 "$PWD/fix.patch"` (three-way merge), run from the

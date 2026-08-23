@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from spotlights_engine.one_shot_fix.notes import render_fix_notes
-from spotlights_engine.one_shot_fix.scope import out_of_scope_files
+from spotlights_engine.one_shot_fix.scope import candidate_target, out_of_scope_files
 from spotlights_engine.one_shot_fix.worktree import FileChange
 from spotlights_engine.prep_evolve.extract import build_spec, infer_direction
 from spotlights_engine.prep_evolve.resolve import (
@@ -118,6 +118,50 @@ def test_includes_the_apply_and_verify_recipe(spec_and_repo) -> None:
     assert "repo root" in notes
     # Prose anchoring $PWD to where fix.patch (and this file) actually live.
     assert "directory containing" in notes
+
+
+def _apply_recipe(notes: str) -> str:
+    """The bash block under "Applying and verifying this patch", alone.
+
+    Asserting on the whole document would pass on the strength of the
+    "Recorded oracles" section, which lists every oracle already. The bug
+    being guarded lives in the copy-pasteable recipe.
+    """
+    section = notes.split("## Applying and verifying this patch", 1)[1]
+    return section.split("```bash\n", 1)[1].split("```", 1)[0]
+
+
+def test_apply_recipe_lists_every_recorded_correctness_oracle(spec_and_repo) -> None:
+    """All the oracles reach the recipe, not just the first one.
+
+    A candidate can record more than one correctness command. Emitting only
+    the first drops a suite that may be the one covering the changed path —
+    and because "Recorded oracles" above still lists it, the reviewer who runs
+    the recipe ends up believing the patch was checked against tests nobody
+    ran.
+    """
+    spec, _repo = spec_and_repo
+    candidate_target(spec).oracles.correctness = [
+        "pytest tests/unit/",
+        "pytest tests/integration/ -m slow",
+    ]
+    recipe = _apply_recipe(_notes(spec_and_repo))
+    assert "pytest tests/unit/" in recipe
+    assert "pytest tests/integration/ -m slow" in recipe
+
+
+def test_apply_recipe_says_run_them_all_when_there_are_several(spec_and_repo) -> None:
+    """The prose has to agree with the number of commands under it.
+
+    "run it on a machine that can" above two commands invites running the
+    first and stopping.
+    """
+    spec, _repo = spec_and_repo
+    candidate_target(spec).oracles.correctness = ["pytest a", "pytest b"]
+    assert "run them all on a machine that can" in _apply_recipe(_notes(spec_and_repo))
+
+    candidate_target(spec).oracles.correctness = ["pytest a"]
+    assert "run it on a machine that can" in _apply_recipe(_notes(spec_and_repo))
 
 
 def test_apply_recipe_is_not_location_dependent(spec_and_repo) -> None:

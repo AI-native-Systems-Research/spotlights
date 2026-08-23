@@ -269,10 +269,20 @@ def _outcome_section(
             f"{summary}\n"
         )
 
-    oracle_cmd = (
-        target.oracles.correctness[0]
-        if target.oracles.correctness
-        else "# (no correctness oracle was recorded for this candidate)"
+    # *Every* recorded correctness oracle, not just the first. This block is
+    # what a reviewer copy-pastes, so a command omitted here is a suite that
+    # never runs against the patched tree — while "Recorded oracles" above
+    # still lists it, leaving the patch looking checked against tests nobody
+    # ran. The oracles are recorded as a list precisely because a candidate can
+    # name more than one.
+    oracle_cmds = target.oracles.correctness
+    oracle_lines = "\n".join(
+        oracle_cmds or ["# (no correctness oracle was recorded for this candidate)"]
+    )
+    oracle_intro = (
+        "# the recorded correctness oracles — run them all on a machine that can:"
+        if len(oracle_cmds) > 1
+        else "# the recorded correctness oracle — run it on a machine that can:"
     )
     # These lines are copy-pasted into a shell, so the repo path has to be
     # shell-quoted: an unquoted `/home/alice/my projects/vllm` makes the shell
@@ -293,8 +303,8 @@ Run this from the directory containing this file — the same directory
 git -C {repo_arg} checkout {base_sha}
 git -C {repo_arg} apply --check "$PWD/fix.patch" && git -C {repo_arg} apply "$PWD/fix.patch"
 
-# the recorded correctness oracle — run it on a machine that can:
-{oracle_cmd}
+{oracle_intro}
+{oracle_lines}
 ```
 
 If the patch does not apply cleanly, `git -C {repo_arg} apply -3 "$PWD/fix.patch"`
