@@ -360,5 +360,15 @@ def _run_all():
     sys.exit(1 if failed else 0)
 
 
+# --- one-shot fix ----------------------------------------------------------
+
+
+def test_cand_module_slug_strips_prefix_and_sequence():
+    assert bb._cand_module_slug("cand-vllm_v1_worker-0001") == "vllm_v1_worker"
+    assert bb._cand_module_slug("cand-qiskit_compiler-0042") == "qiskit_compiler"
+    # a slug containing digits and underscores must survive intact
+    assert bb._cand_module_slug("cand-vllm_v1_kv_offload-0002") == "vllm_v1_kv_offload"
+
+
 if __name__ == "__main__":
     _run_all()

@@ -438,8 +438,12 @@ _EVOLVE_PREREQ = (
     "(e.g. a GPU) to build and measure the target.")
 
 
-def _evolve_module_slug(cand_id: str) -> str:
-    """cand-<module_slug>-NNNN -> <module_slug> (the trailing -NNNN is dropped)."""
+def _cand_module_slug(cand_id: str) -> str:
+    """cand-<module_slug>-NNNN -> <module_slug> (the trailing -NNNN is dropped).
+
+    Shared by both follow-on arms: `evolve/` and `fix/` are both keyed by
+    <module_slug>/<cand_id>/ on disk.
+    """
     return cand_id.removeprefix("cand-").rsplit("-", 1)[0]
 
 
@@ -449,7 +453,7 @@ def find_evolve(cand_id: str, evolve_root: Path) -> dict | None:
     Looks under <evolve_root>/<module_slug>/<cand_id>/<engine>/ and keeps only
     the engines known to ENGINES that actually have files on disk.
     """
-    d = evolve_root / _evolve_module_slug(cand_id) / cand_id
+    d = evolve_root / _cand_module_slug(cand_id) / cand_id
     if not d.is_dir():
         return None
     engines: dict[str, list[Path]] = {}
