@@ -19,6 +19,7 @@ _HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
 _OBJECTIVE = re.compile(r"\*\*Objective:\*\*\s*(.+?)\s*$", re.MULTILINE)
 _TABLE_ROW = re.compile(r"^\|(.+)\|\s*$")
 _CAND_CELL = re.compile(r"\[`?([^`\]]+)`?\]\(([^)]+)\)")
+_PATCH_FIELD = re.compile(r"^#\s(candidate|module|repo|base):\s*(.+?)\s*$")
 
 
 def _is_external(href: str) -> bool:
@@ -586,6 +587,34 @@ def render_evolve_section(engines: dict, evolve_page_name: str) -> str:
         f'<p>{len(engines)} ready-to-launch evolve bundle(s) for this '
         f'candidate: <strong>{", ".join(engines)}</strong>.</p>'
         f'<p><a href="{html.escape(evolve_page_name)}">View evolve bundles →</a></p></div>')
+
+
+# --- one-shot fix -----------------------------------------------------------
+#
+# When `spotlights-engine fix` has run, a sibling `fix/` tree lives beside
+# `sorted/`:
+#   <run>/fix/<module_slug>/<cand_id>/{fix.patch,FIX-NOTES.md}
+# For each exported candidate with a patch we copy those files into the bundle,
+# add a `…__fix.html` page, and surface a link on the candidate page and index
+# card. If no `fix/` tree exists the build behaves exactly as before.
+
+
+def parse_patch_header(patch_text: str) -> dict:
+    """Read the `# candidate/module/repo/base` block above the first diff.
+
+    Both `spotlights-engine fix` and the /spotlights-fix-candidate skill write
+    this header field-for-field, which is what makes it parseable. Absent
+    fields are absent keys — callers use .get(). Scanning stops at the first
+    `diff --git` so a `#` line inside a diff body can never be read as a field.
+    """
+    out: dict = {}
+    for line in patch_text.splitlines():
+        if line.startswith("diff --git"):
+            break
+        m = _PATCH_FIELD.match(line)
+        if m:
+            out[m.group(1)] = m.group(2)
+    return out
 
 
 def build(source_dir: str, top_n: int = 5) -> dict:

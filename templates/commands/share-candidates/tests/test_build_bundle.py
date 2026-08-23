@@ -370,5 +370,57 @@ def test_cand_module_slug_strips_prefix_and_sequence():
     assert bb._cand_module_slug("cand-vllm_v1_kv_offload-0002") == "vllm_v1_kv_offload"
 
 
+SAMPLE_PATCH = """\
+# spotlights one-shot fix
+# candidate: cand-vllm_v1_worker-0001
+# module:    vllm/v1/worker
+# repo:      /Users/someone/checkouts/vllm
+# base:      83ad767eed3be3ee7f2df63be693bfaca5c7c922
+# apply with (from the directory containing this patch):
+#   git -C /Users/someone/checkouts/vllm checkout 83ad767e
+#   git -C /Users/someone/checkouts/vllm apply "$PWD/fix.patch"
+diff --git a/vllm/v1/worker/gpu_model_runner.py b/vllm/v1/worker/gpu_model_runner.py
+index 43f5c45323..225e46f2a7 100644
+--- a/vllm/v1/worker/gpu_model_runner.py
++++ b/vllm/v1/worker/gpu_model_runner.py
+@@ -2019,7 +2019,9 @@ class GPUModelRunner:
+         self.input_batch.block_table.commit_block_table(num_reqs)
+-        # Get request indices.
+-        req_indices = np.repeat(self.arange_np[:num_reqs], num_scheduled)
++        # OPTIMIZATION: pure-decode fast path <&> escaped
++        pure_decode = total == num_reqs
++        req_indices = self.arange_np[:num_reqs]
+
+diff --git a/vllm/v1/worker/utils.py b/vllm/v1/worker/utils.py
+--- a/vllm/v1/worker/utils.py
++++ b/vllm/v1/worker/utils.py
+@@ -10,3 +10,4 @@ def helper():
+     pass
++    # one added line
+"""
+
+
+def test_parse_patch_header_extracts_all_four_fields():
+    h = bb.parse_patch_header(SAMPLE_PATCH)
+    assert h["candidate"] == "cand-vllm_v1_worker-0001"
+    assert h["module"] == "vllm/v1/worker"
+    assert h["repo"] == "/Users/someone/checkouts/vllm"
+    assert h["base"] == "83ad767eed3be3ee7f2df63be693bfaca5c7c922"
+
+
+def test_parse_patch_header_ignores_continuation_and_diff_lines():
+    h = bb.parse_patch_header(SAMPLE_PATCH)
+    # the "#   git -C … checkout" continuation lines must not become fields
+    assert set(h) == {"candidate", "module", "repo", "base"}
+
+
+def test_parse_patch_header_missing_fields_degrade():
+    h = bb.parse_patch_header("diff --git a/x b/x\n--- a/x\n+++ b/x\n")
+    assert h == {}
+    # a header naming only the base is still usable
+    h2 = bb.parse_patch_header("# base:  abc123\ndiff --git a/x b/x\n")
+    assert h2 == {"base": "abc123"}
+
+
 if __name__ == "__main__":
     _run_all()
