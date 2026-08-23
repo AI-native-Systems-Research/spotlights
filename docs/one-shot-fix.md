@@ -7,35 +7,20 @@ attempt*: read the candidate, read the research behind it, implement the
 change, hand back something reviewable.
 
 `spotlights-engine fix` is that arm. Per candidate it creates a throwaway
-detached git worktree at the base commit, validates the candidate against it,
-runs one `claude -p` session inside it, and writes `fix.patch` plus
-`FIX-NOTES.md`. Your checkout is never modified, and a dirty working tree is
-irrelevant.
+detached git worktree at the base commit, runs one `claude -p` session inside
+it, and writes `fix.patch` plus `FIX-NOTES.md`. Your checkout is never
+modified, and a dirty working tree is irrelevant.
 
 ← Back to [README](../README.md) · The other arm: [prep-evolve](prep-evolve.md)
 
 ## What is not verified
 
-**Nothing.** No tests are run, no benchmarks are measured, no build is
-attempted. This is a design decision, not a gap:
-
-- **The machine may not be able to.** A candidate whose recorded
-  `performance_oracle` is `TTFT, TPOT` names *metrics* — there is no harness,
-  no workload, and no baseline. Measuring them needs a GPU and a serving
-  benchmark. A laptop cannot produce that number, and a fabricated one is worse
-  than none.
-- **The correctness oracle is a prose regex.** It is scraped from the
-  candidate's LLM-written `evolve_rationale` by matching `pytest`-shaped strings
-  and test-file-shaped paths. Nothing checks that the file exists.
-  `pytest tests/v1/worker/test_gpu_model_runner.py` reads as authoritative and
-  is a regex hit on a sentence.
-- **A fresh worktree cannot run them anyway.** It has no venv, no build
-  artifacts, and no compiled extensions.
+**Nothing.** The fix is not verified: there is no harness, no tests are run, no
+workload, and no baseline.
 
 The oracles still travel with the patch, verbatim, in `FIX-NOTES.md` — as the
-verification recipe for whoever has the hardware. The deliverable is *a
-proposal faithfully implemented and documented*, not a measured win. Use an
-evolver when you need the measured win.
+verification recipe. The deliverable is *a proposal faithfully implemented and
+documented*, not a measured win.
 
 ## Usage
 
@@ -53,18 +38,10 @@ spotlights-engine fix --result ./spotlights-out --repo ../vllm
 
 `--result` accepts any run artifact and self-locates the rest — a run
 directory, a `result.json`, an `index.md`, a `sorted/` directory, or a
-`sorted_candidates.{json,md}` — exactly as `prep-evolve` does.
+`sorted_candidates.{json,md}`.
 
-Unlike `prep-evolve`, `--repo` **must** point at a real git checkout. `fix`
-fails loudly otherwise: a worktree needs a commit, and a patch without a
-recorded base is not applicable.
-
-`fix` also requires the `claude` CLI to be on `PATH` — it shells out to
-`claude -p` once per candidate. If it isn't, `fix` fails fast with a clear
-error instead of grinding through every candidate and leaving a directory of
-"no patch produced" notes that look like a real (if unlucky) outcome. That
-check runs *after* the `--result`/`--repo` checks, so a bad `--result` path or
-a non-git `--repo` still reports its own, more specific error first.
+`--repo` **must** point at a real git checkout. `fix` fails loudly otherwise: a
+worktree needs a commit, and a patch without a recorded base is not applicable.
 
 | Flag | Purpose |
 |---|---|
@@ -80,115 +57,14 @@ a non-git `--repo` still reports its own, more specific error first.
 | `--wallclock` | Wall-clock cap in seconds per candidate. Default `1800`. Must be `>= 1` (exit 2 otherwise). |
 | `--print-prompt` | Create and validate the worktree, print it and the prompt, exit. **Requires `--candidate`.** |
 
-### `--print-prompt` requires `--candidate`
-
-Without an explicit `--candidate`, `--print-prompt` refuses to run — a sweep
-would create one worktree per candidate with nothing to clean any of them up,
-since the command exits before the normal per-candidate `finally` gets a
-chance to remove one. The error surfaces before any worktree is created.
-
-With one, it prints a block of this exact form and leaves the worktree in
-place:
-
-```
-CANDIDATE: <id>
-MODULE:    <qn>
-BASE:      <sha>
-WORKTREE:  <path>
-WORKTREE_PARENT:  <path>
-PROMPT:
-<the prompt body>
-```
-
-`WORKTREE_PARENT` is the `mkdtemp` scaffolding directory that contains
-`WORKTREE`. A consumer responsible for cleanup must remove both: `git
-worktree remove` deletes the worktree checkout but leaves its parent
-scaffolding directory behind. This is exactly what `/spotlights-fix-candidate`
-(below) does in its final step.
-
-### Failure semantics
-
-A single explicit `--candidate` fails loudly (exit 2). A sweep records a
-per-candidate skip with a reason and continues — the same shape `prep-evolve`
-uses — and still exits 0 as long as *something* happened (a fix, a printed
-prompt, or a recorded skip). Exit 1 means the run produced nothing at all.
-
-**The exit code is not an artifact check, and automation must not use it as
-one.** A sweep is per-candidate: it can skip every candidate and still exit 0,
-and — more importantly — it can equally well exit 0 having produced patches for
-three candidates and skipped seven. No single exit code can answer "is there a
-`fix.patch` for candidate X", so a script that gates `git apply` on `$?` is
-asking the wrong question even when the code is 0 and every candidate
-succeeded. Gate on the artifacts instead: each fix prints one
-`<candidate-id>: <dir> (<state>)` line on stdout, where `<state>` distinguishes
-`patch + notes` from `notes only (no patch)` and `notes only (patch collection
-FAILED)`, and the corresponding `fix.patch` either exists in `<dir>` or does
-not.
-Worktrees are created and removed one at a time, and removal happens in a
-`finally`, so a timed-out or crashed run leaves nothing behind in
-`.git/worktrees`.
-
-## The staleness gate
-
-Before the agent sees anything, the candidate is validated **against the
-worktree**: path containment, file existence, line bounds, excerpt sha256, and
-a two-part symbol heuristic (an identifier token of the recorded symbol within
-5 lines of the recorded range, and every container of a qualified name still
-present in the file).
-
-Validating inside the worktree rather than at `--repo` is deliberate — the
-bytes validated are then exactly the bytes the agent edits, the recorded hash
-is truthful, and your checkout may be dirty while a fix runs.
-
-With no tests being run, **this gate is the only correctness check in the
-design.** It is what stops the agent editing the wrong function after a file
-has drifted. If it fails, check out the commit the run targeted (recorded in
-`run_manifest.json` under `target.commit_sha`) and try again.
-
-## What contains the agent
-
-"Your checkout is never modified" is two separate guarantees, enforced two
-different ways.
-
-**File edits** are contained by `cwd`: the session runs with the throwaway
-worktree as its working directory, and `--permission-mode acceptEdits` lets it
-edit freely *there*.
-
-**Git is not contained by `cwd`.** A linked worktree keeps only HEAD, the index
-and `refs/bisect`/`refs/worktree` privately — its config, refs namespace, object
-database and worktree-admin state all belong to the **main repository**, reached
-through the `.git` file the worktree carries in place of a directory. A
-`git config --local core.hooksPath …` run from inside the worktree writes your
-repo's `.git/config` and survives `git worktree remove --force` +
-`git worktree prune`, and then runs arbitrary code on your next commit. So `fix`
-passes `--disallowedTools` denying every git subcommand that reaches shared
-state: config writes (`config`, `remote`, `submodule`), ref writes (`stash`,
-`branch`, `tag`, `update-ref`, `symbolic-ref`, `notes`, `replace`, `fetch`,
-`pull`, `push`), and object-database or admin writes (`worktree`, `gc`, `prune`,
-`reflog`, `filter-branch`). `commit`, `checkout`, `am`, `cherry-pick`, `revert`,
-`rebase` and `merge` are denied for a different reason: they move the agent's
-work out of the working tree, where `collect_patch`'s `git diff` can no longer
-see it, and `FIX-NOTES.md` would then falsely report that no patch was produced.
-
-`git reset`, `git clean`, `git add` and `git apply` are deliberately **allowed** —
-they touch only the worktree's own private index and files, all destroyed with
-it, so the most they can cost is the agent's own uncommitted work.
-
-This is enforcement, not advice. The prompt asks the agent not to do any of it,
-but whether that prose is even reachable depends on the invoking user's Bash
-allowlist — including a `.claude/settings.json` the **target repo** ships, which
-is present inside the worktree because the worktree is a checkout of that repo.
-`--disallowedTools` is the boundary.
-
 ## Artifacts
 
 ```
-<run-dir>/fix/<module-slug>/<candidate-id>/
+<base>/fix/<module>/<candidate-id>/
 ├── fix.patch        # git diff against the base commit, SHA in a header comment
 └── FIX-NOTES.md     # the travelling documentation
 ```
 
-This mirrors the `evolve/<module-slug>/<candidate-id>/<evolver>/` layout.
 `fix.patch` is a `git diff`, not `format-patch`: the latter needs a commit, and
 the repo stays untouched.
 
