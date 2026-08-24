@@ -295,6 +295,47 @@ hr { border: 0; border-top: 1px solid #e2e5e9; margin: 1.6rem 0; }
 .about dd .ask { margin:.3rem 0 0; padding:.6em .8em; background:#eef6ff;
   border-left:3px solid #2b6cb0; border-radius:0 6px 6px 0; color:#1a1d21;
   font-style:italic; font-size:.88rem; }
+/* --- one-shot fix --- */
+.badge.fix { background:#fdf0d5; color:#8a5a00; }
+.fix-link { display:inline-flex; align-items:center; gap:.45em;
+  font-size:.85rem; font-weight:600; color:#8a5a00; background:#fdf6e7;
+  border:1px solid #f0dfb8; border-radius:999px; padding:.32em .85em;
+  text-decoration:none; }
+.fix-link:hover { background:#fbeed2; border-color:#e6cf9c; }
+.fix-section { margin-top: 1.8rem; }
+.apply { background:#fbfbfc; border:1px solid #eef0f3; border-radius:8px;
+  padding:10px 14px; margin:.2rem 0 1.2rem; }
+.apply h2 { margin:.1rem 0 .5rem; border:0; padding:0; font-size:1.05rem; }
+.apply pre { background:#1a1d21; color:#e6e6e6; border:0; border-radius:6px;
+  padding:.5em .7em; margin:.3rem 0; overflow-x:auto;
+  font:.85em/1.5 ui-monospace,Menlo,Consolas,monospace; }
+.apply .note { font-size:.85rem; color:#5a6169; margin:.5rem 0 .1rem; }
+.apply .sha { font:.85em/1.4 ui-monospace,Menlo,Consolas,monospace;
+  background:#eef0f3; border-radius:4px; padding:.1em .35em; }
+.apply .dl { margin:.7rem 0 .2rem; font-size:.85rem; color:#8a5a00;
+  background:#fdf6e7; border:1px solid #f0dfb8; }
+.apply .dl:hover { background:#fbeed2; border-color:#e6cf9c; }
+.diff { border:1px solid #e2e5e9; border-radius:8px; overflow:hidden;
+  margin:.6rem 0 1.2rem; }
+.diff .file { background:#f6f7f9; border-bottom:1px solid #e2e5e9;
+  padding:.4em .7em; display:flex; gap:.8em; align-items:baseline;
+  font:.85rem/1.4 ui-monospace,Menlo,Consolas,monospace; }
+.diff .file .p { font-weight:600; word-break:break-all; }
+.diff .file .st { margin-left:auto; white-space:nowrap; }
+.diff .file .st .a { color:#1e6b33; }
+.diff .file .st .r { color:#9b1c1c; }
+.diff pre { margin:0; padding:0; background:#fff; overflow-x:auto;
+  font:.82em/1.5 ui-monospace,Menlo,Consolas,monospace; }
+.diff .l { display:block; padding:0 .7em; white-space:pre; }
+.diff .d-add { background:#e6f4ea; color:#1e6b33; }
+.diff .d-del { background:#fde8e8; color:#9b1c1c; }
+.diff .d-hunk { background:#eef0f3; color:#5a6169; }
+/* the patch <details> is not inside .engine, so it needs its own summary rules
+   — these mirror `.engine summary` / `.engine summary .sz` above */
+.patch { margin:.5rem 0 1.2rem; }
+.patch summary { cursor:pointer; padding:.25em 0; color:#3a4149;
+  font:.9rem/1.4 ui-monospace,Menlo,Consolas,monospace; }
+.patch summary .sz { color:#8a9099; }
 """
 
 
@@ -310,9 +351,17 @@ def _doc(title: str, body: str) -> str:
 
 
 def render_candidate_page(md_text: str, title: str, back_href: str,
-                          evolve_section: str = "") -> str:
+                          evolve_section: str = "", fix_section: str = "") -> str:
+    """Render one candidate page.
+
+    `fix_section` is last so the pre-existing 4-positional-argument calls keep
+    working, but it is *emitted* before `evolve_section`: fix is the cheap arm,
+    evolve the expensive one.
+    """
     back = f'<a class="back" href="{html.escape(back_href)}">← Back to index</a>'
     body = back + "\n" + md_to_html_body(md_text)
+    if fix_section:
+        body += "\n" + fix_section
     if evolve_section:
         body += "\n" + evolve_section
     return _doc(title, body)
@@ -753,12 +802,153 @@ def find_fix(cand_id: str, fix_root: Path) -> dict | None:
     # replacement character costs is one unreadable glyph in the rendered diff,
     # against a build that otherwise does not happen.
     patch_text = patch.read_text(encoding="utf-8", errors="replace")
+    notes_text = notes.read_text(encoding="utf-8") if notes.is_file() else None
     return {
         "patch": patch,
         "notes": notes if notes.is_file() else None,
         "header": parse_patch_header(patch_text),
         "stat": diffstat(patch_text),
+        "patch_text": patch_text,
+        "notes_text": notes_text,
+        "patch_kb": patch.stat().st_size / 1024,
     }
+
+
+# The warning is the whole reason this page is careful: a colorized diff in a
+# browser is the most authoritative-looking artifact Spotlights emits, and none
+# of it was tested, benchmarked, or built.
+_DIFF_CLASS = {"add": "d-add", "del": "d-del", "hunk": "d-hunk", "context": ""}
+
+_FIX_UNVERIFIED = (
+    "Nothing here was verified. No test was run, no benchmark was measured, no "
+    "build was attempted. The patch was produced in a fresh detached worktree "
+    "with no virtualenv and no compiled extensions, on a machine that may lack "
+    "the hardware the performance oracle needs. Treat it as a proposal "
+    "faithfully implemented — not as a measured win.")
+
+
+def _repo_placeholder(repo: str | None) -> str:
+    """'/Users/…/vllm' -> '<YOUR_VLLM_CHECKOUT>'; falsy -> '<YOUR_REPO_CHECKOUT>'."""
+    name = Path(repo.rstrip("/")).name if repo else ""
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", name).strip("_").upper()
+    return f"<YOUR_{slug or 'REPO'}_CHECKOUT>"
+
+
+def render_patch(patch_text: str, patch_href: str, size_kb: float) -> str:
+    """The patch as a collapsed colorized diff, one block per changed file.
+
+    Closed by default: FIX-NOTES.md is the orientation, the diff is the detail —
+    the same split that collapses evolve's non-README files.
+    """
+    stat = diffstat(patch_text)
+    per_file = {f["path"]: f for f in stat["files"]}
+    blocks: list[str] = []
+    lines: list[str] = []
+
+    def flush() -> None:
+        if lines:
+            blocks.append(f'<pre>{"".join(lines)}</pre>')
+            lines.clear()
+
+    in_hunk = False
+    for line in patch_text.splitlines():
+        # Same boundary helper diffstat uses (Task 3), so the file rows here and
+        # the rows in `per_file` are keyed by identical paths and the `in_hunk`
+        # reset happens at exactly the same lines in both.
+        path = _diff_git_path(line)
+        if path is not None:
+            flush()
+            in_hunk = False                   # back in a file header block
+            f = per_file.get(path, {"added": 0, "removed": 0})
+            blocks.append(
+                f'<div class="file"><span class="p">{html.escape(path)}</span>'
+                f'<span class="st"><span class="a">+{f["added"]}</span> '
+                f'<span class="r">−{f["removed"]}</span></span></div>')
+            continue
+        if not blocks:
+            continue                          # the `#` header block
+        # One classifier, shared with diffstat (Task 3) — the counts and the
+        # colours can never disagree about what a line is, including on the
+        # `in_hunk` rule that keeps a deleted `---` from reading as a marker.
+        kind = _diff_line_kind(line, in_hunk)
+        if kind == "hunk":
+            in_hunk = True
+        if kind == "marker":
+            continue                          # shown in the file header row instead
+        cls = f"l {_DIFF_CLASS[kind]}".rstrip()
+        lines.append(f'<span class="{cls}">{html.escape(line)}\n</span>')
+    flush()
+
+    return (
+        f'<details class="patch"><summary>fix.patch '
+        f'<span class="sz">— {size_kb:.0f} KB · '
+        f'<a href="{html.escape(patch_href)}">open raw ↗</a></span></summary>'
+        f'<div class="diff">{"".join(blocks)}</div></details>')
+
+
+def render_fix_page(cand_id: str, symbol: str, fx: dict,
+                    raw_reldir: str, back_href: str) -> str:
+    """The `…__fix.html` page: orientation, apply recipe, notes, then the diff."""
+    hdr = fx.get("header") or {}
+    base = hdr.get("base", "")
+    ph = _repo_placeholder(hdr.get("repo"))
+    stat_line = format_diffstat(fx["stat"])
+    body = [
+        f'<a class="back" href="{html.escape(back_href)}">← Back to candidate</a>',
+        f"<h1>One-shot fix — {html.escape(symbol)}</h1>",
+        f'<p class="subtitle">{html.escape(cand_id)} · {html.escape(stat_line)}</p>',
+        '<div class="orient">'
+        '<p><strong>What is this?</strong> One attempt at implementing this '
+        'candidate\'s proposal, as a reviewable patch — not an evolutionary '
+        'search. Spotlights read the candidate and the research behind it, made '
+        'the change in a throwaway worktree, and handed back the diff plus its '
+        'notes. Nothing has been applied to any repository.</p>'
+        f'<p class="warn">⚠️ {html.escape(_FIX_UNVERIFIED)}</p></div>',
+    ]
+
+    apply_cmds = (
+        f"REPO={ph}\n"
+        f"git -C \"$REPO\" checkout {base or '<BASE_COMMIT>'}\n"
+        f"git -C \"$REPO\" apply --check \"$PWD/{raw_reldir}/fix.patch\" \\\n"
+        f"  && git -C \"$REPO\" apply \"$PWD/{raw_reldir}/fix.patch\"")
+    apply_parts = ['<div class="apply"><h2>Apply this patch</h2>']
+    if base:
+        apply_parts.append(
+            f'<p class="note">Base commit <span class="sha">{html.escape(base)}</span>'
+            ' — the patch assumes this exact commit.</p>')
+    apply_parts.append(f'<pre>{html.escape(apply_cmds)}</pre>')
+    apply_parts.append(
+        '<p class="note">If it does not apply cleanly, '
+        f'<code>git -C "$REPO" apply -3 "$PWD/{html.escape(raw_reldir)}/fix.patch"</code> '
+        'falls back to a three-way merge. Without git, <code>patch -p1 &lt; '
+        'fix.patch</code> works from the repo root.</p>')
+    apply_parts.append(
+        '<p class="note">The paths written inside <code>fix.patch</code> and '
+        '<code>FIX-NOTES.md</code> name the machine that produced them — '
+        'substitute your own checkout, as above. The files are copied here '
+        'byte-for-byte and were not rewritten.</p>')
+    apply_parts.append(
+        f'<a class="dl" href="{html.escape(raw_reldir)}/fix.zip" download>'
+        '⬇ Download fix (.zip)</a>')
+    apply_parts.append("</div>")
+    body.append("".join(apply_parts))
+
+    if fx.get("notes_text"):
+        body.append(md_to_html_body(fx["notes_text"]))
+    body.append("<h2>The patch</h2>")
+    body.append(render_patch(fx["patch_text"],
+                             f"{raw_reldir}/fix.patch", fx.get("patch_kb", 0.0)))
+    return _doc(f"One-shot fix — {symbol}", "\n".join(body))
+
+
+def render_fix_section(fx: dict, fix_page_name: str) -> str:
+    """The "One-shot fix" block appended to a candidate page."""
+    return (
+        '<div class="fix-section"><h2>One-shot fix</h2>'
+        f'<p>A reviewable patch for this candidate: '
+        f'<strong>{html.escape(format_diffstat(fx["stat"]))}</strong>. '
+        'Nothing about it was verified — no test, no benchmark, no build.</p>'
+        f'<p><a href="{html.escape(fix_page_name)}">View the fix →</a></p></div>')
 
 
 def build(source_dir: str, top_n: int = 5) -> dict:

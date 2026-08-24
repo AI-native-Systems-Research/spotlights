@@ -682,5 +682,96 @@ def test_find_fix_reads_a_patch_that_is_not_valid_utf8():
     assert fx["stat"]["added"] == 1 and fx["stat"]["removed"] == 1
 
 
+def test_repo_placeholder_from_basename_and_fallback():
+    assert bb._repo_placeholder("/Users/someone/checkouts/vllm") == "<YOUR_VLLM_CHECKOUT>"
+    assert bb._repo_placeholder("/srv/qiskit-terra/") == "<YOUR_QISKIT_TERRA_CHECKOUT>"
+    assert bb._repo_placeholder(None) == "<YOUR_REPO_CHECKOUT>"
+    assert bb._repo_placeholder("") == "<YOUR_REPO_CHECKOUT>"
+
+
+def test_render_patch_colorizes_and_escapes():
+    out = bb.render_patch(SAMPLE_PATCH, "foo__fix/fix.patch", 7.1)
+    # collapsed by default: a <details> with no `open` attribute
+    assert '<details class="patch">' in out and "<details open" not in out
+    # one file block per changed file, with its own per-file stat
+    assert "vllm/v1/worker/gpu_model_runner.py" in out
+    assert "vllm/v1/worker/utils.py" in out
+    assert "+3" in out and "−2" in out
+    # line classes (emitted as `class="l d-add"` etc.)
+    assert 'class="l d-add"' in out
+    assert 'class="l d-del"' in out
+    assert 'class="l d-hunk"' in out
+    # a context line gets the base class only
+    assert 'class="l"' in out
+    # the raw file is linked from the summary
+    assert 'href="foo__fix/fix.patch"' in out
+    # HTML from the patch body is escaped, never live markup
+    assert "&lt;&amp;&gt;" in out
+    assert "<&>" not in out
+
+
+def test_render_fix_page_has_warning_apply_strip_and_notes():
+    fx = {"patch": None, "notes": None,
+          "header": {"candidate": "cand-a-0001", "module": "m/n",
+                     "repo": "/Users/someone/checkouts/vllm",
+                     "base": "83ad767eed3be3ee7f2df63be693bfaca5c7c922"},
+          "stat": bb.diffstat(SAMPLE_PATCH),
+          "patch_text": SAMPLE_PATCH, "notes_text": "# Fix notes\n\n- **Objective:** speed\n",
+          "patch_kb": 7.1}
+    out = bb.render_fix_page("cand-a-0001", "foo", fx, "foo__fix", "foo.html")
+    assert "<!DOCTYPE html>" in out
+    assert 'href="foo.html"' in out                      # back link
+    assert "One-shot fix" in out and "foo" in out
+    assert "2 files changed, +4/−2" in out       # SAMPLE_PATCH's real stat
+    # the unverified warning is first-class content
+    assert "nothing" in out.lower() and "verified" in out.lower()
+    # apply strip: real SHA, placeholder, both fallbacks, producer-path note
+    assert "83ad767eed3be3ee7f2df63be693bfaca5c7c922" in out
+    assert "&lt;YOUR_VLLM_CHECKOUT&gt;" in out
+    assert "apply -3" in out
+    assert "patch -p1" in out
+    assert "producer" in out.lower() or "machine that produced" in out.lower()
+    # the producer's real path is never rendered as a command to run
+    assert "$ REPO=/Users/someone" not in out
+    # download button and the inlined notes
+    assert 'href="foo__fix/fix.zip"' in out
+    assert "Objective" in out
+
+
+def test_render_fix_page_without_notes_omits_that_section():
+    fx = {"header": {"base": "abc123"}, "stat": bb.diffstat(SAMPLE_PATCH),
+          "patch_text": SAMPLE_PATCH, "notes_text": None, "patch_kb": 7.1}
+    out = bb.render_fix_page("cand-a-0001", "foo", fx, "foo__fix", "foo.html")
+    assert "<!DOCTYPE html>" in out          # still a valid page
+    assert "The patch" in out                # the diff is still there
+    assert "Objective" not in out            # no notes content leaked in
+    # a missing base commit degrades to the placeholder, not a crash
+    out2 = bb.render_fix_page("cand-a-0001", "foo",
+                              {**fx, "header": {}}, "foo__fix", "foo.html")
+    assert "&lt;BASE_COMMIT&gt;" in out2
+    assert "&lt;YOUR_REPO_CHECKOUT&gt;" in out2
+
+
+def test_render_fix_section_links_to_the_page():
+    fx = {"stat": bb.diffstat(SAMPLE_PATCH)}
+    out = bb.render_fix_section(fx, "foo__cand-a-0001__fix.html")
+    assert "One-shot fix" in out
+    assert 'href="foo__cand-a-0001__fix.html"' in out
+    assert "2 files changed, +4/−2" in out
+    assert "verified" in out.lower()
+
+
+def test_render_candidate_page_emits_fix_before_evolve():
+    out = bb.render_candidate_page("# t\n", "t", "../index.html",
+                                   "<div>EVOLVEBLOCK</div>", "<div>FIXBLOCK</div>")
+    assert out.index("FIXBLOCK") < out.index("EVOLVEBLOCK")
+
+
+def test_render_candidate_page_still_works_with_evolve_only():
+    # Regression: the pre-existing 4-positional-arg call must keep working.
+    out = bb.render_candidate_page("# t\n", "t", "../index.html", "<div>E</div>")
+    assert "<div>E</div>" in out
+
+
 if __name__ == "__main__":
     _run_all()
