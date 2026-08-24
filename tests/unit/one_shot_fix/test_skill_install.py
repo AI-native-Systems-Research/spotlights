@@ -8,7 +8,7 @@ import pytest
 
 from spotlights_engine.init_skills import _plan_install_items, install_skills
 
-REL = ".claude/commands/spotlights-fix-candidate/SKILL.md"
+REL = ".claude/commands/spotlights-fix-candidate.md"
 
 
 def test_fix_candidate_is_in_the_install_plan() -> None:
@@ -25,7 +25,7 @@ def test_init_writes_the_skill_into_claude_commands(
     assert installed.is_file()
     text = installed.read_text(encoding="utf-8")
     assert text.startswith("---\n")
-    assert "name: fix-candidate" in text
+    assert "description: Use when implementing ONE Spotlights candidate" in text
     assert "--print-prompt" in text
 
 

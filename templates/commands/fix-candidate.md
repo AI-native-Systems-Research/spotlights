@@ -1,5 +1,4 @@
 ---
-name: fix-candidate
 description: Use when implementing ONE Spotlights candidate as a reviewable patch in-session — "fix this candidate", "implement candidate cand-...", "one-shot fix". Runs `spotlights-engine fix --print-prompt` to get a validated throwaway worktree plus the fix prompt, does the work interactively, and collects fix.patch + FIX-NOTES.md. Runs no tests and no benchmarks, and never modifies the target repo.
 ---
 
