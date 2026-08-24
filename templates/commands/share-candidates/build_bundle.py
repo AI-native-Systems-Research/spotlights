@@ -739,7 +739,20 @@ def find_fix(cand_id: str, fix_root: Path) -> dict | None:
     if not patch.is_file():
         return None
     notes = d / "FIX-NOTES.md"
-    patch_text = patch.read_text(encoding="utf-8")
+    # `errors="replace"`, not strict: `fix.patch` is the one file here that is
+    # deliberately NOT guaranteed to be UTF-8. The engine collects the diff as
+    # raw bytes and writes it with `write_bytes`, because decoding and re-encoding
+    # it would corrupt a patch that `git apply` has to accept byte-for-byte — so a
+    # single non-UTF-8 context byte from the target repo lands in this file. Strict
+    # decoding would raise UnicodeDecodeError here, and `build()` reaches this
+    # point only after it has already removed the previous `share-bundle/`, so one
+    # such candidate would abort the run and leave no bundle at all.
+    #
+    # Lossy decoding is safe *because it is only ever used for reading*: the
+    # copied artifact is the raw file (`shutil.copy2`), never this text. What a
+    # replacement character costs is one unreadable glyph in the rendered diff,
+    # against a build that otherwise does not happen.
+    patch_text = patch.read_text(encoding="utf-8", errors="replace")
     return {
         "patch": patch,
         "notes": notes if notes.is_file() else None,

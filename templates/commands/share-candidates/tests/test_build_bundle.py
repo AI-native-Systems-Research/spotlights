@@ -644,5 +644,43 @@ def test_find_fix_patch_without_notes_still_found():
     assert fx is not None and fx["notes"] is None
 
 
+def test_find_fix_derives_the_slug_directory_from_the_candidate_id():
+    # Two candidates under DIFFERENT slugs, each found only at its own path.
+    # Every other test here uses one slug, which an implementation that ignored
+    # `_cand_module_slug` and globbed `fix/*/<cand_id>` would also satisfy.
+    root = Path(tempfile.mkdtemp())
+    _make_fix_tree(root, cand_id="cand-qiskit_compiler-0001", slug="qiskit_compiler")
+    _make_fix_tree(root, cand_id="cand-vllm_v1_kv_offload-0002", slug="vllm_v1_kv_offload")
+    for cand_id, slug in (("cand-qiskit_compiler-0001", "qiskit_compiler"),
+                          ("cand-vllm_v1_kv_offload-0002", "vllm_v1_kv_offload")):
+        fx = bb.find_fix(cand_id, root / "fix")
+        assert fx is not None, cand_id
+        assert fx["patch"] == root / "fix" / slug / cand_id / "fix.patch"
+
+
+def test_find_fix_reads_a_patch_that_is_not_valid_utf8():
+    # The engine collects the diff as raw bytes and writes it with `write_bytes`,
+    # so a non-UTF-8 context byte from the target repo reaches this file intact.
+    # Strict decoding would raise UnicodeDecodeError, and `build()` gets here only
+    # after removing the previous share-bundle/ — so one such candidate would
+    # abort the whole run. It must degrade to a replacement character instead.
+    root = Path(tempfile.mkdtemp())
+    d = root / "fix" / "qiskit_compiler" / "cand-qiskit_compiler-0001"
+    d.mkdir(parents=True)
+    (d / "fix.patch").write_bytes(
+        b"# spotlights one-shot fix\n"
+        b"# base:      83ad767eed3be3ee7f2df63be693bfaca5c7c922\n"
+        b"diff --git a/x.py b/x.py\n"
+        b"--- a/x.py\n"
+        b"+++ b/x.py\n"
+        b"@@ -1,2 +1,2 @@\n"
+        b"-caf\xe9\n"                      # latin-1 e-acute: invalid UTF-8
+        b"+cafe\n")
+    fx = bb.find_fix("cand-qiskit_compiler-0001", root / "fix")
+    assert fx is not None
+    assert fx["header"]["base"] == "83ad767eed3be3ee7f2df63be693bfaca5c7c922"
+    assert fx["stat"]["added"] == 1 and fx["stat"]["removed"] == 1
+
+
 if __name__ == "__main__":
     _run_all()
