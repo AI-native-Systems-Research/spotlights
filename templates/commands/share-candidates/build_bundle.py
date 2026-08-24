@@ -20,6 +20,7 @@ _OBJECTIVE = re.compile(r"\*\*Objective:\*\*\s*(.+?)\s*$", re.MULTILINE)
 _TABLE_ROW = re.compile(r"^\|(.+)\|\s*$")
 _CAND_CELL = re.compile(r"\[`?([^`\]]+)`?\]\(([^)]+)\)")
 _PATCH_FIELD = re.compile(r"^#\s(candidate|module|repo|base):\s*(.+?)\s*$")
+_DIFF_GIT = re.compile(r"^diff --git a/(?:.+?) b/(.+)$")
 
 
 def _is_external(href: str) -> bool:
@@ -615,6 +616,63 @@ def parse_patch_header(patch_text: str) -> dict:
         if m:
             out[m.group(1)] = m.group(2)
     return out
+
+
+def _diff_line_kind(line: str) -> str:
+    """Classify one patch line: marker | hunk | add | del | context.
+
+    The single source of truth for this rule — `diffstat` counts by it and
+    `render_patch` colours by it, so the two can never disagree.
+
+    The `+++ b/…` and `--- a/…` file markers are tested *first*: they start
+    with `+`/`-` but are not changed lines, and checking them second inflates
+    every count by one. A bare `+` or `-` is a real added/removed blank line.
+    """
+    if line.startswith("+++") or line.startswith("---"):
+        return "marker"
+    if line.startswith("@@"):
+        return "hunk"
+    if line.startswith("+"):
+        return "add"
+    if line.startswith("-"):
+        return "del"
+    return "context"
+
+
+def diffstat(patch_text: str) -> dict:
+    """Per-file and total +added/-removed, computed from the patch itself.
+
+    Deliberately not read from FIX-NOTES.md's "Files changed" table: those
+    notes say the table is derived from the patch, and the patch is what
+    ships. One source of truth, and it is the one the recipient applies.
+    """
+    files: list[dict] = []
+    cur: dict | None = None
+    for line in patch_text.splitlines():
+        m = _DIFF_GIT.match(line)
+        if m:
+            cur = {"path": m.group(1), "added": 0, "removed": 0}
+            files.append(cur)
+            continue
+        if cur is None:                       # still in the `#` header block
+            continue
+        kind = _diff_line_kind(line)
+        if kind == "add":
+            cur["added"] += 1
+        elif kind == "del":
+            cur["removed"] += 1
+    return {
+        "files": files,
+        "added": sum(f["added"] for f in files),
+        "removed": sum(f["removed"] for f in files),
+    }
+
+
+def format_diffstat(stat: dict) -> str:
+    """'1 file changed, +69/−26' — U+2212 MINUS SIGN, not a hyphen."""
+    n = len(stat["files"])
+    noun = "file" if n == 1 else "files"
+    return f"{n} {noun} changed, +{stat['added']}/−{stat['removed']}"
 
 
 def build(source_dir: str, top_n: int = 5) -> dict:

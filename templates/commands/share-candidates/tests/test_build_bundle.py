@@ -422,5 +422,67 @@ def test_parse_patch_header_missing_fields_degrade():
     assert h2 == {"base": "abc123"}
 
 
+def test_diff_line_kind_classifies_every_case():
+    # The file markers must be checked BEFORE the +/- tests, or every marker
+    # is miscounted as a changed line. This is the whole point of the helper.
+    assert bb._diff_line_kind("+++ b/vllm/x.py") == "marker"
+    assert bb._diff_line_kind("--- a/vllm/x.py") == "marker"
+    assert bb._diff_line_kind("@@ -1,2 +1,3 @@ def f():") == "hunk"
+    assert bb._diff_line_kind("+    added") == "add"
+    assert bb._diff_line_kind("-    removed") == "del"
+    assert bb._diff_line_kind("     context") == "context"
+    assert bb._diff_line_kind("") == "context"
+    # a bare +/- is a real added/removed blank line, not a marker
+    assert bb._diff_line_kind("+") == "add"
+    assert bb._diff_line_kind("-") == "del"
+    # two dashes/pluses are NOT the three-character marker
+    assert bb._diff_line_kind("--x") == "del"
+    assert bb._diff_line_kind("++x") == "add"
+
+
+def test_diffstat_counts_per_file_and_totals():
+    st = bb.diffstat(SAMPLE_PATCH)
+    assert st["files"] == [
+        {"path": "vllm/v1/worker/gpu_model_runner.py", "added": 3, "removed": 2},
+        {"path": "vllm/v1/worker/utils.py", "added": 1, "removed": 0},
+    ]
+    assert st["added"] == 4
+    assert st["removed"] == 2
+
+
+def test_diffstat_does_not_count_file_markers_or_header():
+    # SAMPLE_PATCH has 2 '+++ b/' and 2 '--- a/' markers and an 8-line '#'
+    # header. Miscounting any of them is the classic defect here.
+    st = bb.diffstat(SAMPLE_PATCH)
+    assert st["added"] == 4        # NOT 6 (would mean '+++' counted)
+    assert st["removed"] == 2      # NOT 4 (would mean '---' counted)
+
+
+def test_diffstat_counts_blank_added_and_removed_lines():
+    patch = ("diff --git a/x.py b/x.py\n"
+             "--- a/x.py\n"
+             "+++ b/x.py\n"
+             "@@ -1,2 +1,2 @@\n"
+             "-\n"
+             "+\n"
+             " context\n")
+    st = bb.diffstat(patch)
+    assert st["added"] == 1 and st["removed"] == 1
+
+
+def test_diffstat_empty_patch_is_zero():
+    st = bb.diffstat("# spotlights one-shot fix\n# base:  abc\n")
+    assert st == {"files": [], "added": 0, "removed": 0}
+
+
+def test_format_diffstat_singular_plural_and_minus_sign():
+    assert bb.format_diffstat({"files": [{}], "added": 69, "removed": 26}) == \
+        "1 file changed, +69/−26"
+    assert bb.format_diffstat({"files": [{}, {}], "added": 70, "removed": 26}) == \
+        "2 files changed, +70/−26"
+    assert bb.format_diffstat({"files": [], "added": 0, "removed": 0}) == \
+        "0 files changed, +0/−0"
+
+
 if __name__ == "__main__":
     _run_all()
