@@ -115,7 +115,7 @@ For LiteLLM gateway config and a quick response check, see [docs/agent-cli-setup
 
 **Prerequisites:** Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/).
 
-**1. Install the engine**
+**1. Install the engine** ([Quick install](docs/INSTALL.md#quick-install-recommended))
 
 Quick install — puts `spotlights-engine` on your PATH (in `~/.local/bin`) via [uv](https://docs.astral.sh/uv/):
 
@@ -131,7 +131,7 @@ Pin a version by replacing `main` with any git tag, branch, or commit. No shell 
 > curl -fsSL https://raw.githubusercontent.com/AI-native-Systems-Research/spotlights/main/install.sh | sh
 > ```
 
-Or install from source for development (editable):
+Or install from source for development ([editable](docs/INSTALL.md#from-source-development)):
 
 ```bash
 git clone https://github.com/AI-native-Systems-Research/spotlights.git
