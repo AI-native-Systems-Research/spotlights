@@ -678,6 +678,15 @@ def test_format_diffstat_singular_plural_and_minus_sign():
         "0 files changed, +0/−0"
 
 
+def test_format_diffstat_short_is_the_badge_form():
+    # The badge form drops the file count and keeps the U+2212 minus sign.
+    assert bb.format_diffstat_short({"files": [{}], "added": 69, "removed": 26}) == \
+        "+69/−26"
+    assert bb.format_diffstat_short({"files": [{}, {}], "added": 70, "removed": 26}) == \
+        "+70/−26"
+    assert "−" in bb.format_diffstat_short({"files": [{}], "added": 1, "removed": 2})
+
+
 def _make_fix_tree(root, cand_id="cand-qiskit_compiler-0001", slug="qiskit_compiler",
                    patch=True, notes=True):
     """Create <root>/fix/<slug>/<cand_id>/ with the requested artifacts."""
@@ -987,8 +996,11 @@ def test_build_end_to_end_with_fix_bundle():
     # dropping r["fix_stat"] or r["fix_href"] in build() silently strips the badge
     # and the pill from every card while every other test stays green.
     idx = (bundle / "index.html").read_text(encoding="utf-8")
-    stat_line = bb.format_diffstat(bb.diffstat(SAMPLE_PATCH))
-    assert f'<span class="badge fix">fix · {stat_line}</span>' in idx
+    st = bb.diffstat(SAMPLE_PATCH)
+    # The badge carries the short stat, the pill the full prose one: build() has
+    # to set both row keys, from the two different helpers.
+    assert f'<span class="badge fix">fix · {bb.format_diffstat_short(st)}</span>' in idx
+    assert f'🔧 One-shot fix: {bb.format_diffstat(st)} →' in idx
     fix_href = "candidates/modules/qiskit_compiler/foo__cand-a-0001__fix.html"
     assert f'class="fix-link" href="{fix_href}"' in idx
     # ...and that href actually resolves to the generated page
@@ -1104,10 +1116,15 @@ def test_render_index_fix_badge_and_footer_link():
          "impact": "high", "score": "96", "rationale": "R",
          "html_href": "candidates/modules/m/foo__cand-a-0001.html",
          "fix_stat": "1 file changed, +69/−26",
+         "fix_badge_stat": "+69/−26",
          "fix_href": "candidates/modules/m/foo__cand-a-0001__fix.html"},
     ]
     idx = bb.render_index(header, rows)
-    assert '<span class="badge fix">fix · 1 file changed, +69/−26</span>' in idx
+    # The badge is the short form and the pill the long one, on the same card.
+    # Collapsing them back to one string fails here.
+    assert '<span class="badge fix">fix · +69/−26</span>' in idx
+    assert '<span class="badge fix">fix · 1 file changed, +69/−26</span>' not in idx
+    assert '🔧 One-shot fix: 1 file changed, +69/−26 →' in idx
     assert 'class="fix-link"' in idx
     assert 'href="candidates/modules/m/foo__cand-a-0001__fix.html"' in idx
 
@@ -1119,6 +1136,7 @@ def test_render_index_shows_both_pills_with_fix_first():
          "impact": "high", "score": "96", "rationale": "R",
          "html_href": "candidates/modules/m/foo__cand-a-0001.html",
          "fix_stat": "1 file changed, +69/−26",
+         "fix_badge_stat": "+69/−26",
          "fix_href": "candidates/modules/m/foo__cand-a-0001__fix.html",
          "evolve_count": 2, "evolve_engines": ["coral", "nous"],
          "evolve_href": "candidates/modules/m/foo__cand-a-0001__evolve.html"},
@@ -1137,6 +1155,7 @@ def test_render_index_fix_only_row_has_no_evolve_markup():
          "impact": "high", "score": "96", "rationale": "R",
          "html_href": "candidates/modules/m/foo__cand-a-0001.html",
          "fix_stat": "1 file changed, +69/−26",
+         "fix_badge_stat": "+69/−26",
          "fix_href": "candidates/modules/m/foo__cand-a-0001__fix.html"},
     ]
     idx = bb.render_index(header, rows)

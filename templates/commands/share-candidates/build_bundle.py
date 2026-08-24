@@ -438,8 +438,10 @@ def render_index(header: dict, rows: list[dict]) -> str:
     for r in rows:
         impact_cls = "impact-high" if r["impact"].lower() == "high" else ""
         fix_stat = r.get("fix_stat", "")
-        fix_badge = (f'<span class="badge fix">fix · {html.escape(fix_stat)}</span>'
-                     if fix_stat else "")
+        # The badge carries the short form, the footer pill the full prose stat.
+        fix_badge_stat = r.get("fix_badge_stat", "")
+        fix_badge = (f'<span class="badge fix">fix · {html.escape(fix_badge_stat)}</span>'
+                     if fix_badge_stat else "")
         evolve_count = r.get("evolve_count", 0)
         evolve_badge = (f'<span class="badge evolve">evolve · {evolve_count}</span>'
                         if evolve_count else "")
@@ -846,6 +848,11 @@ def format_diffstat(stat: dict) -> str:
     return f"{n} {noun} changed, +{stat['added']}/−{stat['removed']}"
 
 
+def format_diffstat_short(stat: dict) -> str:
+    """'+69/−26' — the badge form; `format_diffstat` is the prose form."""
+    return f"+{stat['added']}/−{stat['removed']}"
+
+
 def find_fix(cand_id: str, fix_root: Path) -> dict | None:
     """Return a candidate's fix artifacts, or None.
 
@@ -1110,6 +1117,7 @@ def build(source_dir: str, top_n: int = 5) -> dict:
         # Fold in the one-shot fix for this candidate, if a patch exists on disk.
         fx = find_fix(r["cand_id"], fix_root)
         r["fix_stat"] = ""
+        r["fix_badge_stat"] = ""
         r["fix_href"] = ""
         fix_section = ""
         if fx:
@@ -1118,6 +1126,7 @@ def build(source_dir: str, top_n: int = 5) -> dict:
             fix_reldir = Path(fix_stem).name                   # relative to the page
             fix_page_name = fix_reldir + ".html"
             r["fix_stat"] = format_diffstat(fx["stat"])
+            r["fix_badge_stat"] = format_diffstat_short(fx["stat"])
             r["fix_href"] = str(Path("candidates") / (fix_stem + ".html"))
             _copy_fix_files(fx, bundle / "candidates" / fix_stem)
             # No re-read here: `find_fix` already returned `patch_text`,
