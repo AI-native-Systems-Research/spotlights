@@ -440,6 +440,20 @@ def test_diff_line_kind_classifies_every_case():
     assert bb._diff_line_kind("++x") == "add"
 
 
+def test_diff_line_kind_inside_a_hunk_marker_prefixes_are_content():
+    # A file marker only ever appears in a file's header block, before its
+    # first @@. Inside a hunk the same prefix is a changed line whose CONTENT
+    # begins with --/++: deleting a markdown `---` rule emits `----`, and
+    # deleting a `-- flag` doc line emits `--- flag`. Classifying those as
+    # markers drops them from the count and under-reports removals.
+    assert bb._diff_line_kind("----", in_hunk=True) == "del"
+    assert bb._diff_line_kind("--- flag doc", in_hunk=True) == "del"
+    assert bb._diff_line_kind("+++x", in_hunk=True) == "add"
+    # ...but in the header block they are still markers
+    assert bb._diff_line_kind("--- a/x.py", in_hunk=False) == "marker"
+    assert bb._diff_line_kind("+++ b/x.py", in_hunk=False) == "marker"
+
+
 def test_diffstat_counts_per_file_and_totals():
     st = bb.diffstat(SAMPLE_PATCH)
     assert st["files"] == [
@@ -450,12 +464,32 @@ def test_diffstat_counts_per_file_and_totals():
     assert st["removed"] == 2
 
 
-def test_diffstat_does_not_count_file_markers_or_header():
-    # SAMPLE_PATCH has 2 '+++ b/' and 2 '--- a/' markers and an 8-line '#'
-    # header. Miscounting any of them is the classic defect here.
-    st = bb.diffstat(SAMPLE_PATCH)
-    assert st["added"] == 4        # NOT 6 (would mean '+++' counted)
-    assert st["removed"] == 2      # NOT 4 (would mean '---' counted)
+def test_diffstat_counts_removed_lines_whose_content_starts_with_dashes():
+    # Deleting a markdown `---` rule emits the diff line `----`, and deleting
+    # a `-- flag` doc line emits `--- flag`. Both must count as removals.
+    # `git diff --numstat` reports 3 removals here; so must we, or the page
+    # under-reports a patch a recipient is deciding whether to apply.
+    patch = ("diff --git a/README.md b/README.md\n"
+             "--- a/README.md\n"
+             "+++ b/README.md\n"
+             "@@ -1,4 +1,2 @@\n"
+             " title\n"
+             "----\n"
+             "--- flag doc\n"
+             "-plain\n"
+             "+++added\n")
+    st = bb.diffstat(patch)
+    assert st["removed"] == 3      # NOT 1 (would mean '----'/'--- ' read as markers)
+    assert st["added"] == 1        # the '+++added' content line
+
+
+def test_diffstat_ignores_lines_before_the_first_diff_git():
+    # The `#` header block `spotlights-engine fix` writes above the diff can
+    # contain a line starting with +/-; nothing before the first `diff --git`
+    # belongs to any file. Without the `cur is None` guard this raises
+    # TypeError on a None subscript.
+    st = bb.diffstat("# spotlights one-shot fix\n-stray\n+stray\n")
+    assert st == {"files": [], "added": 0, "removed": 0}
 
 
 def test_diffstat_counts_blank_added_and_removed_lines():

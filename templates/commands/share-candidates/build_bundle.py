@@ -618,7 +618,7 @@ def parse_patch_header(patch_text: str) -> dict:
     return out
 
 
-def _diff_line_kind(line: str) -> str:
+def _diff_line_kind(line: str, in_hunk: bool = False) -> str:
     """Classify one patch line: marker | hunk | add | del | context.
 
     The single source of truth for this rule — `diffstat` counts by it and
@@ -627,8 +627,17 @@ def _diff_line_kind(line: str) -> str:
     The `+++ b/…` and `--- a/…` file markers are tested *first*: they start
     with `+`/`-` but are not changed lines, and checking them second inflates
     every count by one. A bare `+` or `-` is a real added/removed blank line.
+
+    `in_hunk` is what keeps that first test from swallowing real content. File
+    markers only ever appear in a file's header block, before its first `@@`.
+    Inside a hunk, `---`/`+++` is a changed line whose *content* begins with
+    `--`/`++` — deleting a markdown `---` rule emits `----`, and deleting a
+    `-- flag` doc line emits `--- flag`. Treating those as markers drops them
+    from the count, under-reporting removals on the one page that exists to
+    inform an apply/don't-apply decision. Callers iterate in order, so they
+    set `in_hunk=True` on a `@@` line and back to False on `diff --git`.
     """
-    if line.startswith("+++") or line.startswith("---"):
+    if not in_hunk and (line.startswith("+++") or line.startswith("---")):
         return "marker"
     if line.startswith("@@"):
         return "hunk"
@@ -648,16 +657,20 @@ def diffstat(patch_text: str) -> dict:
     """
     files: list[dict] = []
     cur: dict | None = None
+    in_hunk = False
     for line in patch_text.splitlines():
         m = _DIFF_GIT.match(line)
         if m:
             cur = {"path": m.group(1), "added": 0, "removed": 0}
             files.append(cur)
+            in_hunk = False                   # back in a file header block
             continue
         if cur is None:                       # still in the `#` header block
             continue
-        kind = _diff_line_kind(line)
-        if kind == "add":
+        kind = _diff_line_kind(line, in_hunk)
+        if kind == "hunk":
+            in_hunk = True
+        elif kind == "add":
             cur["added"] += 1
         elif kind == "del":
             cur["removed"] += 1
