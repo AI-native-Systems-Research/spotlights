@@ -452,6 +452,14 @@ def test_diff_line_kind_inside_a_hunk_marker_prefixes_are_content():
     # ...but in the header block they are still markers
     assert bb._diff_line_kind("--- a/x.py", in_hunk=False) == "marker"
     assert bb._diff_line_kind("+++ b/x.py", in_hunk=False) == "marker"
+    # These two are the assertions that pin the STATE MACHINE as the mechanism.
+    # The three above are all distinguishable by their content alone, so they
+    # would also pass a stateless `startswith("--- a/")` heuristic. These cannot:
+    # the exact marker strings must classify as changed lines inside a hunk,
+    # which is only reachable by consulting `in_hunk`. A patch of a patch file
+    # is the real input that produces them.
+    assert bb._diff_line_kind("--- a/x.py", in_hunk=True) == "del"
+    assert bb._diff_line_kind("+++ b/x.py", in_hunk=True) == "add"
 
 
 def test_diffstat_counts_per_file_and_totals():
@@ -502,6 +510,56 @@ def test_diffstat_counts_blank_added_and_removed_lines():
              " context\n")
     st = bb.diffstat(patch)
     assert st["added"] == 1 and st["removed"] == 1
+
+
+def test_diffstat_resets_hunk_state_on_a_quoted_diff_git_path():
+    # `core.quotePath` defaults to true and `fix.patch` is a plain `git diff`,
+    # so any path holding a non-ASCII byte arrives C-quoted. If the boundary is
+    # only recognised when the *path* parses, `in_hunk` survives into the next
+    # file and its own markers count as a removal and an addition. Real
+    # `--numstat` for this input is 2 files, +2/-4.
+    patch = ('diff --git a/a.py b/a.py\n'
+             '--- a/a.py\n'
+             '+++ b/a.py\n'
+             '@@ -1,3 +1,2 @@\n'
+             ' keep\n'
+             '-gone\n'
+             '+new\n'
+             'diff --git "a/zz-caf\\303\\251.py" "b/zz-caf\\303\\251.py"\n'
+             '--- "a/zz-caf\\303\\251.py"\n'
+             '+++ "b/zz-caf\\303\\251.py"\n'
+             '@@ -1,4 +1,2 @@\n'
+             ' keep\n'
+             '-one\n'
+             '-two\n'
+             '-three\n'
+             '+one\n')
+    st = bb.diffstat(patch)
+    assert st["added"] == 2 and st["removed"] == 4
+    assert len(st["files"]) == 2                    # the quoted file has its own row
+    assert st["files"][0] == {"path": "a.py", "added": 1, "removed": 1}
+    assert st["files"][1]["added"] == 1 and st["files"][1]["removed"] == 3
+
+
+def test_diffstat_counts_every_hunk_of_a_multi_hunk_file():
+    # `in_hunk` is already True at the second `@@`. A classifier that only
+    # recognises a hunk header when not already in one still totals correctly
+    # here, but would leave Task 5 colouring every later hunk header as
+    # context — so assert the count that keeps both readings honest.
+    patch = ("diff --git a/x.py b/x.py\n"
+             "--- a/x.py\n"
+             "+++ b/x.py\n"
+             "@@ -1,3 +1,3 @@\n"
+             " a\n"
+             "-b\n"
+             "+B\n"
+             "@@ -20,3 +20,4 @@\n"
+             " c\n"
+             "+d\n"
+             "+e\n")
+    st = bb.diffstat(patch)
+    assert st["files"] == [{"path": "x.py", "added": 3, "removed": 1}]
+    assert bb._diff_line_kind("@@ -20,3 +20,4 @@", in_hunk=True) == "hunk"
 
 
 def test_diffstat_empty_patch_is_zero():

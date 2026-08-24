@@ -600,6 +600,37 @@ def render_evolve_section(engines: dict, evolve_page_name: str) -> str:
 # card. If no `fix/` tree exists the build behaves exactly as before.
 
 
+def _diff_git_path(line: str) -> str | None:
+    """The post-image path of a `diff --git` header line, or None if not one.
+
+    The single source of truth for recognising a file boundary — `diffstat` and
+    `render_patch` both start a new file by it, and both reset `in_hunk` by it.
+
+    It never returns None for a line starting with `diff --git`, and that is the
+    point: recognising the boundary is what resets the caller's `in_hunk` state.
+    Coupling the reset to a successful *path* capture is a live bug — git quotes
+    any path holding a non-ASCII byte, a quote, a backslash, or a control
+    character (`core.quotePath` defaults to true, and `fix.patch` comes from a
+    plain `git diff`), so a real patch contains both forms:
+
+        diff --git a/vllm/v1/worker/utils.py b/vllm/v1/worker/utils.py
+        diff --git "a/caf\\303\\251.py" "b/caf\\303\\251.py"
+
+    Miss the second and `in_hunk` stays True across the boundary, so that file's
+    own `--- a/…` and `+++ b/…` markers are counted as a removal and an addition.
+    Git's escapes are left in the returned path rather than decoded: an unusual
+    filename displayed verbatim is better than a file missing from the table.
+    """
+    if not line.startswith("diff --git "):
+        return None
+    m = _DIFF_GIT.match(line)
+    if m:
+        return m.group(1)
+    rest = line[len("diff --git "):]
+    _, sep, post = rest.rpartition(' "b/')
+    return post[:-1] if sep and post.endswith('"') else rest
+
+
 def parse_patch_header(patch_text: str) -> dict:
     """Read the `# candidate/module/repo/base` block above the first diff.
 
@@ -659,9 +690,9 @@ def diffstat(patch_text: str) -> dict:
     cur: dict | None = None
     in_hunk = False
     for line in patch_text.splitlines():
-        m = _DIFF_GIT.match(line)
-        if m:
-            cur = {"path": m.group(1), "added": 0, "removed": 0}
+        path = _diff_git_path(line)           # never None for a `diff --git` line,
+        if path is not None:                  # so the reset cannot be skipped
+            cur = {"path": path, "added": 0, "removed": 0}
             files.append(cur)
             in_hunk = False                   # back in a file header block
             continue
