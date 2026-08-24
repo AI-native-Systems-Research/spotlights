@@ -281,9 +281,7 @@ def _process_candidate(
             )
             continue
 
-        native_files = adapter.render(spec)
-        minimal = getattr(adapter, "minimal_bundle", False)
-        all_files = native_files if minimal else native_files + _always_emitted(spec, key)
+        all_files = adapter.render(spec) + _always_emitted(spec, key)
         written = _materialize(bundle_path, all_files)
         bundles.append(BundleResult(evolver=key, path=str(bundle_path), files=sorted(written)))
 
@@ -319,7 +317,90 @@ def _evaluator_file(evolver: str) -> str:
         return "evaluator.py"
     if evolver == "coral":
         return "grader/grader.py"
-    return "ground_truth in campaign.yaml"
+    return "campaign.yaml"
+
+
+# --- the evaluation gap, per evolver -------------------------------------
+#
+# skydiscover and coral leave a `# TODO` in hand-written evaluator code; nous
+# needs no evaluator code but leaves `ground_truth.pass_condition` as a TODO in
+# campaign.yaml. Same gap, different shape — so the README's gap section and the
+# in-scope lead-in are resolved per evolver rather than shared verbatim.
+
+
+def _gap_heading(evolver: str) -> str:
+    if evolver == "nous":
+        return "The evaluation gap — you must define the pass condition"
+    return "The evaluation gap — you must complete the evaluator"
+
+
+def _gap_intro(evolver: str) -> str:
+    if evolver == "nous":
+        return (
+            "This campaign is **launchable but unscored**. `campaign.yaml` names the\n"
+            "metric and which way it should move, but `ground_truth.pass_condition` is a\n"
+            "`TODO`. Nous will run the arms and report numbers; nothing decides whether\n"
+            "those numbers count as a win until you write that rule."
+        )
+    return (
+        "This bundle ships a **launchable but degenerate** evaluator: the correctness\n"
+        "gate is wired from what Spotlights parsed, but the performance measurement is a\n"
+        "`# TODO`. Until you implement it, scores are not meaningful."
+    )
+
+
+def _pass_condition_example(spec: EvolveSpec, cand: Target) -> str:
+    """The body of the worked `pass_condition` block scalar (4-space indented).
+
+    Never names a metric the spec does not have: with no parsed performance
+    oracle the example stays generic rather than inventing one. A performance
+    oracle may name several comma-separated metrics, so the subject is phrased to
+    keep the singular verb grammatical either way.
+    """
+    metrics = [m.strip() for m in (cand.oracles.performance or "").split(",") if m.strip()]
+    if not metrics:
+        return (
+            "    the primary metric moves in the intended direction versus the\n"
+            "    seed baseline, with all correctness checks passing"
+        )
+    verb = "decreases" if spec.objective.direction == "minimize" else "increases"
+    subject = metrics[0] if len(metrics) == 1 else f"every one of {', '.join(metrics)}"
+    return (
+        f"    {subject} {verb} by at least 5% versus the seed baseline,\n"
+        "    with all correctness checks passing"
+    )
+
+
+def _gap_action(evolver: str, spec: EvolveSpec, cand: Target) -> str:
+    if evolver != "nous":
+        return (
+            f"Complete the measurement in `{_evaluator_file(evolver)}` before trusting any result."
+        )
+    return (
+        "Replace the `pass_condition` TODO under `ground_truth` in `campaign.yaml`\n"
+        "before trusting any result. Spotlights knows the metric and its direction, not\n"
+        "how much movement counts as a win. A concrete rule for this candidate looks\n"
+        "like:\n"
+        "\n"
+        "```yaml\n"
+        "ground_truth:\n"
+        "  pass_condition: >-\n"
+        f"{_pass_condition_example(spec, cand)}\n"
+        "```\n"
+        "\n"
+        "Choose the threshold from your own benchmark's noise floor."
+    )
+
+
+def _scope_lead_in(evolver: str) -> str:
+    """Nous applies `code_changes[]` arms with no allowlist to enforce them, so
+    its README must not assert a guardrail nothing checks."""
+    if evolver == "nous":
+        return (
+            "The arms should confine their `code_changes[]` to these files. Nous does\n"
+            "not enforce this, so review each arm's diff before trusting a result:"
+        )
+    return "Only these files may change:"
 
 
 def _candidate_target(spec: EvolveSpec) -> Target:
@@ -342,7 +423,10 @@ def _always_emitted(spec: EvolveSpec, evolver: str) -> list[GeneratedFile]:
         correctness_oracle=", ".join(cand.oracles.correctness) or "(none parsed — add one)",
         performance_oracle=cand.oracles.performance or "(none parsed — see objective)",
         direction=spec.objective.direction,
-        evaluator_file=_evaluator_file(evolver),
+        gap_heading=_gap_heading(evolver),
+        gap_intro=_gap_intro(evolver),
+        gap_action=_gap_action(evolver, spec, cand),
+        scope_lead_in=_scope_lead_in(evolver),
         scope_files=_scope_files_md(spec),
         objective=spec.objective.goal,
     )

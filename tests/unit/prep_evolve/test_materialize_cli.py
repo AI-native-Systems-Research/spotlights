@@ -53,6 +53,23 @@ def test_emits_readme_not_metadata_files(tmp_path: Path) -> None:
         assert not (bundle / name).exists()
 
 
+def test_nous_readme_documents_pass_condition_gap(tmp_path: Path) -> None:
+    # Nous ships no evaluator code, so its gap is `ground_truth.pass_condition`
+    # in campaign.yaml. The README must name that gap — and must not claim the
+    # in-scope file list is enforced, because nothing in nous enforces it.
+    repo = fx.make_repo(tmp_path)
+    result = prep_evolve(_input(tmp_path, repo, evolver="nous"), _CFG)
+    bundle = Path(result.bundles[0].path)
+    readme = (bundle / "README.md").read_text(encoding="utf-8")
+    assert "ground_truth" in readme and "pass_condition" in readme
+    assert "Only these files may change" not in readme
+    assert "code_changes[]" in readme
+    # A comma-separated performance oracle keeps the singular verb grammatical.
+    assert "every one of TPOT, TTFT decreases by at least 5%" in readme
+    # No unsubstituted template placeholders survived.
+    assert "${" not in readme
+
+
 def test_existing_bundle_skipped_without_force(tmp_path: Path) -> None:
     repo = fx.make_repo(tmp_path)
     first = prep_evolve(_input(tmp_path, repo, evolver="coral"), _CFG)
