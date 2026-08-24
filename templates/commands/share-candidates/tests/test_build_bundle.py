@@ -856,5 +856,112 @@ def test_render_candidate_page_still_works_with_evolve_only():
     assert "<div>E</div>" in out
 
 
+def test_build_end_to_end_with_fix_bundle():
+    root = Path(tempfile.mkdtemp())
+    src = root / "sorted"
+    src.mkdir(parents=True, exist_ok=True)
+    (src / "sorted_candidates.md").write_text(SAMPLE_SORTED, encoding="utf-8")
+    c1 = (src / ".." / "modules" / "qiskit_compiler" / "foo__cand-a-0001.md").resolve()
+    c1.parent.mkdir(parents=True, exist_ok=True)
+    c1.write_text("# foo\n", encoding="utf-8")
+    # SAMPLE_SORTED's top row is cand-a-0001 -> module slug "a"
+    _make_fix_tree(root, cand_id="cand-a-0001", slug="a")
+
+    result = bb.build(str(src), top_n=1)
+    assert result["fix_bundles"] == 1
+
+    bundle = Path(result["bundle_dir"])
+    d = bundle / "candidates" / "modules" / "qiskit_compiler"
+    page = d / "foo__cand-a-0001__fix.html"
+    assert page.exists()
+    assert (d / "foo__cand-a-0001__fix" / "fix.patch").exists()
+    assert (d / "foo__cand-a-0001__fix" / "FIX-NOTES.md").exists()
+    assert (d / "foo__cand-a-0001__fix" / "fix.zip").exists()
+
+    # copies are byte-for-byte
+    assert (d / "foo__cand-a-0001__fix" / "fix.patch").read_text(
+        encoding="utf-8") == SAMPLE_PATCH
+
+    # zip entries live under a top-level fix/ folder
+    with _zip.ZipFile(d / "foo__cand-a-0001__fix" / "fix.zip") as zf:
+        assert sorted(zf.namelist()) == ["fix/FIX-NOTES.md", "fix/fix.patch"]
+
+    # the candidate page links to the fix page; the fix page links back
+    cand_html = (d / "foo__cand-a-0001.html").read_text(encoding="utf-8")
+    assert 'href="foo__cand-a-0001__fix.html"' in cand_html
+    assert 'href="foo__cand-a-0001.html"' in page.read_text(encoding="utf-8")
+
+    # and the whole thing is in the outer zip
+    with _zip.ZipFile(Path(result["zip_path"])) as zf:
+        names = zf.namelist()
+    assert any(n.endswith("foo__cand-a-0001__fix.html") for n in names)
+    assert any(n.endswith("foo__cand-a-0001__fix/fix.zip") for n in names)
+
+
+def test_build_skips_notes_only_fix_directory():
+    root = Path(tempfile.mkdtemp())
+    src = root / "sorted"
+    src.mkdir(parents=True, exist_ok=True)
+    (src / "sorted_candidates.md").write_text(SAMPLE_SORTED, encoding="utf-8")
+    c1 = (src / ".." / "modules" / "qiskit_compiler" / "foo__cand-a-0001.md").resolve()
+    c1.parent.mkdir(parents=True, exist_ok=True)
+    c1.write_text("# foo\n", encoding="utf-8")
+    _make_fix_tree(root, cand_id="cand-a-0001", slug="a", patch=False, notes=True)
+
+    result = bb.build(str(src), top_n=1)
+    assert result["fix_bundles"] == 0
+    bundle = Path(result["bundle_dir"])
+    d = bundle / "candidates" / "modules" / "qiskit_compiler"
+    assert not (d / "foo__cand-a-0001__fix.html").exists()
+    assert "One-shot fix" not in (d / "foo__cand-a-0001.html").read_text(encoding="utf-8")
+    assert "badge fix" not in (bundle / "index.html").read_text(encoding="utf-8")
+
+
+def test_build_end_to_end_with_both_arms():
+    # The fourth tree combination: fix/ and evolve/ side by side.
+    root = Path(tempfile.mkdtemp())
+    src = root / "sorted"
+    src.mkdir(parents=True, exist_ok=True)
+    (src / "sorted_candidates.md").write_text(SAMPLE_SORTED, encoding="utf-8")
+    c1 = (src / ".." / "modules" / "qiskit_compiler" / "foo__cand-a-0001.md").resolve()
+    c1.parent.mkdir(parents=True, exist_ok=True)
+    c1.write_text("# foo\n", encoding="utf-8")
+    _make_fix_tree(root, cand_id="cand-a-0001", slug="a")
+    ev = root / "evolve" / "a" / "cand-a-0001" / "coral"
+    ev.mkdir(parents=True, exist_ok=True)
+    (ev / "task.yaml").write_text("name: t\n", encoding="utf-8")
+
+    result = bb.build(str(src), top_n=1)
+    assert result["fix_bundles"] == 1
+    assert result["evolve_bundles"] == 1
+
+    bundle = Path(result["bundle_dir"])
+    d = bundle / "candidates" / "modules" / "qiskit_compiler"
+    assert (d / "foo__cand-a-0001__fix.html").exists()
+    assert (d / "foo__cand-a-0001__evolve.html").exists()
+
+    # both sections on the candidate page, fix first
+    cand_html = (d / "foo__cand-a-0001.html").read_text(encoding="utf-8")
+    assert cand_html.index("One-shot fix") < cand_html.index("Evolve bundles")
+
+    # both arms' back links point at the same candidate page
+    for page in ("foo__cand-a-0001__fix.html", "foo__cand-a-0001__evolve.html"):
+        assert 'href="foo__cand-a-0001.html"' in (d / page).read_text(encoding="utf-8")
+
+
+def test_build_without_fix_tree_reports_zero():
+    # Regression: a run with no fix/ tree at all still builds.
+    root = Path(tempfile.mkdtemp())
+    src = root / "sorted"
+    src.mkdir(parents=True, exist_ok=True)
+    (src / "sorted_candidates.md").write_text(SAMPLE_SORTED, encoding="utf-8")
+    c1 = (src / ".." / "modules" / "qiskit_compiler" / "foo__cand-a-0001.md").resolve()
+    c1.parent.mkdir(parents=True, exist_ok=True)
+    c1.write_text("# foo\n", encoding="utf-8")
+    result = bb.build(str(src), top_n=1)
+    assert result["fix_bundles"] == 0
+    assert result["count"] == 1
+
+
 if __name__ == "__main__":
     _run_all()

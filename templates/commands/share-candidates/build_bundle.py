@@ -971,6 +971,22 @@ def render_fix_section(fx: dict, fix_page_name: str) -> str:
         f'<p><a href="{html.escape(fix_page_name)}">View the fix →</a></p></div>')
 
 
+def _copy_fix_files(fx: dict, fix_dir: Path) -> None:
+    """Copy the fix artifacts verbatim and write a fix.zip rooted at fix/.
+
+    Byte-for-byte is deliberate: scrubbing the producer's repo path out of
+    fix.patch would ship a patch that differs from what the engine wrote. The
+    page carries a portable apply recipe instead.
+    """
+    fix_dir.mkdir(parents=True, exist_ok=True)
+    members = [fx["patch"]] + ([fx["notes"]] if fx.get("notes") else [])
+    for f in members:
+        shutil.copy2(f, fix_dir / f.name)
+    with zipfile.ZipFile(fix_dir / "fix.zip", "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in members:
+            zf.write(f, f"fix/{f.name}")
+
+
 def build(source_dir: str, top_n: int = 5) -> dict:
     """Parse sorted_candidates.md and build share-bundle/ + share-candidates.zip.
 
@@ -992,13 +1008,15 @@ def build(source_dir: str, top_n: int = 5) -> dict:
         shutil.rmtree(bundle)
     (bundle / "candidates").mkdir(parents=True)
 
-    # `prep-evolve` writes its output to a sibling `evolve/` tree; fold it in
+    # Both follow-on arms write to a sibling tree beside `sorted/`; fold each in
     # when present, otherwise the build proceeds exactly as before.
     evolve_root = src.parent / "evolve"
+    fix_root = src.parent / "fix"
 
     kept: list[dict] = []
     skipped: list[str] = []
     evolve_bundles = 0
+    fix_bundles = 0
     for r in rows:
         cand_path = (src / r["rel_link"]).resolve()
         if not cand_path.is_file():
@@ -1015,6 +1033,31 @@ def build(source_dir: str, top_n: int = 5) -> dict:
 
         r = dict(r)
         r["html_href"] = str(Path("candidates") / Path(mod_rel).with_suffix(".html"))
+        stem = Path(mod_rel).with_suffix("")                   # modules/pkg/file
+        cand_page_name = Path(stem).name + ".html"             # sibling back-link
+
+        # Fold in the one-shot fix for this candidate, if a patch exists on disk.
+        fx = find_fix(r["cand_id"], fix_root)
+        r["fix_stat"] = ""
+        r["fix_href"] = ""
+        fix_section = ""
+        if fx:
+            fix_bundles += 1
+            fix_stem = str(stem) + "__fix"
+            fix_reldir = Path(fix_stem).name                   # relative to the page
+            fix_page_name = fix_reldir + ".html"
+            r["fix_stat"] = format_diffstat(fx["stat"])
+            r["fix_href"] = str(Path("candidates") / (fix_stem + ".html"))
+            _copy_fix_files(fx, bundle / "candidates" / fix_stem)
+            # No re-read here: `find_fix` already returned `patch_text`,
+            # `notes_text`, and `patch_kb`, and it is the only place that knows
+            # `fix.patch` may not be valid UTF-8 (Task 4). Re-reading it strictly
+            # would abort the whole build on one odd byte.
+            (bundle / "candidates" / (fix_stem + ".html")).write_text(
+                render_fix_page(r["cand_id"], r["symbol"] or r["cand_id"],
+                                fx, fix_reldir, cand_page_name),
+                encoding="utf-8")
+            fix_section = render_fix_section(fx, fix_page_name)
 
         # Fold in evolve bundles for this candidate, if any exist on disk.
         engines = find_evolve(r["cand_id"], evolve_root)
@@ -1024,7 +1067,6 @@ def build(source_dir: str, top_n: int = 5) -> dict:
         evolve_section = ""
         if engines:
             evolve_bundles += 1
-            stem = Path(mod_rel).with_suffix("")               # modules/pkg/file
             evolve_stem = str(stem) + "__evolve"
             raw_reldir = Path(evolve_stem).name                # relative to the page
             evolve_page_name = raw_reldir + ".html"
@@ -1033,13 +1075,13 @@ def build(source_dir: str, top_n: int = 5) -> dict:
             _copy_evolve_files(engines, evolve_dir)
             (bundle / "candidates" / (evolve_stem + ".html")).write_text(
                 render_evolve_page(r["cand_id"], r["symbol"] or r["cand_id"],
-                                   engines, raw_reldir, Path(stem).name + ".html"),
+                                   engines, raw_reldir, cand_page_name),
                 encoding="utf-8")
             evolve_section = render_evolve_section(engines, evolve_page_name)
 
         out_html.write_text(
             render_candidate_page(cand_md, r["symbol"] or r["cand_id"], back_href,
-                                  evolve_section),
+                                  evolve_section, fix_section),
             encoding="utf-8",
         )
         kept.append(r)
@@ -1061,6 +1103,7 @@ def build(source_dir: str, top_n: int = 5) -> dict:
         "zip_path": str(zip_path),
         "skipped": skipped,
         "evolve_bundles": evolve_bundles,
+        "fix_bundles": fix_bundles,
     }
 
 
@@ -1074,6 +1117,8 @@ def main() -> None:
     print(f"Candidates: {result['count']}")
     print(f"Bundle:     {result['bundle_dir']}")
     print(f"Zip:        {result['zip_path']}")
+    if result.get("fix_bundles"):
+        print(f"Fix:        {result['fix_bundles']} candidate(s) with one-shot fixes")
     if result.get("evolve_bundles"):
         print(f"Evolve:     {result['evolve_bundles']} candidate(s) with evolve bundles")
     if result["skipped"]:
