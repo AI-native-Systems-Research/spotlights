@@ -6,6 +6,37 @@ This page covers installing the engine, the bundled Claude Code slash commands, 
 
 ## Installing the engine
 
+**Prerequisites:** Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/).
+
+### Quick install (recommended)
+
+Installs `spotlights-engine` (and the sibling CLIs) into an isolated venv and puts them on your PATH in `~/.local/bin` — no shell activation needed afterwards:
+
+```bash
+uv tool install --force "git+https://github.com/AI-native-Systems-Research/spotlights.git@main"
+```
+
+Pin a version by replacing `main` with any git tag, branch, or commit:
+
+```bash
+uv tool install --force "git+https://github.com/AI-native-Systems-Research/spotlights.git@v0.1.0"
+```
+
+`--force` makes the command idempotent — re-run it to upgrade an existing install in place.
+
+If `spotlights-engine` is not found afterwards, open a new terminal (or run `uv tool update-shell`) so `~/.local/bin` is on your PATH.
+
+> [!NOTE]
+> Once the repo is public, this simplifies to a one-liner (TBD until then):
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/AI-native-Systems-Research/spotlights/main/install.sh | sh
+> ```
+> That script installs `uv` if missing, runs the `uv tool install` above, and fixes up your PATH.
+
+### From source (development)
+
+Gives you an editable install, which the CLIs automatically prefer over a `uv tool` install:
+
 ```bash
 git clone https://github.com/AI-native-Systems-Research/spotlights.git
 cd spotlights
