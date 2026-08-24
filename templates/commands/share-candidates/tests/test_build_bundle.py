@@ -91,6 +91,71 @@ def test_body_renders_fenced_code_block():
     assert "```" not in out
 
 
+def test_body_renders_a_pipe_table():
+    # Every real FIX-NOTES.md carries a "Files changed" table. Without table
+    # support it rendered as literal pipes in a paragraph.
+    md = ("| File | Lines |\n"
+          "| --- | --- |\n"
+          "| `a.py` | +58/-16 |\n"
+          "| `b.py` | +1/-0 |\n")
+    out = bb.md_to_html_body(md)
+    assert "<table>" in out and "</table>" in out
+    assert "<th>File</th>" in out and "<th>Lines</th>" in out
+    assert "<td><code>a.py</code></td>" in out
+    assert "<td><code>b.py</code></td>" in out
+    assert out.count("<tr>") == 3          # header + two body rows
+    # the separator row is consumed, never rendered as a data row
+    assert "<td>---</td>" not in out
+    # and none of it leaks out as literal markdown
+    assert "| File |" not in out
+
+
+def test_body_renders_a_blockquote_as_one_block():
+    # The unverified warning is a wrapped multi-line blockquote. The paragraph
+    # gatherer used to join its lines with spaces, emitting a stray `&gt;` at
+    # every source line break, mid-sentence.
+    md = ("> **Nothing here was verified.** No test was\n"
+          "> run, no benchmark was measured.\n")
+    out = bb.md_to_html_body(md)
+    assert out.count("<blockquote>") == 1 and out.count("</blockquote>") == 1
+    assert "&gt;" not in out               # THE regression: no stray markers
+    assert "<strong>Nothing here was verified.</strong>" in out
+    # the wrapped lines join into one sentence
+    assert "No test was run, no benchmark was measured." in out
+    # a bare `>` inside the quote opens a second paragraph, still one blockquote
+    out2 = bb.md_to_html_body("> one\n>\n> two\n")
+    assert out2.count("<blockquote>") == 1
+    assert out2.count("<p>") == 2
+    assert "&gt;" not in out2
+
+
+def test_body_pipe_row_without_a_separator_degrades_to_a_paragraph():
+    # REGRESSION GUARD AGAINST A HANG. If the paragraph loop breaks on any pipe
+    # row, a lone `| a | b |` with no `|---|` under it breaks the loop without
+    # being consumed by the table branch, so `i` never advances and this call
+    # spins forever. The break must be gated on the separator lookahead.
+    out = bb.md_to_html_body("| a | b |\n\nnext")
+    assert "<table>" not in out
+    assert "<p>| a | b |</p>" in out
+    assert "<p>next</p>" in out
+    # the same row as the very last line of the input (no lookahead available)
+    out2 = bb.md_to_html_body("intro\n\n| a | b |")
+    assert "<table>" not in out2
+    assert "| a | b |" in out2
+
+
+def test_body_table_cell_escapes_html_metacharacters_exactly_once():
+    md = ("| Expr | Note |\n"
+          "| --- | --- |\n"
+          '| a < b && c | `x="<script>"` |\n')
+    out = bb.md_to_html_body(md)
+    assert "<td>a &lt; b &amp;&amp; c</td>" in out
+    assert "&amp;lt;" not in out and "&amp;amp;" not in out
+    # inside a code span too: escaped once, and never live markup
+    assert "<code>x=&quot;&lt;script&gt;&quot;</code>" in out
+    assert "<script>" not in out
+
+
 SAMPLE_SORTED = """# Sorted candidates — run-abc (qiskit / circuit-depth)
 
 **Objective:** Reduce circuit depth after transpilation
@@ -167,6 +232,7 @@ def test_render_index_lists_cards_with_html_hrefs():
     assert "foo" in idx and "96" in idx and "R1" in idx
 
 
+import filecmp
 import tempfile
 import zipfile as _zip
 
@@ -760,6 +826,25 @@ def test_render_patch_colors_match_counts_with_in_hunk_content_dashes():
     assert del_spans == 2, f"expected 2 d-del spans, got {del_spans}"
 
 
+def test_render_patch_resets_hunk_state_at_every_file_boundary():
+    # THE MULTI-FILE INVARIANT. `render_patch` must reset `in_hunk` at each
+    # `diff --git`, because the next file opens with its own `--- a/…` /
+    # `+++ b/…` markers. Without the reset, `in_hunk` is still True from the
+    # previous file's hunk, so those two markers classify as a removed and an
+    # added line and render as a spurious red and green diff row — every file
+    # after the first. Invisible on a single-file patch, which is why all four
+    # example patches missed it.
+    stat = bb.diffstat(SAMPLE_PATCH)          # two files: +4 / −2
+    assert len(stat["files"]) == 2, "this test needs a multi-file patch"
+    out = bb.render_patch(SAMPLE_PATCH, "foo__fix/fix.patch", 7.1)
+    # The coloured spans must total exactly what the file rows claim.
+    assert out.count('class="l d-add"') == stat["added"]
+    assert out.count('class="l d-del"') == stat["removed"]
+    # And the second file's markers must not appear as diff content at all.
+    assert '<span class="l d-del">--- a/vllm/v1/worker/utils.py' not in out
+    assert '<span class="l d-add">+++ b/vllm/v1/worker/utils.py' not in out
+
+
 def test_render_patch_escapes_paths_containing_html_metacharacters():
     # File paths can contain <, &, > (though git auto-quotes them). If the
     # html.escape on the path is deleted, these metacharacters appear live in
@@ -878,9 +963,15 @@ def test_build_end_to_end_with_fix_bundle():
     assert (d / "foo__cand-a-0001__fix" / "FIX-NOTES.md").exists()
     assert (d / "foo__cand-a-0001__fix" / "fix.zip").exists()
 
-    # copies are byte-for-byte
-    assert (d / "foo__cand-a-0001__fix" / "fix.patch").read_text(
-        encoding="utf-8") == SAMPLE_PATCH
+    # Copies are byte-for-byte — compared as BYTES, not as decoded text. A
+    # decode-and-rewrite (any encoding, any newline translation) produces text
+    # that still compares equal while breaking the guarantee `git apply` needs,
+    # so read_text() cannot pin this. filecmp with shallow=False can.
+    src_fix = root / "fix" / "a" / "cand-a-0001"
+    assert filecmp.cmp(src_fix / "fix.patch",
+                       d / "foo__cand-a-0001__fix" / "fix.patch", shallow=False)
+    assert filecmp.cmp(src_fix / "FIX-NOTES.md",
+                       d / "foo__cand-a-0001__fix" / "FIX-NOTES.md", shallow=False)
 
     # zip entries live under a top-level fix/ folder
     with _zip.ZipFile(d / "foo__cand-a-0001__fix" / "fix.zip") as zf:
@@ -891,11 +982,54 @@ def test_build_end_to_end_with_fix_bundle():
     assert 'href="foo__cand-a-0001__fix.html"' in cand_html
     assert 'href="foo__cand-a-0001.html"' in page.read_text(encoding="utf-8")
 
+    # The INDEX-side wiring, end to end. render_index's unit tests are built from
+    # hand-written row dicts, so nothing else connects build() to the index:
+    # dropping r["fix_stat"] or r["fix_href"] in build() silently strips the badge
+    # and the pill from every card while every other test stays green.
+    idx = (bundle / "index.html").read_text(encoding="utf-8")
+    stat_line = bb.format_diffstat(bb.diffstat(SAMPLE_PATCH))
+    assert f'<span class="badge fix">fix · {stat_line}</span>' in idx
+    fix_href = "candidates/modules/qiskit_compiler/foo__cand-a-0001__fix.html"
+    assert f'class="fix-link" href="{fix_href}"' in idx
+    # ...and that href actually resolves to the generated page
+    assert (bundle / fix_href).exists()
+
     # and the whole thing is in the outer zip
     with _zip.ZipFile(Path(result["zip_path"])) as zf:
         names = zf.namelist()
     assert any(n.endswith("foo__cand-a-0001__fix.html") for n in names)
     assert any(n.endswith("foo__cand-a-0001__fix/fix.zip") for n in names)
+
+
+def test_build_patch_without_notes_builds_a_bundle_of_one_file():
+    # FIX-NOTES.md is optional. `_copy_fix_files` guards on fx.get("notes"), and
+    # without that guard `shutil.copy2(None, …)` raises TypeError — *after*
+    # build() has already removed the previous share-bundle/, so the user is left
+    # with no bundle at all. Same abort-with-nothing class as a strict decode.
+    root = Path(tempfile.mkdtemp())
+    src = root / "sorted"
+    src.mkdir(parents=True, exist_ok=True)
+    (src / "sorted_candidates.md").write_text(SAMPLE_SORTED, encoding="utf-8")
+    c1 = (src / ".." / "modules" / "qiskit_compiler" / "foo__cand-a-0001.md").resolve()
+    c1.parent.mkdir(parents=True, exist_ok=True)
+    c1.write_text("# foo\n", encoding="utf-8")
+    _make_fix_tree(root, cand_id="cand-a-0001", slug="a", patch=True, notes=False)
+
+    result = bb.build(str(src), top_n=1)
+    assert result["fix_bundles"] == 1          # a patch alone is a real fix
+
+    bundle = Path(result["bundle_dir"])
+    d = bundle / "candidates" / "modules" / "qiskit_compiler"
+    fixdir = d / "foo__cand-a-0001__fix"
+    assert (d / "foo__cand-a-0001__fix.html").exists()
+    assert (fixdir / "fix.patch").exists()
+    assert not (fixdir / "FIX-NOTES.md").exists()      # nothing invented
+    with _zip.ZipFile(fixdir / "fix.zip") as zf:
+        assert zf.namelist() == ["fix/fix.patch"]
+    # the page is still complete: the diff renders, the index still links to it
+    page = (d / "foo__cand-a-0001__fix.html").read_text(encoding="utf-8")
+    assert "The patch" in page and 'class="l d-add"' in page
+    assert 'class="badge fix"' in (bundle / "index.html").read_text(encoding="utf-8")
 
 
 def test_build_skips_notes_only_fix_directory():

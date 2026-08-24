@@ -79,9 +79,10 @@ For each exported candidate that has a `fix.patch`, the bundle also gets:
 
 - `candidates/modules/<module>/<file>__fix.html` — a "One-shot fix" page: what a
   one-shot fix is, the unverified warning, an **Apply this patch** strip (real
-  base commit, a `<YOUR_REPO_CHECKOUT>` placeholder, the `-3` and `patch -p1`
-  fallbacks), the inlined `FIX-NOTES.md`, and the patch as a collapsible
-  colorized diff.
+  base commit, a checkout placeholder derived from the producer's repo name —
+  `<YOUR_VLLM_CHECKOUT>`, falling back to `<YOUR_REPO_CHECKOUT>` — and the `-3`
+  and `patch -p1` fallbacks), the inlined `FIX-NOTES.md`, and the patch as a
+  collapsible colorized diff.
 - `candidates/modules/<module>/<file>__fix/` — `fix.patch` and `FIX-NOTES.md`
   copied verbatim, plus a `fix.zip` that unzips into a tidy top-level `fix/`
   folder.

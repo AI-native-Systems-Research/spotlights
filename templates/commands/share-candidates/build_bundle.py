@@ -89,12 +89,18 @@ def _inline_no_links(text: str) -> str:
     return text
 
 
+def _is_quote(s: str) -> bool:
+    """True for a blockquote line: `> text`, or a bare `>` separating its paragraphs."""
+    return s.startswith("> ") or s == ">"
+
+
 def md_to_html_body(md_text: str) -> str:
     """Render a block-level markdown subset to an HTML fragment.
 
     Supported blocks: ATX headings (# .. ######), bullet lists (- ...),
-    horizontal rules (---), and paragraphs. Inline formatting within each
-    block is delegated to render_inline.
+    fenced code, horizontal rules (---), blockquotes (> ...), GFM pipe tables,
+    and paragraphs. Inline formatting within each block is delegated to
+    render_inline.
     """
     lines = md_text.replace("\r\n", "\n").split("\n")
     out: list[str] = []
@@ -143,11 +149,47 @@ def md_to_html_body(md_text: str) -> str:
             out.append("</ul>")
             continue
 
+        if _is_quote(stripped):
+            # One <blockquote>, not one `&gt;`-prefixed paragraph per line: the
+            # unverified warning in FIX-NOTES.md is a wrapped multi-line quote.
+            quote: list[list[str]] = [[]]
+            while i < n and _is_quote(lines[i].strip()):
+                q = lines[i].strip()[1:].strip()
+                if q:
+                    quote[-1].append(q)
+                elif quote[-1]:
+                    quote.append([])      # a bare `>` starts a new paragraph
+                i += 1
+            inner = "".join(f"<p>{render_inline(' '.join(p))}</p>" for p in quote if p)
+            out.append(f"<blockquote>{inner}</blockquote>")
+            continue
+
+        # GFM table: a pipe row, a |---| separator under it, then body rows. The
+        # separator is required — see the paragraph break below.
+        if _TABLE_ROW.match(stripped) and i + 1 < n and _is_table_sep(lines[i + 1]):
+            rows_html = ["<tr>" + "".join(
+                f"<th>{render_inline(c)}</th>" for c in _split_row(stripped)) + "</tr>"]
+            i += 2                                     # header + separator
+            while i < n and _TABLE_ROW.match(lines[i].strip()):
+                row = lines[i].strip()
+                i += 1
+                if _is_table_sep(row):
+                    continue                           # a stray second separator
+                rows_html.append("<tr>" + "".join(
+                    f"<td>{render_inline(c)}</td>" for c in _split_row(row)) + "</tr>")
+            out.append(f'<div class="tw"><table>{"".join(rows_html)}</table></div>')
+            continue
+
         # paragraph: gather consecutive non-blank, non-special lines
         para: list[str] = []
         while i < n:
             s = lines[i].strip()
-            if not s or s == "---" or _HEADING.match(s) or s.startswith("- "):
+            # A pipe row breaks the paragraph only when a separator follows it:
+            # gating on the lookahead is what keeps this loop advancing, since a
+            # lone `| a | b |` is not consumed by the table branch above.
+            starts_table = bool(_TABLE_ROW.match(s)) and i + 1 < n and _is_table_sep(lines[i + 1])
+            if (not s or s == "---" or _HEADING.match(s) or s.startswith("- ")
+                    or _is_quote(s) or starts_table):
                 break
             para.append(s)
             i += 1
@@ -174,6 +216,18 @@ def _split_row(line: str) -> list[str]:
     return [c.strip() for c in inner.split("|")]
 
 
+def _is_table_sep(line: str) -> bool:
+    """True for a GFM separator row like `| --- | :-: |`.
+
+    The one definition of this rule: `parse_ranking_table` uses it to skip the
+    separator, and `md_to_html_body` uses it as the lookahead that decides
+    whether a pipe row actually opens a table.
+    """
+    if not _TABLE_ROW.match(line):
+        return False
+    return all(set(c) <= set("-: ") for c in _split_row(line))
+
+
 def parse_ranking_table(md_text: str, top_n: int) -> list[dict]:
     """Parse the '## Ranking summary' table; return up to top_n data rows.
 
@@ -185,10 +239,10 @@ def parse_ranking_table(md_text: str, top_n: int) -> list[dict]:
     for line in md_text.splitlines():
         if not _TABLE_ROW.match(line):
             continue
-        cells = _split_row(line)
         # separator row like |---|---|
-        if all(set(c) <= set("-: ") for c in cells):
+        if _is_table_sep(line):
             continue
+        cells = _split_row(line)
         if not seen_header:
             seen_header = True  # first table row is the column header
             continue
@@ -230,6 +284,14 @@ li { margin: .2rem 0; }
 code { background: #eef0f3; border-radius: 4px; padding: .1em .35em;
   font: .9em/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 hr { border: 0; border-top: 1px solid #e2e5e9; margin: 1.6rem 0; }
+blockquote { margin: .8rem 0; padding: .5em .9em; background: #f6f7f9;
+  border-left: 3px solid #e2e5e9; border-radius: 0 6px 6px 0; color: #3a4149; }
+blockquote p { margin: .3rem 0; }
+.tw { overflow-x: auto; margin: .7rem 0 1rem; }
+table { border-collapse: collapse; font-size: .92rem; }
+th, td { border: 1px solid #e2e5e9; padding: .35em .6em; text-align: left;
+  vertical-align: top; }
+th { background: #f6f7f9; color: #3a4149; font-weight: 600; }
 .back { display: inline-block; margin-bottom: 1.2rem; font-size: .95rem; }
 .subtitle { color: #5a6169; margin: 0 0 1.6rem; }
 .card { display: block; background: #fff; border: 1px solid #e2e5e9; border-radius: 10px;
@@ -839,11 +901,11 @@ def find_fix(cand_id: str, fix_root: Path) -> dict | None:
     }
 
 
+_DIFF_CLASS = {"add": "d-add", "del": "d-del", "hunk": "d-hunk", "context": ""}
+
 # The warning is the whole reason this page is careful: a colorized diff in a
 # browser is the most authoritative-looking artifact Spotlights emits, and none
 # of it was tested, benchmarked, or built.
-_DIFF_CLASS = {"add": "d-add", "del": "d-del", "hunk": "d-hunk", "context": ""}
-
 _FIX_UNVERIFIED = (
     "Nothing here was verified. No test was run, no benchmark was measured, no "
     "build was attempted. The patch was produced in a fresh detached worktree "
@@ -998,9 +1060,10 @@ def _copy_fix_files(fx: dict, fix_dir: Path) -> None:
 def build(source_dir: str, top_n: int = 5) -> dict:
     """Parse sorted_candidates.md and build share-bundle/ + share-candidates.zip.
 
-    Returns {title, count, bundle_dir, zip_path, skipped}. Candidates whose
-    linked .md file cannot be found are skipped (recorded in 'skipped'), not
-    fatal.
+    Returns {title, count, bundle_dir, zip_path, skipped, evolve_bundles,
+    fix_bundles} — the last two being how many candidates got a folded-in
+    sibling tree. Candidates whose linked .md file cannot be found are skipped
+    (recorded in 'skipped'), not fatal.
     """
     src = Path(source_dir).resolve()
     sorted_md = src / "sorted_candidates.md"
