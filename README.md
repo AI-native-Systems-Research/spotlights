@@ -209,7 +209,7 @@ Contributions to any of these are welcome — see [Contributing](#contributing).
 ## More
 
 - **[Evolve bundles (`prep-evolve`)](docs/prep-evolve.md)** — turn a chosen candidate into a ready-to-run bundle for an external evolver (skydiscover, coral, nous).
-- **[One-shot apply (`apply`)](docs/one-shot-apply.md)** — the cheap arm: one Claude Code session turns a candidate into a reviewable patch plus its verification recipe. No fitness loop, no evaluator to write.
+- **[One-shot apply (`apply`)](docs/one-shot-apply.md)** — one Claude Code session turns a candidate into a reviewable patch plus its verification recipe. No fitness loop, no evaluator to write.
 - **[Telemetry-driven discovery (preview)](docs/telemetry-preview.md)** — the `signal-pipeline` path: OpenTelemetry traces → candidates anchored to captured anomalies.
 - **[Cost and the run manifest](docs/cost-and-manifest.md)** — how runs are priced, the rate-table format, and overriding it for your LiteLLM contract.
 - **[The `SpotlightReport` format](docs/spotlight-report.md)** — the machine-readable `result.json` schema: candidates, proposals, findings, and how they join.
