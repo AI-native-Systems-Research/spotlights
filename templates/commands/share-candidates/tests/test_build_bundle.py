@@ -541,6 +541,27 @@ def test_diffstat_resets_hunk_state_on_a_quoted_diff_git_path():
     assert st["files"][1]["added"] == 1 and st["files"][1]["removed"] == 3
 
 
+def test_diff_git_path_extracts_the_post_image_path_in_every_header_form():
+    # The boundary helper is what resets `in_hunk`, so it must return a path —
+    # never None — for every shape a `diff --git` line can take. Git quotes each
+    # side independently, so a rename can quote one side and not the other.
+    assert bb._diff_git_path("diff --git a/x/y.py b/x/y.py") == "x/y.py"
+    # a rename reports the POST-image path, which is the one a reader applies to
+    assert bb._diff_git_path("diff --git a/old.py b/new.py") == "new.py"
+    assert bb._diff_git_path('diff --git "a/caf\\303\\251.py" "b/caf\\303\\251.py"') \
+        == "caf\\303\\251.py"
+    # quoted source, bare destination — the whole header remainder must not leak
+    assert bb._diff_git_path('diff --git "a/caf\\303\\251.py" b/ascii.py') == "ascii.py"
+    assert bb._diff_git_path('diff --git a/ascii.py "b/caf\\303\\251.py"') \
+        == "caf\\303\\251.py"
+    # and None for anything that is not a boundary, or `diffstat` would start a
+    # spurious file and drop the real one's counts
+    assert bb._diff_git_path("--- a/x.py") is None
+    assert bb._diff_git_path("@@ -1,2 +1,3 @@") is None
+    assert bb._diff_git_path("-removed") is None
+    assert bb._diff_git_path("# spotlights one-shot fix") is None
+
+
 def test_diffstat_counts_every_hunk_of_a_multi_hunk_file():
     # `in_hunk` is already True at the second `@@`. A classifier that only
     # recognises a hunk header when not already in one still totals correctly

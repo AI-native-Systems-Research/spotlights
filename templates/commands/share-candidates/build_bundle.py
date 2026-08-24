@@ -627,8 +627,15 @@ def _diff_git_path(line: str) -> str | None:
     if m:
         return m.group(1)
     rest = line[len("diff --git "):]
+    # Git quotes each side independently, so a rename can quote only its source:
+    # `diff --git "a/caf\303\251.py" b/ascii.py`. Try the quoted post-image first,
+    # then the bare one, so the label is the destination path and not the whole
+    # header remainder (which would carry the pre-image side along with it).
     _, sep, post = rest.rpartition(' "b/')
-    return post[:-1] if sep and post.endswith('"') else rest
+    if sep and post.endswith('"'):
+        return post[:-1]
+    _, sep, post = rest.rpartition(' b/')
+    return post if sep else rest
 
 
 def parse_patch_header(patch_text: str) -> dict:
