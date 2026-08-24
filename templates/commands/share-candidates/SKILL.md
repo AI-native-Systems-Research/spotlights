@@ -32,7 +32,8 @@ your responsibility to run the ranking step first.
 
 4. **Report** the printed summary: bundle title, number of candidates exported,
    the `share-bundle/` path, the `share-candidates.zip` path, how many candidates
-   got evolve bundles (if any), and any skipped candidates.
+   got evolve bundles and how many got one-shot fixes (if any), and any skipped
+   candidates.
 
 ## What the bundle contains
 
@@ -66,6 +67,34 @@ For each exported candidate that has evolve data, the bundle also gets:
 > the performance measurement in the evaluator/grader for `skydiscover` and
 > `coral`, and `ground_truth.pass_condition` in `campaign.yaml` for `nous`. Each
 > engine's inlined README states this and the oracle Spotlights inferred.
+
+## One-shot fix bundles (automatic when present)
+
+If `spotlights-engine fix` (or `/spotlights-fix-candidate`) has run, its output
+lives in a sibling `fix/` tree beside `sorted/`
+(`<run>/fix/<module>/<candidate>/`). The build folds it in automatically — no
+flag needed. If there is no `fix/` tree, the build behaves exactly as above.
+
+For each exported candidate that has a `fix.patch`, the bundle also gets:
+
+- `candidates/modules/<module>/<file>__fix.html` — a "One-shot fix" page: what a
+  one-shot fix is, the unverified warning, an **Apply this patch** strip (real
+  base commit, a `<YOUR_REPO_CHECKOUT>` placeholder, the `-3` and `patch -p1`
+  fallbacks), the inlined `FIX-NOTES.md`, and the patch as a collapsible
+  colorized diff.
+- `candidates/modules/<module>/<file>__fix/` — `fix.patch` and `FIX-NOTES.md`
+  copied verbatim, plus a `fix.zip` that unzips into a tidy top-level `fix/`
+  folder.
+- The candidate page gains a "One-shot fix" section, and its index card gains a
+  `fix · N file(s) changed, +X/−Y` badge and a footer link to the fix page.
+
+A candidate directory holding only `FIX-NOTES.md` and no patch — the legitimate
+"the change could not be made" outcome — is skipped entirely: no page, no badge.
+
+> **Nothing in a fix bundle was verified:** no test was run, no benchmark was
+> measured, no build was attempted. The fix page states this prominently, and
+> carries the candidate's recorded oracles as the verification recipe for
+> whoever has the hardware.
 
 ## Link handling (built into the script)
 

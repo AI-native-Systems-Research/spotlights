@@ -193,3 +193,15 @@ move a candidate between the two paths without translating anything.
 > same prompt unattended. Use `--print-prompt` if you want to inspect the prompt
 > and the validated worktree before deciding which way to go — it leaves the
 > worktree in place for you.
+
+## Sharing a fix
+
+`/spotlights-share-candidates` folds the `fix/` tree into its offline bundle
+automatically — no flag. Each exported candidate that has a `fix.patch` gets a
+page with the notes rendered, the patch as a collapsible colorized diff, an
+apply recipe using your own checkout path, and a `fix.zip`; the ranked index
+gains a `fix` badge and a link. Candidates whose directory holds only
+`FIX-NOTES.md` are skipped.
+
+The artifacts are copied byte-for-byte, so the patch a recipient applies is
+exactly the one written here — including its recorded base commit.
