@@ -108,7 +108,7 @@ For LiteLLM gateway config and a quick response check, see [docs/agent-cli-setup
 | `/spotlights-objective-setting` | Optional interview that helps you frame a sharp optimization objective and prints ready-to-paste `--objective`/`--hint` flags. You can also write those flags by hand. |
 | `/spotlights-sort-candidates` | Ranks a finished run's candidates by estimated impact, writing `sorted_candidates.md` (a summary table linking each candidate) and `sorted_candidates.json` under `<output-folder>/sorted/`. |
 | `/spotlights-share-candidates` | Packages the top-N candidates from `sorted_candidates.md` into a self-contained ZIP an external teammate can unzip and open by double-clicking `index.html` — no server, works offline. |
-| `/spotlights-apply-candidate` | Implements one candidate as a reviewable patch, in-session, in a throwaway git worktree. Produces `apply.patch` + `APPLY-NOTES.md`. Runs no tests and no benchmarks; your checkout is never modified. |
+| `/spotlights-apply-candidate` | Implements one candidate as a reviewable patch, in-session, in a throwaway git worktree. Produces `apply.patch` + `apply.prompt.txt` + `APPLY-NOTES.md`. Runs no tests and no benchmarks; your checkout is never modified. |
 
 <a id="quickstart"></a>
 ## Quickstart on a vLLM subset

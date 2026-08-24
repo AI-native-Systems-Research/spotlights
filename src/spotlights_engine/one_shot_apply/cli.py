@@ -23,6 +23,7 @@ from spotlights_engine.one_shot_apply.api import (
     OneShotApplyConfig,
     OneShotApplyInput,
     one_shot_apply,
+    render_prompt_block,
 )
 from spotlights_engine.one_shot_apply.errors import OneShotApplyError
 from spotlights_engine.prep_evolve.errors import PrepEvolveError
@@ -33,7 +34,8 @@ def _build_argparser() -> argparse.ArgumentParser:
         prog="spotlights-engine apply",
         description=(
             "Implement one candidate with a single Claude Code session in a "
-            "throwaway git worktree, and write apply.patch + APPLY-NOTES.md. "
+            "throwaway git worktree, and write apply.patch + apply.prompt.txt "
+            "+ APPLY-NOTES.md. "
             "Runs no tests and no benchmarks; the target repo is never modified."
         ),
     )
@@ -193,13 +195,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"warning: {w}", file=sys.stderr)
 
     for preview in result.prompts:
-        print(f"CANDIDATE: {preview.candidate_id}")
-        print(f"MODULE:    {preview.module_qualified_name}")
-        print(f"BASE:      {preview.base_sha}")
-        print(f"WORKTREE:  {preview.worktree}")
-        print(f"WORKTREE_PARENT:  {preview.worktree_parent}")
-        print("PROMPT:")
-        print(preview.prompt)
+        # Same renderer the run path writes to `apply.prompt.txt`, so a skill
+        # that tees this stdout into that filename produces the same bytes the
+        # engine would have written itself.
+        print(render_prompt_block(preview), end="")
 
     for artifact in result.patches:
         # Three distinct states, not two: a failed diff also has no patch, but

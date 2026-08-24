@@ -8,7 +8,7 @@ change, hand back something reviewable.
 
 `spotlights-engine apply` is that arm. Per candidate it creates a throwaway
 detached git worktree at the base commit, runs one `claude -p` session inside
-it, and writes `apply.patch` plus `APPLY-NOTES.md`. Your checkout is never
+it, and writes `apply.patch`, `apply.prompt.txt`, and `APPLY-NOTES.md`. Your checkout is never
 modified, and a dirty working tree is irrelevant.
 
 ← Back to [README](../README.md) · The other arm: [prep-evolve](prep-evolve.md)
@@ -62,17 +62,26 @@ worktree needs a commit, and a patch without a recorded base is not applicable.
 ```
 <base>/apply/<module>/<candidate-id>/
 ├── apply.patch        # git diff against the base commit, SHA in a header comment
+├── apply.prompt.txt   # the prompt the agent was given, verbatim
 └── APPLY-NOTES.md     # the travelling documentation
 ```
 
 `apply.patch` is a `git diff`, not `format-patch`: the latter needs a commit, and
 the repo stays untouched.
 
-When the agent makes no in-scope edit — a legitimate outcome — only
-`APPLY-NOTES.md` is written, saying why, and the directory ends up with **no**
-`apply.patch`: a stale patch left over from an earlier run of the same candidate
-is deleted, so the directory can never hold a patch that the notes go on to
-deny exists.
+When the agent makes no in-scope edit — a legitimate outcome — the patch is
+absent but `APPLY-NOTES.md` and `apply.prompt.txt` are still written, and a stale
+patch left over from an earlier run of the same candidate is deleted, so the
+directory can never hold a patch that the notes go on to deny exists.
+
+`apply.prompt.txt` is the exact block `--print-prompt` emits — candidate, module,
+base commit, worktree paths, then the prompt body — written on every path, patch
+or no patch. It answers the question the notes cannot: whether a disappointing
+outcome came from the agent or from what the agent was *told*. "No in-scope edit
+was possible" and "the target the prompt named was the wrong one" read the same in
+the notes and differently here. Both `--print-prompt` and the run path render it
+from the same function, so the file the `/spotlights-apply-candidate` skill saves
+by teeing that stdout is byte-identical to the one the CLI writes itself.
 
 `apply.patch` carries a header comment recording the candidate, module, repo,
 and base commit, plus the apply command:

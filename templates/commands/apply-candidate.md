@@ -1,5 +1,5 @@
 ---
-description: Use when implementing ONE Spotlights candidate as a reviewable patch in-session — "apply this candidate", "fix this candidate", "implement candidate cand-...", "one-shot apply". Runs `spotlights-engine apply --print-prompt` to get a validated throwaway worktree plus the apply prompt, does the work interactively, and collects apply.patch + APPLY-NOTES.md. Runs no tests and no benchmarks, and never modifies the target repo.
+description: Use when implementing ONE Spotlights candidate as a reviewable patch in-session — "apply this candidate", "fix this candidate", "implement candidate cand-...", "one-shot apply". Runs `spotlights-engine apply --print-prompt` to get a validated throwaway worktree plus the apply prompt, does the work interactively, and collects apply.patch + apply.prompt.txt + APPLY-NOTES.md. Runs no tests and no benchmarks, and never modifies the target repo.
 ---
 
 # Apply Candidate
@@ -46,8 +46,17 @@ prevent.
 
    ```bash
    spotlights-engine apply --print-prompt \
-     --result "<run-dir>" --repo "<repo>" --candidate "<cand-id>"
+     --result "<run-dir>" --repo "<repo>" --candidate "<cand-id>" \
+     | tee "/tmp/spotlights-apply-prompt-<cand-id>.txt"
    ```
+
+   The `tee` is not optional: that file becomes `apply.prompt.txt` in step 4,
+   and this is the only moment the prompt exists as text you can copy. Do not
+   reconstruct it later from what you remember reading — a paraphrase of the
+   prompt is worse than no prompt, because it reads as the real one. `tee`
+   captures stdout only, which is exactly the block; warnings go to stderr and
+   stay out of the file, so it matches byte-for-byte what
+   `spotlights-engine apply` writes on its own path.
 
    It prints a block of the form:
 
@@ -120,8 +129,23 @@ prevent.
 
    `<module-slug>` is the module's slash-form qualified name with every
    character outside `[A-Za-z0-9._-]` (including `/`) replaced by `_` (e.g.
-   `v1/attention` → `v1_attention`). Then write `APPLY-NOTES.md` beside the
-   patch containing:
+   `v1/attention` → `v1_attention`).
+
+   Then save the prompt you teed in step 2 beside the patch, unchanged:
+
+   ```bash
+   cp "/tmp/spotlights-apply-prompt-<cand-id>.txt" \
+      "<run-dir>/apply/<module-slug>/<cand-id>/apply.prompt.txt"
+   ```
+
+   Copy it verbatim — do not edit, trim, or re-wrap it. It is the record of what
+   the agent was *told*, and it is what separates "the proposal was declined" from
+   "the instruction was wrong" when the notes alone cannot say which. Save it even
+   when you produced no patch: that is the case where it matters most.
+   `spotlights-engine apply` writes this same file, from the same renderer, so
+   the two paths agree.
+
+   Then write `APPLY-NOTES.md` beside the patch containing:
 
    - candidate id, module, objective, and the **base commit** from `BASE:`
    - the in-scope files with their line ranges
@@ -182,6 +206,8 @@ prevent.
 
 Write `APPLY-NOTES.md` explaining why — the scope is wrong, the proposal needs a
 file outside it, the research does not actually support the change — and
-produce no patch. A missing patch is a fine outcome. A patch that cannot be
-trusted is not. There is no plan-approval step in this skill; the patch itself
-is the reviewable artifact, and nothing is applied until a human applies it.
+produce no patch. Still save `apply.prompt.txt`: a reader deciding whether to
+believe the reason needs to see the instruction it was a reason about. A missing
+patch is a fine outcome. A patch that cannot be trusted is not. There is no
+plan-approval step in this skill; the patch itself is the reviewable artifact,
+and nothing is applied until a human applies it.

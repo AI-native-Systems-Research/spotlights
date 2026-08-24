@@ -84,6 +84,7 @@ ClaudeRunner = Callable[..., ApplyRunResult]
 
 PATCH_NAME = "apply.patch"
 NOTES_NAME = "APPLY-NOTES.md"
+PROMPT_NAME = "apply.prompt.txt"
 
 
 class OneShotApplyInput(BaseModel):
@@ -135,6 +136,28 @@ class PromptPreview(BaseModel):
     worktree_parent: str
     base_sha: str
     prompt: str
+
+
+def render_prompt_block(preview: PromptPreview) -> str:
+    """The `--print-prompt` block: header lines, then the prompt body.
+
+    One renderer, two consumers — the CLI prints this to stdout under
+    `--print-prompt`, and `_write_artifacts` writes the same string to
+    `apply.prompt.txt` beside the patch. Sharing it is the point: the skill
+    tees the CLI's stdout into that filename, so the two paths must not be
+    able to drift into producing different bytes for the same candidate.
+
+    Ends in a newline, so the CLI prints it with `end=""`.
+    """
+    return (
+        f"CANDIDATE: {preview.candidate_id}\n"
+        f"MODULE:    {preview.module_qualified_name}\n"
+        f"BASE:      {preview.base_sha}\n"
+        f"WORKTREE:  {preview.worktree}\n"
+        f"WORKTREE_PARENT:  {preview.worktree_parent}\n"
+        f"PROMPT:\n"
+        f"{preview.prompt}\n"
+    )
 
 
 class SkippedApply(BaseModel):
@@ -242,9 +265,10 @@ def _write_artifacts(
     manifest: list[FileChange],
     change_summary: str | None,
     agent_error: str | None,
+    preview: PromptPreview,
     collect_error: str | None = None,
 ) -> tuple[list[str], bool, list[str]]:
-    """Write `apply.patch` (when non-empty) and `APPLY-NOTES.md`.
+    """Write `apply.patch` (when non-empty), `apply.prompt.txt`, and `APPLY-NOTES.md`.
 
     Returns `(files, produced, out_of_scope)` — `out_of_scope` is computed
     once here, from `manifest` against `spec.targets`, and threaded both into
@@ -255,6 +279,11 @@ def _write_artifacts(
     whose diff failed still gets a `APPLY-NOTES.md`, saying exactly that. It is
     the one case where the notes must not read "no patch was produced" — the
     agent may well have edited files, and they are gone with the worktree.
+
+    `apply.prompt.txt` is written unconditionally, patch or no patch: it records
+    what the agent was *told*, which is exactly what a reviewer needs when the
+    outcome is "no edit" or "the diff failed" and the notes alone cannot say
+    whether the instruction or the agent was at fault.
 
     Every filesystem write is wrapped: an `OSError` becomes an
     `ArtifactWriteError`, which the batch loop already knows how to record as
@@ -306,6 +335,9 @@ def _write_artifacts(
             # patch behind — the notes below explicitly deny one exists.
             (out_dir / PATCH_NAME).unlink(missing_ok=True)
 
+        (out_dir / PROMPT_NAME).write_text(render_prompt_block(preview), encoding="utf-8")
+        files.append(PROMPT_NAME)
+
         (out_dir / NOTES_NAME).write_text(notes, encoding="utf-8")
         files.append(NOTES_NAME)
     except OSError as exc:
@@ -320,9 +352,10 @@ def _write_artifacts(
         # that says which commit the patch belongs to, and this directory is
         # also where a *previous* run's artifacts sit. Leaving last run's notes
         # next to no patch is a directory that documents a patch which is not
-        # there. Remove both, so the failure reads as "nothing here" — the same
-        # invariant the empty-patch branch above maintains.
-        for name in (PATCH_NAME, NOTES_NAME):
+        # there. Remove all three, so the failure reads as "nothing here" — the
+        # same invariant the empty-patch branch above maintains. `apply.prompt.txt`
+        # goes too: on its own it would document an apply that produced nothing.
+        for name in (PATCH_NAME, PROMPT_NAME, NOTES_NAME):
             with contextlib.suppress(OSError):
                 (out_dir / name).unlink(missing_ok=True)
         raise ArtifactWriteError(
@@ -365,16 +398,19 @@ def _process_candidate(
             direction=direction,
         )
         prompt = build_apply_prompt(spec=spec, worktree=worktree.path)
+        # Built on both paths, not just under --print-prompt: it is what the
+        # CLI prints there and what `apply.prompt.txt` records here, and one
+        # value feeding both is what keeps the two byte-identical.
+        preview = PromptPreview(
+            candidate_id=sel.candidate.id,
+            module_qualified_name=sel.qn,
+            worktree=str(worktree.path),
+            worktree_parent=str(worktree.parent),
+            base_sha=base_sha,
+            prompt=prompt,
+        )
 
         if input.print_prompt:
-            preview = PromptPreview(
-                candidate_id=sel.candidate.id,
-                module_qualified_name=sel.qn,
-                worktree=str(worktree.path),
-                worktree_parent=str(worktree.parent),
-                base_sha=base_sha,
-                prompt=prompt,
-            )
             result.prompts.append(preview)
             # Only set once the handoff has actually succeeded, so a leaked
             # worktree can never coexist with a swallowed exception.
@@ -403,6 +439,7 @@ def _process_candidate(
         patch=collection.patch,
         manifest=collection.manifest,
         change_summary=collection.change_summary,
+        preview=preview,
         agent_error=run.error,
         collect_error=collection.collect_error,
     )

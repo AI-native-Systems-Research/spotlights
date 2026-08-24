@@ -12,7 +12,9 @@ import pytest
 from spotlights_engine.one_shot_apply import worktree as worktree_mod
 from spotlights_engine.one_shot_apply.api import (
     OneShotApplyInput,
+    PromptPreview,
     one_shot_apply,
+    render_prompt_block,
 )
 from spotlights_engine.one_shot_apply.claude_exec import ApplyRunResult
 from spotlights_engine.one_shot_apply.errors import (
@@ -98,7 +100,11 @@ def test_single_candidate_writes_patch_and_notes(run) -> None:
     assert artifact.candidate_id == CAND_ID
     out_dir = Path(artifact.path)
     assert out_dir == run_dir / "apply" / "v1_attention" / CAND_ID
-    assert sorted(artifact.files) == ["APPLY-NOTES.md", "apply.patch"]
+    assert sorted(artifact.files) == [
+        "APPLY-NOTES.md",
+        "apply.patch",
+        "apply.prompt.txt",
+    ]
     patch_text = (out_dir / "apply.patch").read_text(encoding="utf-8")
     assert "# agent edit" in patch_text
     assert "did the thing" in (out_dir / "APPLY-NOTES.md").read_text(encoding="utf-8")
@@ -113,6 +119,65 @@ def test_single_candidate_writes_patch_and_notes(run) -> None:
     assert f'git -C {repo_resolved} apply "$PWD/apply.patch"' in patch_text
     assert "git apply apply.patch" not in patch_text
     assert f"git -C {repo_resolved} apply apply.patch" not in patch_text
+
+
+def test_the_prompt_the_agent_ran_is_saved_beside_the_patch(run) -> None:
+    """`apply.prompt.txt` records the prompt verbatim, in the `--print-prompt` shape.
+
+    Asserted as full equality against `render_prompt_block`, fed the prompt and
+    worktree the runner actually received — not a substring check. The file is
+    the reviewer's only record of what the agent was *told*, so a drift between
+    what the CLI prints and what the run path writes is exactly the bug: the
+    skill tees that stdout into this filename, and both must produce the same
+    bytes for the same candidate.
+    """
+    run_dir, repo = run
+    seen: dict[str, object] = {}
+    inner = _runner()
+
+    def _capture(**kwargs):
+        seen.update(kwargs)
+        return inner(**kwargs)
+
+    result = one_shot_apply(
+        OneShotApplyInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+        claude_runner=_capture,
+    )
+    artifact = result.patches[0]
+    worktree = seen["worktree"]
+    assert isinstance(worktree, Path)
+
+    expected = render_prompt_block(
+        PromptPreview(
+            candidate_id=CAND_ID,
+            module_qualified_name=artifact.module_qualified_name,
+            worktree=str(worktree),
+            worktree_parent=str(worktree.parent),
+            base_sha=artifact.base_sha,
+            prompt=seen["prompt"],
+        )
+    )
+    written = (Path(artifact.path) / "apply.prompt.txt").read_text(encoding="utf-8")
+    assert written == expected
+
+
+def test_the_prompt_is_saved_even_when_the_agent_makes_no_edit(run) -> None:
+    """No patch is the case where the prompt matters most.
+
+    "The agent declined" and "the agent was told the wrong thing" look identical
+    in `APPLY-NOTES.md` alone. The prompt is what separates them, so it is
+    written on the no-patch path too.
+    """
+    run_dir, repo = run
+    result = one_shot_apply(
+        OneShotApplyInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+        claude_runner=_runner(edit=None, summary="cannot be done within scope"),
+    )
+    artifact = result.patches[0]
+    assert artifact.patch_produced is False
+    written = (Path(artifact.path) / "apply.prompt.txt").read_text(encoding="utf-8")
+    assert written.startswith(f"CANDIDATE: {CAND_ID}\n")
+    assert f"BASE:      {artifact.base_sha}\n" in written
 
 
 def test_added_file_appears_in_the_patch(run) -> None:
@@ -297,7 +362,7 @@ def test_no_edit_produces_notes_but_no_patch(run) -> None:
     )
     artifact = result.patches[0]
     assert artifact.patch_produced is False
-    assert artifact.files == ["APPLY-NOTES.md"]
+    assert artifact.files == ["APPLY-NOTES.md", "apply.prompt.txt"]
     assert not (Path(artifact.path) / "apply.patch").exists()
 
 
@@ -317,7 +382,7 @@ def test_a_rerun_that_produces_no_patch_removes_the_stale_patch(run) -> None:
     )
     artifact = second.patches[0]
     assert artifact.patch_produced is False
-    assert artifact.files == ["APPLY-NOTES.md"]
+    assert artifact.files == ["APPLY-NOTES.md", "apply.prompt.txt"]
     assert not (out_dir / "apply.patch").exists()
 
 
@@ -601,8 +666,10 @@ def test_a_notes_write_that_fails_partway_leaves_neither_artifact_behind(
     out_dir = run_dir / "apply" / "v1_attention" / CAND_ID
     assert not (out_dir / "APPLY-NOTES.md").exists()
     # And the patch that *did* write successfully goes with it — a patch with
-    # no notes has no recorded base commit.
+    # no notes has no recorded base commit. `apply.prompt.txt` goes too: on its
+    # own it documents an apply that left nothing else behind.
     assert not (out_dir / "apply.patch").exists()
+    assert not (out_dir / "apply.prompt.txt").exists()
 
 
 def test_a_keyboard_interrupt_during_the_agent_session_leaks_no_worktree(run) -> None:
@@ -680,7 +747,7 @@ def test_a_failed_diff_still_writes_notes_and_does_not_claim_no_patch(
     assert artifact.collection_error is not None
     assert "timed out" in artifact.collection_error
     assert artifact.patch_produced is False
-    assert artifact.files == ["APPLY-NOTES.md"]
+    assert artifact.files == ["APPLY-NOTES.md", "apply.prompt.txt"]
 
     notes = (Path(artifact.path) / "APPLY-NOTES.md").read_text(encoding="utf-8")
     assert "No patch could be collected" in notes
