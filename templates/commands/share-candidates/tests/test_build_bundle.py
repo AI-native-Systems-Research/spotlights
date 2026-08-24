@@ -38,6 +38,21 @@ def test_render_inline_escapes_html():
     assert "&lt;" in out and "&amp;" in out and "&gt;" in out
 
 
+def test_inline_code_span_escapes_html_metacharacters_exactly_once():
+    # A code span containing HTML metacharacters must be escaped exactly once,
+    # not double-escaped. Before the fix: `stderr="oops"` rendered as
+    # stderr=&amp;quot;oops&amp;quot;, displaying literal &quot; in the browser.
+    out_direct = bb._inline_no_links('`stderr="oops"`')
+    assert "<code>stderr=&quot;oops&quot;</code>" in out_direct
+    assert "&amp;quot;" not in out_direct
+    # Also through the public render_inline path (which stashes anchor links and
+    # restores them after escape, so the sentinel-preservation matters)
+    out_indirect = bb.render_inline('`a < b && c`')
+    assert "<code>a &lt; b &amp;&amp; c</code>" in out_indirect
+    assert "&amp;lt;" not in out_indirect
+    assert "&amp;amp;" not in out_indirect
+
+
 def test_body_renders_headings():
     out = bb.md_to_html_body("# Title\n\n## Section")
     assert "<h1>Title</h1>" in out
@@ -710,6 +725,59 @@ def test_render_patch_colorizes_and_escapes():
     assert "<&>" not in out
 
 
+def test_render_patch_colors_match_counts_with_in_hunk_content_dashes():
+    # The in_hunk state machine is critical: inside a hunk, a line starting
+    # with --- or +++ is real content (e.g., deleting a markdown --- rule),
+    # not a file marker. If in_hunk threading is deleted from render_patch,
+    # lines like ---- and ++++marker are skipped (treated as markers), so the
+    # coloured spans do not render for them — but diffstat counts them anyway,
+    # so the file row's +X/−Y disagrees with the sum of the coloured spans.
+    patch = (
+        "diff --git a/file_<&>.py b/file_<&>.py\n"
+        "--- a/file_<&>.py\n"
+        "+++ b/file_<&>.py\n"
+        "@@ -1,5 +1,4 @@\n"
+        " context\n"
+        "----\n"
+        "--- removed\n"
+        "++++added\n"
+        " more context\n"
+    )
+    out = bb.render_patch(patch, "patch.txt", 0.1)
+    # The file path must be escaped
+    assert "file_&lt;&amp;&gt;.py" in out
+    assert "file_<&>.py" not in out
+    # Count the coloured spans in the rendered output
+    add_spans = out.count('class="l d-add"')
+    del_spans = out.count('class="l d-del"')
+    # The file row shows the correct counts from diffstat: +1 −2
+    # (---- is 1 deletion, --- removed is 1 deletion, ++++added is 1 addition)
+    assert "+1" in out and "−2" in out
+    # CRITICAL: the row counts and the span count must agree. If in_hunk is not
+    # threaded, the ---- and --- lines are skipped and no spans render, but the
+    # row still shows the correct counts, creating a disagreement.
+    assert add_spans == 1, f"expected 1 d-add span, got {add_spans}"
+    assert del_spans == 2, f"expected 2 d-del spans, got {del_spans}"
+
+
+def test_render_patch_escapes_paths_containing_html_metacharacters():
+    # File paths can contain <, &, > (though git auto-quotes them). If the
+    # html.escape on the path is deleted, these metacharacters appear live in
+    # the rendered file header, allowing script injection.
+    patch = (
+        "diff --git a/weird_<script>_file.py b/weird_<script>_file.py\n"
+        "--- a/weird_<script>_file.py\n"
+        "+++ b/weird_<script>_file.py\n"
+        "@@ -1 +1 @@\n"
+        " context\n"
+    )
+    out = bb.render_patch(patch, "patch.txt", 0.1)
+    # The path must appear escaped in the output
+    assert "weird_&lt;script&gt;_file.py" in out
+    # The raw metacharacters must not appear live
+    assert "<script>_file" not in out
+
+
 def test_render_fix_page_has_warning_apply_strip_and_notes():
     fx = {"patch": None, "notes": None,
           "header": {"candidate": "cand-a-0001", "module": "m/n",
@@ -750,6 +818,21 @@ def test_render_fix_page_without_notes_omits_that_section():
                               {**fx, "header": {}}, "foo__fix", "foo.html")
     assert "&lt;BASE_COMMIT&gt;" in out2
     assert "&lt;YOUR_REPO_CHECKOUT&gt;" in out2
+
+
+def test_render_fix_page_says_which_directory_the_apply_commands_assume():
+    # The apply commands use "$PWD/{raw_reldir}/fix.patch", so they are
+    # silently cwd-dependent. The page must state which directory to cd into.
+    # Without this note, running the commands from a different directory
+    # (e.g., share-bundle/ or from the unpacked .zip) fails with "can't open
+    # patch: No such file or directory" and no explanation of why.
+    fx = {"header": {"base": "abc123"}, "stat": bb.diffstat(SAMPLE_PATCH),
+          "patch_text": SAMPLE_PATCH, "notes_text": None, "patch_kb": 7.1}
+    out = bb.render_fix_page("cand-a-0001", "foo", fx, "artifact_dir__fix", "foo.html")
+    # The cwd note must mention the artifact directory name
+    assert "artifact_dir__fix" in out
+    # The note must explain the cwd requirement
+    assert "$PWD" in out and "directory" in out.lower()
 
 
 def test_render_fix_section_links_to_the_page():

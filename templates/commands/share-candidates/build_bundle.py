@@ -78,9 +78,10 @@ def _strip_code_ticks(s: str) -> str:
 def _inline_no_links(text: str) -> str:
     """Escape HTML, then apply bold + inline code (no link processing)."""
     def _code(m: re.Match) -> str:
-        return "\x01" + html.escape(m.group(1)) + "\x02"
+        return "\x01" + m.group(1) + "\x02"
 
-    # Protect code spans from escaping their own content twice.
+    # The sentinels \x01/\x02 survive html.escape, so the single outer call
+    # escapes the code span's content exactly once.
     text = _CODE.sub(_code, text)
     text = html.escape(text)
     text = text.replace("\x01", "<code>").replace("\x02", "</code>")
@@ -932,6 +933,9 @@ def render_fix_page(cand_id: str, symbol: str, fx: dict,
         apply_parts.append(
             f'<p class="note">Base commit <span class="sha">{html.escape(base)}</span>'
             ' — the patch assumes this exact commit.</p>')
+    apply_parts.append(
+        f'<p class="note">Run these from the folder this page sits in — '
+        f'<code>$PWD</code> must be the directory holding <code>{html.escape(raw_reldir)}/</code>.</p>')
     apply_parts.append(f'<pre>{html.escape(apply_cmds)}</pre>')
     apply_parts.append(
         '<p class="note">If it does not apply cleanly, '
