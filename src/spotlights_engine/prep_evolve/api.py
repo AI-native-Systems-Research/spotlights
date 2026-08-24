@@ -339,7 +339,7 @@ def _gap_intro(evolver: str) -> str:
         return (
             "This campaign is **launchable but unscored**. `campaign.yaml` names the\n"
             "metric and which way it should move, but `ground_truth.pass_condition` is a\n"
-            "`TODO`. Nous will run the arms and report numbers; nothing decides whether\n"
+            "`TODO`. Nous will run and report numbers; nothing decides whether\n"
             "those numbers count as a win until you write that rule."
         )
     return (
@@ -393,13 +393,6 @@ def _gap_action(evolver: str, spec: EvolveSpec, cand: Target) -> str:
 
 
 def _scope_lead_in(evolver: str) -> str:
-    """Nous applies `code_changes[]` arms with no allowlist to enforce them, so
-    its README must not assert a guardrail nothing checks."""
-    if evolver == "nous":
-        return (
-            "The arms should confine their `code_changes[]` to these files. Nous does\n"
-            "not enforce this, so review each arm's diff before trusting a result:"
-        )
     return "Only these files may change:"
 
 
