@@ -1,7 +1,7 @@
 """Reading a candidate's declared scope out of an `EvolveSpec`.
 
 `prompts.py` writes the scope into the agent's prompt; `notes.py` writes it
-into `FIX-NOTES.md` and compares it against what the diff actually touched.
+into `APPLY-NOTES.md` and compares it against what the diff actually touched.
 Both had their own copy of `candidate_target` and of the scope-line
 formatter, kept in sync by a docstring cross-reference. A single home removes
 the drift risk: the prompt's "do not edit anything else" list and the notes'
@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING
 from spotlights_engine.prep_evolve.spec import EvolveSpec, Target
 
 if TYPE_CHECKING:  # `worktree` imports `prompts`, which imports this module.
-    from spotlights_engine.one_shot_fix.worktree import FileChange
+    from spotlights_engine.one_shot_apply.worktree import FileChange
 
 
 def candidate_target(spec: EvolveSpec) -> Target:
@@ -98,7 +98,7 @@ def out_of_scope_files(spec: EvolveSpec, manifest: Sequence[FileChange]) -> list
     This is the whole point of the manifest: derived from the diff, so it can
     (and does, when the agent strays) disagree with what was declared.
     Computed exactly once per candidate, in `api._write_artifacts`, and
-    threaded from there into both `FixArtifact` and the notes renderer — so
+    threaded from there into both `ApplyArtifact` and the notes renderer — so
     the artifact and the notes can never disagree about what strayed.
 
     Counts *both* ends of a rename (see `out_of_scope_paths`), so a rename out

@@ -1,4 +1,4 @@
-"""CLI for `spotlights-engine fix`.
+"""CLI for `spotlights-engine apply`.
 
 Wired into the top-level dispatch in `spotlights_engine.cli.main`. Argument
 shape deliberately mirrors `prep-evolve` (`--result`, `--repo`, `--index`,
@@ -7,7 +7,7 @@ are interchangeable at the call site.
 
 `--print-prompt` runs resolution, worktree creation, and validation, then
 prints the worktree path and the prompt and exits — leaving the worktree in
-place for `/spotlights-fix-candidate` to work in.
+place for `/spotlights-apply-candidate` to work in.
 """
 
 from __future__ import annotations
@@ -18,22 +18,22 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from spotlights_engine.one_shot_fix.api import (
+from spotlights_engine.one_shot_apply.api import (
     NOTES_NAME,
-    OneShotFixConfig,
-    OneShotFixInput,
-    one_shot_fix,
+    OneShotApplyConfig,
+    OneShotApplyInput,
+    one_shot_apply,
 )
-from spotlights_engine.one_shot_fix.errors import OneShotFixError
+from spotlights_engine.one_shot_apply.errors import OneShotApplyError
 from spotlights_engine.prep_evolve.errors import PrepEvolveError
 
 
 def _build_argparser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
-        prog="spotlights-engine fix",
+        prog="spotlights-engine apply",
         description=(
             "Implement one candidate with a single Claude Code session in a "
-            "throwaway git worktree, and write fix.patch + FIX-NOTES.md. "
+            "throwaway git worktree, and write apply.patch + APPLY-NOTES.md. "
             "Runs no tests and no benchmarks; the target repo is never modified."
         ),
     )
@@ -68,7 +68,7 @@ def _build_argparser() -> argparse.ArgumentParser:
     p.add_argument(
         "--candidate",
         default=None,
-        help="Candidate id, e.g. cand-....; omit to fix every candidate.",
+        help="Candidate id, e.g. cand-....; omit to apply every candidate.",
     )
     p.add_argument(
         "--out",
@@ -87,7 +87,7 @@ def _build_argparser() -> argparse.ArgumentParser:
         dest="top_n",
         default="all",
         help=(
-            "For a sorted --result: fix only the top N ranked candidates "
+            "For a sorted --result: apply only the top N ranked candidates "
             "('all' = every ranked candidate, the default)."
         ),
     )
@@ -127,7 +127,7 @@ def _parse_top_n(raw: str) -> int | None:
     return n
 
 
-# Maps `OneShotFixInput` field names to the CLI flag that sets them, so a
+# Maps `OneShotApplyInput` field names to the CLI flag that sets them, so a
 # pydantic validation error can name what the user actually typed instead of
 # the model's internal field name.
 _FIELD_TO_FLAG = {
@@ -138,7 +138,7 @@ _FIELD_TO_FLAG = {
 
 
 def _format_validation_error(exc: ValidationError) -> str:
-    """One `fix: --flag: <constraint>, got <value>` line per pydantic error.
+    """One `apply: --flag: <constraint>, got <value>` line per pydantic error.
 
     Deliberately drops pydantic's multi-line dump and its
     `https://errors.pydantic.dev/...` URL, and swaps the model field name
@@ -148,7 +148,7 @@ def _format_validation_error(exc: ValidationError) -> str:
     for err in exc.errors():
         field = str(err["loc"][0]) if err["loc"] else "arguments"
         flag = _FIELD_TO_FLAG.get(field, f"--{field.replace('_', '-')}")
-        lines.append(f"fix: {flag}: {err['msg']}, got {err.get('input')!r}")
+        lines.append(f"apply: {flag}: {err['msg']}, got {err.get('input')!r}")
     return "\n".join(lines)
 
 
@@ -159,14 +159,14 @@ def main(argv: list[str] | None = None) -> int:
         top_n = _parse_top_n(args.top_n)
     except ValueError as exc:
         print(
-            f"fix: --top-n must be a positive integer or 'all', got "
+            f"apply: --top-n must be a positive integer or 'all', got "
             f"{args.top_n!r} ({exc})",
             file=sys.stderr,
         )
         return 2
 
     try:
-        inp = OneShotFixInput(
+        inp = OneShotApplyInput(
             result=args.result,
             index=args.index,
             repo=args.repo,
@@ -184,9 +184,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        result = one_shot_fix(inp, OneShotFixConfig())
-    except (PrepEvolveError, OneShotFixError) as exc:
-        print(f"fix: {exc}", file=sys.stderr)
+        result = one_shot_apply(inp, OneShotApplyConfig())
+    except (PrepEvolveError, OneShotApplyError) as exc:
+        print(f"apply: {exc}", file=sys.stderr)
         return 2
 
     for w in result.warnings:
@@ -201,37 +201,37 @@ def main(argv: list[str] | None = None) -> int:
         print("PROMPT:")
         print(preview.prompt)
 
-    for fix in result.fixes:
+    for artifact in result.patches:
         # Three distinct states, not two: a failed diff also has no patch, but
         # printing it as "notes only" would read as the benign "the agent chose
         # not to edit anything" when the truth is that its edits were lost.
-        if fix.collection_error:
+        if artifact.collection_error:
             state = "notes only (patch collection FAILED)"
-        elif fix.patch_produced:
+        elif artifact.patch_produced:
             state = "patch + notes"
         else:
             state = "notes only (no patch)"
-        print(f"{fix.candidate_id}: {fix.path} ({state})")
-        if fix.collection_error:
+        print(f"{artifact.candidate_id}: {artifact.path} ({state})")
+        if artifact.collection_error:
             print(
-                f"warning: {fix.candidate_id}: could not collect the patch: "
-                f"{fix.collection_error} — the agent session ran but its edits "
+                f"warning: {artifact.candidate_id}: could not collect the patch: "
+                f"{artifact.collection_error} — the agent session ran but its edits "
                 f"were not captured and the worktree is gone; re-run this "
-                f"candidate. See {Path(fix.path) / NOTES_NAME}",
+                f"candidate. See {Path(artifact.path) / NOTES_NAME}",
                 file=sys.stderr,
             )
-        if fix.out_of_scope_files:
+        if artifact.out_of_scope_files:
             print(
-                f"warning: {fix.candidate_id}: patch touches files outside the "
-                f"declared scope: {', '.join(fix.out_of_scope_files)} — see "
-                f"{Path(fix.path) / NOTES_NAME}",
+                f"warning: {artifact.candidate_id}: patch touches files outside the "
+                f"declared scope: {', '.join(artifact.out_of_scope_files)} — see "
+                f"{Path(artifact.path) / NOTES_NAME}",
                 file=sys.stderr,
             )
 
-    if result.fixes:
+    if result.patches:
         print(
-            "fix: nothing was verified — no tests and no benchmarks were run. "
-            "See FIX-NOTES.md for the recorded oracles.",
+            "apply: nothing was verified — no tests and no benchmarks were run. "
+            "See APPLY-NOTES.md for the recorded oracles.",
             file=sys.stderr,
         )
     for s in result.skipped:
@@ -244,7 +244,7 @@ def main(argv: list[str] | None = None) -> int:
         label = f"  skipped {who}: " if who else "  skipped: "
         print(f"{label}{s.reason}", file=sys.stderr)
 
-    produced = result.fixes or result.prompts or result.skipped
+    produced = result.patches or result.prompts or result.skipped
     return 0 if produced else 1
 
 

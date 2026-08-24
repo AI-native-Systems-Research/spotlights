@@ -1,4 +1,4 @@
-"""`run_fix_claude` against a fake `claude` binary."""
+"""`run_apply_claude` against a fake `claude` binary."""
 
 from __future__ import annotations
 
@@ -9,11 +9,11 @@ from pathlib import Path
 import pytest
 
 from spotlights_engine.agent_proposals.errors import AgentProposalsSetupError
-from spotlights_engine.one_shot_fix.claude_exec import (
+from spotlights_engine.one_shot_apply.claude_exec import (
     ensure_claude_available,
-    run_fix_claude,
+    run_apply_claude,
 )
-from tests.unit.one_shot_fix._fixtures import (
+from tests.unit.one_shot_apply._fixtures import (
     FAKE_CLAUDE_ARGV_RECORDER,
     FAKE_CLAUDE_ENV_RECORDER,
     FAKE_CLAUDE_FAILURE,
@@ -37,7 +37,7 @@ def test_successful_run_edits_the_worktree_and_captures_usage(
     fake = write_fake_claude(tmp_path / "bin", script=FAKE_CLAUDE_SUCCESS)
     prepend_to_path(monkeypatch, fake.parent)
 
-    result = run_fix_claude(
+    result = run_apply_claude(
         candidate_id="cand-v1_attention-0002",
         prompt="do the thing",
         worktree=repo,
@@ -60,7 +60,7 @@ def test_nonzero_exit_is_reported_as_an_error(
     fake = write_fake_claude(tmp_path / "bin", script=FAKE_CLAUDE_FAILURE)
     prepend_to_path(monkeypatch, fake.parent)
 
-    result = run_fix_claude(
+    result = run_apply_claude(
         candidate_id="c1", prompt="p", worktree=repo, max_turns=5, wallclock_s=30
     )
 
@@ -82,7 +82,7 @@ def test_missing_result_event_is_not_an_error(
         monkeypatch, write_fake_claude(tmp_path / "bin", script=FAKE_CLAUDE_NO_RESULT_EVENT).parent
     )
 
-    result = run_fix_claude(
+    result = run_apply_claude(
         candidate_id="c1", prompt="p", worktree=repo, max_turns=5, wallclock_s=30
     )
 
@@ -100,7 +100,7 @@ def test_argv_carries_the_edit_permissions_and_turn_cap(
         monkeypatch, write_fake_claude(tmp_path / "bin", script=FAKE_CLAUDE_ARGV_RECORDER).parent
     )
 
-    run_fix_claude(
+    run_apply_claude(
         candidate_id="c1",
         prompt="THE-PROMPT",
         worktree=repo,
@@ -117,7 +117,7 @@ def test_argv_carries_the_edit_permissions_and_turn_cap(
 def test_prompt_travels_on_stdin_not_argv(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A fix prompt embeds the whole findings digest and is unbounded in principle.
+    """A apply prompt embeds the whole findings digest and is unbounded in principle.
 
     On argv it would hit a platform limit (Linux caps one argv element at
     `MAX_ARG_STRLEN` = 128 KiB; macOS caps env + argv together at 1 MiB) and
@@ -139,7 +139,7 @@ def test_prompt_travels_on_stdin_not_argv(
     # ever moved back onto argv.
     prompt = "THE-PROMPT " + ("x" * 200_000)
 
-    result = run_fix_claude(
+    result = run_apply_claude(
         candidate_id="c1",
         prompt=prompt,
         worktree=repo,
@@ -158,8 +158,8 @@ def test_anthropic_auth_token_is_scrubbed_from_the_child_env(
 ) -> None:
     """Inherited, this token overrides the child's keychain credentials.
 
-    `fix` is designed to be launched from inside a Claude Code session (that is
-    what `/spotlights-fix-candidate` does), and such a session sets
+    `apply` is designed to be launched from inside a Claude Code session (that is
+    what `/spotlights-apply-candidate` does), and such a session sets
     `ANTHROPIC_AUTH_TOKEN` in the environment. Inherited by the spawned
     `claude`, it wins over the keychain credentials and the session dies with
     `401 Invalid bearer token`.
@@ -174,7 +174,7 @@ def test_anthropic_auth_token_is_scrubbed_from_the_child_env(
         monkeypatch, write_fake_claude(tmp_path / "bin", script=FAKE_CLAUDE_ENV_RECORDER).parent
     )
 
-    run_fix_claude(
+    run_apply_claude(
         candidate_id="c1", prompt="p", worktree=repo, max_turns=5, wallclock_s=30
     )
 
@@ -207,7 +207,7 @@ def test_argv_denies_git_write_commands_that_escape_the_worktree(
         monkeypatch, write_fake_claude(tmp_path / "bin", script=FAKE_CLAUDE_ARGV_RECORDER).parent
     )
 
-    run_fix_claude(
+    run_apply_claude(
         candidate_id="c1",
         prompt="THE-PROMPT",
         worktree=repo,
@@ -320,7 +320,7 @@ def test_timeout_is_reported_as_an_error(
         write_fake_claude(tmp_path / "bin", script="#!/bin/sh\nsleep 5\n").parent,
     )
 
-    result = run_fix_claude(
+    result = run_apply_claude(
         candidate_id="c1", prompt="p", worktree=repo, max_turns=5, wallclock_s=1
     )
 

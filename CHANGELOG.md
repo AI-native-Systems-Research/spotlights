@@ -14,14 +14,14 @@ The first end-to-end version: point it at a repo and a goal, get a ranked, brows
 - **Module scoping** — `--include` limits a run to the modules you name (slash-form, e.g. `vllm/v1/kv_offload`). Nothing outside the scope is extracted or researched. Narrower scope reduces run time and cost.
 - **Cost tracking** — `run_manifest.json` records provenance, token usage, and price.
 - **`prep-evolve`** — packages a chosen candidate as a ready-to-run bundle for an external evolver (skydiscover, coral, nous).
-- **`fix`** — one Claude Code session turns a candidate into a code fix.
+- **`apply`** — one Claude Code session turns a candidate into a reviewable patch.
 
 ### Skills
 
 - **`/spotlights-objective-setting`** — interview that turns a vague goal into ready-to-paste `--objective` / `--hint` flags.
 - **`/spotlights-sort-candidates`** — ranks a finished run's candidates by estimated impact into `sorted_candidates.md` / `.json`.
 - **`/spotlights-share-candidates`** — packages the top-N candidates into a self-contained offline ZIP.
-- **`/spotlights-fix-candidate`** — drives `spotlights-engine fix` in-session.
+- **`/spotlights-apply-candidate`** — drives `spotlights-engine apply` in-session.
 
 ### Known limitations
 

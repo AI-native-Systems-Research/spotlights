@@ -1,4 +1,4 @@
-"""FIX-NOTES.md content: oracles verbatim, base commit, no-verification statement."""
+"""APPLY-NOTES.md content: oracles verbatim, base commit, no-verification statement."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from spotlights_engine.one_shot_fix.notes import render_fix_notes
-from spotlights_engine.one_shot_fix.scope import candidate_target, out_of_scope_files
-from spotlights_engine.one_shot_fix.worktree import FileChange
+from spotlights_engine.one_shot_apply.notes import render_apply_notes
+from spotlights_engine.one_shot_apply.scope import candidate_target, out_of_scope_files
+from spotlights_engine.one_shot_apply.worktree import FileChange
 from spotlights_engine.prep_evolve.extract import build_spec, infer_direction
 from spotlights_engine.prep_evolve.resolve import (
     find_candidate,
@@ -76,12 +76,12 @@ def _notes(spec_and_repo, **overrides) -> str:
         ],
     }
     kwargs.update(overrides)
-    # `render_fix_notes` takes the out-of-scope verdict rather than deriving
-    # it, so the notes and `FixArtifact` can never disagree. Mirror what
+    # `render_apply_notes` takes the out-of-scope verdict rather than deriving
+    # it, so the notes and `ApplyArtifact` can never disagree. Mirror what
     # `api._write_artifacts` does, and derive it from whichever manifest the
     # test supplied.
     kwargs.setdefault("out_of_scope", out_of_scope_files(spec, kwargs["manifest"]))
-    return render_fix_notes(**kwargs)
+    return render_apply_notes(**kwargs)
 
 
 def test_records_identity_and_base_commit(spec_and_repo) -> None:
@@ -111,12 +111,12 @@ def test_includes_the_apply_and_verify_recipe(spec_and_repo) -> None:
     spec, repo = spec_and_repo
     notes = _notes(spec_and_repo)
     assert f"git -C {repo} checkout {BASE_SHA}" in notes
-    assert f'git -C {repo} apply --check "$PWD/fix.patch"' in notes
-    assert f'git -C {repo} apply "$PWD/fix.patch"' in notes
+    assert f'git -C {repo} apply --check "$PWD/apply.patch"' in notes
+    assert f'git -C {repo} apply "$PWD/apply.patch"' in notes
     assert f"git -C {repo} apply -3" in notes
-    assert "patch -p1 < fix.patch" in notes
+    assert "patch -p1 < apply.patch" in notes
     assert "repo root" in notes
-    # Prose anchoring $PWD to where fix.patch (and this file) actually live.
+    # Prose anchoring $PWD to where apply.patch (and this file) actually live.
     assert "directory containing" in notes
 
 
@@ -167,16 +167,16 @@ def test_apply_recipe_says_run_them_all_when_there_are_several(spec_and_repo) ->
 def test_apply_recipe_is_not_location_dependent(spec_and_repo) -> None:
     """Regression guard against BOTH previously-shipped broken forms.
 
-    Form 1 (bare, no `-C`): `git apply --check fix.patch` either fails with
-    "not a git repository" when run from wherever FIX-NOTES.md was saved, or
+    Form 1 (bare, no `-C`): `git apply --check apply.patch` either fails with
+    "not a git repository" when run from wherever APPLY-NOTES.md was saved, or
     — worse — silently applies against whatever unrelated git repo happens to
     contain that directory.
 
     Form 2 (`-C` but a bare patch path): `git -C {repo} apply --check
-    fix.patch` chdirs into `{repo}` first, so git then resolves the
-    *relative* `fix.patch` under `{repo}` — not under the artifact directory
+    apply.patch` chdirs into `{repo}` first, so git then resolves the
+    *relative* `apply.patch` under `{repo}` — not under the artifact directory
     where the file actually lives. Verified in a scratch repo: this fails
-    with "can't open patch 'fix.patch': No such file or directory" (exit
+    with "can't open patch 'apply.patch': No such file or directory" (exit
     128) when run from the artifact directory. This was the state after the
     first "fix" of this finding — neither form worked.
 
@@ -185,10 +185,10 @@ def test_apply_recipe_is_not_location_dependent(spec_and_repo) -> None:
     """
     spec, repo = spec_and_repo
     notes = _notes(spec_and_repo)
-    assert "git apply --check fix.patch" not in notes
-    assert "git apply fix.patch" not in notes
-    assert f"git -C {repo} apply --check fix.patch" not in notes
-    assert f"git -C {repo} apply fix.patch" not in notes
+    assert "git apply --check apply.patch" not in notes
+    assert "git apply apply.patch" not in notes
+    assert f"git -C {repo} apply --check apply.patch" not in notes
+    assert f"git -C {repo} apply apply.patch" not in notes
 
 
 def test_the_emitted_apply_recipe_actually_applies_from_the_artifact_directory(
@@ -227,7 +227,7 @@ def test_the_emitted_apply_recipe_actually_applies_from_the_artifact_directory(
     subprocess.run(["git", "checkout", "-q", "--", "f.txt"], cwd=target_repo, check=True)
     assert tracked.read_text(encoding="utf-8") == "line1\n"
 
-    notes = render_fix_notes(
+    notes = render_apply_notes(
         spec=spec,
         candidate_id=CAND_ID,
         module_qn="v1/attention",
@@ -242,7 +242,7 @@ def test_the_emitted_apply_recipe_actually_applies_from_the_artifact_directory(
 
     artifact_dir = tmp_path / "artifact"
     artifact_dir.mkdir()
-    (artifact_dir / "fix.patch").write_text(patch_text, encoding="utf-8")
+    (artifact_dir / "apply.patch").write_text(patch_text, encoding="utf-8")
 
     bash_block = notes.split("```bash\n", 1)[1].split("```", 1)[0]
     apply_lines = [
@@ -534,7 +534,7 @@ def test_declared_scope_normalizes_dot_and_dotdot_segments(spec_and_repo) -> Non
     assert out_of_scope_files(spec, manifest) == []
 
 
-def test_render_fix_notes_requires_manifest(spec_and_repo) -> None:
+def test_render_apply_notes_requires_manifest(spec_and_repo) -> None:
     """Minor 7: `manifest` must be a required keyword, not `()`-defaulted.
 
     A caller that passes `patch_produced=True` but forgets `manifest` used to
@@ -544,7 +544,7 @@ def test_render_fix_notes_requires_manifest(spec_and_repo) -> None:
     """
     import inspect
 
-    sig = inspect.signature(render_fix_notes)
+    sig = inspect.signature(render_apply_notes)
     assert sig.parameters["manifest"].default is inspect.Parameter.empty
 
 
@@ -576,7 +576,7 @@ def test_agent_error_is_recorded(spec_and_repo) -> None:
 def test_a_backtick_in_the_agent_error_does_not_break_its_code_span(spec_and_repo) -> None:
     """`agent_error` carries the tail of the agent's own stderr — arbitrary text.
 
-    `claude_exec.run_fix_claude` builds it as `claude exit=N: stderr=<repr>`, so
+    `claude_exec.run_apply_claude` builds it as `claude exit=N: stderr=<repr>`, so
     whatever the CLI wrote lands here, backticks included. A plain `` ` ``
     wrapper closes at the first one and spills the rest of the error into the
     document as prose, on the one line a reader came to this section for.
@@ -672,7 +672,7 @@ def test_the_apply_recipe_survives_a_repo_path_containing_spaces(
     ).stdout
     subprocess.run(["git", "checkout", "-q", "--", "f.txt"], cwd=target_repo, check=True)
 
-    notes = render_fix_notes(
+    notes = render_apply_notes(
         spec=spec,
         candidate_id=CAND_ID,
         module_qn="v1/attention",
@@ -687,7 +687,7 @@ def test_the_apply_recipe_survives_a_repo_path_containing_spaces(
 
     artifact_dir = tmp_path / "artifact"
     artifact_dir.mkdir()
-    (artifact_dir / "fix.patch").write_text(patch_text, encoding="utf-8")
+    (artifact_dir / "apply.patch").write_text(patch_text, encoding="utf-8")
 
     bash_block = notes.split("```bash\n", 1)[1].split("```", 1)[0]
     script = "\n".join(ln for ln in bash_block.splitlines() if ln.startswith("git -C"))

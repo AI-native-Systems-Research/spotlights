@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from spotlights_engine.one_shot_fix.errors import NotAGitRepoError
-from spotlights_engine.one_shot_fix.prompts import CHANGE_SUMMARY_NAME
-from spotlights_engine.one_shot_fix.worktree import (
+from spotlights_engine.one_shot_apply.errors import NotAGitRepoError
+from spotlights_engine.one_shot_apply.prompts import CHANGE_SUMMARY_NAME
+from spotlights_engine.one_shot_apply.worktree import (
     FileChange,
     collect_patch,
     create_worktree,
@@ -335,7 +335,7 @@ def test_remove_worktree_never_raises_even_when_git_fails(
     escaping the git call inside `remove_worktree`) deterministically and
     without a 120s wait or brittle filesystem tricks.
     """
-    import spotlights_engine.one_shot_fix.worktree as worktree_mod
+    import spotlights_engine.one_shot_apply.worktree as worktree_mod
 
     repo = make_repo(tmp_path)
     wt = create_worktree(repo, require_git_repo(repo))
@@ -357,7 +357,7 @@ def test_collect_patch_survives_a_tab_in_a_filename(tmp_path: Path) -> None:
     makes `git diff --numstat -z` emit a *4*-field record
     (`added\\tdeleted\\ttab\\tname.py\\0`). The naive `split("\\t")` used to
     raise `ValueError: too many values to unpack`, which — uncaught by
-    `api.py`'s `(PrepEvolveError, OneShotFixError)` handler — aborted the
+    `api.py`'s `(PrepEvolveError, OneShotApplyError)` handler — aborted the
     entire sweep and (because `collect_patch` runs inside the `try` whose
     `finally` removes the worktree) discarded the whole session's work before
     `_write_artifacts` ever ran. Tabs in filenames are legal on POSIX.
@@ -397,7 +397,7 @@ def test_collect_patch_diffs_against_base_sha_not_head(tmp_path: Path) -> None:
     diffing against `HEAD` after such a reset silently changes the diff's
     base out from under the caller. Diffing against `wt.base_sha` (the
     commit the worktree was actually created at, and the same value recorded
-    in `fix.patch`'s header and `FIX-NOTES.md`) is immune to this.
+    in `apply.patch`'s header and `APPLY-NOTES.md`) is immune to this.
 
     Reproduced directly against real git: base_sha = c2 ("v2"); the agent
     edits the file to "v3-agent" (uncommitted); the agent runs
@@ -447,7 +447,7 @@ def test_manifest_survives_a_malformed_numstat_record_without_crashing(
     crash class as Critical 1's tab bug, guarded against directly so a future
     git output surprise can't reintroduce it.
     """
-    import spotlights_engine.one_shot_fix.worktree as worktree_mod
+    import spotlights_engine.one_shot_apply.worktree as worktree_mod
 
     repo = make_repo(tmp_path)
     wt = create_worktree(repo, require_git_repo(repo))
@@ -487,7 +487,7 @@ def test_collect_patch_preserves_the_patch_when_manifest_building_blows_up(
     collected) must still come back rather than the whole collection failing
     and losing the agent's work.
     """
-    import spotlights_engine.one_shot_fix.worktree as worktree_mod
+    import spotlights_engine.one_shot_apply.worktree as worktree_mod
 
     repo = make_repo(tmp_path)
     wt = create_worktree(repo, require_git_repo(repo))
@@ -560,7 +560,7 @@ def test_collected_patch_with_non_utf8_bytes_still_applies(tmp_path: Path) -> No
     assert b"\xff\xfe" in collection.patch, "the invalid bytes were re-encoded"
     assert b"\xef\xbf\xbd" not in collection.patch, "U+FFFD replacement leaked in"
 
-    patch_file = tmp_path / "fix.patch"
+    patch_file = tmp_path / "apply.patch"
     patch_file.write_bytes(collection.patch)
     applied = subprocess.run(
         ["git", "apply", "--check", str(patch_file)],
@@ -579,7 +579,7 @@ def test_a_change_summary_tracked_by_the_repo_is_not_deleted_by_the_patch(
     Reading the agent's rationale means unlinking `CHANGE-SUMMARY.md`. If the
     target repo happens to *track* a file by that name, `git add -N .` fully
     stages that deletion and the diff-against-base faithfully reports it — so
-    `fix.patch` ships a hunk deleting a repo file the agent never touched.
+    `apply.patch` ships a hunk deleting a repo file the agent never touched.
     Restoring the committed copy after the read undoes exactly the
     collector's own edit.
     """
@@ -615,7 +615,7 @@ def test_a_change_summary_tracked_by_the_repo_is_not_read_as_the_agents_rational
     A repo that tracks that path hands a copy to every worktree made from it,
     so the file is on disk before the agent has run. A bare `is_file()` cannot
     tell that copy apart from one the agent wrote, and read the repo's own
-    content into `FIX-NOTES.md`'s "What changed and why" as though the agent
+    content into `APPLY-NOTES.md`'s "What changed and why" as though the agent
     had written it — a fabricated rationale in the document a reviewer relies
     on to know what was actually done.
 
@@ -661,7 +661,7 @@ def test_collect_patch_survives_a_git_failure_while_restoring_the_change_summary
     numbers of an agent session that had already finished and already been
     paid for.
     """
-    import spotlights_engine.one_shot_fix.worktree as worktree_mod
+    import spotlights_engine.one_shot_apply.worktree as worktree_mod
 
     repo = make_repo(tmp_path)
     wt = create_worktree(repo, require_git_repo(repo))
@@ -699,7 +699,7 @@ def test_a_half_binary_numstat_record_reports_unknown_counts_not_none(
     back with `counts_known=True` and a `None` count, which the notes
     rendered as the nonsense `+None/-0`.
     """
-    import spotlights_engine.one_shot_fix.worktree as worktree_mod
+    import spotlights_engine.one_shot_apply.worktree as worktree_mod
 
     repo = make_repo(tmp_path)
     wt = create_worktree(repo, require_git_repo(repo))
@@ -737,7 +737,7 @@ def test_a_truncated_name_status_stream_keeps_the_records_that_parsed(
     raw string, so it raised again and the manifest degraded all the way to
     `[]` — silently switching off the out-of-scope check for that patch.
     """
-    import spotlights_engine.one_shot_fix.worktree as worktree_mod
+    import spotlights_engine.one_shot_apply.worktree as worktree_mod
 
     repo = make_repo(tmp_path)
     wt = create_worktree(repo, require_git_repo(repo))
@@ -786,7 +786,7 @@ def test_a_numstat_rename_record_missing_its_path_tokens_keeps_every_count() -> 
     `unknown`. That is the failure this test exists to prevent, so read it
     before making the two parsers look alike.
     """
-    from spotlights_engine.one_shot_fix.worktree import _build_manifest
+    from spotlights_engine.one_shot_apply.worktree import _build_manifest
 
     # `M<NUL>path<NUL>` then `R100<NUL>old<NUL>new<NUL>` — complete.
     name_status = "M\0pkg/attn/tile.py\0R100\0pkg/attn/old.py\0pkg/attn/new.py\0"

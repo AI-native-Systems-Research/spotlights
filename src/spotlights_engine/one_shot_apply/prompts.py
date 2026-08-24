@@ -1,28 +1,28 @@
-"""The one-shot fix prompt — the single source of truth.
+"""The one-shot apply prompt — the single source of truth.
 
-`spotlights-engine fix` builds the prompt with `build_fix_prompt` and feeds it
-to `claude -p`; `fix --print-prompt` prints the same string for
-`/spotlights-fix-candidate` to work from in-session. The prompt is shared so
+`spotlights-engine apply` builds the prompt with `build_apply_prompt` and feeds it
+to `claude -p`; `apply --print-prompt` prints the same string for
+`/spotlights-apply-candidate` to work from in-session. The prompt is shared so
 the two paths cannot drift on the part that matters.
 
 The findings/proposals/target body is `prep_evolve.digest.render_digest`, the
 same block every evolver bundle embeds. What this module adds around it is the
-fix-specific contract: the worktree to edit, the hard scope boundary, the base
+apply-specific contract: the worktree to edit, the hard scope boundary, the base
 commit, the oracles as a recipe rather than a task, and the instruction to
-write a rationale file the collector folds into FIX-NOTES.md.
+write a rationale file the collector folds into APPLY-NOTES.md.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from spotlights_engine.one_shot_fix.scope import candidate_target, scope_lines
+from spotlights_engine.one_shot_apply.scope import candidate_target, scope_lines
 from spotlights_engine.prep_evolve.digest import render_digest
 from spotlights_engine.prep_evolve.spec import EvolveSpec, Target
 
 # The agent writes its rationale here, in the worktree root. `collect_patch`
 # reads it and removes it *before* `git add -N`, so it never lands in the
-# patch; `render_fix_notes` folds the text into FIX-NOTES.md.
+# patch; `render_apply_notes` folds the text into APPLY-NOTES.md.
 CHANGE_SUMMARY_NAME = "CHANGE-SUMMARY.md"
 
 
@@ -44,8 +44,8 @@ def _oracle_block(target: Target) -> str:
     return "\n".join(lines)
 
 
-def build_fix_prompt(*, spec: EvolveSpec, worktree: Path) -> str:
-    """Render the fix prompt for one candidate.
+def build_apply_prompt(*, spec: EvolveSpec, worktree: Path) -> str:
+    """Render the apply prompt for one candidate.
 
     `spec.run.repo_path` is the real target repo (identity); `worktree` is the
     detached, throwaway checkout the agent actually edits.
@@ -89,4 +89,4 @@ extensions — nothing in it is runnable.
 """.strip()
 
 
-__all__ = ["CHANGE_SUMMARY_NAME", "build_fix_prompt"]
+__all__ = ["CHANGE_SUMMARY_NAME", "build_apply_prompt"]

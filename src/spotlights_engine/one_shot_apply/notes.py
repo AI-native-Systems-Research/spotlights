@@ -1,4 +1,4 @@
-"""`FIX-NOTES.md` — the patch's travelling documentation.
+"""`APPLY-NOTES.md` — the patch's travelling documentation.
 
 The notes make the patch self-contained for a reviewer on another machine:
 what was proposed, what changed and why, which research backed it, **which
@@ -17,13 +17,13 @@ import shlex
 from collections.abc import Sequence
 from pathlib import Path
 
-from spotlights_engine.one_shot_fix.scope import (
+from spotlights_engine.one_shot_apply.scope import (
     candidate_target,
     declared_scope,
     out_of_scope_paths,
     scope_lines,
 )
-from spotlights_engine.one_shot_fix.worktree import FileChange
+from spotlights_engine.one_shot_apply.worktree import FileChange
 from spotlights_engine.prep_evolve.spec import EvolveSpec, Target
 
 
@@ -133,7 +133,7 @@ def _manifest_section(
     difference between them is exactly what a reviewer needs to catch before
     applying a patch they cannot otherwise see without applying it.
 
-    `out_of_scope` is passed in, never recomputed here: `FixArtifact` (and so
+    `out_of_scope` is passed in, never recomputed here: `ApplyArtifact` (and so
     the CLI warning) carries the same list, and a reader who sees the CLI warn
     about two files must not open the notes and find three. One computation,
     in `api._write_artifacts`, feeds both.
@@ -162,7 +162,7 @@ def _manifest_section(
         return (
             "## Files changed\n\n"
             "_(a patch was produced, but the per-file breakdown could not be "
-            "collected — see `fix.patch` directly for what changed)_\n"
+            "collected — see `apply.patch` directly for what changed)_\n"
         )
 
     declared = declared_scope(spec)
@@ -236,7 +236,7 @@ def _outcome_section(
     summary = change_summary.strip() if change_summary else "_(the agent left no summary)_"
     if agent_error:
         # `_code_span`, not a bare `` `...` ``: `agent_error` carries the tail of
-        # the agent's own stderr (see `claude_exec.run_fix_claude`), so its
+        # the agent's own stderr (see `claude_exec.run_apply_claude`), so its
         # content is arbitrary CLI output. One backtick in there closes a plain
         # span early and spills the rest of the error into the document as
         # prose — precisely the line a reader turns to this section for.
@@ -297,23 +297,23 @@ def _outcome_section(
 ## Applying and verifying this patch
 
 Run this from the directory containing this file — the same directory
-`fix.patch` sits in:
+`apply.patch` sits in:
 
 ```bash
 git -C {repo_arg} checkout {base_sha}
-git -C {repo_arg} apply --check "$PWD/fix.patch" && git -C {repo_arg} apply "$PWD/fix.patch"
+git -C {repo_arg} apply --check "$PWD/apply.patch" && git -C {repo_arg} apply "$PWD/apply.patch"
 
 {oracle_intro}
 {oracle_lines}
 ```
 
-If the patch does not apply cleanly, `git -C {repo_arg} apply -3 "$PWD/fix.patch"`
-falls back to a three-way merge. Without git, `patch -p1 < fix.patch` works
+If the patch does not apply cleanly, `git -C {repo_arg} apply -3 "$PWD/apply.patch"`
+falls back to a three-way merge. Without git, `patch -p1 < apply.patch` works
 from the repo root.
 """
 
 
-def render_fix_notes(
+def render_apply_notes(
     *,
     spec: EvolveSpec,
     candidate_id: str,
@@ -327,14 +327,14 @@ def render_fix_notes(
     out_of_scope: Sequence[str],
     collect_error: str | None = None,
 ) -> str:
-    """Render `FIX-NOTES.md` for one candidate.
+    """Render `APPLY-NOTES.md` for one candidate.
 
     `manifest` is the per-file breakdown of what the patch actually touched
     (see `worktree.collect_patch`) — always derived from the diff, never from
     `spec.targets`, so it can surface a patch that strayed outside scope.
 
     `out_of_scope` is that comparison's verdict, computed once by the caller
-    (`api._write_artifacts`) and shared with `FixArtifact`, so the notes and
+    (`api._write_artifacts`) and shared with `ApplyArtifact`, so the notes and
     the CLI warning cannot disagree.
 
     `collect_error` outranks `patch_produced`: when the diff itself could not
@@ -343,7 +343,7 @@ def render_fix_notes(
     instead of the (unknowable) claim that no edit was made.
     """
     target = candidate_target(spec)
-    return f"""# Fix notes — {candidate_id}
+    return f"""# Apply notes — {candidate_id}
 
 - **Candidate:** `{candidate_id}`
 - **Module:** `{module_qn}`
@@ -393,4 +393,4 @@ verification recipe for a machine that can run them.
 )}"""
 
 
-__all__ = ["render_fix_notes"]
+__all__ = ["render_apply_notes"]
