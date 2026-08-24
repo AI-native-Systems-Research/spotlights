@@ -963,5 +963,54 @@ def test_build_without_fix_tree_reports_zero():
     assert result["count"] == 1
 
 
+def test_render_index_fix_badge_and_footer_link():
+    header = {"title": "T", "objective": "O"}
+    rows = [
+        {"rank": "1", "cand_id": "cand-a-0001", "module": "m", "symbol": "foo",
+         "impact": "high", "score": "96", "rationale": "R",
+         "html_href": "candidates/modules/m/foo__cand-a-0001.html",
+         "fix_stat": "1 file changed, +69/−26",
+         "fix_href": "candidates/modules/m/foo__cand-a-0001__fix.html"},
+    ]
+    idx = bb.render_index(header, rows)
+    assert '<span class="badge fix">fix · 1 file changed, +69/−26</span>' in idx
+    assert 'class="fix-link"' in idx
+    assert 'href="candidates/modules/m/foo__cand-a-0001__fix.html"' in idx
+
+
+def test_render_index_shows_both_pills_with_fix_first():
+    header = {"title": "T", "objective": "O"}
+    rows = [
+        {"rank": "1", "cand_id": "cand-a-0001", "module": "m", "symbol": "foo",
+         "impact": "high", "score": "96", "rationale": "R",
+         "html_href": "candidates/modules/m/foo__cand-a-0001.html",
+         "fix_stat": "1 file changed, +69/−26",
+         "fix_href": "candidates/modules/m/foo__cand-a-0001__fix.html",
+         "evolve_count": 2, "evolve_engines": ["coral", "nous"],
+         "evolve_href": "candidates/modules/m/foo__cand-a-0001__evolve.html"},
+    ]
+    idx = bb.render_index(header, rows)
+    assert 'class="fix-link"' in idx and 'class="evolve-link"' in idx
+    assert idx.index('class="fix-link"') < idx.index('class="evolve-link"')
+    assert '<span class="badge fix">' in idx
+    assert '<span class="badge evolve">evolve · 2</span>' in idx
+
+
+def test_render_index_fix_only_row_has_no_evolve_markup():
+    header = {"title": "T", "objective": "O"}
+    rows = [
+        {"rank": "1", "cand_id": "cand-a-0001", "module": "m", "symbol": "foo",
+         "impact": "high", "score": "96", "rationale": "R",
+         "html_href": "candidates/modules/m/foo__cand-a-0001.html",
+         "fix_stat": "1 file changed, +69/−26",
+         "fix_href": "candidates/modules/m/foo__cand-a-0001__fix.html"},
+    ]
+    idx = bb.render_index(header, rows)
+    # NB: the embedded _CSS mentions `.badge.evolve` and `.evolve-link`, so
+    # assert on the *markup* the loop would emit, not on the bare word.
+    assert 'class="evolve-link"' not in idx
+    assert '<span class="badge evolve">' not in idx
+
+
 if __name__ == "__main__":
     _run_all()

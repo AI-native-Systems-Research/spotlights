@@ -249,7 +249,8 @@ hr { border: 0; border-top: 1px solid #e2e5e9; margin: 1.6rem 0; }
 /* --- evolve bundles --- */
 .badge.evolve { background: #e8e3fd; color: #4c2a9b; }
 .card-main { display:block; text-decoration:none; color:inherit; }
-.card-foot { margin-top:.7rem; padding-top:.6rem; border-top:1px dashed #e2e5e9; }
+.card-foot { margin-top:.7rem; padding-top:.6rem; border-top:1px dashed #e2e5e9;
+  display:flex; gap:8px; flex-wrap:wrap; }
 .evolve-link { display:inline-flex; align-items:center; gap:.45em;
   font-size:.85rem; font-weight:600; color:#4c2a9b; background:#f1edfd;
   border:1px solid #d9cffb; border-radius:999px; padding:.32em .85em;
@@ -374,30 +375,37 @@ def render_index(header: dict, rows: list[dict]) -> str:
         parts.append(f'<p class="subtitle">{render_inline(header["objective"])}</p>')
     for r in rows:
         impact_cls = "impact-high" if r["impact"].lower() == "high" else ""
+        fix_stat = r.get("fix_stat", "")
+        fix_badge = (f'<span class="badge fix">fix · {html.escape(fix_stat)}</span>'
+                     if fix_stat else "")
         evolve_count = r.get("evolve_count", 0)
         evolve_badge = (f'<span class="badge evolve">evolve · {evolve_count}</span>'
                         if evolve_count else "")
-        # The whole card is one anchor to the candidate page; the evolve link
-        # lives in a separate footer anchor so we never nest <a> in <a>.
+        # The whole card is one anchor to the candidate page; the follow-on arm
+        # links live in a separate footer so we never nest <a> in <a>.
         card_main = (
             f'<a class="card-main" href="{html.escape(r["html_href"])}">'
             f'<div class="row1">'
             f'<span class="rank">#{html.escape(r["rank"])}</span>'
             f'<span class="sym">{html.escape(r["symbol"])}</span>'
             f'<span class="mod">{html.escape(r["module"])}</span>'
-            f'<span class="badges">{evolve_badge}'
+            f'<span class="badges">{fix_badge}{evolve_badge}'
             f'<span class="badge {impact_cls}">{html.escape(r["impact"])}</span>'
             f'<span class="badge score">score {html.escape(r["score"])}</span>'
             f'</span></div>'
             f'<p class="rationale">{render_inline(r["rationale"])}</p>'
             f'</a>'
         )
-        foot = ""
+        # Fix first: it is the cheap arm, evolve the expensive one.
+        pills = []
+        if fix_stat:
+            pills.append(f'<a class="fix-link" href="{html.escape(r["fix_href"])}">'
+                         f'🔧 One-shot fix: {html.escape(fix_stat)} →</a>')
         if evolve_count:
             engines = " · ".join(r.get("evolve_engines", []))
-            foot = (f'<div class="card-foot"><a class="evolve-link" '
-                    f'href="{html.escape(r["evolve_href"])}">⚙ Evolve bundles: '
-                    f'{html.escape(engines)} →</a></div>')
+            pills.append(f'<a class="evolve-link" href="{html.escape(r["evolve_href"])}">'
+                         f'⚙ Evolve bundles: {html.escape(engines)} →</a>')
+        foot = f'<div class="card-foot">{"".join(pills)}</div>' if pills else ""
         parts.append(f'<div class="card">{card_main}{foot}</div>')
     return _doc(header.get("title", "Candidates"), "\n".join(parts))
 
