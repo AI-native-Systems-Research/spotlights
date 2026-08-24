@@ -53,6 +53,91 @@ def test_inline_code_span_escapes_html_metacharacters_exactly_once():
     assert "&amp;amp;" not in out_indirect
 
 
+_ARXIV = "https://arxiv.org/abs/2309.06180"
+
+
+def _anchor(url, text=None):
+    return f'<a href="{url}" target="_blank" rel="noopener">{text or url}</a>'
+
+
+def test_render_inline_bare_url_in_prose_is_clickable():
+    # The engine writes FIX-NOTES.md references as bare URLs, not autolinks.
+    out = bb.render_inline(f"Ref (paper) — {_ARXIV} and more")
+    assert _anchor(_ARXIV) in out
+
+
+def test_render_inline_bare_url_trailing_punctuation_stays_outside():
+    for punct in (".", ",", ";", ":"):
+        out = bb.render_inline(f"See {_ARXIV}{punct}")
+        assert out.endswith(_anchor(_ARXIV) + punct), (punct, out)
+
+
+def test_render_inline_parenthesised_bare_url_keeps_the_paren_outside():
+    out = bb.render_inline(f"(see {_ARXIV})")
+    assert _anchor(_ARXIV) + ")" in out
+    # ...but a paren that belongs to the URL is kept inside it
+    wiki = "https://en.wikipedia.org/wiki/PagedAttention_(vLLM)"
+    assert _anchor(wiki) in bb.render_inline(f"see {wiki} here")
+
+
+def test_render_inline_bare_url_in_code_span_stays_literal():
+    # The \x01/\x02 code-span sentinels must shield the URL from linkification.
+    out = bb.render_inline(f"run `curl {_ARXIV}` now")
+    assert f"<code>curl {_ARXIV}</code>" in out
+    assert "<a " not in out
+
+
+def test_render_inline_existing_markdown_link_is_not_double_linkified():
+    out = bb.render_inline(f"[the paper]({_ARXIV})")
+    assert out.count("<a ") == 1
+    assert _anchor(_ARXIV, "the paper") in out
+    # a link whose visible text is itself a URL keeps that text as plain text
+    out2 = bb.render_inline(f"[{_ARXIV}](https://doi.org/10.1/2)")
+    assert out2.count("<a ") == 1
+    assert _anchor("https://doi.org/10.1/2", _ARXIV) in out2
+
+
+def test_render_inline_existing_autolink_is_not_double_linkified():
+    out = bb.render_inline(f"see <{_ARXIV}>")
+    assert out.count("<a ") == 1
+    assert _anchor(_ARXIV) in out
+
+
+def test_render_inline_bare_url_query_string_is_escaped_exactly_once():
+    # Regression guard: this file has already shipped a double-escaping bug.
+    url = "https://docs.example.dev/s?a=1&b=2"
+    esc = "https://docs.example.dev/s?a=1&amp;b=2"
+    out = bb.render_inline(f"see {url} now")
+    assert _anchor(esc) in out
+    assert "&amp;amp;" not in out
+
+
+def test_render_inline_repeated_bare_url_is_linkified_every_time():
+    out = bb.render_inline(f"{_ARXIV} and again {_ARXIV}")
+    assert out.count(_anchor(_ARXIV)) == 2
+
+
+def test_render_inline_bare_url_only_http_schemes():
+    # No bare www., no email, no scheme-relative.
+    out = bb.render_inline("www.example.com me@example.com //example.com/x")
+    assert "<a " not in out
+
+
+def test_md_to_html_body_linkifies_bare_urls_in_every_block():
+    # The shared inline path: fix notes, evolve READMEs and candidate pages all
+    # reach it, so one block type getting it is not enough.
+    md = (f"# H {_ARXIV}\n\n"
+          f"para {_ARXIV}\n\n"
+          f"- item {_ARXIV}\n\n"
+          f"> quote {_ARXIV}\n\n"
+          f"| a | b |\n| --- | --- |\n| {_ARXIV} | x |\n")
+    out = bb.md_to_html_body(md)
+    assert out.count(_anchor(_ARXIV)) == 5
+    # ...and a fenced block is still verbatim, never linkified
+    fenced = bb.md_to_html_body(f"```\ncurl {_ARXIV}\n```\n")
+    assert "<a " not in fenced
+
+
 def test_body_renders_headings():
     out = bb.md_to_html_body("# Title\n\n## Section")
     assert "<h1>Title</h1>" in out

@@ -87,7 +87,8 @@ For each exported candidate that has a `fix.patch`, the bundle also gets:
   copied verbatim, plus a `fix.zip` that unzips into a tidy top-level `fix/`
   folder.
 - The candidate page gains a "One-shot fix" section, and its index card gains a
-  `fix · N file(s) changed, +X/−Y` badge and a footer link to the fix page.
+  `fix · +X/−Y` badge and a footer link carrying the full
+  `N file(s) changed, +X/−Y` stat.
 
 A candidate directory holding only `FIX-NOTES.md` and no patch — the legitimate
 "the change could not be made" outcome — is skipped entirely: no page, no badge.
@@ -99,8 +100,21 @@ A candidate directory holding only `FIX-NOTES.md` and no patch — the legitimat
 
 ## Link handling (built into the script)
 
-- External URLs (arxiv, doi, docs) → clickable, open in a new tab.
+- External URLs (arxiv, doi, docs) → clickable, open in a new tab. All three
+  forms are covered: `<https://…>` autolinks, `[text](https://…)` links, and
+  bare `https://…` URLs in prose. Only `http(s)` is linkified — not bare
+  `www.`, not email addresses, not scheme-relative URLs.
+- Trailing sentence punctuation is not part of the link: `See https://arxiv.org/abs/2309.06180.`
+  links the URL and leaves the full stop outside it. Same for `,` `;` `:` and a
+  closing paren the URL did not open.
+- A URL inside a code span or a fenced code block stays literal text, and so
+  does every URL inside a rendered patch.
 - Module breadcrumbs (`../*.md`) and source `.py` paths → plain non-clickable text.
+
+Which pages this matters for: the sorted ranking writes its references as
+`<…>` autolinks, so candidate pages' reference links have always been
+clickable. `FIX-NOTES.md` writes them bare, so the bare-URL rule is what makes
+a fix page's references clickable (roughly four per page).
 
 ## Notes
 

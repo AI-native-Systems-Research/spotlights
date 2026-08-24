@@ -15,6 +15,12 @@ _BOLD = re.compile(r"\*\*([^*]+)\*\*")
 _AUTOLINK = re.compile(r"<(https?://[^>\s]+)>")
 _MDLINK = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 _TOKEN = re.compile(r"\x00(\d+)\x00")
+# A bare URL run: no whitespace, no markup delimiters, no sentinel. `*` and the
+# backtick are excluded so a URL can never swallow the bold/code markers that are
+# applied around it; quotes are excluded so `"https://x"` links without them.
+_BARE_URL = re.compile(r"https?://[^\s<>\"'`*\x00-\x04]+")
+_CODE_SPAN = re.compile(r"(\x01[^\x02]*\x02)")   # capturing: split keeps the spans
+_URL_MARK = re.compile(r"\x03([^\x04]*)\x04")
 _HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
 _OBJECTIVE = re.compile(r"\*\*Objective:\*\*\s*(.+?)\s*$", re.MULTILINE)
 _TABLE_ROW = re.compile(r"^\|(.+)\|\s*$")
@@ -27,13 +33,20 @@ def _is_external(href: str) -> bool:
     return href.startswith("http://") or href.startswith("https://")
 
 
+def _ext_anchor(esc_href: str, inner_html: str) -> str:
+    """The one shape an external link takes in this bundle. Both arguments are
+    already escaped/rendered — this adds no escaping of its own."""
+    return f'<a href="{esc_href}" target="_blank" rel="noopener">{inner_html}</a>'
+
+
 def render_inline(text: str) -> str:
     """Render inline markdown to HTML with the project's link rules.
 
-    External URLs (autolinks and http(s) markdown links) become clickable
-    anchors that open in a new tab. Every other link is stripped and its
-    visible text is rendered as inline <code>. Bold and inline code are
-    supported. All literal text is HTML-escaped.
+    External URLs (autolinks, http(s) markdown links, and bare http(s) URLs in
+    prose) become clickable anchors that open in a new tab. Every other link is
+    stripped and its visible text is rendered as inline <code>. Bold and inline
+    code are supported, and a URL inside a code span stays literal. All literal
+    text is HTML-escaped, exactly once.
     """
     tokens: list[str] = []
 
@@ -43,26 +56,27 @@ def render_inline(text: str) -> str:
 
     # 1. Autolinks: <https://...>
     def _auto(m: re.Match) -> str:
-        url = m.group(1)
-        esc = html.escape(url)
-        return stash(f'<a href="{esc}" target="_blank" rel="noopener">{esc}</a>')
+        esc = html.escape(m.group(1))
+        return stash(_ext_anchor(esc, esc))
 
     text = _AUTOLINK.sub(_auto, text)
 
     # 2. Markdown links: [text](href)
     def _link(m: re.Match) -> str:
         label, href = m.group(1), m.group(2)
+        # linkify_bare stays off: a link's visible text is never rewritten.
         label_html = _inline_no_links(label)
         if _is_external(href):
-            esc = html.escape(href)
-            return stash(f'<a href="{esc}" target="_blank" rel="noopener">{label_html}</a>')
+            return stash(_ext_anchor(html.escape(href), label_html))
         # internal target not in the bundle -> plain code, not clickable
         return stash(f"<code>{_strip_code_ticks(label_html)}</code>")
 
     text = _MDLINK.sub(_link, text)
 
-    # 3. Remaining inline (bold, code) on the non-token text, then restore tokens.
-    text = _inline_no_links(text)
+    # 3. Remaining inline (bold, code, bare URLs) on the non-token text, then
+    #    restore tokens. Steps 1-2 already replaced every autolink and markdown
+    #    link with a \x00 token, so no URL here can be linkified twice.
+    text = _inline_no_links(text, linkify_bare=True)
 
     def _restore(m: re.Match) -> str:
         return tokens[int(m.group(1))]
@@ -75,16 +89,51 @@ def _strip_code_ticks(s: str) -> str:
     return s.replace("<code>", "").replace("</code>", "")
 
 
-def _inline_no_links(text: str) -> str:
-    """Escape HTML, then apply bold + inline code (no link processing)."""
+def _mark_bare_urls(text: str) -> str:
+    """Mark bare http(s) URLs outside code spans with \\x03..\\x04 sentinels.
+
+    Runs on pre-escape text whose code spans are already \\x01/\\x02-delimited,
+    and marks only the segments between them — so a URL in backticks stays
+    literal text. Trailing sentence punctuation (and an unbalanced closing
+    paren) is left outside the mark.
+    """
+    def _mark(m: re.Match) -> str:
+        url, trail = m.group(0), ""
+        while url:
+            c = url[-1]
+            if c in ".,;:!?" or (c == ")" and url.count(")") > url.count("(")):
+                url, trail = url[:-1], c + trail
+            else:
+                break
+        if url.endswith("//"):        # nothing but a scheme left: not a URL
+            return m.group(0)
+        return f"\x03{url}\x04{trail}"
+
+    # Capturing split -> odd indices are the code spans, left untouched.
+    return "".join(seg if i % 2 else _BARE_URL.sub(_mark, seg)
+                   for i, seg in enumerate(_CODE_SPAN.split(text)))
+
+
+def _inline_no_links(text: str, linkify_bare: bool = False) -> str:
+    """Escape HTML, then apply bold + inline code (no link processing).
+
+    With `linkify_bare`, bare http(s) URLs outside code spans also become
+    anchors. It is off by default because markdown link labels come through
+    here and their visible text must never be rewritten.
+    """
     def _code(m: re.Match) -> str:
         return "\x01" + m.group(1) + "\x02"
 
     # The sentinels \x01/\x02 survive html.escape, so the single outer call
-    # escapes the code span's content exactly once.
+    # escapes the code span's content exactly once. \x03/\x04 ride along on the
+    # same trick: the URL they wrap is escaped by that one call and no other.
     text = _CODE.sub(_code, text)
+    if linkify_bare:
+        text = _mark_bare_urls(text)
     text = html.escape(text)
     text = text.replace("\x01", "<code>").replace("\x02", "</code>")
+    if linkify_bare:
+        text = _URL_MARK.sub(lambda m: _ext_anchor(m.group(1), m.group(1)), text)
     text = _BOLD.sub(r"<strong>\1</strong>", text)
     return text
 
