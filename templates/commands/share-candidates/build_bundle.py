@@ -726,6 +726,28 @@ def format_diffstat(stat: dict) -> str:
     return f"{n} {noun} changed, +{stat['added']}/−{stat['removed']}"
 
 
+def find_fix(cand_id: str, fix_root: Path) -> dict | None:
+    """Return a candidate's fix artifacts, or None.
+
+    Looks under <fix_root>/<module_slug>/<cand_id>/. `fix.patch` is required:
+    a directory holding only FIX-NOTES.md is the legitimate "the change could
+    not be made" outcome, and a share bundle skips it entirely — no page, no
+    badge, no copies. FIX-NOTES.md itself is optional.
+    """
+    d = fix_root / _cand_module_slug(cand_id) / cand_id
+    patch = d / "fix.patch"
+    if not patch.is_file():
+        return None
+    notes = d / "FIX-NOTES.md"
+    patch_text = patch.read_text(encoding="utf-8")
+    return {
+        "patch": patch,
+        "notes": notes if notes.is_file() else None,
+        "header": parse_patch_header(patch_text),
+        "stat": diffstat(patch_text),
+    }
+
+
 def build(source_dir: str, top_n: int = 5) -> dict:
     """Parse sorted_candidates.md and build share-bundle/ + share-candidates.zip.
 

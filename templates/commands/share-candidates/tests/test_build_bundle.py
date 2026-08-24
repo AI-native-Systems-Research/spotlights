@@ -597,5 +597,52 @@ def test_format_diffstat_singular_plural_and_minus_sign():
         "0 files changed, +0/−0"
 
 
+def _make_fix_tree(root, cand_id="cand-qiskit_compiler-0001", slug="qiskit_compiler",
+                   patch=True, notes=True):
+    """Create <root>/fix/<slug>/<cand_id>/ with the requested artifacts."""
+    d = root / "fix" / slug / cand_id
+    d.mkdir(parents=True, exist_ok=True)
+    if patch:
+        (d / "fix.patch").write_text(SAMPLE_PATCH, encoding="utf-8")
+    if notes:
+        (d / "FIX-NOTES.md").write_text(
+            "# Fix notes\n\n- **Candidate:** `%s`\n" % cand_id, encoding="utf-8")
+    return d
+
+
+def test_find_fix_joins_slug_path_and_returns_artifacts():
+    root = Path(tempfile.mkdtemp())
+    d = _make_fix_tree(root)
+    fx = bb.find_fix("cand-qiskit_compiler-0001", root / "fix")
+    assert fx is not None
+    assert fx["patch"] == d / "fix.patch"
+    assert fx["notes"] == d / "FIX-NOTES.md"
+    assert fx["header"]["base"] == "83ad767eed3be3ee7f2df63be693bfaca5c7c922"
+    assert fx["stat"]["added"] == 4
+
+
+def test_find_fix_absent_candidate_is_none():
+    root = Path(tempfile.mkdtemp())
+    _make_fix_tree(root)
+    assert bb.find_fix("cand-qiskit_compiler-9999", root / "fix") is None
+    # an absent fix/ tree entirely
+    assert bb.find_fix("cand-qiskit_compiler-0001", root / "nope") is None
+
+
+def test_find_fix_notes_only_directory_is_skipped():
+    # `fix` writes FIX-NOTES.md and no patch when the change was not made.
+    # A share bundle skips those: no page, no badge, no copies.
+    root = Path(tempfile.mkdtemp())
+    _make_fix_tree(root, patch=False, notes=True)
+    assert bb.find_fix("cand-qiskit_compiler-0001", root / "fix") is None
+
+
+def test_find_fix_patch_without_notes_still_found():
+    root = Path(tempfile.mkdtemp())
+    _make_fix_tree(root, patch=True, notes=False)
+    fx = bb.find_fix("cand-qiskit_compiler-0001", root / "fix")
+    assert fx is not None and fx["notes"] is None
+
+
 if __name__ == "__main__":
     _run_all()
