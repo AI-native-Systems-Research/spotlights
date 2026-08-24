@@ -782,6 +782,17 @@ def find_fix(cand_id: str, fix_root: Path) -> dict | None:
     a directory holding only FIX-NOTES.md is the legitimate "the change could
     not be made" outcome, and a share bundle skips it entirely — no page, no
     badge, no copies. FIX-NOTES.md itself is optional.
+
+    Returns the paths (`patch`, `notes`), the parsed contents (`header`, `stat`),
+    and the decoded text plus patch size (`patch_text`, `notes_text`,
+    `patch_kb`). `notes` and `notes_text` are None together when the notes are
+    absent; `header` may be `{}` and `stat["files"]` may be `[]`, so callers use
+    `.get()` on `header` rather than indexing it.
+
+    The text is read here and nowhere else. `build()` must not re-read either
+    file: this is the only place that knows how to decode `fix.patch` safely
+    (see the comment on the read below), and a second strict read elsewhere
+    would reintroduce a crash that takes the whole bundle with it.
     """
     d = fix_root / _cand_module_slug(cand_id) / cand_id
     patch = d / "fix.patch"
@@ -802,10 +813,15 @@ def find_fix(cand_id: str, fix_root: Path) -> dict | None:
     # replacement character costs is one unreadable glyph in the rendered diff,
     # against a build that otherwise does not happen.
     patch_text = patch.read_text(encoding="utf-8", errors="replace")
-    notes_text = notes.read_text(encoding="utf-8") if notes.is_file() else None
+    # The notes are written through Python's text layer, so they are UTF-8 by
+    # construction — but they sit on disk next to the patch and are as easy to
+    # hand-edit, so they get the same lossy read. No artifact this build merely
+    # *displays* is worth aborting the whole bundle over.
+    has_notes = notes.is_file()
+    notes_text = notes.read_text(encoding="utf-8", errors="replace") if has_notes else None
     return {
         "patch": patch,
-        "notes": notes if notes.is_file() else None,
+        "notes": notes if has_notes else None,
         "header": parse_patch_header(patch_text),
         "stat": diffstat(patch_text),
         "patch_text": patch_text,
