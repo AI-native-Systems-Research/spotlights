@@ -25,12 +25,6 @@
 ARG PLATFORM_BASE_TAG=latest
 FROM quay.io/dam-agents/platform-base:${PLATFORM_BASE_TAG}
 
-# Codex release to bake in. Bump when you want a newer version. Available
-# targets are listed at https://github.com/openai/codex/releases (look for
-# `codex-package-<target>.tar.gz`).
-ARG CODEX_VERSION=0.149.1
-ARG CODEX_TARGET=x86_64-unknown-linux-musl
-
 # Claude Code release to bake in. Empty ⇒ resolve `latest` at build time.
 # Pin a specific version (e.g. 2.0.14) for reproducibility.
 ARG CLAUDE_VERSION=
@@ -62,38 +56,21 @@ RUN --mount=type=cache,target=/root/.npm \
     /usr/local/bin/claude --version
 
 # ---------------------------------------------------------------------------
-# Codex CLI — manual install.
+# Codex CLI + ACP shim — installed via mise.
 #
-# We can't run the vendor installer (`curl chatgpt.com/codex/install.sh | sh`)
-# inside this base under Docker Desktop's QEMU x86_64 emulation on Apple
-# Silicon: the installer's internal `tar -xzf codex-package-*.tar.gz` step
-# hits ENOSYS on the mkdirat/openat2 syscalls that hardened GNU tar uses,
-# and dies with "Cannot mkdir: Function not implemented".
-#
-# Instead, fetch the same package tarball GitHub publishes and extract it
-# with Python's stdlib `tarfile`, which uses the older mkdir/openat syscalls
-# QEMU implements. Then replicate the directory layout the installer builds
-# under $STANDALONE_ROOT so codex finds its bundled rg, bwrap, and zsh at
-# runtime. Both `curl` and `python3` are shipped in the base image.
+# harness tool pins ride the image as system-level mise config so they always
+# match the installs baked in below (a pin seeded into the persistent workspace
+# would go stale on template upgrade); install by name — a bare `mise install`
+# would also preinstall every lazy tool from the base image's
+# /etc/mise/config.toml.
 # ---------------------------------------------------------------------------
-RUN set -eux; \
-    codex_home=/opt/codex; \
-    releases_dir="${codex_home}/packages/standalone/releases"; \
-    release_dir="${releases_dir}/${CODEX_VERSION}-${CODEX_TARGET}"; \
-    current_link="${codex_home}/packages/standalone/current"; \
-    mkdir -p "${release_dir}"; \
-    curl -fsSL -o /tmp/codex-package.tar.gz \
-        "https://github.com/openai/codex/releases/download/rust-v${CODEX_VERSION}/codex-package-${CODEX_TARGET}.tar.gz"; \
-    python3 -c "import sys, tarfile; tf=tarfile.open('/tmp/codex-package.tar.gz'); tf.extractall(sys.argv[1], filter='data'); tf.close()" "${release_dir}"; \
-    ln -s bin/codex "${release_dir}/codex"; \
-    for f in bin/codex bin/codex-code-mode-host codex-path/rg codex-resources/bwrap; do \
-      [ -f "${release_dir}/${f}" ] && chmod 0755 "${release_dir}/${f}" || true; \
-    done; \
-    ln -sfn "${release_dir}" "${current_link}"; \
-    ln -sf "${current_link}/bin/codex" /usr/local/bin/codex; \
-    rm -f /tmp/codex-package.tar.gz; \
-    chown -R 65532:0 "${codex_home}"; \
-    /usr/local/bin/codex --version
+COPY DAM/spotlights-agent/harness-tools.toml /etc/mise/conf.d/harness-tools.toml
+RUN --mount=type=cache,target=/root/.npm \
+    mise install "npm:@openai/codex" "npm:@zed-industries/codex-acp" && \
+    chown -R 65532 /etc/mise \
+      "$(dirname "$(mise where npm:@openai/codex)")" \
+      "$(dirname "$(mise where npm:@zed-industries/codex-acp)")" && \
+    find /etc/mise -name '*.lock' -exec chmod 644 {} +
 
 # ---------------------------------------------------------------------------
 # Spotlights engine.
