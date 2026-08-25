@@ -107,10 +107,14 @@ def test_print_prompt_writes_the_prompt_and_worktree_to_stdout(
             "--print-prompt",
         ]
     )
-    out = capsys.readouterr().out
+    captured = capsys.readouterr()
+    out = captured.out
     assert code == 0
     assert "WORKTREE:" in out
     assert CAND_FILE in out
+    # `--print-prompt` writes nothing and skips nothing, so there is no tally to
+    # print: "0 candidate(s) written" under a prompt dump would read as failure.
+    assert "candidate(s) written" not in captured.err
 
     # The worktree is left in place for the caller; clean it up, including the
     # temp-dir parent that WORKTREE_PARENT points at (create_worktree allocates
@@ -214,6 +218,131 @@ def test_a_failed_patch_collection_is_not_printed_as_notes_only(
     assert "patch collection FAILED" in captured.out
     assert "git diff timed out after 60s" in captured.err
     assert "re-run this candidate" in captured.err
+
+
+@pytest.mark.parametrize(
+    ("patch_produced", "collection_error", "expected"),
+    [
+        (True, None, "(3 files)"),
+        (False, None, "(2 files, no patch)"),
+        (False, "git diff timed out after 60s", "(2 files, patch collection FAILED)"),
+    ],
+)
+def test_the_per_candidate_line_leads_with_the_file_count(
+    run,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture,
+    patch_produced: bool,
+    collection_error: str | None,
+    expected: str,
+) -> None:
+    """`prep-evolve`'s shape: `<id>: <path> (N files)`.
+
+    The count is what the two arms share, so a sweep over both scans as one
+    column. It cannot carry the outcome, though — 2 files means "no patch" and
+    "the diff was lost" alike — so those two keep a suffix and only the normal
+    case reads bare.
+    """
+    import spotlights_engine.one_shot_apply.cli as cli_mod
+    from spotlights_engine.one_shot_apply.api import ApplyArtifact, OneShotApplyResult
+
+    run_dir, repo = run
+    out_dir = run_dir / "apply" / "v1_attention" / CAND_ID
+    files = ["APPLY-NOTES.md", "apply.prompt.txt"]
+    if patch_produced:
+        files.append("apply.patch")
+    monkeypatch.setattr(
+        cli_mod,
+        "one_shot_apply",
+        lambda inp, cfg: OneShotApplyResult(
+            patches=[
+                ApplyArtifact(
+                    candidate_id=CAND_ID,
+                    module_qualified_name="v1/attention",
+                    path=str(out_dir),
+                    files=sorted(files),
+                    patch_produced=patch_produced,
+                    base_sha="0" * 40,
+                    collection_error=collection_error,
+                )
+            ]
+        ),
+    )
+
+    code = apply_main(["--result", str(run_dir), "--repo", str(repo), "--candidate", CAND_ID])
+    captured = capsys.readouterr()
+
+    assert code == 0
+    assert f"{CAND_ID}: {out_dir} {expected}" in captured.out
+    # The old shape is gone, not merely supplemented.
+    assert "patch + notes" not in captured.out
+    assert "notes only" not in captured.out
+
+
+def test_the_summary_line_tallies_what_was_written_and_skipped(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """The closing tally, matching `prep-evolve: N bundle(s) written, M skipped`.
+
+    On stderr, so stdout stays the machine-readable one-line-per-candidate list
+    a caller can pipe.
+    """
+    import spotlights_engine.one_shot_apply.cli as cli_mod
+    from spotlights_engine.one_shot_apply.api import (
+        ApplyArtifact,
+        OneShotApplyResult,
+        SkippedApply,
+    )
+
+    run_dir, repo = run
+    out_dir = run_dir / "apply" / "v1_attention" / CAND_ID
+    monkeypatch.setattr(
+        cli_mod,
+        "one_shot_apply",
+        lambda inp, cfg: OneShotApplyResult(
+            patches=[
+                ApplyArtifact(
+                    candidate_id=CAND_ID,
+                    module_qualified_name="v1/attention",
+                    path=str(out_dir),
+                    files=["APPLY-NOTES.md", "apply.patch", "apply.prompt.txt"],
+                    patch_produced=True,
+                    base_sha="0" * 40,
+                )
+            ],
+            skipped=[
+                SkippedApply(reason="no longer in result.json", candidate_id="cand-other-0001"),
+                SkippedApply(reason="no scope", candidate_id="cand-other-0002"),
+            ],
+        ),
+    )
+
+    code = apply_main(["--result", str(run_dir), "--repo", str(repo)])
+    captured = capsys.readouterr()
+
+    assert code == 0
+    assert "apply: 1 candidate(s) written, 2 skipped" in captured.err
+    assert "candidate(s) written" not in captured.out
+
+
+def test_a_skip_only_run_still_reports_the_tally(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Nothing written is exactly when the operator most needs the count."""
+    import spotlights_engine.one_shot_apply.cli as cli_mod
+    from spotlights_engine.one_shot_apply.api import OneShotApplyResult, SkippedApply
+
+    run_dir, repo = run
+    monkeypatch.setattr(
+        cli_mod,
+        "one_shot_apply",
+        lambda inp, cfg: OneShotApplyResult(
+            skipped=[SkippedApply(reason="no longer in result.json", candidate_id=CAND_ID)]
+        ),
+    )
+
+    apply_main(["--result", str(run_dir), "--repo", str(repo)])
+    assert "apply: 0 candidate(s) written, 1 skipped" in capsys.readouterr().err
 
 
 def test_engine_dispatch_routes_fix_to_the_subcommand(
