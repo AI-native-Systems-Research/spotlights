@@ -189,7 +189,7 @@ Point it at `./spotlights-out/result.json` and it writes a ranked `./spotlights-
 /spotlights-share-candidates
 ```
 
-It asks for the folder containing `sorted_candidates.md` (e.g. `./spotlights-out/sorted/`) and a top-N (default `5`), then writes a `share-bundle/` folder and a `share-candidates.zip` next to it. The bundle contains rendered HTML for each candidate plus the original markdown, with external references (arxiv, doi, docs) kept clickable and module breadcrumbs left as plain text. If `prep-evolve` or `fix` has run, their bundles are folded in automatically: each candidate gains its evolve engines and its one-shot patch — the latter as a colorized diff with an apply recipe — with nothing verified and the page saying so.
+It asks for the folder containing `sorted_candidates.md` (e.g. `./spotlights-out/sorted/`) and a top-N (default `5`), then writes a `share-bundle/` folder and a `share-candidates.zip` next to it. The bundle contains rendered HTML for each candidate plus the original markdown, with external references (arxiv, doi, docs) kept clickable and module breadcrumbs left as plain text. If `prep-evolve` or `apply` has run, their bundles are folded in automatically: each candidate gains its evolve engines and its one-shot patch — the latter as a colorized diff with an apply recipe — with nothing verified and the page saying so.
 
 ## Signal sources & roadmap
 

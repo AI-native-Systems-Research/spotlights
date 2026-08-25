@@ -61,7 +61,7 @@ def _anchor(url, text=None):
 
 
 def test_render_inline_bare_url_in_prose_is_clickable():
-    # The engine writes FIX-NOTES.md references as bare URLs, not autolinks.
+    # The engine writes APPLY-NOTES.md references as bare URLs, not autolinks.
     out = bb.render_inline(f"Ref (paper) — {_ARXIV} and more")
     assert _anchor(_ARXIV) in out
 
@@ -124,7 +124,7 @@ def test_render_inline_bare_url_only_http_schemes():
 
 
 def test_md_to_html_body_linkifies_bare_urls_in_every_block():
-    # The shared inline path: fix notes, evolve READMEs and candidate pages all
+    # The shared inline path: apply notes, evolve READMEs and candidate pages all
     # reach it, so one block type getting it is not enough.
     md = (f"# H {_ARXIV}\n\n"
           f"para {_ARXIV}\n\n"
@@ -177,7 +177,7 @@ def test_body_renders_fenced_code_block():
 
 
 def test_body_renders_a_pipe_table():
-    # Every real FIX-NOTES.md carries a "Files changed" table. Without table
+    # Every real APPLY-NOTES.md carries a "Files changed" table. Without table
     # support it rendered as literal pipes in a paragraph.
     md = ("| File | Lines |\n"
           "| --- | --- |\n"
@@ -526,7 +526,7 @@ def _run_all():
     sys.exit(1 if failed else 0)
 
 
-# --- one-shot fix ----------------------------------------------------------
+# --- one-shot apply --------------------------------------------------------
 
 
 def test_cand_module_slug_strips_prefix_and_sequence():
@@ -537,14 +537,14 @@ def test_cand_module_slug_strips_prefix_and_sequence():
 
 
 SAMPLE_PATCH = """\
-# spotlights one-shot fix
+# spotlights one-shot apply
 # candidate: cand-vllm_v1_worker-0001
 # module:    vllm/v1/worker
 # repo:      /Users/someone/checkouts/vllm
 # base:      83ad767eed3be3ee7f2df63be693bfaca5c7c922
 # apply with (from the directory containing this patch):
 #   git -C /Users/someone/checkouts/vllm checkout 83ad767e
-#   git -C /Users/someone/checkouts/vllm apply "$PWD/fix.patch"
+#   git -C /Users/someone/checkouts/vllm apply "$PWD/apply.patch"
 diff --git a/vllm/v1/worker/gpu_model_runner.py b/vllm/v1/worker/gpu_model_runner.py
 index 43f5c45323..225e46f2a7 100644
 --- a/vllm/v1/worker/gpu_model_runner.py
@@ -658,11 +658,11 @@ def test_diffstat_counts_removed_lines_whose_content_starts_with_dashes():
 
 
 def test_diffstat_ignores_lines_before_the_first_diff_git():
-    # The `#` header block `spotlights-engine fix` writes above the diff can
+    # The `#` header block `spotlights-engine apply` writes above the diff can
     # contain a line starting with +/-; nothing before the first `diff --git`
     # belongs to any file. Without the `cur is None` guard this raises
     # TypeError on a None subscript.
-    st = bb.diffstat("# spotlights one-shot fix\n-stray\n+stray\n")
+    st = bb.diffstat("# spotlights one-shot apply\n-stray\n+stray\n")
     assert st == {"files": [], "added": 0, "removed": 0}
 
 
@@ -679,7 +679,7 @@ def test_diffstat_counts_blank_added_and_removed_lines():
 
 
 def test_diffstat_resets_hunk_state_on_a_quoted_diff_git_path():
-    # `core.quotePath` defaults to true and `fix.patch` is a plain `git diff`,
+    # `core.quotePath` defaults to true and `apply.patch` is a plain `git diff`,
     # so any path holding a non-ASCII byte arrives C-quoted. If the boundary is
     # only recognised when the *path* parses, `in_hunk` survives into the next
     # file and its own markers count as a removal and an addition. Real
@@ -725,7 +725,7 @@ def test_diff_git_path_extracts_the_post_image_path_in_every_header_form():
     assert bb._diff_git_path("--- a/x.py") is None
     assert bb._diff_git_path("@@ -1,2 +1,3 @@") is None
     assert bb._diff_git_path("-removed") is None
-    assert bb._diff_git_path("# spotlights one-shot fix") is None
+    assert bb._diff_git_path("# spotlights one-shot apply") is None
 
 
 def test_diffstat_counts_every_hunk_of_a_multi_hunk_file():
@@ -750,7 +750,7 @@ def test_diffstat_counts_every_hunk_of_a_multi_hunk_file():
 
 
 def test_diffstat_empty_patch_is_zero():
-    st = bb.diffstat("# spotlights one-shot fix\n# base:  abc\n")
+    st = bb.diffstat("# spotlights one-shot apply\n# base:  abc\n")
     assert st == {"files": [], "added": 0, "removed": 0}
 
 
@@ -772,78 +772,78 @@ def test_format_diffstat_short_is_the_badge_form():
     assert "−" in bb.format_diffstat_short({"files": [{}], "added": 1, "removed": 2})
 
 
-def _make_fix_tree(root, cand_id="cand-qiskit_compiler-0001", slug="qiskit_compiler",
-                   patch=True, notes=True):
-    """Create <root>/fix/<slug>/<cand_id>/ with the requested artifacts."""
-    d = root / "fix" / slug / cand_id
+def _make_apply_tree(root, cand_id="cand-qiskit_compiler-0001", slug="qiskit_compiler",
+                     patch=True, notes=True):
+    """Create <root>/apply/<slug>/<cand_id>/ with the requested artifacts."""
+    d = root / "apply" / slug / cand_id
     d.mkdir(parents=True, exist_ok=True)
     if patch:
-        (d / "fix.patch").write_text(SAMPLE_PATCH, encoding="utf-8")
+        (d / "apply.patch").write_text(SAMPLE_PATCH, encoding="utf-8")
     if notes:
-        (d / "FIX-NOTES.md").write_text(
-            "# Fix notes\n\n- **Candidate:** `%s`\n" % cand_id, encoding="utf-8")
+        (d / "APPLY-NOTES.md").write_text(
+            "# Apply notes\n\n- **Candidate:** `%s`\n" % cand_id, encoding="utf-8")
     return d
 
 
-def test_find_fix_joins_slug_path_and_returns_artifacts():
+def test_find_apply_joins_slug_path_and_returns_artifacts():
     root = Path(tempfile.mkdtemp())
-    d = _make_fix_tree(root)
-    fx = bb.find_fix("cand-qiskit_compiler-0001", root / "fix")
+    d = _make_apply_tree(root)
+    fx = bb.find_apply("cand-qiskit_compiler-0001", root / "apply")
     assert fx is not None
-    assert fx["patch"] == d / "fix.patch"
-    assert fx["notes"] == d / "FIX-NOTES.md"
+    assert fx["patch"] == d / "apply.patch"
+    assert fx["notes"] == d / "APPLY-NOTES.md"
     assert fx["header"]["base"] == "83ad767eed3be3ee7f2df63be693bfaca5c7c922"
     assert fx["stat"]["added"] == 4
 
 
-def test_find_fix_absent_candidate_is_none():
+def test_find_apply_absent_candidate_is_none():
     root = Path(tempfile.mkdtemp())
-    _make_fix_tree(root)
-    assert bb.find_fix("cand-qiskit_compiler-9999", root / "fix") is None
-    # an absent fix/ tree entirely
-    assert bb.find_fix("cand-qiskit_compiler-0001", root / "nope") is None
+    _make_apply_tree(root)
+    assert bb.find_apply("cand-qiskit_compiler-9999", root / "apply") is None
+    # an absent apply/ tree entirely
+    assert bb.find_apply("cand-qiskit_compiler-0001", root / "nope") is None
 
 
-def test_find_fix_notes_only_directory_is_skipped():
-    # `fix` writes FIX-NOTES.md and no patch when the change was not made.
+def test_find_apply_notes_only_directory_is_skipped():
+    # `apply` writes APPLY-NOTES.md and no patch when the change was not made.
     # A share bundle skips those: no page, no badge, no copies.
     root = Path(tempfile.mkdtemp())
-    _make_fix_tree(root, patch=False, notes=True)
-    assert bb.find_fix("cand-qiskit_compiler-0001", root / "fix") is None
+    _make_apply_tree(root, patch=False, notes=True)
+    assert bb.find_apply("cand-qiskit_compiler-0001", root / "apply") is None
 
 
-def test_find_fix_patch_without_notes_still_found():
+def test_find_apply_patch_without_notes_still_found():
     root = Path(tempfile.mkdtemp())
-    _make_fix_tree(root, patch=True, notes=False)
-    fx = bb.find_fix("cand-qiskit_compiler-0001", root / "fix")
+    _make_apply_tree(root, patch=True, notes=False)
+    fx = bb.find_apply("cand-qiskit_compiler-0001", root / "apply")
     assert fx is not None and fx["notes"] is None
 
 
-def test_find_fix_derives_the_slug_directory_from_the_candidate_id():
+def test_find_apply_derives_the_slug_directory_from_the_candidate_id():
     # Two candidates under DIFFERENT slugs, each found only at its own path.
     # Every other test here uses one slug, which an implementation that ignored
-    # `_cand_module_slug` and globbed `fix/*/<cand_id>` would also satisfy.
+    # `_cand_module_slug` and globbed `apply/*/<cand_id>` would also satisfy.
     root = Path(tempfile.mkdtemp())
-    _make_fix_tree(root, cand_id="cand-qiskit_compiler-0001", slug="qiskit_compiler")
-    _make_fix_tree(root, cand_id="cand-vllm_v1_kv_offload-0002", slug="vllm_v1_kv_offload")
+    _make_apply_tree(root, cand_id="cand-qiskit_compiler-0001", slug="qiskit_compiler")
+    _make_apply_tree(root, cand_id="cand-vllm_v1_kv_offload-0002", slug="vllm_v1_kv_offload")
     for cand_id, slug in (("cand-qiskit_compiler-0001", "qiskit_compiler"),
                           ("cand-vllm_v1_kv_offload-0002", "vllm_v1_kv_offload")):
-        fx = bb.find_fix(cand_id, root / "fix")
+        fx = bb.find_apply(cand_id, root / "apply")
         assert fx is not None, cand_id
-        assert fx["patch"] == root / "fix" / slug / cand_id / "fix.patch"
+        assert fx["patch"] == root / "apply" / slug / cand_id / "apply.patch"
 
 
-def test_find_fix_reads_a_patch_that_is_not_valid_utf8():
+def test_find_apply_reads_a_patch_that_is_not_valid_utf8():
     # The engine collects the diff as raw bytes and writes it with `write_bytes`,
     # so a non-UTF-8 context byte from the target repo reaches this file intact.
     # Strict decoding would raise UnicodeDecodeError, and `build()` gets here only
     # after removing the previous share-bundle/ — so one such candidate would
     # abort the whole run. It must degrade to a replacement character instead.
     root = Path(tempfile.mkdtemp())
-    d = root / "fix" / "qiskit_compiler" / "cand-qiskit_compiler-0001"
+    d = root / "apply" / "qiskit_compiler" / "cand-qiskit_compiler-0001"
     d.mkdir(parents=True)
-    (d / "fix.patch").write_bytes(
-        b"# spotlights one-shot fix\n"
+    (d / "apply.patch").write_bytes(
+        b"# spotlights one-shot apply\n"
         b"# base:      83ad767eed3be3ee7f2df63be693bfaca5c7c922\n"
         b"diff --git a/x.py b/x.py\n"
         b"--- a/x.py\n"
@@ -851,7 +851,7 @@ def test_find_fix_reads_a_patch_that_is_not_valid_utf8():
         b"@@ -1,2 +1,2 @@\n"
         b"-caf\xe9\n"                      # latin-1 e-acute: invalid UTF-8
         b"+cafe\n")
-    fx = bb.find_fix("cand-qiskit_compiler-0001", root / "fix")
+    fx = bb.find_apply("cand-qiskit_compiler-0001", root / "apply")
     assert fx is not None
     assert fx["header"]["base"] == "83ad767eed3be3ee7f2df63be693bfaca5c7c922"
     assert fx["stat"]["added"] == 1 and fx["stat"]["removed"] == 1
@@ -865,7 +865,7 @@ def test_repo_placeholder_from_basename_and_fallback():
 
 
 def test_render_patch_colorizes_and_escapes():
-    out = bb.render_patch(SAMPLE_PATCH, "foo__fix/fix.patch", 7.1)
+    out = bb.render_patch(SAMPLE_PATCH, "foo__apply/apply.patch", 7.1)
     # collapsed by default: a <details> with no `open` attribute
     assert '<details class="patch">' in out and "<details open" not in out
     # one file block per changed file, with its own per-file stat
@@ -879,7 +879,7 @@ def test_render_patch_colorizes_and_escapes():
     # a context line gets the base class only
     assert 'class="l"' in out
     # the raw file is linked from the summary
-    assert 'href="foo__fix/fix.patch"' in out
+    assert 'href="foo__apply/apply.patch"' in out
     # HTML from the patch body is escaped, never live markup
     assert "&lt;&amp;&gt;" in out
     assert "<&>" not in out
@@ -930,7 +930,7 @@ def test_render_patch_resets_hunk_state_at_every_file_boundary():
     # example patches missed it.
     stat = bb.diffstat(SAMPLE_PATCH)          # two files: +4 / −2
     assert len(stat["files"]) == 2, "this test needs a multi-file patch"
-    out = bb.render_patch(SAMPLE_PATCH, "foo__fix/fix.patch", 7.1)
+    out = bb.render_patch(SAMPLE_PATCH, "foo__apply/apply.patch", 7.1)
     # The coloured spans must total exactly what the file rows claim.
     assert out.count('class="l d-add"') == stat["added"]
     assert out.count('class="l d-del"') == stat["removed"]
@@ -957,18 +957,18 @@ def test_render_patch_escapes_paths_containing_html_metacharacters():
     assert "<script>_file" not in out
 
 
-def test_render_fix_page_has_warning_apply_strip_and_notes():
+def test_render_apply_page_has_warning_apply_strip_and_notes():
     fx = {"patch": None, "notes": None,
           "header": {"candidate": "cand-a-0001", "module": "m/n",
                      "repo": "/Users/someone/checkouts/vllm",
                      "base": "83ad767eed3be3ee7f2df63be693bfaca5c7c922"},
           "stat": bb.diffstat(SAMPLE_PATCH),
-          "patch_text": SAMPLE_PATCH, "notes_text": "# Fix notes\n\n- **Objective:** speed\n",
+          "patch_text": SAMPLE_PATCH, "notes_text": "# Apply notes\n\n- **Objective:** speed\n",
           "patch_kb": 7.1}
-    out = bb.render_fix_page("cand-a-0001", "foo", fx, "foo__fix", "foo.html")
+    out = bb.render_apply_page("cand-a-0001", "foo", fx, "foo__apply", "foo.html")
     assert "<!DOCTYPE html>" in out
     assert 'href="foo.html"' in out                      # back link
-    assert "One-shot fix" in out and "foo" in out
+    assert "One-shot apply" in out and "foo" in out
     assert "2 files changed, +4/−2" in out       # SAMPLE_PATCH's real stat
     # the unverified warning is first-class content
     assert "nothing" in out.lower() and "verified" in out.lower()
@@ -981,52 +981,52 @@ def test_render_fix_page_has_warning_apply_strip_and_notes():
     # the producer's real path is never rendered as a command to run
     assert "$ REPO=/Users/someone" not in out
     # download button and the inlined notes
-    assert 'href="foo__fix/fix.zip"' in out
+    assert 'href="foo__apply/apply.zip"' in out
     assert "Objective" in out
 
 
-def test_render_fix_page_without_notes_omits_that_section():
+def test_render_apply_page_without_notes_omits_that_section():
     fx = {"header": {"base": "abc123"}, "stat": bb.diffstat(SAMPLE_PATCH),
           "patch_text": SAMPLE_PATCH, "notes_text": None, "patch_kb": 7.1}
-    out = bb.render_fix_page("cand-a-0001", "foo", fx, "foo__fix", "foo.html")
+    out = bb.render_apply_page("cand-a-0001", "foo", fx, "foo__apply", "foo.html")
     assert "<!DOCTYPE html>" in out          # still a valid page
     assert "The patch" in out                # the diff is still there
     assert "Objective" not in out            # no notes content leaked in
     # a missing base commit degrades to the placeholder, not a crash
-    out2 = bb.render_fix_page("cand-a-0001", "foo",
-                              {**fx, "header": {}}, "foo__fix", "foo.html")
+    out2 = bb.render_apply_page("cand-a-0001", "foo",
+                                {**fx, "header": {}}, "foo__apply", "foo.html")
     assert "&lt;BASE_COMMIT&gt;" in out2
     assert "&lt;YOUR_REPO_CHECKOUT&gt;" in out2
 
 
-def test_render_fix_page_says_which_directory_the_apply_commands_assume():
-    # The apply commands use "$PWD/{raw_reldir}/fix.patch", so they are
+def test_render_apply_page_says_which_directory_the_apply_commands_assume():
+    # The apply commands use "$PWD/{raw_reldir}/apply.patch", so they are
     # silently cwd-dependent. The page must state which directory to cd into.
     # Without this note, running the commands from a different directory
     # (e.g., share-bundle/ or from the unpacked .zip) fails with "can't open
     # patch: No such file or directory" and no explanation of why.
     fx = {"header": {"base": "abc123"}, "stat": bb.diffstat(SAMPLE_PATCH),
           "patch_text": SAMPLE_PATCH, "notes_text": None, "patch_kb": 7.1}
-    out = bb.render_fix_page("cand-a-0001", "foo", fx, "artifact_dir__fix", "foo.html")
+    out = bb.render_apply_page("cand-a-0001", "foo", fx, "artifact_dir__apply", "foo.html")
     # The cwd note must mention the artifact directory name
-    assert "artifact_dir__fix" in out
+    assert "artifact_dir__apply" in out
     # The note must explain the cwd requirement
     assert "$PWD" in out and "directory" in out.lower()
 
 
-def test_render_fix_section_links_to_the_page():
+def test_render_apply_section_links_to_the_page():
     fx = {"stat": bb.diffstat(SAMPLE_PATCH)}
-    out = bb.render_fix_section(fx, "foo__cand-a-0001__fix.html")
-    assert "One-shot fix" in out
-    assert 'href="foo__cand-a-0001__fix.html"' in out
+    out = bb.render_apply_section(fx, "foo__cand-a-0001__apply.html")
+    assert "One-shot apply" in out
+    assert 'href="foo__cand-a-0001__apply.html"' in out
     assert "2 files changed, +4/−2" in out
     assert "verified" in out.lower()
 
 
-def test_render_candidate_page_emits_fix_before_evolve():
+def test_render_candidate_page_emits_apply_before_evolve():
     out = bb.render_candidate_page("# t\n", "t", "../index.html",
-                                   "<div>EVOLVEBLOCK</div>", "<div>FIXBLOCK</div>")
-    assert out.index("FIXBLOCK") < out.index("EVOLVEBLOCK")
+                                   "<div>EVOLVEBLOCK</div>", "<div>APPLYBLOCK</div>")
+    assert out.index("APPLYBLOCK") < out.index("EVOLVEBLOCK")
 
 
 def test_render_candidate_page_still_works_with_evolve_only():
@@ -1035,7 +1035,7 @@ def test_render_candidate_page_still_works_with_evolve_only():
     assert "<div>E</div>" in out
 
 
-def test_build_end_to_end_with_fix_bundle():
+def test_build_end_to_end_with_apply_bundle():
     root = Path(tempfile.mkdtemp())
     src = root / "sorted"
     src.mkdir(parents=True, exist_ok=True)
@@ -1044,62 +1044,62 @@ def test_build_end_to_end_with_fix_bundle():
     c1.parent.mkdir(parents=True, exist_ok=True)
     c1.write_text("# foo\n", encoding="utf-8")
     # SAMPLE_SORTED's top row is cand-a-0001 -> module slug "a"
-    _make_fix_tree(root, cand_id="cand-a-0001", slug="a")
+    _make_apply_tree(root, cand_id="cand-a-0001", slug="a")
 
     result = bb.build(str(src), top_n=1)
-    assert result["fix_bundles"] == 1
+    assert result["apply_bundles"] == 1
 
     bundle = Path(result["bundle_dir"])
     d = bundle / "candidates" / "modules" / "qiskit_compiler"
-    page = d / "foo__cand-a-0001__fix.html"
+    page = d / "foo__cand-a-0001__apply.html"
     assert page.exists()
-    assert (d / "foo__cand-a-0001__fix" / "fix.patch").exists()
-    assert (d / "foo__cand-a-0001__fix" / "FIX-NOTES.md").exists()
-    assert (d / "foo__cand-a-0001__fix" / "fix.zip").exists()
+    assert (d / "foo__cand-a-0001__apply" / "apply.patch").exists()
+    assert (d / "foo__cand-a-0001__apply" / "APPLY-NOTES.md").exists()
+    assert (d / "foo__cand-a-0001__apply" / "apply.zip").exists()
 
     # Copies are byte-for-byte — compared as BYTES, not as decoded text. A
     # decode-and-rewrite (any encoding, any newline translation) produces text
     # that still compares equal while breaking the guarantee `git apply` needs,
     # so read_text() cannot pin this. filecmp with shallow=False can.
-    src_fix = root / "fix" / "a" / "cand-a-0001"
-    assert filecmp.cmp(src_fix / "fix.patch",
-                       d / "foo__cand-a-0001__fix" / "fix.patch", shallow=False)
-    assert filecmp.cmp(src_fix / "FIX-NOTES.md",
-                       d / "foo__cand-a-0001__fix" / "FIX-NOTES.md", shallow=False)
+    src_apply = root / "apply" / "a" / "cand-a-0001"
+    assert filecmp.cmp(src_apply / "apply.patch",
+                       d / "foo__cand-a-0001__apply" / "apply.patch", shallow=False)
+    assert filecmp.cmp(src_apply / "APPLY-NOTES.md",
+                       d / "foo__cand-a-0001__apply" / "APPLY-NOTES.md", shallow=False)
 
-    # zip entries live under a top-level fix/ folder
-    with _zip.ZipFile(d / "foo__cand-a-0001__fix" / "fix.zip") as zf:
-        assert sorted(zf.namelist()) == ["fix/FIX-NOTES.md", "fix/fix.patch"]
+    # zip entries live under a top-level apply/ folder
+    with _zip.ZipFile(d / "foo__cand-a-0001__apply" / "apply.zip") as zf:
+        assert sorted(zf.namelist()) == ["apply/APPLY-NOTES.md", "apply/apply.patch"]
 
-    # the candidate page links to the fix page; the fix page links back
+    # the candidate page links to the apply page; the apply page links back
     cand_html = (d / "foo__cand-a-0001.html").read_text(encoding="utf-8")
-    assert 'href="foo__cand-a-0001__fix.html"' in cand_html
+    assert 'href="foo__cand-a-0001__apply.html"' in cand_html
     assert 'href="foo__cand-a-0001.html"' in page.read_text(encoding="utf-8")
 
     # The INDEX-side wiring, end to end. render_index's unit tests are built from
     # hand-written row dicts, so nothing else connects build() to the index:
-    # dropping r["fix_stat"] or r["fix_href"] in build() silently strips the badge
+    # dropping r["apply_stat"] or r["apply_href"] in build() silently strips the badge
     # and the pill from every card while every other test stays green.
     idx = (bundle / "index.html").read_text(encoding="utf-8")
     st = bb.diffstat(SAMPLE_PATCH)
     # The badge carries the short stat, the pill the full prose one: build() has
     # to set both row keys, from the two different helpers.
-    assert f'<span class="badge fix">fix · {bb.format_diffstat_short(st)}</span>' in idx
-    assert f'🔧 One-shot fix: {bb.format_diffstat(st)} →' in idx
-    fix_href = "candidates/modules/qiskit_compiler/foo__cand-a-0001__fix.html"
-    assert f'class="fix-link" href="{fix_href}"' in idx
+    assert f'<span class="badge apply">apply · {bb.format_diffstat_short(st)}</span>' in idx
+    assert f'🔧 One-shot apply: {bb.format_diffstat(st)} →' in idx
+    apply_href = "candidates/modules/qiskit_compiler/foo__cand-a-0001__apply.html"
+    assert f'class="apply-link" href="{apply_href}"' in idx
     # ...and that href actually resolves to the generated page
-    assert (bundle / fix_href).exists()
+    assert (bundle / apply_href).exists()
 
     # and the whole thing is in the outer zip
     with _zip.ZipFile(Path(result["zip_path"])) as zf:
         names = zf.namelist()
-    assert any(n.endswith("foo__cand-a-0001__fix.html") for n in names)
-    assert any(n.endswith("foo__cand-a-0001__fix/fix.zip") for n in names)
+    assert any(n.endswith("foo__cand-a-0001__apply.html") for n in names)
+    assert any(n.endswith("foo__cand-a-0001__apply/apply.zip") for n in names)
 
 
 def test_build_patch_without_notes_builds_a_bundle_of_one_file():
-    # FIX-NOTES.md is optional. `_copy_fix_files` guards on fx.get("notes"), and
+    # APPLY-NOTES.md is optional. `_copy_apply_files` guards on fx.get("notes"), and
     # without that guard `shutil.copy2(None, …)` raises TypeError — *after*
     # build() has already removed the previous share-bundle/, so the user is left
     # with no bundle at all. Same abort-with-nothing class as a strict decode.
@@ -1110,26 +1110,26 @@ def test_build_patch_without_notes_builds_a_bundle_of_one_file():
     c1 = (src / ".." / "modules" / "qiskit_compiler" / "foo__cand-a-0001.md").resolve()
     c1.parent.mkdir(parents=True, exist_ok=True)
     c1.write_text("# foo\n", encoding="utf-8")
-    _make_fix_tree(root, cand_id="cand-a-0001", slug="a", patch=True, notes=False)
+    _make_apply_tree(root, cand_id="cand-a-0001", slug="a", patch=True, notes=False)
 
     result = bb.build(str(src), top_n=1)
-    assert result["fix_bundles"] == 1          # a patch alone is a real fix
+    assert result["apply_bundles"] == 1        # a patch alone is enough
 
     bundle = Path(result["bundle_dir"])
     d = bundle / "candidates" / "modules" / "qiskit_compiler"
-    fixdir = d / "foo__cand-a-0001__fix"
-    assert (d / "foo__cand-a-0001__fix.html").exists()
-    assert (fixdir / "fix.patch").exists()
-    assert not (fixdir / "FIX-NOTES.md").exists()      # nothing invented
-    with _zip.ZipFile(fixdir / "fix.zip") as zf:
-        assert zf.namelist() == ["fix/fix.patch"]
+    applydir = d / "foo__cand-a-0001__apply"
+    assert (d / "foo__cand-a-0001__apply.html").exists()
+    assert (applydir / "apply.patch").exists()
+    assert not (applydir / "APPLY-NOTES.md").exists()  # nothing invented
+    with _zip.ZipFile(applydir / "apply.zip") as zf:
+        assert zf.namelist() == ["apply/apply.patch"]
     # the page is still complete: the diff renders, the index still links to it
-    page = (d / "foo__cand-a-0001__fix.html").read_text(encoding="utf-8")
+    page = (d / "foo__cand-a-0001__apply.html").read_text(encoding="utf-8")
     assert "The patch" in page and 'class="l d-add"' in page
-    assert 'class="badge fix"' in (bundle / "index.html").read_text(encoding="utf-8")
+    assert 'class="badge apply"' in (bundle / "index.html").read_text(encoding="utf-8")
 
 
-def test_build_skips_notes_only_fix_directory():
+def test_build_skips_notes_only_apply_directory():
     root = Path(tempfile.mkdtemp())
     src = root / "sorted"
     src.mkdir(parents=True, exist_ok=True)
@@ -1137,19 +1137,19 @@ def test_build_skips_notes_only_fix_directory():
     c1 = (src / ".." / "modules" / "qiskit_compiler" / "foo__cand-a-0001.md").resolve()
     c1.parent.mkdir(parents=True, exist_ok=True)
     c1.write_text("# foo\n", encoding="utf-8")
-    _make_fix_tree(root, cand_id="cand-a-0001", slug="a", patch=False, notes=True)
+    _make_apply_tree(root, cand_id="cand-a-0001", slug="a", patch=False, notes=True)
 
     result = bb.build(str(src), top_n=1)
-    assert result["fix_bundles"] == 0
+    assert result["apply_bundles"] == 0
     bundle = Path(result["bundle_dir"])
     d = bundle / "candidates" / "modules" / "qiskit_compiler"
-    assert not (d / "foo__cand-a-0001__fix.html").exists()
-    assert "One-shot fix" not in (d / "foo__cand-a-0001.html").read_text(encoding="utf-8")
-    assert "badge fix" not in (bundle / "index.html").read_text(encoding="utf-8")
+    assert not (d / "foo__cand-a-0001__apply.html").exists()
+    assert "One-shot apply" not in (d / "foo__cand-a-0001.html").read_text(encoding="utf-8")
+    assert "badge apply" not in (bundle / "index.html").read_text(encoding="utf-8")
 
 
 def test_build_end_to_end_with_both_arms():
-    # The fourth tree combination: fix/ and evolve/ side by side.
+    # The fourth tree combination: apply/ and evolve/ side by side.
     root = Path(tempfile.mkdtemp())
     src = root / "sorted"
     src.mkdir(parents=True, exist_ok=True)
@@ -1157,31 +1157,31 @@ def test_build_end_to_end_with_both_arms():
     c1 = (src / ".." / "modules" / "qiskit_compiler" / "foo__cand-a-0001.md").resolve()
     c1.parent.mkdir(parents=True, exist_ok=True)
     c1.write_text("# foo\n", encoding="utf-8")
-    _make_fix_tree(root, cand_id="cand-a-0001", slug="a")
+    _make_apply_tree(root, cand_id="cand-a-0001", slug="a")
     ev = root / "evolve" / "a" / "cand-a-0001" / "coral"
     ev.mkdir(parents=True, exist_ok=True)
     (ev / "task.yaml").write_text("name: t\n", encoding="utf-8")
 
     result = bb.build(str(src), top_n=1)
-    assert result["fix_bundles"] == 1
+    assert result["apply_bundles"] == 1
     assert result["evolve_bundles"] == 1
 
     bundle = Path(result["bundle_dir"])
     d = bundle / "candidates" / "modules" / "qiskit_compiler"
-    assert (d / "foo__cand-a-0001__fix.html").exists()
+    assert (d / "foo__cand-a-0001__apply.html").exists()
     assert (d / "foo__cand-a-0001__evolve.html").exists()
 
-    # both sections on the candidate page, fix first
+    # both sections on the candidate page, apply first
     cand_html = (d / "foo__cand-a-0001.html").read_text(encoding="utf-8")
-    assert cand_html.index("One-shot fix") < cand_html.index("Evolve bundles")
+    assert cand_html.index("One-shot apply") < cand_html.index("Evolve bundles")
 
     # both arms' back links point at the same candidate page
-    for page in ("foo__cand-a-0001__fix.html", "foo__cand-a-0001__evolve.html"):
+    for page in ("foo__cand-a-0001__apply.html", "foo__cand-a-0001__evolve.html"):
         assert 'href="foo__cand-a-0001.html"' in (d / page).read_text(encoding="utf-8")
 
 
-def test_build_without_fix_tree_reports_zero():
-    # Regression: a run with no fix/ tree at all still builds.
+def test_build_without_apply_tree_reports_zero():
+    # Regression: a run with no apply/ tree at all still builds.
     root = Path(tempfile.mkdtemp())
     src = root / "sorted"
     src.mkdir(parents=True, exist_ok=True)
@@ -1190,58 +1190,58 @@ def test_build_without_fix_tree_reports_zero():
     c1.parent.mkdir(parents=True, exist_ok=True)
     c1.write_text("# foo\n", encoding="utf-8")
     result = bb.build(str(src), top_n=1)
-    assert result["fix_bundles"] == 0
+    assert result["apply_bundles"] == 0
     assert result["count"] == 1
 
 
-def test_render_index_fix_badge_and_footer_link():
+def test_render_index_apply_badge_and_footer_link():
     header = {"title": "T", "objective": "O"}
     rows = [
         {"rank": "1", "cand_id": "cand-a-0001", "module": "m", "symbol": "foo",
          "impact": "high", "score": "96", "rationale": "R",
          "html_href": "candidates/modules/m/foo__cand-a-0001.html",
-         "fix_stat": "1 file changed, +69/−26",
-         "fix_badge_stat": "+69/−26",
-         "fix_href": "candidates/modules/m/foo__cand-a-0001__fix.html"},
+         "apply_stat": "1 file changed, +69/−26",
+         "apply_badge_stat": "+69/−26",
+         "apply_href": "candidates/modules/m/foo__cand-a-0001__apply.html"},
     ]
     idx = bb.render_index(header, rows)
     # The badge is the short form and the pill the long one, on the same card.
     # Collapsing them back to one string fails here.
-    assert '<span class="badge fix">fix · +69/−26</span>' in idx
-    assert '<span class="badge fix">fix · 1 file changed, +69/−26</span>' not in idx
-    assert '🔧 One-shot fix: 1 file changed, +69/−26 →' in idx
-    assert 'class="fix-link"' in idx
-    assert 'href="candidates/modules/m/foo__cand-a-0001__fix.html"' in idx
+    assert '<span class="badge apply">apply · +69/−26</span>' in idx
+    assert '<span class="badge apply">apply · 1 file changed, +69/−26</span>' not in idx
+    assert '🔧 One-shot apply: 1 file changed, +69/−26 →' in idx
+    assert 'class="apply-link"' in idx
+    assert 'href="candidates/modules/m/foo__cand-a-0001__apply.html"' in idx
 
 
-def test_render_index_shows_both_pills_with_fix_first():
+def test_render_index_shows_both_pills_with_apply_first():
     header = {"title": "T", "objective": "O"}
     rows = [
         {"rank": "1", "cand_id": "cand-a-0001", "module": "m", "symbol": "foo",
          "impact": "high", "score": "96", "rationale": "R",
          "html_href": "candidates/modules/m/foo__cand-a-0001.html",
-         "fix_stat": "1 file changed, +69/−26",
-         "fix_badge_stat": "+69/−26",
-         "fix_href": "candidates/modules/m/foo__cand-a-0001__fix.html",
+         "apply_stat": "1 file changed, +69/−26",
+         "apply_badge_stat": "+69/−26",
+         "apply_href": "candidates/modules/m/foo__cand-a-0001__apply.html",
          "evolve_count": 2, "evolve_engines": ["coral", "nous"],
          "evolve_href": "candidates/modules/m/foo__cand-a-0001__evolve.html"},
     ]
     idx = bb.render_index(header, rows)
-    assert 'class="fix-link"' in idx and 'class="evolve-link"' in idx
-    assert idx.index('class="fix-link"') < idx.index('class="evolve-link"')
-    assert '<span class="badge fix">' in idx
+    assert 'class="apply-link"' in idx and 'class="evolve-link"' in idx
+    assert idx.index('class="apply-link"') < idx.index('class="evolve-link"')
+    assert '<span class="badge apply">' in idx
     assert '<span class="badge evolve">evolve · 2</span>' in idx
 
 
-def test_render_index_fix_only_row_has_no_evolve_markup():
+def test_render_index_apply_only_row_has_no_evolve_markup():
     header = {"title": "T", "objective": "O"}
     rows = [
         {"rank": "1", "cand_id": "cand-a-0001", "module": "m", "symbol": "foo",
          "impact": "high", "score": "96", "rationale": "R",
          "html_href": "candidates/modules/m/foo__cand-a-0001.html",
-         "fix_stat": "1 file changed, +69/−26",
-         "fix_badge_stat": "+69/−26",
-         "fix_href": "candidates/modules/m/foo__cand-a-0001__fix.html"},
+         "apply_stat": "1 file changed, +69/−26",
+         "apply_badge_stat": "+69/−26",
+         "apply_href": "candidates/modules/m/foo__cand-a-0001__apply.html"},
     ]
     idx = bb.render_index(header, rows)
     # NB: the embedded _CSS mentions `.badge.evolve` and `.evolve-link`, so

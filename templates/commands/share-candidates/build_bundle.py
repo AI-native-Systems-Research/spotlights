@@ -200,7 +200,7 @@ def md_to_html_body(md_text: str) -> str:
 
         if _is_quote(stripped):
             # One <blockquote>, not one `&gt;`-prefixed paragraph per line: the
-            # unverified warning in FIX-NOTES.md is a wrapped multi-line quote.
+            # unverified warning in APPLY-NOTES.md is a wrapped multi-line quote.
             quote: list[list[str]] = [[]]
             while i < n and _is_quote(lines[i].strip()):
                 q = lines[i].strip()[1:].strip()
@@ -408,14 +408,14 @@ th { background: #f6f7f9; color: #3a4149; font-weight: 600; }
 .about dd .ask { margin:.3rem 0 0; padding:.6em .8em; background:#eef6ff;
   border-left:3px solid #2b6cb0; border-radius:0 6px 6px 0; color:#1a1d21;
   font-style:italic; font-size:.88rem; }
-/* --- one-shot fix --- */
-.badge.fix { background:#fdf0d5; color:#8a5a00; }
-.fix-link { display:inline-flex; align-items:center; gap:.45em;
+/* --- one-shot apply --- */
+.badge.apply { background:#fdf0d5; color:#8a5a00; }
+.apply-link { display:inline-flex; align-items:center; gap:.45em;
   font-size:.85rem; font-weight:600; color:#8a5a00; background:#fdf6e7;
   border:1px solid #f0dfb8; border-radius:999px; padding:.32em .85em;
   text-decoration:none; }
-.fix-link:hover { background:#fbeed2; border-color:#e6cf9c; }
-.fix-section { margin-top: 1.8rem; }
+.apply-link:hover { background:#fbeed2; border-color:#e6cf9c; }
+.apply-section { margin-top: 1.8rem; }
 .apply { background:#fbfbfc; border:1px solid #eef0f3; border-radius:8px;
   padding:10px 14px; margin:.2rem 0 1.2rem; }
 .apply h2 { margin:.1rem 0 .5rem; border:0; padding:0; font-size:1.05rem; }
@@ -464,17 +464,17 @@ def _doc(title: str, body: str) -> str:
 
 
 def render_candidate_page(md_text: str, title: str, back_href: str,
-                          evolve_section: str = "", fix_section: str = "") -> str:
+                          evolve_section: str = "", apply_section: str = "") -> str:
     """Render one candidate page.
 
-    `fix_section` is last so the pre-existing 4-positional-argument calls keep
-    working, but it is *emitted* before `evolve_section`: fix is the cheap arm,
+    `apply_section` is last so the pre-existing 4-positional-argument calls keep
+    working, but it is *emitted* before `evolve_section`: apply is the cheap arm,
     evolve the expensive one.
     """
     back = f'<a class="back" href="{html.escape(back_href)}">← Back to index</a>'
     body = back + "\n" + md_to_html_body(md_text)
-    if fix_section:
-        body += "\n" + fix_section
+    if apply_section:
+        body += "\n" + apply_section
     if evolve_section:
         body += "\n" + evolve_section
     return _doc(title, body)
@@ -486,11 +486,11 @@ def render_index(header: dict, rows: list[dict]) -> str:
         parts.append(f'<p class="subtitle">{render_inline(header["objective"])}</p>')
     for r in rows:
         impact_cls = "impact-high" if r["impact"].lower() == "high" else ""
-        fix_stat = r.get("fix_stat", "")
+        apply_stat = r.get("apply_stat", "")
         # The badge carries the short form, the footer pill the full prose stat.
-        fix_badge_stat = r.get("fix_badge_stat", "")
-        fix_badge = (f'<span class="badge fix">fix · {html.escape(fix_badge_stat)}</span>'
-                     if fix_badge_stat else "")
+        apply_badge_stat = r.get("apply_badge_stat", "")
+        apply_badge = (f'<span class="badge apply">apply · {html.escape(apply_badge_stat)}</span>'
+                       if apply_badge_stat else "")
         evolve_count = r.get("evolve_count", 0)
         evolve_badge = (f'<span class="badge evolve">evolve · {evolve_count}</span>'
                         if evolve_count else "")
@@ -502,18 +502,18 @@ def render_index(header: dict, rows: list[dict]) -> str:
             f'<span class="rank">#{html.escape(r["rank"])}</span>'
             f'<span class="sym">{html.escape(r["symbol"])}</span>'
             f'<span class="mod">{html.escape(r["module"])}</span>'
-            f'<span class="badges">{fix_badge}{evolve_badge}'
+            f'<span class="badges">{apply_badge}{evolve_badge}'
             f'<span class="badge {impact_cls}">{html.escape(r["impact"])}</span>'
             f'<span class="badge score">score {html.escape(r["score"])}</span>'
             f'</span></div>'
             f'<p class="rationale">{render_inline(r["rationale"])}</p>'
             f'</a>'
         )
-        # Fix first: it is the cheap arm, evolve the expensive one.
+        # Apply first: it is the cheap arm, evolve the expensive one.
         pills = []
-        if fix_stat:
-            pills.append(f'<a class="fix-link" href="{html.escape(r["fix_href"])}">'
-                         f'🔧 One-shot fix: {html.escape(fix_stat)} →</a>')
+        if apply_stat:
+            pills.append(f'<a class="apply-link" href="{html.escape(r["apply_href"])}">'
+                         f'🔧 One-shot apply: {html.escape(apply_stat)} →</a>')
         if evolve_count:
             engines = " · ".join(r.get("evolve_engines", []))
             pills.append(f'<a class="evolve-link" href="{html.escape(r["evolve_href"])}">'
@@ -614,7 +614,7 @@ _EVOLVE_PREREQ = (
 def _cand_module_slug(cand_id: str) -> str:
     """cand-<module_slug>-NNNN -> <module_slug> (the trailing -NNNN is dropped).
 
-    Shared by both follow-on arms: `evolve/` and `fix/` are both keyed by
+    Shared by both follow-on arms: `evolve/` and `apply/` are both keyed by
     <module_slug>/<cand_id>/ on disk.
     """
     return cand_id.removeprefix("cand-").rsplit("-", 1)[0]
@@ -761,14 +761,14 @@ def render_evolve_section(engines: dict, evolve_page_name: str) -> str:
         f'<p><a href="{html.escape(evolve_page_name)}">View evolve bundles →</a></p></div>')
 
 
-# --- one-shot fix -----------------------------------------------------------
+# --- one-shot apply ---------------------------------------------------------
 #
-# When `spotlights-engine fix` has run, a sibling `fix/` tree lives beside
+# When `spotlights-engine apply` has run, a sibling `apply/` tree lives beside
 # `sorted/`:
-#   <run>/fix/<module_slug>/<cand_id>/{fix.patch,FIX-NOTES.md}
+#   <run>/apply/<module_slug>/<cand_id>/{apply.patch,APPLY-NOTES.md}
 # For each exported candidate with a patch we copy those files into the bundle,
-# add a `…__fix.html` page, and surface a link on the candidate page and index
-# card. If no `fix/` tree exists the build behaves exactly as before.
+# add a `…__apply.html` page, and surface a link on the candidate page and index
+# card. If no `apply/` tree exists the build behaves exactly as before.
 
 
 def _diff_git_path(line: str) -> str | None:
@@ -781,7 +781,7 @@ def _diff_git_path(line: str) -> str | None:
     point: recognising the boundary is what resets the caller's `in_hunk` state.
     Coupling the reset to a successful *path* capture is a live bug — git quotes
     any path holding a non-ASCII byte, a quote, a backslash, or a control
-    character (`core.quotePath` defaults to true, and `fix.patch` comes from a
+    character (`core.quotePath` defaults to true, and `apply.patch` comes from a
     plain `git diff`), so a real patch contains both forms:
 
         diff --git a/vllm/v1/worker/utils.py b/vllm/v1/worker/utils.py
@@ -812,7 +812,7 @@ def _diff_git_path(line: str) -> str | None:
 def parse_patch_header(patch_text: str) -> dict:
     """Read the `# candidate/module/repo/base` block above the first diff.
 
-    Both `spotlights-engine fix` and the /spotlights-fix-candidate skill write
+    Both `spotlights-engine apply` and the /spotlights-apply-candidate skill write
     this header field-for-field, which is what makes it parseable. Absent
     fields are absent keys — callers use .get(). Scanning stops at the first
     `diff --git` so a `#` line inside a diff body can never be read as a field.
@@ -860,7 +860,7 @@ def _diff_line_kind(line: str, in_hunk: bool = False) -> str:
 def diffstat(patch_text: str) -> dict:
     """Per-file and total +added/-removed, computed from the patch itself.
 
-    Deliberately not read from FIX-NOTES.md's "Files changed" table: those
+    Deliberately not read from APPLY-NOTES.md's "Files changed" table: those
     notes say the table is derived from the patch, and the patch is what
     ships. One source of truth, and it is the one the recipient applies.
     """
@@ -902,13 +902,13 @@ def format_diffstat_short(stat: dict) -> str:
     return f"+{stat['added']}/−{stat['removed']}"
 
 
-def find_fix(cand_id: str, fix_root: Path) -> dict | None:
-    """Return a candidate's fix artifacts, or None.
+def find_apply(cand_id: str, apply_root: Path) -> dict | None:
+    """Return a candidate's apply artifacts, or None.
 
-    Looks under <fix_root>/<module_slug>/<cand_id>/. `fix.patch` is required:
-    a directory holding only FIX-NOTES.md is the legitimate "the change could
+    Looks under <apply_root>/<module_slug>/<cand_id>/. `apply.patch` is required:
+    a directory holding only APPLY-NOTES.md is the legitimate "the change could
     not be made" outcome, and a share bundle skips it entirely — no page, no
-    badge, no copies. FIX-NOTES.md itself is optional.
+    badge, no copies. APPLY-NOTES.md itself is optional.
 
     Returns the paths (`patch`, `notes`), the parsed contents (`header`, `stat`),
     and the decoded text plus patch size (`patch_text`, `notes_text`,
@@ -917,16 +917,16 @@ def find_fix(cand_id: str, fix_root: Path) -> dict | None:
     `.get()` on `header` rather than indexing it.
 
     The text is read here and nowhere else. `build()` must not re-read either
-    file: this is the only place that knows how to decode `fix.patch` safely
+    file: this is the only place that knows how to decode `apply.patch` safely
     (see the comment on the read below), and a second strict read elsewhere
     would reintroduce a crash that takes the whole bundle with it.
     """
-    d = fix_root / _cand_module_slug(cand_id) / cand_id
-    patch = d / "fix.patch"
+    d = apply_root / _cand_module_slug(cand_id) / cand_id
+    patch = d / "apply.patch"
     if not patch.is_file():
         return None
-    notes = d / "FIX-NOTES.md"
-    # `errors="replace"`, not strict: `fix.patch` is the one file here that is
+    notes = d / "APPLY-NOTES.md"
+    # `errors="replace"`, not strict: `apply.patch` is the one file here that is
     # deliberately NOT guaranteed to be UTF-8. The engine collects the diff as
     # raw bytes and writes it with `write_bytes`, because decoding and re-encoding
     # it would corrupt a patch that `git apply` has to accept byte-for-byte — so a
@@ -962,7 +962,7 @@ _DIFF_CLASS = {"add": "d-add", "del": "d-del", "hunk": "d-hunk", "context": ""}
 # The warning is the whole reason this page is careful: a colorized diff in a
 # browser is the most authoritative-looking artifact Spotlights emits, and none
 # of it was tested, benchmarked, or built.
-_FIX_UNVERIFIED = (
+_APPLY_UNVERIFIED = (
     "Nothing here was verified. No test was run, no benchmark was measured, no "
     "build was attempted. The patch was produced in a fresh detached worktree "
     "with no virtualenv and no compiled extensions, on a machine that may lack "
@@ -980,7 +980,7 @@ def _repo_placeholder(repo: str | None) -> str:
 def render_patch(patch_text: str, patch_href: str, size_kb: float) -> str:
     """The patch as a collapsed colorized diff, one block per changed file.
 
-    Closed by default: FIX-NOTES.md is the orientation, the diff is the detail —
+    Closed by default: APPLY-NOTES.md is the orientation, the diff is the detail —
     the same split that collapses evolve's non-README files.
     """
     stat = diffstat(patch_text)
@@ -1023,22 +1023,22 @@ def render_patch(patch_text: str, patch_href: str, size_kb: float) -> str:
     flush()
 
     return (
-        f'<details class="patch"><summary>fix.patch '
+        f'<details class="patch"><summary>apply.patch '
         f'<span class="sz">— {size_kb:.0f} KB · '
         f'<a href="{html.escape(patch_href)}">open raw ↗</a></span></summary>'
         f'<div class="diff">{"".join(blocks)}</div></details>')
 
 
-def render_fix_page(cand_id: str, symbol: str, fx: dict,
-                    raw_reldir: str, back_href: str) -> str:
-    """The `…__fix.html` page: orientation, apply recipe, notes, then the diff."""
+def render_apply_page(cand_id: str, symbol: str, fx: dict,
+                      raw_reldir: str, back_href: str) -> str:
+    """The `…__apply.html` page: orientation, apply recipe, notes, then the diff."""
     hdr = fx.get("header") or {}
     base = hdr.get("base", "")
     ph = _repo_placeholder(hdr.get("repo"))
     stat_line = format_diffstat(fx["stat"])
     body = [
         f'<a class="back" href="{html.escape(back_href)}">← Back to candidate</a>',
-        f"<h1>One-shot fix — {html.escape(symbol)}</h1>",
+        f"<h1>One-shot apply — {html.escape(symbol)}</h1>",
         f'<p class="subtitle">{html.escape(cand_id)} · {html.escape(stat_line)}</p>',
         '<div class="orient">'
         '<p><strong>What is this?</strong> One attempt at implementing this '
@@ -1046,14 +1046,14 @@ def render_fix_page(cand_id: str, symbol: str, fx: dict,
         'search. Spotlights read the candidate and the research behind it, made '
         'the change in a throwaway worktree, and handed back the diff plus its '
         'notes. Nothing has been applied to any repository.</p>'
-        f'<p class="warn">⚠️ {html.escape(_FIX_UNVERIFIED)}</p></div>',
+        f'<p class="warn">⚠️ {html.escape(_APPLY_UNVERIFIED)}</p></div>',
     ]
 
     apply_cmds = (
         f"REPO={ph}\n"
         f"git -C \"$REPO\" checkout {base or '<BASE_COMMIT>'}\n"
-        f"git -C \"$REPO\" apply --check \"$PWD/{raw_reldir}/fix.patch\" \\\n"
-        f"  && git -C \"$REPO\" apply \"$PWD/{raw_reldir}/fix.patch\"")
+        f"git -C \"$REPO\" apply --check \"$PWD/{raw_reldir}/apply.patch\" \\\n"
+        f"  && git -C \"$REPO\" apply \"$PWD/{raw_reldir}/apply.patch\"")
     apply_parts = ['<div class="apply"><h2>Apply this patch</h2>']
     if base:
         apply_parts.append(
@@ -1065,17 +1065,17 @@ def render_fix_page(cand_id: str, symbol: str, fx: dict,
     apply_parts.append(f'<pre>{html.escape(apply_cmds)}</pre>')
     apply_parts.append(
         '<p class="note">If it does not apply cleanly, '
-        f'<code>git -C "$REPO" apply -3 "$PWD/{html.escape(raw_reldir)}/fix.patch"</code> '
+        f'<code>git -C "$REPO" apply -3 "$PWD/{html.escape(raw_reldir)}/apply.patch"</code> '
         'falls back to a three-way merge. Without git, <code>patch -p1 &lt; '
-        'fix.patch</code> works from the repo root.</p>')
+        'apply.patch</code> works from the repo root.</p>')
     apply_parts.append(
-        '<p class="note">The paths written inside <code>fix.patch</code> and '
-        '<code>FIX-NOTES.md</code> name the machine that produced them — '
+        '<p class="note">The paths written inside <code>apply.patch</code> and '
+        '<code>APPLY-NOTES.md</code> name the machine that produced them — '
         'substitute your own checkout, as above. The files are copied here '
         'byte-for-byte and were not rewritten.</p>')
     apply_parts.append(
-        f'<a class="dl" href="{html.escape(raw_reldir)}/fix.zip" download>'
-        '⬇ Download fix (.zip)</a>')
+        f'<a class="dl" href="{html.escape(raw_reldir)}/apply.zip" download>'
+        '⬇ Download patch (.zip)</a>')
     apply_parts.append("</div>")
     body.append("".join(apply_parts))
 
@@ -1083,41 +1083,41 @@ def render_fix_page(cand_id: str, symbol: str, fx: dict,
         body.append(md_to_html_body(fx["notes_text"]))
     body.append("<h2>The patch</h2>")
     body.append(render_patch(fx["patch_text"],
-                             f"{raw_reldir}/fix.patch", fx.get("patch_kb", 0.0)))
-    return _doc(f"One-shot fix — {symbol}", "\n".join(body))
+                             f"{raw_reldir}/apply.patch", fx.get("patch_kb", 0.0)))
+    return _doc(f"One-shot apply — {symbol}", "\n".join(body))
 
 
-def render_fix_section(fx: dict, fix_page_name: str) -> str:
-    """The "One-shot fix" block appended to a candidate page."""
+def render_apply_section(fx: dict, apply_page_name: str) -> str:
+    """The "One-shot apply" block appended to a candidate page."""
     return (
-        '<div class="fix-section"><h2>One-shot fix</h2>'
+        '<div class="apply-section"><h2>One-shot apply</h2>'
         f'<p>A reviewable patch for this candidate: '
         f'<strong>{html.escape(format_diffstat(fx["stat"]))}</strong>. '
         'Nothing about it was verified — no test, no benchmark, no build.</p>'
-        f'<p><a href="{html.escape(fix_page_name)}">View the fix →</a></p></div>')
+        f'<p><a href="{html.escape(apply_page_name)}">View the patch →</a></p></div>')
 
 
-def _copy_fix_files(fx: dict, fix_dir: Path) -> None:
-    """Copy the fix artifacts verbatim and write a fix.zip rooted at fix/.
+def _copy_apply_files(fx: dict, apply_dir: Path) -> None:
+    """Copy the apply artifacts verbatim and write an apply.zip rooted at apply/.
 
     Byte-for-byte is deliberate: scrubbing the producer's repo path out of
-    fix.patch would ship a patch that differs from what the engine wrote. The
+    apply.patch would ship a patch that differs from what the engine wrote. The
     page carries a portable apply recipe instead.
     """
-    fix_dir.mkdir(parents=True, exist_ok=True)
+    apply_dir.mkdir(parents=True, exist_ok=True)
     members = [fx["patch"]] + ([fx["notes"]] if fx.get("notes") else [])
     for f in members:
-        shutil.copy2(f, fix_dir / f.name)
-    with zipfile.ZipFile(fix_dir / "fix.zip", "w", zipfile.ZIP_DEFLATED) as zf:
+        shutil.copy2(f, apply_dir / f.name)
+    with zipfile.ZipFile(apply_dir / "apply.zip", "w", zipfile.ZIP_DEFLATED) as zf:
         for f in members:
-            zf.write(f, f"fix/{f.name}")
+            zf.write(f, f"apply/{f.name}")
 
 
 def build(source_dir: str, top_n: int = 5) -> dict:
     """Parse sorted_candidates.md and build share-bundle/ + share-candidates.zip.
 
     Returns {title, count, bundle_dir, zip_path, skipped, evolve_bundles,
-    fix_bundles} — the last two being how many candidates got a folded-in
+    apply_bundles} — the last two being how many candidates got a folded-in
     sibling tree. Candidates whose linked .md file cannot be found are skipped
     (recorded in 'skipped'), not fatal.
     """
@@ -1138,12 +1138,12 @@ def build(source_dir: str, top_n: int = 5) -> dict:
     # Both follow-on arms write to a sibling tree beside `sorted/`; fold each in
     # when present, otherwise the build proceeds exactly as before.
     evolve_root = src.parent / "evolve"
-    fix_root = src.parent / "fix"
+    apply_root = src.parent / "apply"
 
     kept: list[dict] = []
     skipped: list[str] = []
     evolve_bundles = 0
-    fix_bundles = 0
+    apply_bundles = 0
     for r in rows:
         cand_path = (src / r["rel_link"]).resolve()
         if not cand_path.is_file():
@@ -1163,30 +1163,30 @@ def build(source_dir: str, top_n: int = 5) -> dict:
         stem = Path(mod_rel).with_suffix("")                   # modules/pkg/file
         cand_page_name = Path(stem).name + ".html"             # sibling back-link
 
-        # Fold in the one-shot fix for this candidate, if a patch exists on disk.
-        fx = find_fix(r["cand_id"], fix_root)
-        r["fix_stat"] = ""
-        r["fix_badge_stat"] = ""
-        r["fix_href"] = ""
-        fix_section = ""
+        # Fold in the one-shot apply for this candidate, if a patch exists on disk.
+        fx = find_apply(r["cand_id"], apply_root)
+        r["apply_stat"] = ""
+        r["apply_badge_stat"] = ""
+        r["apply_href"] = ""
+        apply_section = ""
         if fx:
-            fix_bundles += 1
-            fix_stem = str(stem) + "__fix"
-            fix_reldir = Path(fix_stem).name                   # relative to the page
-            fix_page_name = fix_reldir + ".html"
-            r["fix_stat"] = format_diffstat(fx["stat"])
-            r["fix_badge_stat"] = format_diffstat_short(fx["stat"])
-            r["fix_href"] = str(Path("candidates") / (fix_stem + ".html"))
-            _copy_fix_files(fx, bundle / "candidates" / fix_stem)
-            # No re-read here: `find_fix` already returned `patch_text`,
+            apply_bundles += 1
+            apply_stem = str(stem) + "__apply"
+            apply_reldir = Path(apply_stem).name                # relative to the page
+            apply_page_name = apply_reldir + ".html"
+            r["apply_stat"] = format_diffstat(fx["stat"])
+            r["apply_badge_stat"] = format_diffstat_short(fx["stat"])
+            r["apply_href"] = str(Path("candidates") / (apply_stem + ".html"))
+            _copy_apply_files(fx, bundle / "candidates" / apply_stem)
+            # No re-read here: `find_apply` already returned `patch_text`,
             # `notes_text`, and `patch_kb`, and it is the only place that knows
-            # `fix.patch` may not be valid UTF-8 (Task 4). Re-reading it strictly
+            # `apply.patch` may not be valid UTF-8 (Task 4). Re-reading it strictly
             # would abort the whole build on one odd byte.
-            (bundle / "candidates" / (fix_stem + ".html")).write_text(
-                render_fix_page(r["cand_id"], r["symbol"] or r["cand_id"],
-                                fx, fix_reldir, cand_page_name),
+            (bundle / "candidates" / (apply_stem + ".html")).write_text(
+                render_apply_page(r["cand_id"], r["symbol"] or r["cand_id"],
+                                  fx, apply_reldir, cand_page_name),
                 encoding="utf-8")
-            fix_section = render_fix_section(fx, fix_page_name)
+            apply_section = render_apply_section(fx, apply_page_name)
 
         # Fold in evolve bundles for this candidate, if any exist on disk.
         engines = find_evolve(r["cand_id"], evolve_root)
@@ -1210,7 +1210,7 @@ def build(source_dir: str, top_n: int = 5) -> dict:
 
         out_html.write_text(
             render_candidate_page(cand_md, r["symbol"] or r["cand_id"], back_href,
-                                  evolve_section, fix_section),
+                                  evolve_section, apply_section),
             encoding="utf-8",
         )
         kept.append(r)
@@ -1232,7 +1232,7 @@ def build(source_dir: str, top_n: int = 5) -> dict:
         "zip_path": str(zip_path),
         "skipped": skipped,
         "evolve_bundles": evolve_bundles,
-        "fix_bundles": fix_bundles,
+        "apply_bundles": apply_bundles,
     }
 
 
@@ -1246,8 +1246,8 @@ def main() -> None:
     print(f"Candidates: {result['count']}")
     print(f"Bundle:     {result['bundle_dir']}")
     print(f"Zip:        {result['zip_path']}")
-    if result.get("fix_bundles"):
-        print(f"Fix:        {result['fix_bundles']} candidate(s) with one-shot fixes")
+    if result.get("apply_bundles"):
+        print(f"Apply:      {result['apply_bundles']} candidate(s) with one-shot patches")
     if result.get("evolve_bundles"):
         print(f"Evolve:     {result['evolve_bundles']} candidate(s) with evolve bundles")
     if result["skipped"]:
