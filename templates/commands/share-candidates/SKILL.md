@@ -83,9 +83,11 @@ For each exported candidate that has an `apply.patch`, the bundle also gets:
   repo name — `<YOUR_VLLM_CHECKOUT>`, falling back to `<YOUR_REPO_CHECKOUT>` —
   and the `-3` and `patch -p1` fallbacks), the inlined `APPLY-NOTES.md`, and the
   patch as a collapsible colorized diff.
-- `candidates/modules/<module>/<file>__apply/` — `apply.patch` and
-  `APPLY-NOTES.md` copied verbatim, plus an `apply.zip` that unzips into a tidy
-  top-level `apply/` folder.
+- `candidates/modules/<module>/<file>__apply/` — `apply.patch`, `APPLY-NOTES.md`
+  and `apply.prompt.txt` copied verbatim, plus an `apply.zip` carrying the same
+  files, unzipping into a tidy top-level `apply/` folder. Only the patch is
+  guaranteed present; the notes and the prompt each ship when the `apply/` tree
+  has them, and the page names the prompt in the apply strip when it does.
 - The candidate page gains a "One-shot apply" section, and its index card gains
   an `apply · +X/−Y` badge and a footer link carrying the full
   `N file(s) changed, +X/−Y` stat.

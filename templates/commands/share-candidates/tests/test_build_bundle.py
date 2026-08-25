@@ -773,7 +773,7 @@ def test_format_diffstat_short_is_the_badge_form():
 
 
 def _make_apply_tree(root, cand_id="cand-qiskit_compiler-0001", slug="qiskit_compiler",
-                     patch=True, notes=True):
+                     patch=True, notes=True, prompt=True):
     """Create <root>/apply/<slug>/<cand_id>/ with the requested artifacts."""
     d = root / "apply" / slug / cand_id
     d.mkdir(parents=True, exist_ok=True)
@@ -782,6 +782,9 @@ def _make_apply_tree(root, cand_id="cand-qiskit_compiler-0001", slug="qiskit_com
     if notes:
         (d / "APPLY-NOTES.md").write_text(
             "# Apply notes\n\n- **Candidate:** `%s`\n" % cand_id, encoding="utf-8")
+    if prompt:
+        (d / "apply.prompt.txt").write_text(
+            "CANDIDATE: %s\nPROMPT:\nmake the change\n" % cand_id, encoding="utf-8")
     return d
 
 
@@ -792,6 +795,7 @@ def test_find_apply_joins_slug_path_and_returns_artifacts():
     assert fx is not None
     assert fx["patch"] == d / "apply.patch"
     assert fx["notes"] == d / "APPLY-NOTES.md"
+    assert fx["prompt"] == d / "apply.prompt.txt"
     assert fx["header"]["base"] == "83ad767eed3be3ee7f2df63be693bfaca5c7c922"
     assert fx["stat"]["added"] == 4
 
@@ -808,7 +812,7 @@ def test_find_apply_notes_only_directory_is_skipped():
     # `apply` writes APPLY-NOTES.md and no patch when the change was not made.
     # A share bundle skips those: no page, no badge, no copies.
     root = Path(tempfile.mkdtemp())
-    _make_apply_tree(root, patch=False, notes=True)
+    _make_apply_tree(root, patch=False, notes=True, prompt=False)
     assert bb.find_apply("cand-qiskit_compiler-0001", root / "apply") is None
 
 
@@ -999,6 +1003,51 @@ def test_render_apply_page_without_notes_omits_that_section():
     assert "&lt;YOUR_REPO_CHECKOUT&gt;" in out2
 
 
+def test_render_apply_page_mentions_the_prompt_only_when_one_ships():
+    # The download button is labelled "Download patch", so a recipient has no
+    # reason to expect apply.prompt.txt inside the zip. The page names it —
+    # but only when the file actually exists, or the note points at nothing.
+    fx = {"header": {"base": "abc123"}, "stat": bb.diffstat(SAMPLE_PATCH),
+          "patch_text": SAMPLE_PATCH, "notes_text": None, "patch_kb": 7.1}
+    assert "apply.prompt.txt" not in bb.render_apply_page(
+        "cand-a-0001", "foo", fx, "foo__apply", "foo.html")
+    out = bb.render_apply_page("cand-a-0001", "foo",
+                               {**fx, "prompt": Path("apply.prompt.txt")},
+                               "foo__apply", "foo.html")
+    assert "apply.prompt.txt" in out
+
+
+def test_copy_apply_files_puts_the_prompt_in_the_folder_and_the_zip():
+    # The zip is what the "Download patch (.zip)" button hands over, so the
+    # prompt has to be a zip member — being copied into the raw folder beside it
+    # is not enough for anyone who only clicks the button.
+    root = Path(tempfile.mkdtemp())
+    d = _make_apply_tree(root, notes=False)          # patch + prompt, no notes
+    fx = bb.find_apply("cand-qiskit_compiler-0001", root / "apply")
+    assert fx["prompt"] == d / "apply.prompt.txt"
+
+    out = root / "out__apply"
+    bb._copy_apply_files(fx, out)
+    assert filecmp.cmp(d / "apply.prompt.txt", out / "apply.prompt.txt", shallow=False)
+    with _zip.ZipFile(out / "apply.zip") as zf:
+        assert zf.namelist() == ["apply/apply.patch", "apply/apply.prompt.txt"]
+
+
+def test_copy_apply_files_without_a_prompt_ships_no_placeholder():
+    # apply.prompt.txt is optional: an older apply/ tree has none, and the zip
+    # must not gain an empty entry (nor `shutil.copy2(None, …)` a TypeError).
+    root = Path(tempfile.mkdtemp())
+    _make_apply_tree(root, prompt=False)
+    fx = bb.find_apply("cand-qiskit_compiler-0001", root / "apply")
+    assert fx["prompt"] is None
+
+    out = root / "out__apply"
+    bb._copy_apply_files(fx, out)
+    assert not (out / "apply.prompt.txt").exists()
+    with _zip.ZipFile(out / "apply.zip") as zf:
+        assert zf.namelist() == ["apply/apply.patch", "apply/APPLY-NOTES.md"]
+
+
 def test_render_apply_page_says_which_directory_the_apply_commands_assume():
     # The apply commands use "$PWD/{raw_reldir}/apply.patch", so they are
     # silently cwd-dependent. The page must state which directory to cd into.
@@ -1055,6 +1104,7 @@ def test_build_end_to_end_with_apply_bundle():
     assert page.exists()
     assert (d / "foo__cand-a-0001__apply" / "apply.patch").exists()
     assert (d / "foo__cand-a-0001__apply" / "APPLY-NOTES.md").exists()
+    assert (d / "foo__cand-a-0001__apply" / "apply.prompt.txt").exists()
     assert (d / "foo__cand-a-0001__apply" / "apply.zip").exists()
 
     # Copies are byte-for-byte — compared as BYTES, not as decoded text. A
@@ -1066,10 +1116,13 @@ def test_build_end_to_end_with_apply_bundle():
                        d / "foo__cand-a-0001__apply" / "apply.patch", shallow=False)
     assert filecmp.cmp(src_apply / "APPLY-NOTES.md",
                        d / "foo__cand-a-0001__apply" / "APPLY-NOTES.md", shallow=False)
+    assert filecmp.cmp(src_apply / "apply.prompt.txt",
+                       d / "foo__cand-a-0001__apply" / "apply.prompt.txt", shallow=False)
 
     # zip entries live under a top-level apply/ folder
     with _zip.ZipFile(d / "foo__cand-a-0001__apply" / "apply.zip") as zf:
-        assert sorted(zf.namelist()) == ["apply/APPLY-NOTES.md", "apply/apply.patch"]
+        assert sorted(zf.namelist()) == [
+            "apply/APPLY-NOTES.md", "apply/apply.patch", "apply/apply.prompt.txt"]
 
     # the candidate page links to the apply page; the apply page links back
     cand_html = (d / "foo__cand-a-0001.html").read_text(encoding="utf-8")
@@ -1099,10 +1152,11 @@ def test_build_end_to_end_with_apply_bundle():
 
 
 def test_build_patch_without_notes_builds_a_bundle_of_one_file():
-    # APPLY-NOTES.md is optional. `_copy_apply_files` guards on fx.get("notes"), and
-    # without that guard `shutil.copy2(None, …)` raises TypeError — *after*
-    # build() has already removed the previous share-bundle/, so the user is left
-    # with no bundle at all. Same abort-with-nothing class as a strict decode.
+    # APPLY-NOTES.md and apply.prompt.txt are both optional. `_copy_apply_files`
+    # guards on fx.get() for each, and without that guard `shutil.copy2(None, …)`
+    # raises TypeError — *after* build() has already removed the previous
+    # share-bundle/, so the user is left with no bundle at all. Same
+    # abort-with-nothing class as a strict decode.
     root = Path(tempfile.mkdtemp())
     src = root / "sorted"
     src.mkdir(parents=True, exist_ok=True)
@@ -1110,7 +1164,8 @@ def test_build_patch_without_notes_builds_a_bundle_of_one_file():
     c1 = (src / ".." / "modules" / "qiskit_compiler" / "foo__cand-a-0001.md").resolve()
     c1.parent.mkdir(parents=True, exist_ok=True)
     c1.write_text("# foo\n", encoding="utf-8")
-    _make_apply_tree(root, cand_id="cand-a-0001", slug="a", patch=True, notes=False)
+    _make_apply_tree(root, cand_id="cand-a-0001", slug="a", patch=True, notes=False,
+                     prompt=False)
 
     result = bb.build(str(src), top_n=1)
     assert result["apply_bundles"] == 1        # a patch alone is enough

@@ -908,13 +908,17 @@ def find_apply(cand_id: str, apply_root: Path) -> dict | None:
     Looks under <apply_root>/<module_slug>/<cand_id>/. `apply.patch` is required:
     a directory holding only APPLY-NOTES.md is the legitimate "the change could
     not be made" outcome, and a share bundle skips it entirely — no page, no
-    badge, no copies. APPLY-NOTES.md itself is optional.
+    badge, no copies. APPLY-NOTES.md and apply.prompt.txt are optional.
 
-    Returns the paths (`patch`, `notes`), the parsed contents (`header`, `stat`),
-    and the decoded text plus patch size (`patch_text`, `notes_text`,
-    `patch_kb`). `notes` and `notes_text` are None together when the notes are
-    absent; `header` may be `{}` and `stat["files"]` may be `[]`, so callers use
-    `.get()` on `header` rather than indexing it.
+    Returns the paths (`patch`, `notes`, `prompt`), the parsed contents
+    (`header`, `stat`), and the decoded text plus patch size (`patch_text`,
+    `notes_text`, `patch_kb`). `notes` and `notes_text` are None together when
+    the notes are absent; `header` may be `{}` and `stat["files"]` may be `[]`,
+    so callers use `.get()` on `header` rather than indexing it.
+
+    `prompt` is a path only — apply.prompt.txt ships in the copies and the zip so
+    the recipient can see the instruction the patch came from, but nothing
+    renders its text, so it is never read here.
 
     The text is read here and nowhere else. `build()` must not re-read either
     file: this is the only place that knows how to decode `apply.patch` safely
@@ -946,9 +950,11 @@ def find_apply(cand_id: str, apply_root: Path) -> dict | None:
     # *displays* is worth aborting the whole bundle over.
     has_notes = notes.is_file()
     notes_text = notes.read_text(encoding="utf-8", errors="replace") if has_notes else None
+    prompt = d / "apply.prompt.txt"
     return {
         "patch": patch,
         "notes": notes if has_notes else None,
+        "prompt": prompt if prompt.is_file() else None,
         "header": parse_patch_header(patch_text),
         "stat": diffstat(patch_text),
         "patch_text": patch_text,
@@ -1073,6 +1079,12 @@ def render_apply_page(cand_id: str, symbol: str, fx: dict,
         '<code>APPLY-NOTES.md</code> name the machine that produced them — '
         'substitute your own checkout, as above. The files are copied here '
         'byte-for-byte and were not rewritten.</p>')
+    if fx.get("prompt"):
+        apply_parts.append(
+            '<p class="note">The zip also carries <code>apply.prompt.txt</code> — '
+            'the verbatim instruction this patch was produced from. It records '
+            'the attempt (and the throwaway worktree it ran in); applying the '
+            'patch does not need it.</p>')
     apply_parts.append(
         f'<a class="dl" href="{html.escape(raw_reldir)}/apply.zip" download>'
         '⬇ Download patch (.zip)</a>')
@@ -1103,9 +1115,14 @@ def _copy_apply_files(fx: dict, apply_dir: Path) -> None:
     Byte-for-byte is deliberate: scrubbing the producer's repo path out of
     apply.patch would ship a patch that differs from what the engine wrote. The
     page carries a portable apply recipe instead.
+
+    The raw folder and the zip carry the same members, in the same order —
+    apply.patch, then whichever of APPLY-NOTES.md and apply.prompt.txt exist.
+    Only the patch is guaranteed present.
     """
     apply_dir.mkdir(parents=True, exist_ok=True)
-    members = [fx["patch"]] + ([fx["notes"]] if fx.get("notes") else [])
+    members = [fx["patch"]]
+    members += [fx[k] for k in ("notes", "prompt") if fx.get(k)]
     for f in members:
         shutil.copy2(f, apply_dir / f.name)
     with zipfile.ZipFile(apply_dir / "apply.zip", "w", zipfile.ZIP_DEFLATED) as zf:
