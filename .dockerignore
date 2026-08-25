@@ -1,0 +1,52 @@
+# VCS / CI metadata
+.git/
+.github/
+.pre-commit-config.yaml
+
+# Local user config / caches
+.claude/
+.claudeignore
+.spotlights/
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.omx/
+.env
+.DS_Store
+
+# Run outputs (may be present as untracked in dev checkouts)
+artifacts/
+artifacts_1/
+data/
+evolve_bundles/
+runs/
+spotlights-out/
+spotlights-out_1/
+tmp/
+output/
+logs/
+
+# Scratch files at repo root
+aggregate.log
+commands.txt
+filter_report.*
+mvp_demo_slide.pptx
+nous_report.md
+plan_creation.txt
+*.stdout
+*.stderr
+Building a Custom Image - DAM.html
+
+# Content not needed to build/install the wheel
+docs/
+examples/
+tests/
+scripts/
+
+# Python build/cache artefacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
