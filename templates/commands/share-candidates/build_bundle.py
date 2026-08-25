@@ -419,8 +419,10 @@ ENGINES: dict[str, dict] = {
                    "(alias: agentic-strategy-evolution).",
         "scope": "Multi-file: experiment arms with code_changes[].",
         "config": "campaign.yaml",
-        # nothing to hand-author: the agents discover metrics and evaluate on their own
-        "writes": None,
+        # No evaluator code — the agents discover metrics and evaluate on their own.
+        # The one gap is the rule deciding whether a measured number is a win.
+        "writes_html": ("<code>ground_truth.pass_condition</code> in "
+                        "<code>campaign.yaml</code> — a concrete pass/fail rule."),
         "install": [{"label": None,
                      "cmd": 'pip install "git+https://github.com/AI-native-Systems-Research/'
                             'agentic-strategy-evolution.git@reflective"'}],

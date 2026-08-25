@@ -238,13 +238,14 @@ def test_render_engine_coral_has_repo_install_quickstart_download():
     assert 'href="foo__cand-a-0001__evolve/coral/task.yaml"' in out   # open-raw link
 
 
-def test_render_engine_nous_has_no_writes_row():
+def test_render_engine_nous_writes_row_names_pass_condition():
     d = Path(tempfile.mkdtemp())
     f = d / "campaign.yaml"
     f.write_text("research_question: q\n", encoding="utf-8")
     out = bb.render_engine("nous", [f], "bar__cand-b-0002__evolve")
     assert "agentic-strategy-evolution.git@reflective" in out     # install command
-    assert "You must write" not in out                            # nothing to hand-author
+    assert "You must write" in out                                # the pass_condition gap
+    assert "ground_truth.pass_condition" in out
     assert "Quickstart" not in out                                # coral-only
 
 

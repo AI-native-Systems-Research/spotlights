@@ -6,7 +6,7 @@ Spotlights decides *what* to optimize; **evolvers** (evolutionary code-search ba
 
 > [!TIP]
 > **Not every candidate needs a search.** Every bundle below ships with a
-> deliberately unfinished evaluator (the "evaluation gap"), and completing it is
+> deliberately unfinished evaluation (the "evaluation gap"), and completing it is
 > project-specific work. When a candidate warrants *one attempt* rather than an
 > evolutionary search, [`spotlights-engine apply`](one-shot-apply.md) is the cheap
 > arm: one Claude Code session in a throwaway worktree produces `apply.patch` plus
@@ -17,7 +17,7 @@ Spotlights decides *what* to optimize; **evolvers** (evolutionary code-search ba
 |---|---|---|---|
 | [`skydiscover`](https://github.com/skydiscover-ai/skydiscover) | single file (mutates the `# EVOLVE-BLOCK-START/END` region) | `config.yaml` + `seed.<ext>` (you write `evaluator.py`) | `skydiscover-run seed.<ext> evaluator.py -c config.yaml` |
 | [`coral`](https://github.com/Human-Agent-Society/CORAL) | multi-file (agent edits a git worktree) | `task.yaml` (you write `grader/grader.py`) | `coral start --config task.yaml` |
-| [`nous`](https://github.com/AI-native-Systems-Research/agentic-strategy-evolution) (alias `agentic-strategy-evolution`) | multi-file (experiment arms with `code_changes[]`) | `campaign.yaml` | `NOUS_CAMPAIGN_PARENT=$PWD/nous_runs nous run campaign.yaml` |
+| [`nous`](https://github.com/AI-native-Systems-Research/agentic-strategy-evolution) (alias `agentic-strategy-evolution`) | multi-file (experiment arms with `code_changes[]`) | `campaign.yaml` (you set `ground_truth.pass_condition`) | `NOUS_CAMPAIGN_PARENT=$PWD/nous_runs nous run campaign.yaml` |
 
 Pass `--evolver all` to emit one bundle per compatible evolver (skydiscover is reported as skipped for multi-file selections).
 
@@ -79,15 +79,14 @@ with a warning, and existing bundles are skipped unless `--force` is set.
 ### What lands on disk
 
 Bundles are written to `<base>/evolve/<module>/<candidate>/<evolver>/`, mirroring
-the `modules/` tree. Alongside the evolver-native files, every bundle (except the
-single-file Nous campaign) includes:
+the `modules/` tree. Alongside the evolver-native files, every bundle includes:
 
 - `README.md` — the copy-paste run command, the in-scope files, and the **evaluation-gap warning**.
 
 The findings/proposals digest is embedded directly in each evolver's native config (the grader/evaluator prompt or system message) rather than written as a standalone file.
 
 > [!IMPORTANT]
-> **The evaluation gap is real.** Every evolver needs a project-specific measurement loop (build the target, run a benchmark, parse the metric). `prep-evolve` parses the correctness/performance oracle out of the candidate's `evolve_rationale` and objective and pre-fills the evaluator/grader scaffold, but the performance measurement is left as a clearly-marked `# TODO`. The bundle is launchable end-to-end immediately, but **results are not meaningful until you complete the evaluator** — each bundle's `README.md` states what Spotlights believes the oracle is.
+> **The evaluation gap is real.** Every evolver needs a project-specific measurement loop (build the target, run a benchmark, parse the metric). `prep-evolve` parses the correctness/performance oracle out of the candidate's `evolve_rationale` and objective and pre-fills what it can, but the part only you can supply ships as a clearly-marked `TODO`: for skydiscover and CORAL that is the performance measurement inside the evaluator/grader; for Nous, which needs no evaluator code, it is `ground_truth.pass_condition` in `campaign.yaml` — the rule deciding whether a measured number counts as a win. Spotlights knows the metric and its direction, never the threshold. Every bundle is launchable end-to-end immediately, but **results are not meaningful until you close that gap** — each bundle's `README.md` states what Spotlights believes the oracle is and exactly what to fill in.
 
 ### Flags
 
@@ -155,9 +154,9 @@ Agentic multi-file evolver — an LLM agent edits a git worktree of the repo.
 Runs experiment "arms" that apply `code_changes[]` across the target.
 
 - **Repository:** https://github.com/AI-native-Systems-Research/agentic-strategy-evolution
-- **Edit scope:** multi-file — experiment arms with `code_changes[]`.
+- **Edit scope:** multi-file — experiment arms with `code_changes[]`; the agents discover metrics and evaluate on their own.
 - **Native config:** `campaign.yaml`
-- **You must write:** nothing to hand-author — the agents discover metrics and evaluate on their own.
+- **You must write:** `ground_truth.pass_condition` in `campaign.yaml` — a concrete pass/fail rule.
 - **Install:** `pip install "git+https://github.com/AI-native-Systems-Research/agentic-strategy-evolution.git@reflective"`
 - **Run:** `NOUS_CAMPAIGN_PARENT=$PWD/nous_runs nous run campaign.yaml`
 

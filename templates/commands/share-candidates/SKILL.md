@@ -53,8 +53,8 @@ For each exported candidate that has evolve data, the bundle also gets:
 - `candidates/modules/<module>/<file>__evolve.html` — an "Evolve bundles" page
   with one section per engine (`coral`, `skydiscover`, `nous`): what the framework
   is, its repo, install command(s), edit scope, native config, the run command,
-  the inlined README (where the engine ships one), collapsible raw views of the
-  other files, and a per-engine download button.
+  the inlined README, collapsible raw views of the other files, and a per-engine
+  download button.
 - `candidates/modules/<module>/<file>__evolve/<engine>/…` — the complete original
   evolve files copied verbatim (including `seed.py`), plus a per-engine
   `<engine>.zip` that unzips into a tidy top-level `<engine>/` folder.
@@ -62,9 +62,10 @@ For each exported candidate that has evolve data, the bundle also gets:
   an `evolve · N` badge and a footer link to the evolve page.
 
 > **Evaluation gap:** every evolve bundle is launchable as-is, but produces no
-> meaningful score until the recipient completes its evaluator/grader — the
-> performance measurement ships as a `TODO`. The evolve page states this and the
-> oracle Spotlights inferred for each engine.
+> meaningful score until the recipient closes its gap, which ships as a `TODO` —
+> the performance measurement in the evaluator/grader for `skydiscover` and
+> `coral`, and `ground_truth.pass_condition` in `campaign.yaml` for `nous`. Each
+> engine's inlined README states this and the oracle Spotlights inferred.
 
 ## Link handling (built into the script)
 
