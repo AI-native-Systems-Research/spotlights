@@ -19,6 +19,7 @@ from spotlights_engine.one_shot_apply.api import (
     PromptPreview,
     SkippedApply,
     one_shot_apply,
+    render_prompt_block,
 )
 from spotlights_engine.one_shot_apply.errors import (
     ArtifactWriteError,
@@ -43,4 +44,5 @@ __all__ = [
     "WorktreeError",
     "build_apply_prompt",
     "one_shot_apply",
+    "render_prompt_block",
 ]

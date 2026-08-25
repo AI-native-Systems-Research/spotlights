@@ -64,11 +64,16 @@ prevent.
    CANDIDATE: <id>
    MODULE:    <qn>
    BASE:      <sha>
+   REPO:      <repo>
    WORKTREE:  <path>
    WORKTREE_PARENT:  <path>
+   NOTE: <the worktree paths are throwaway; how to recreate an equivalent one>
    PROMPT:
    <the prompt body>
    ```
+
+   Read `WORKTREE` and `WORKTREE_PARENT` off their own lines — the `NOTE:` block
+   mentions both by name, so match on the line prefix, not on the substring.
 
    `WORKTREE` is a detached checkout at `BASE`, already validated against the
    candidate's recorded symbol and line range, and is **left in place for you**.

@@ -75,13 +75,30 @@ patch left over from an earlier run of the same candidate is deleted, so the
 directory can never hold a patch that the notes go on to deny exists.
 
 `apply.prompt.txt` is the exact block `--print-prompt` emits — candidate, module,
-base commit, worktree paths, then the prompt body — written on every path, patch
-or no patch. It answers the question the notes cannot: whether a disappointing
-outcome came from the agent or from what the agent was *told*. "No in-scope edit
-was possible" and "the target the prompt named was the wrong one" read the same in
-the notes and differently here. Both `--print-prompt` and the run path render it
-from the same function, so the file the `/spotlights-apply-candidate` skill saves
-by teeing that stdout is byte-identical to the one the CLI writes itself.
+base commit, repo, worktree paths, then the prompt body — written on every path,
+patch or no patch. It is meant to be reusable on its own: take the file, and the
+prompt is what a fresh agent needs to attempt the same change. It also answers
+the question the notes cannot: whether a disappointing outcome came from the agent
+or from what the agent was *told*. "No in-scope edit was possible" and "the target
+the prompt named was the wrong one" read the same in the notes and differently
+here. Both `--print-prompt` and the run path render it from the same function, so
+the file the `/spotlights-apply-candidate` skill saves by teeing that stdout is
+byte-identical to the one the CLI writes itself.
+
+The two worktree paths in it are **dead by the time you read it** — the run
+deletes the worktree before writing the artifact, and the skill deletes it at its
+own last step. They are kept as a record that correlates the artifact with the
+run, and the file's `NOTE:` block says so, along with the one command that turns
+it back into something runnable:
+
+```bash
+git -C <repo> worktree add --detach <dir> <base-sha>
+```
+
+That is what makes the file reusable rather than merely readable: the prompt body
+names the old worktree as its working directory, so a reader needs somewhere to
+put a live one. Dropping the two fields instead would have left that body line in
+place with nothing to explain it.
 
 `apply.patch` carries a header comment recording the candidate, module, repo,
 and base commit, plus the apply command:
@@ -133,7 +150,7 @@ use the bundled skill instead (install it with `spotlights-engine init`):
 
 It picks a candidate, calls `spotlights-engine apply --print-prompt` to get the
 prompt *and* a created, validated worktree in one call, does the work
-in-session, then collects the same two artifacts and removes both the
+in-session, then collects the same three artifacts and removes both the
 worktree and its `WORKTREE_PARENT` scaffolding directory. The prompt is shared
 between the two paths, so they cannot drift on the part that matters.
 

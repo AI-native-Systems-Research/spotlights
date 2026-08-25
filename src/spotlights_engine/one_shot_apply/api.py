@@ -132,6 +132,7 @@ class PromptPreview(BaseModel):
 
     candidate_id: str
     module_qualified_name: str
+    repo_path: str
     worktree: str
     worktree_parent: str
     base_sha: str
@@ -147,14 +148,37 @@ def render_prompt_block(preview: PromptPreview) -> str:
     tees the CLI's stdout into that filename, so the two paths must not be
     able to drift into producing different bytes for the same candidate.
 
+    The `NOTE:` block exists because the two worktree paths are *dead* in every
+    saved copy of this file. On the run path `_write_artifacts` is called after
+    the `finally` that removes the worktree; on the skill path the worktree
+    survives only until its step 5 removes it. So the saved artifact always
+    records a directory that is gone — and the prompt body names that same
+    directory as its working directory, which is the line a reader reusing this
+    prompt would actually act on. The fields stay (they correlate the artifact
+    with the run's logs, and dropping them would leave the misleading body line
+    behind unexplained); what they mean is now stated, with the one command that
+    turns the file back into something runnable.
+
+    `WORKTREE:` and `WORKTREE_PARENT:` must keep their exact spelling and stay
+    one-per-line: the skill parses them out of stdout to know where to work and
+    what to clean up.
+
     Ends in a newline, so the CLI prints it with `end=""`.
     """
     return (
         f"CANDIDATE: {preview.candidate_id}\n"
         f"MODULE:    {preview.module_qualified_name}\n"
         f"BASE:      {preview.base_sha}\n"
+        f"REPO:      {preview.repo_path}\n"
         f"WORKTREE:  {preview.worktree}\n"
         f"WORKTREE_PARENT:  {preview.worktree_parent}\n"
+        f"NOTE: WORKTREE and WORKTREE_PARENT are throwaway paths, deleted when the\n"
+        f"      run finishes — and the prompt below names WORKTREE as its working\n"
+        f"      directory. In a saved copy of this file both are a historical record,\n"
+        f"      not a directory you can enter. To run this prompt again, make an\n"
+        f"      equivalent checkout and use that as the working directory instead:\n"
+        f"        git -C {shlex.quote(preview.repo_path)} worktree add --detach"
+        f" <dir> {preview.base_sha}\n"
         f"PROMPT:\n"
         f"{preview.prompt}\n"
     )
@@ -335,11 +359,17 @@ def _write_artifacts(
             # patch behind — the notes below explicitly deny one exists.
             (out_dir / PATCH_NAME).unlink(missing_ok=True)
 
-        (out_dir / PROMPT_NAME).write_text(render_prompt_block(preview), encoding="utf-8")
-        files.append(PROMPT_NAME)
-
+        # Notes before prompt. The `OSError` handler below unwinds either order,
+        # but a SIGKILL between the two writes does not run it: prompt-first
+        # would leave `apply.prompt.txt` alone in the directory, the one state
+        # the handler exists to prevent. Notes-alone is already a legitimate
+        # outcome (a no-patch run), so a crash lands on a state a reader can
+        # already read correctly.
         (out_dir / NOTES_NAME).write_text(notes, encoding="utf-8")
         files.append(NOTES_NAME)
+
+        (out_dir / PROMPT_NAME).write_text(render_prompt_block(preview), encoding="utf-8")
+        files.append(PROMPT_NAME)
     except OSError as exc:
         # Neither `write_bytes` nor `write_text` is atomic: an `ENOSPC` partway
         # through a multi-MB patch leaves a truncated `apply.patch` on disk, and
@@ -404,6 +434,11 @@ def _process_candidate(
         preview = PromptPreview(
             candidate_id=sel.candidate.id,
             module_qualified_name=sel.qn,
+            # The resolved path, matching the patch header's apply recipe rather
+            # than the as-recorded `spec.run.repo_path` the prompt body names —
+            # both blocks hand the reader a git command, and they must not point
+            # at two different spellings of the same repo.
+            repo_path=str(repo_path),
             worktree=str(worktree.path),
             worktree_parent=str(worktree.parent),
             base_sha=base_sha,
@@ -577,4 +612,5 @@ __all__ = [
     "PromptPreview",
     "SkippedApply",
     "one_shot_apply",
+    "render_prompt_block",
 ]

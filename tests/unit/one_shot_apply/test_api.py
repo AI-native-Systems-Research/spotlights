@@ -151,6 +151,7 @@ def test_the_prompt_the_agent_ran_is_saved_beside_the_patch(run) -> None:
         PromptPreview(
             candidate_id=CAND_ID,
             module_qualified_name=artifact.module_qualified_name,
+            repo_path=str(repo.resolve()),
             worktree=str(worktree),
             worktree_parent=str(worktree.parent),
             base_sha=artifact.base_sha,
@@ -159,6 +160,44 @@ def test_the_prompt_the_agent_ran_is_saved_beside_the_patch(run) -> None:
     )
     written = (Path(artifact.path) / "apply.prompt.txt").read_text(encoding="utf-8")
     assert written == expected
+
+
+def test_the_saved_prompt_admits_its_worktree_paths_are_dead(run) -> None:
+    """The worktree is already removed when `apply.prompt.txt` is written.
+
+    `_write_artifacts` runs *after* the `finally` that calls `remove_worktree`,
+    so `WORKTREE:`/`WORKTREE_PARENT:` in the saved file always name a deleted
+    directory — and the prompt body names that same directory as its working
+    directory. Both are kept (they correlate the artifact with the run's logs),
+    so the file has to say what they are and how to get a live checkout instead.
+    Asserted here rather than left implicit: the previous version of this test
+    passed while the file silently advertised a path nobody could enter.
+    """
+    run_dir, repo = run
+    seen: dict[str, object] = {}
+    inner = _runner()
+
+    def _capture(**kwargs):
+        seen.update(kwargs)
+        return inner(**kwargs)
+
+    result = one_shot_apply(
+        OneShotApplyInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+        claude_runner=_capture,
+    )
+    artifact = result.patches[0]
+    worktree = seen["worktree"]
+    assert isinstance(worktree, Path)
+    assert not worktree.exists(), "the worktree outlived the run it belongs to"
+
+    written = (Path(artifact.path) / "apply.prompt.txt").read_text(encoding="utf-8")
+    assert str(worktree) in written  # kept, not dropped
+    assert "deleted when the" in written  # and labelled as gone
+    # The recreate command is the whole point: without it the file records a
+    # prompt whose working directory cannot be reconstructed from the file.
+    assert (
+        f"git -C {repo.resolve()} worktree add --detach <dir> {artifact.base_sha}" in written
+    )
 
 
 def test_the_prompt_is_saved_even_when_the_agent_makes_no_edit(run) -> None:
