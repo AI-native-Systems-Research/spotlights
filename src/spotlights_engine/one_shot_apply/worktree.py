@@ -20,8 +20,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
-from spotlights_engine.one_shot_fix.errors import NotAGitRepoError, WorktreeError
-from spotlights_engine.one_shot_fix.prompts import CHANGE_SUMMARY_NAME
+from spotlights_engine.one_shot_apply.errors import NotAGitRepoError, WorktreeError
+from spotlights_engine.one_shot_apply.prompts import CHANGE_SUMMARY_NAME
 
 _GIT_TIMEOUT_S = 120
 
@@ -80,7 +80,7 @@ def _run_git_bytes(cwd: Path, *args: str, check: bool = True) -> bytes:
     Required for `git diff`. A diff's context lines reproduce the file's bytes
     verbatim, and a source file may legally contain bytes that are not valid
     UTF-8. Decoding with `errors="replace"` turns each such byte into U+FFFD
-    (`ef bf bd`); writing that back out produces a `fix.patch` whose context
+    (`ef bf bd`); writing that back out produces a `apply.patch` whose context
     no longer matches the file it came from, and `git apply` rejects it with
     "patch does not apply". `errors="strict"` is no better — it raises, losing
     the patch entirely. The only correct handling is not to decode: collect
@@ -98,7 +98,7 @@ def _run_git_bytes(cwd: Path, *args: str, check: bool = True) -> bytes:
 def require_git_repo(repo: Path) -> str:
     """Return `repo`'s HEAD sha, or raise `NotAGitRepoError`.
 
-    `prep-evolve` tolerates a non-git target and records a `None` commit. `fix`
+    `prep-evolve` tolerates a non-git target and records a `None` commit. `apply`
     cannot: a worktree needs a commit, and the emitted patch is meaningless
     without a recorded base to apply it to.
 
@@ -116,7 +116,7 @@ def require_git_repo(repo: Path) -> str:
         completed = _run_git(repo, "rev-parse", "HEAD", check=False)
     except WorktreeError as exc:
         raise NotAGitRepoError(
-            f"could not run git in {repo}: {exc}. `fix` needs a real git repo "
+            f"could not run git in {repo}: {exc}. `apply` needs a real git repo "
             f"and a working `git` on PATH: it creates a detached worktree at "
             f"the base commit and records that commit in the patch notes."
         ) from exc
@@ -124,7 +124,7 @@ def require_git_repo(repo: Path) -> str:
     if completed.returncode != 0 or not sha:
         raise NotAGitRepoError(
             f"{repo} is not a git checkout (git rev-parse HEAD failed). "
-            f"`fix` needs a real git repo: it creates a detached worktree at "
+            f"`apply` needs a real git repo: it creates a detached worktree at "
             f"the base commit and records that commit in the patch notes."
         )
     return sha
@@ -136,7 +136,7 @@ def create_worktree(repo: Path, base_sha: str) -> Worktree:
     `git worktree add` requires a non-existent path, so the temp directory is
     created first and the worktree goes in a child of it.
     """
-    parent = Path(tempfile.mkdtemp(prefix="spotlights-fix-"))
+    parent = Path(tempfile.mkdtemp(prefix="spotlights-apply-"))
     dest = parent / "worktree"
     try:
         _run_git(repo, "worktree", "add", "--detach", str(dest), base_sha)
@@ -247,7 +247,7 @@ class PatchCollection:
     `_GIT_TIMEOUT_S` timeout fired). It is *not* the same as an empty `patch`:
     an empty patch means the agent made no edit, while `collect_error` means
     what the agent did is unknown and now unrecoverable. Conflating the two
-    would make `FIX-NOTES.md` claim "the agent made no in-scope edit" about a
+    would make `APPLY-NOTES.md` claim "the agent made no in-scope edit" about a
     session whose edits were merely lost.
     """
 
@@ -428,7 +428,7 @@ def _summary_is_the_agents(wt: Worktree) -> bool:
     The file's existence on disk says nothing on its own: a repo that *tracks*
     a path by that name hands a copy to every worktree created from it, before
     the agent has run at all. Reading that copy would put the repo's own
-    content into `FIX-NOTES.md`'s "What changed and why" as though it were the
+    content into `APPLY-NOTES.md`'s "What changed and why" as though it were the
     agent's rationale — a false attribution in the one document whose entire
     value is being trustworthy about what was and was not done.
 
@@ -477,15 +477,15 @@ def collect_patch(wt: Worktree) -> PatchCollection:
 
     Order matters:
     1. read + delete `CHANGE-SUMMARY.md` *if the agent wrote it* (see
-       `_summary_is_the_agents`), so the agent's rationale reaches FIX-NOTES.md
+       `_summary_is_the_agents`), so the agent's rationale reaches APPLY-NOTES.md
        but never appears in the patch (or the manifest), then restore it from
        `base_sha` in case the repo tracked that path;
     2. `git add -N .` so *added* files show up in the diff;
     3. `git diff <base_sha>` (patch bytes) plus `git diff <base_sha>
        --name-status -z` and `git diff <base_sha> --numstat -z` (the
        manifest) — diffed against `wt.base_sha`, the exact commit the
-       worktree was created at and the same value recorded in `fix.patch`'s
-       header and `FIX-NOTES.md`.
+       worktree was created at and the same value recorded in `apply.patch`'s
+       header and `APPLY-NOTES.md`.
 
     `wt.base_sha` (not a bare `git diff`, which is index-vs-worktree only,
     and not `HEAD`) is load-bearing on two counts:
@@ -509,8 +509,8 @@ def collect_patch(wt: Worktree) -> PatchCollection:
       escape". That reasoning holds only if the diff base doesn't move with
       it. `git reset --soft` moves HEAD without touching the working tree,
       so a plain `git diff HEAD` after such a reset silently changes what
-      the diff (and thus `fix.patch`) is relative to — while the header and
-      `FIX-NOTES.md` still (correctly) claim `base_sha`. Diffing against
+      the diff (and thus `apply.patch`) is relative to — while the header and
+      `APPLY-NOTES.md` still (correctly) claim `base_sha`. Diffing against
       `wt.base_sha` directly is immune to HEAD moving underneath it.
     """
     summary_path = wt.path / CHANGE_SUMMARY_NAME
@@ -541,7 +541,7 @@ def collect_patch(wt: Worktree) -> PatchCollection:
             pass
         # Removing the rationale file keeps it out of the patch — unless the
         # target repo *tracks* a file by that name, in which case the unlink is
-        # a deletion the diff below reports faithfully, and `fix.patch` ships a
+        # a deletion the diff below reports faithfully, and `apply.patch` ships a
         # spurious hunk deleting one of the repo's own files. That is precisely
         # the class of unintended edit the manifest exists to catch, introduced
         # by the collector itself. Restoring the committed copy undoes exactly
@@ -572,7 +572,7 @@ def collect_patch(wt: Worktree) -> PatchCollection:
     # (a 120 s `_GIT_TIMEOUT_S` timeout on a huge tree, a git that dies). The
     # caller runs this inside the `try` whose `finally` destroys the worktree,
     # so raising here would take the whole candidate's record down with the
-    # worktree: no `FIX-NOTES.md`, no recorded `run.error`, no usage numbers,
+    # worktree: no `APPLY-NOTES.md`, no recorded `run.error`, no usage numbers,
     # and in a sweep, one skip line for a session that was already paid for.
     # Report the failure instead, keeping the agent's own prose (already read
     # above), and let the caller write notes that say plainly what is and is

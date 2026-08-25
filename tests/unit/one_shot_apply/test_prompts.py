@@ -1,4 +1,4 @@
-"""The fix prompt: oracles verbatim, base SHA present, scope confined."""
+"""The apply prompt: oracles verbatim, base SHA present, scope confined."""
 
 from __future__ import annotations
 
@@ -6,9 +6,9 @@ from pathlib import Path
 
 import pytest
 
-from spotlights_engine.one_shot_fix.prompts import (
+from spotlights_engine.one_shot_apply.prompts import (
     CHANGE_SUMMARY_NAME,
-    build_fix_prompt,
+    build_apply_prompt,
 )
 from spotlights_engine.prep_evolve.extract import build_spec, infer_direction
 from spotlights_engine.prep_evolve.resolve import (
@@ -54,12 +54,12 @@ def spec(tmp_path: Path) -> EvolveSpec:
 
 
 def test_base_sha_is_present(spec: EvolveSpec, tmp_path: Path) -> None:
-    prompt = build_fix_prompt(spec=spec, worktree=tmp_path / "wt")
+    prompt = build_apply_prompt(spec=spec, worktree=tmp_path / "wt")
     assert BASE_SHA in prompt
 
 
 def test_oracles_appear_verbatim(spec: EvolveSpec, tmp_path: Path) -> None:
-    prompt = build_fix_prompt(spec=spec, worktree=tmp_path / "wt")
+    prompt = build_apply_prompt(spec=spec, worktree=tmp_path / "wt")
     # The fixture rationale yields this correctness oracle and these metrics.
     assert "pytest tests/kernels/test_tile.py" in prompt
     assert "TPOT" in prompt and "TTFT" in prompt
@@ -68,7 +68,7 @@ def test_oracles_appear_verbatim(spec: EvolveSpec, tmp_path: Path) -> None:
 def test_scope_is_confined_to_the_candidate_file_and_range(
     spec: EvolveSpec, tmp_path: Path
 ) -> None:
-    prompt = build_fix_prompt(spec=spec, worktree=tmp_path / "wt")
+    prompt = build_apply_prompt(spec=spec, worktree=tmp_path / "wt")
     assert f"{CAND_FILE}:{CAND_START}-{CAND_END}" in prompt
     # The other module main file is NOT in scope for --scope candidate.
     assert "pkg/attn/launch.py" not in prompt
@@ -77,7 +77,7 @@ def test_scope_is_confined_to_the_candidate_file_and_range(
 def test_findings_with_urls_and_proposals_are_included(
     spec: EvolveSpec, tmp_path: Path
 ) -> None:
-    prompt = build_fix_prompt(spec=spec, worktree=tmp_path / "wt")
+    prompt = build_apply_prompt(spec=spec, worktree=tmp_path / "wt")
     assert "POD-Attention" in prompt
     assert "https://arxiv.org/abs/2410.18038" in prompt
     assert "Make tile size GQA-aware" in prompt
@@ -87,7 +87,7 @@ def test_prompt_forbids_running_tests_and_names_the_worktree(
     spec: EvolveSpec, tmp_path: Path
 ) -> None:
     worktree = tmp_path / "wt"
-    prompt = build_fix_prompt(spec=spec, worktree=worktree)
+    prompt = build_apply_prompt(spec=spec, worktree=worktree)
     assert str(worktree) in prompt
     assert "Do not run tests" in prompt
     assert CHANGE_SUMMARY_NAME in prompt

@@ -1,4 +1,4 @@
-"""Thin subprocess wrapper around `claude -p` for the one-shot fix session.
+"""Thin subprocess wrapper around `claude -p` for the one-shot apply session.
 
 Modeled on `agent_proposals.claude_exec` — prompt on stdin, `shutil.which`
 resolution so a Windows `.CMD` shim is found, stream-json usage capture for
@@ -29,7 +29,7 @@ costing. Four deliberate differences:
     --worktree` would not, but it needs `extensions.worktreeConfig`, off by
     default). `core.hooksPath` is the sharpest edge on the whole list: set it
     and arbitrary code runs on the user's next commit in their own checkout,
-    long after `fix` has exited.
+    long after `apply` has exited.
   - **refs** — `git stash` (`refs/stash`), `git branch`/`git tag`, and the
     low-level `git update-ref`/`git symbolic-ref`, which supersede those two
     by writing any ref directly. `git notes` and `git replace` are the same
@@ -43,7 +43,7 @@ costing. Four deliberate differences:
 
   `git commit` and `git checkout` are milder — worktree-local — but undermine
   the contract another way: they move the agent's work out of the working
-  tree, so `collect_patch`'s `git diff` sees nothing and `FIX-NOTES.md`
+  tree, so `collect_patch`'s `git diff` sees nothing and `APPLY-NOTES.md`
   falsely reports no patch was produced. `git am`, `git cherry-pick`,
   `git revert`, `git rebase` and `git merge` are denied for that same reason,
   not for blast radius.
@@ -83,9 +83,9 @@ _DROP_EXACT = frozenset(
         # Dropped for the reason `signal_pipeline/claude_subprocess.py` records:
         # inside a Claude Code session this token is set in the environment, and
         # inherited by a spawned `claude` it overrides the keychain credentials
-        # and the session fails with `401 Invalid bearer token`. `fix` is
+        # and the session fails with `401 Invalid bearer token`. `apply` is
         # *designed* to be launched from such a session (that is what
-        # `/spotlights-fix-candidate` does), so this is the module where the
+        # `/spotlights-apply-candidate` does), so this is the module where the
         # leak is most likely, not least.
         "ANTHROPIC_AUTH_TOKEN",
         "HTTP_PROXY",
@@ -106,7 +106,7 @@ _DROP_PREFIX = ("VSCODE_", "OPTQUEST_", "SPOTLIGHTS_")
 # absent.
 _DISALLOWED_GIT_WRITES = (
     # Moves the work out of the working tree: `collect_patch`'s `git diff
-    # <base>` then sees nothing and `FIX-NOTES.md` falsely reports no patch.
+    # <base>` then sees nothing and `APPLY-NOTES.md` falsely reports no patch.
     "Bash(git commit:*)",
     "Bash(git checkout:*)",
     "Bash(git am:*)",
@@ -129,7 +129,7 @@ _DISALLOWED_GIT_WRITES = (
     "Bash(git push:*)",
     # Writes the main repository's shared `.git/config`. `core.hooksPath` is
     # the sharpest edge here: it makes arbitrary code run on the *user's* next
-    # commit in their own checkout, long after `fix` has exited.
+    # commit in their own checkout, long after `apply` has exited.
     "Bash(git config:*)",
     "Bash(git remote:*)",
     "Bash(git submodule:*)",
@@ -151,8 +151,8 @@ def _clean_env() -> dict[str, str]:
 
 
 @dataclass
-class FixRunResult:
-    """Outcome of one fix session.
+class ApplyRunResult:
+    """Outcome of one apply session.
 
     `error is None` means the session completed; it does **not** mean the
     worktree changed. An agent that concluded the change could not be made in
@@ -177,21 +177,21 @@ def ensure_claude_available() -> None:
         )
 
 
-def run_fix_claude(
+def run_apply_claude(
     *,
     candidate_id: str,
     prompt: str,
     worktree: Path,
     max_turns: int,
     wallclock_s: int,
-) -> FixRunResult:
-    """Run one `claude -p` fix session with `worktree` as the working directory."""
+) -> ApplyRunResult:
+    """Run one `claude -p` apply session with `worktree` as the working directory."""
     # Resolve via shutil.which so Windows finds the .CMD shim. Bare
     # "claude" → FileNotFoundError because subprocess on Windows doesn't
     # follow PATHEXT for unqualified argv[0].
     claude_resolved = shutil.which("claude") or "claude"
     # The prompt goes on **stdin**, not argv — same as
-    # `agent_proposals.claude_exec`. A fix prompt embeds the whole findings
+    # `agent_proposals.claude_exec`. A apply prompt embeds the whole findings
     # digest (candidate spec, code excerpt, scope list, oracles) and is
     # unbounded in principle. Linux caps a single argv element at
     # `MAX_ARG_STRLEN` = 128 KiB regardless of `ARG_MAX`, and macOS caps env +
@@ -229,7 +229,7 @@ def run_fix_claude(
     except subprocess.TimeoutExpired as exc:
         duration = time.monotonic() - start
         stdout = exc.stdout or b""
-        return FixRunResult(
+        return ApplyRunResult(
             candidate_id=candidate_id,
             duration_s=duration,
             error=f"claude timed out after {duration:.1f}s",
@@ -239,7 +239,7 @@ def run_fix_claude(
         )
     except OSError as exc:
         duration = time.monotonic() - start
-        return FixRunResult(
+        return ApplyRunResult(
             candidate_id=candidate_id,
             duration_s=duration,
             error=f"could not launch claude: {exc}",
@@ -252,7 +252,7 @@ def run_fix_claude(
 
     if completed.returncode != 0:
         stderr_tail = stderr[-500:].decode("utf-8", "replace")
-        return FixRunResult(
+        return ApplyRunResult(
             candidate_id=candidate_id,
             duration_s=duration,
             error=f"claude exit={completed.returncode}: stderr={stderr_tail!r}",
@@ -261,7 +261,7 @@ def run_fix_claude(
             usage=usage,
         )
 
-    return FixRunResult(
+    return ApplyRunResult(
         candidate_id=candidate_id,
         duration_s=duration,
         stdout=stdout,
@@ -271,7 +271,7 @@ def run_fix_claude(
 
 
 __all__ = [
-    "FixRunResult",
+    "ApplyRunResult",
     "ensure_claude_available",
-    "run_fix_claude",
+    "run_apply_claude",
 ]

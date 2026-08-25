@@ -1,12 +1,12 @@
 ---
-description: Use when implementing ONE Spotlights candidate as a reviewable patch in-session — "fix this candidate", "implement candidate cand-...", "one-shot fix". Runs `spotlights-engine fix --print-prompt` to get a validated throwaway worktree plus the fix prompt, does the work interactively, and collects fix.patch + FIX-NOTES.md. Runs no tests and no benchmarks, and never modifies the target repo.
+description: Use when implementing ONE Spotlights candidate as a reviewable patch in-session — "apply this candidate", "fix this candidate", "implement candidate cand-...", "one-shot apply". Runs `spotlights-engine apply --print-prompt` to get a validated throwaway worktree plus the apply prompt, does the work interactively, and collects apply.patch + apply.prompt.txt + APPLY-NOTES.md. Runs no tests and no benchmarks, and never modifies the target repo.
 ---
 
-# Fix Candidate
+# Apply Candidate
 
 Turns one candidate from a finished Spotlights run into a reviewable patch,
 implemented **in this session** so you can steer it, interrupt it, and ask why
-mid-change. The batch equivalent is `spotlights-engine fix`, which runs a
+mid-change. The batch equivalent is `spotlights-engine apply`, which runs a
 nested `claude -p` you cannot influence — reach for this skill when you want to
 be in the loop on one candidate.
 
@@ -45,9 +45,18 @@ prevent.
    to avoid leaking one worktree per candidate in a sweep):
 
    ```bash
-   spotlights-engine fix --print-prompt \
-     --result "<run-dir>" --repo "<repo>" --candidate "<cand-id>"
+   spotlights-engine apply --print-prompt \
+     --result "<run-dir>" --repo "<repo>" --candidate "<cand-id>" \
+     | tee "/tmp/spotlights-apply-prompt-<cand-id>.txt"
    ```
+
+   The `tee` is not optional: that file becomes `apply.prompt.txt` in step 4,
+   and this is the only moment the prompt exists as text you can copy. Do not
+   reconstruct it later from what you remember reading — a paraphrase of the
+   prompt is worse than no prompt, because it reads as the real one. `tee`
+   captures stdout only, which is exactly the block; warnings go to stderr and
+   stay out of the file, so it matches byte-for-byte what
+   `spotlights-engine apply` writes on its own path.
 
    It prints a block of the form:
 
@@ -55,11 +64,16 @@ prevent.
    CANDIDATE: <id>
    MODULE:    <qn>
    BASE:      <sha>
+   REPO:      <repo>
    WORKTREE:  <path>
    WORKTREE_PARENT:  <path>
+   NOTE: <the worktree paths are throwaway; how to recreate an equivalent one>
    PROMPT:
    <the prompt body>
    ```
+
+   Read `WORKTREE` and `WORKTREE_PARENT` off their own lines — the `NOTE:` block
+   mentions both by name, so match on the line prefix, not on the substring.
 
    `WORKTREE` is a detached checkout at `BASE`, already validated against the
    candidate's recorded symbol and line range, and is **left in place for you**.
@@ -77,7 +91,7 @@ prevent.
    there; never touch the user's own checkout of the repo, which may be dirty
    mid-work and is none of your business.
 
-4. **Collect the artifacts.** `fix.patch` must carry a header naming the
+4. **Collect the artifacts.** `apply.patch` must carry a header naming the
    candidate, module, repo, and base commit — a bare `git diff` embeds none of
    that, and a patch that travels on its own without its base commit either
    fails to apply or misapplies silently. Write the header first, then append
@@ -86,18 +100,18 @@ prevent.
    ```bash
    cd "<WORKTREE>"
    git add -N .                 # REQUIRED: without it, files you ADDED vanish from the diff
-   mkdir -p "<run-dir>/fix/<module-slug>/<cand-id>"
-   cat > "<run-dir>/fix/<module-slug>/<cand-id>/fix.patch" <<'HEADER'
-   # spotlights one-shot fix
+   mkdir -p "<run-dir>/apply/<module-slug>/<cand-id>"
+   cat > "<run-dir>/apply/<module-slug>/<cand-id>/apply.patch" <<'HEADER'
+   # spotlights one-shot apply
    # candidate: <cand-id>
    # module:    <qn>
    # repo:      <repo>
    # base:      <BASE>
    # apply with (from the directory containing this patch):
    #   git -C <repo> checkout <BASE>
-   #   git -C <repo> apply "$PWD/fix.patch"
+   #   git -C <repo> apply "$PWD/apply.patch"
    HEADER
-   git diff "<BASE>" >> "<run-dir>/fix/<module-slug>/<cand-id>/fix.patch"
+   git diff "<BASE>" >> "<run-dir>/apply/<module-slug>/<cand-id>/apply.patch"
    ```
 
    Diff against `<BASE>`, never a bare `git diff`. `git add -N .`'s `.`
@@ -112,16 +126,31 @@ prevent.
 
    Use the quoted `<<'HEADER'` heredoc exactly as shown — quoting the
    delimiter stops the shell from expanding `$PWD` while writing the header,
-   so the literal text `"$PWD/fix.patch"` lands in the file. Fill in `<qn>`
+   so the literal text `"$PWD/apply.patch"` lands in the file. Fill in `<qn>`
    with the module's slash-form qualified name from `MODULE:` (not the slug),
    and `<repo>` / `<BASE>` from the same printed block. This is the exact
-   header `spotlights-engine fix` itself writes, field for field, so both
+   header `spotlights-engine apply` itself writes, field for field, so both
    paths produce the same artifact.
 
    `<module-slug>` is the module's slash-form qualified name with every
    character outside `[A-Za-z0-9._-]` (including `/`) replaced by `_` (e.g.
-   `v1/attention` → `v1_attention`). Then write `FIX-NOTES.md` beside the
-   patch containing:
+   `v1/attention` → `v1_attention`).
+
+   Then save the prompt you teed in step 2 beside the patch, unchanged:
+
+   ```bash
+   cp "/tmp/spotlights-apply-prompt-<cand-id>.txt" \
+      "<run-dir>/apply/<module-slug>/<cand-id>/apply.prompt.txt"
+   ```
+
+   Copy it verbatim — do not edit, trim, or re-wrap it. It is the record of what
+   the agent was *told*, and it is what separates "the proposal was declined" from
+   "the instruction was wrong" when the notes alone cannot say which. Save it even
+   when you produced no patch: that is the case where it matters most.
+   `spotlights-engine apply` writes this same file, from the same renderer, so
+   the two paths agree.
+
+   Then write `APPLY-NOTES.md` beside the patch containing:
 
    - candidate id, module, objective, and the **base commit** from `BASE:`
    - the in-scope files with their line ranges
@@ -129,14 +158,14 @@ prevent.
    - the findings you used, with their URLs
    - **the oracles verbatim**, correctness commands and performance metrics
    - an explicit statement that nothing was verified here
-   - the apply-and-verify recipe below, run **from the directory `fix.patch` is
-     in** (the same directory `FIX-NOTES.md` sits in) — this is the exact recipe
-     `spotlights-engine fix` itself writes, so both paths produce the same
+   - the apply-and-verify recipe below, run **from the directory `apply.patch` is
+     in** (the same directory `APPLY-NOTES.md` sits in) — this is the exact recipe
+     `spotlights-engine apply` itself writes, so both paths produce the same
      artifact:
 
      ```bash
      git -C <repo> checkout <BASE>
-     git -C <repo> apply --check "$PWD/fix.patch" && git -C <repo> apply "$PWD/fix.patch"
+     git -C <repo> apply --check "$PWD/apply.patch" && git -C <repo> apply "$PWD/apply.patch"
 
      # the recorded correctness oracle(s) — run them on a machine that can:
      <every recorded correctness oracle, one command per line>
@@ -146,15 +175,15 @@ prevent.
      and the one you drop may be the suite covering the code you changed.
 
      If the patch does not apply cleanly, the fallback is
-     `git -C <repo> apply -3 "$PWD/fix.patch"` (three-way merge), run from the
-     same directory. Without git, `patch -p1 < fix.patch` works, run from the
+     `git -C <repo> apply -3 "$PWD/apply.patch"` (three-way merge), run from the
+     same directory. Without git, `patch -p1 < apply.patch` works, run from the
      repo root instead.
 
-     Do not write `git -C <repo> apply fix.patch` with a bare relative path —
-     `-C` makes git chdir into `<repo>` first, so a bare `fix.patch` resolves
+     Do not write `git -C <repo> apply apply.patch` with a bare relative path —
+     `-C` makes git chdir into `<repo>` first, so a bare `apply.patch` resolves
      under `<repo>`, not under the directory it actually lives in, and the
-     apply fails with "can't open patch 'fix.patch'". Always pass the absolute
-     `"$PWD/fix.patch"` (captured from the directory containing the patch,
+     apply fails with "can't open patch 'apply.patch'". Always pass the absolute
+     `"$PWD/apply.patch"` (captured from the directory containing the patch,
      before the `-C` command runs).
 
    Recording the base commit is not optional: `git diff` embeds no base, and
@@ -171,7 +200,7 @@ prevent.
 
    All three matter. Skipping the prune leaves a stale entry in
    `.git/worktrees`. Skipping the `rm -rf` leaves an empty
-   `spotlights-fix-XXXX/` directory behind in the system temp directory on
+   `spotlights-apply-XXXX/` directory behind in the system temp directory on
    every single invocation — `worktree remove` deletes the worktree but not the
    parent scaffolding directory it lived in.
 
@@ -180,8 +209,10 @@ prevent.
 
 ## If the change cannot be made
 
-Write `FIX-NOTES.md` explaining why — the scope is wrong, the proposal needs a
+Write `APPLY-NOTES.md` explaining why — the scope is wrong, the proposal needs a
 file outside it, the research does not actually support the change — and
-produce no patch. A missing patch is a fine outcome. A patch that cannot be
-trusted is not. There is no plan-approval step in this skill; the patch itself
-is the reviewable artifact, and nothing is applied until a human applies it.
+produce no patch. Still save `apply.prompt.txt`: a reader deciding whether to
+believe the reason needs to see the instruction it was a reason about. A missing
+patch is a fine outcome. A patch that cannot be trusted is not. There is no
+plan-approval step in this skill; the patch itself is the reviewable artifact,
+and nothing is applied until a human applies it.

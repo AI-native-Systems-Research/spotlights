@@ -8,8 +8,8 @@ Spotlights decides *what* to optimize; **evolvers** (evolutionary code-search ba
 > **Not every candidate needs a search.** Every bundle below ships with a
 > deliberately unfinished evaluator (the "evaluation gap"), and completing it is
 > project-specific work. When a candidate warrants *one attempt* rather than an
-> evolutionary search, [`spotlights-engine fix`](one-shot-fix.md) is the cheap
-> arm: one Claude Code session in a throwaway worktree produces `fix.patch` plus
+> evolutionary search, [`spotlights-engine apply`](one-shot-apply.md) is the cheap
+> arm: one Claude Code session in a throwaway worktree produces `apply.patch` plus
 > the recorded verification recipe — a proposal faithfully implemented, with no
 > fitness loop. Use an evolver when you need a *measured* win.
 

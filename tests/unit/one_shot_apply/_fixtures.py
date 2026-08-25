@@ -1,4 +1,4 @@
-"""Fakes for one_shot_fix tests.
+"""Fakes for one_shot_apply tests.
 
 The `claude` runner is exercised against a fake executable on PATH rather than
 a monkeypatched function, so the real subprocess/argv/stream-json path is under

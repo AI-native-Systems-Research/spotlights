@@ -1,4 +1,4 @@
-"""`one_shot_fix(input, config) -> OneShotFixResult`.
+"""`one_shot_apply(input, config) -> OneShotApplyResult`.
 
 Per candidate: resolve → capture base sha → worktree → **validate inside the
 worktree** → build prompt → run `claude -p` → collect patch + notes → remove
@@ -8,12 +8,12 @@ Two orchestration decisions carry the design's weight:
 
 - **Validation runs against the worktree, not `--repo`.** The bytes validated
   are then exactly the bytes the agent edits, the recorded excerpt hash is
-  truthful, and your own checkout may be dirty while a fix runs. `prep-evolve`
+  truthful, and your own checkout may be dirty while an apply runs. `prep-evolve`
   has no such concern because it validates and points the evolver at the same
   path; the worktree introduces the asymmetry. With no tests being run, this
   gate is the only correctness check in the design.
 - **`print_prompt` runs steps 1-5 and stops**, leaving the worktree in place.
-  That is what `/spotlights-fix-candidate` consumes: it gets a validated
+  That is what `/spotlights-apply-candidate` consumes: it gets a validated
   worktree and the prompt in one call, so the staleness gate is never
   reimplemented in markdown.
 
@@ -21,7 +21,7 @@ Failure semantics follow `prep_evolve`'s batch loop in shape — a single
 explicit `--candidate` raises; a sweep records a per-candidate skip and
 continues — but the sweep's net is deliberately wider: it records *any*
 `Exception`, not only the two expected error hierarchies. Every candidate in a
-`fix` sweep costs a paid agent session, so an unexpected exception type on
+`apply` sweep costs a paid agent session, so an unexpected exception type on
 candidate 2 must not discard the eight that have not run yet. `prep_evolve`
 can afford the narrow handler because re-running it is free.
 """
@@ -38,20 +38,20 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from spotlights_engine.agent_proposals.errors import AgentProposalsSetupError
 from spotlights_engine.costing.usage import AgentUsage
-from spotlights_engine.one_shot_fix.claude_exec import (
-    FixRunResult,
+from spotlights_engine.one_shot_apply.claude_exec import (
+    ApplyRunResult,
     ensure_claude_available,
-    run_fix_claude,
+    run_apply_claude,
 )
-from spotlights_engine.one_shot_fix.errors import (
+from spotlights_engine.one_shot_apply.errors import (
     ArtifactWriteError,
     ClaudeUnavailableError,
-    OneShotFixError,
+    OneShotApplyError,
 )
-from spotlights_engine.one_shot_fix.notes import render_fix_notes
-from spotlights_engine.one_shot_fix.prompts import build_fix_prompt
-from spotlights_engine.one_shot_fix.scope import out_of_scope_files
-from spotlights_engine.one_shot_fix.worktree import (
+from spotlights_engine.one_shot_apply.notes import render_apply_notes
+from spotlights_engine.one_shot_apply.prompts import build_apply_prompt
+from spotlights_engine.one_shot_apply.scope import out_of_scope_files
+from spotlights_engine.one_shot_apply.worktree import (
     FileChange,
     Worktree,
     collect_patch,
@@ -80,13 +80,14 @@ from spotlights_engine.prep_evolve.validate_target import (
 )
 from spotlights_engine.utils.id_helpers import slug_for
 
-ClaudeRunner = Callable[..., FixRunResult]
+ClaudeRunner = Callable[..., ApplyRunResult]
 
-PATCH_NAME = "fix.patch"
-NOTES_NAME = "FIX-NOTES.md"
+PATCH_NAME = "apply.patch"
+NOTES_NAME = "APPLY-NOTES.md"
+PROMPT_NAME = "apply.prompt.txt"
 
 
-class OneShotFixInput(BaseModel):
+class OneShotApplyInput(BaseModel):
     model_config = ConfigDict(extra="forbid", arbitrary_types_allowed=True)
 
     result: Path
@@ -102,13 +103,13 @@ class OneShotFixInput(BaseModel):
     wallclock_s: int = Field(default=1800, ge=1)
 
 
-class OneShotFixConfig(BaseModel):
+class OneShotApplyConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     captured_at: str | None = None  # injected timestamp; default = now (UTC)
 
 
-class FixArtifact(BaseModel):
+class ApplyArtifact(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     candidate_id: str
@@ -131,13 +132,59 @@ class PromptPreview(BaseModel):
 
     candidate_id: str
     module_qualified_name: str
+    repo_path: str
     worktree: str
     worktree_parent: str
     base_sha: str
     prompt: str
 
 
-class SkippedFix(BaseModel):
+def render_prompt_block(preview: PromptPreview) -> str:
+    """The `--print-prompt` block: header lines, then the prompt body.
+
+    One renderer, two consumers — the CLI prints this to stdout under
+    `--print-prompt`, and `_write_artifacts` writes the same string to
+    `apply.prompt.txt` beside the patch. Sharing it is the point: the skill
+    tees the CLI's stdout into that filename, so the two paths must not be
+    able to drift into producing different bytes for the same candidate.
+
+    The `NOTE:` block exists because the two worktree paths are *dead* in every
+    saved copy of this file. On the run path `_write_artifacts` is called after
+    the `finally` that removes the worktree; on the skill path the worktree
+    survives only until its step 5 removes it. So the saved artifact always
+    records a directory that is gone — and the prompt body names that same
+    directory as its working directory, which is the line a reader reusing this
+    prompt would actually act on. The fields stay (they correlate the artifact
+    with the run's logs, and dropping them would leave the misleading body line
+    behind unexplained); what they mean is now stated, with the one command that
+    turns the file back into something runnable.
+
+    `WORKTREE:` and `WORKTREE_PARENT:` must keep their exact spelling and stay
+    one-per-line: the skill parses them out of stdout to know where to work and
+    what to clean up.
+
+    Ends in a newline, so the CLI prints it with `end=""`.
+    """
+    return (
+        f"CANDIDATE: {preview.candidate_id}\n"
+        f"MODULE:    {preview.module_qualified_name}\n"
+        f"BASE:      {preview.base_sha}\n"
+        f"REPO:      {preview.repo_path}\n"
+        f"WORKTREE:  {preview.worktree}\n"
+        f"WORKTREE_PARENT:  {preview.worktree_parent}\n"
+        f"NOTE: WORKTREE and WORKTREE_PARENT are throwaway paths, deleted when the\n"
+        f"      run finishes — and the prompt below names WORKTREE as its working\n"
+        f"      directory. In a saved copy of this file both are a historical record,\n"
+        f"      not a directory you can enter. To run this prompt again, make an\n"
+        f"      equivalent checkout and use that as the working directory instead:\n"
+        f"        git -C {shlex.quote(preview.repo_path)} worktree add --detach"
+        f" <dir> {preview.base_sha}\n"
+        f"PROMPT:\n"
+        f"{preview.prompt}\n"
+    )
+
+
+class SkippedApply(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     reason: str
@@ -145,12 +192,12 @@ class SkippedFix(BaseModel):
     module_qualified_name: str | None = None
 
 
-class OneShotFixResult(BaseModel):
+class OneShotApplyResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    fixes: list[FixArtifact] = Field(default_factory=list)
+    patches: list[ApplyArtifact] = Field(default_factory=list)
     prompts: list[PromptPreview] = Field(default_factory=list)
-    skipped: list[SkippedFix] = Field(default_factory=list)
+    skipped: list[SkippedApply] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
 
 
@@ -158,16 +205,16 @@ def _now_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _fix_dir(base: Path, qn: str, candidate_id: str) -> Path:
-    """`fix/<module-slug>/<candidate-id>/`, mirroring the evolve/ layout."""
-    return base / "fix" / slug_for(qn) / candidate_id
+def _apply_dir(base: Path, qn: str, candidate_id: str) -> Path:
+    """`apply/<module-slug>/<candidate-id>/`, mirroring the evolve/ layout."""
+    return base / "apply" / slug_for(qn) / candidate_id
 
 
 def _select(
-    input: OneShotFixInput,
+    input: OneShotApplyInput,
     loaded: LoadedResult,
     ranking: Path | None,
-    skipped: list[SkippedFix],
+    skipped: list[SkippedApply],
 ) -> list[CandidateSelection]:
     """Resolve the candidate selection, mirroring prep_evolve's three modes."""
     if input.candidate is not None:
@@ -188,7 +235,7 @@ def _select(
             try:
                 selections.append(find_candidate(loaded, cid))
             except SelectionError as exc:
-                skipped.append(SkippedFix(reason=str(exc), candidate_id=cid))
+                skipped.append(SkippedApply(reason=str(exc), candidate_id=cid))
         return selections
 
     if input.top_n is not None:
@@ -242,19 +289,25 @@ def _write_artifacts(
     manifest: list[FileChange],
     change_summary: str | None,
     agent_error: str | None,
+    preview: PromptPreview,
     collect_error: str | None = None,
 ) -> tuple[list[str], bool, list[str]]:
-    """Write `fix.patch` (when non-empty) and `FIX-NOTES.md`.
+    """Write `apply.patch` (when non-empty), `apply.prompt.txt`, and `APPLY-NOTES.md`.
 
     Returns `(files, produced, out_of_scope)` — `out_of_scope` is computed
     once here, from `manifest` against `spec.targets`, and threaded both into
-    the notes and back to the caller for `FixArtifact`, so the notes, the
+    the notes and back to the caller for `ApplyArtifact`, so the notes, the
     artifact, and the CLI warning are one verdict rather than three.
 
     `collect_error` is written even though it produces no patch: a session
-    whose diff failed still gets a `FIX-NOTES.md`, saying exactly that. It is
+    whose diff failed still gets a `APPLY-NOTES.md`, saying exactly that. It is
     the one case where the notes must not read "no patch was produced" — the
     agent may well have edited files, and they are gone with the worktree.
+
+    `apply.prompt.txt` is written unconditionally, patch or no patch: it records
+    what the agent was *told*, which is exactly what a reviewer needs when the
+    outcome is "no edit" or "the diff failed" and the notes alone cannot say
+    whether the instruction or the agent was at fault.
 
     Every filesystem write is wrapped: an `OSError` becomes an
     `ArtifactWriteError`, which the batch loop already knows how to record as
@@ -263,7 +316,7 @@ def _write_artifacts(
     """
     patch_produced = bool(patch.strip())
     out_of_scope = out_of_scope_files(spec, manifest) if patch_produced else []
-    notes = render_fix_notes(
+    notes = render_apply_notes(
         spec=spec,
         candidate_id=sel.candidate.id,
         module_qn=sel.qn,
@@ -277,12 +330,12 @@ def _write_artifacts(
         collect_error=collect_error,
     )
 
-    # Shell-quoted for the same reason as the recipe in FIX-NOTES.md: these
+    # Shell-quoted for the same reason as the recipe in APPLY-NOTES.md: these
     # header lines are meant to be copy-pasted, and a repo path containing a
     # space would otherwise be split by the shell.
     repo_arg = shlex.quote(str(repo_path))
     header = (
-        f"# spotlights one-shot fix\n"
+        f"# spotlights one-shot apply\n"
         f"# candidate: {sel.candidate.id}\n"
         f"# module:    {sel.qn}\n"
         f"# repo:      {repo_path}\n"
@@ -302,31 +355,41 @@ def _write_artifacts(
             (out_dir / PATCH_NAME).write_bytes(header.encode("utf-8") + patch)
             files.append(PATCH_NAME)
         else:
-            # A rerun that concludes no fix must not leave a previous session's
+            # A rerun that concludes no change must not leave a previous session's
             # patch behind — the notes below explicitly deny one exists.
             (out_dir / PATCH_NAME).unlink(missing_ok=True)
 
+        # Notes before prompt. The `OSError` handler below unwinds either order,
+        # but a SIGKILL between the two writes does not run it: prompt-first
+        # would leave `apply.prompt.txt` alone in the directory, the one state
+        # the handler exists to prevent. Notes-alone is already a legitimate
+        # outcome (a no-patch run), so a crash lands on a state a reader can
+        # already read correctly.
         (out_dir / NOTES_NAME).write_text(notes, encoding="utf-8")
         files.append(NOTES_NAME)
+
+        (out_dir / PROMPT_NAME).write_text(render_prompt_block(preview), encoding="utf-8")
+        files.append(PROMPT_NAME)
     except OSError as exc:
         # Neither `write_bytes` nor `write_text` is atomic: an `ENOSPC` partway
-        # through a multi-MB patch leaves a truncated `fix.patch` on disk, and
-        # the same failure on the notes leaves a truncated `FIX-NOTES.md`.
+        # through a multi-MB patch leaves a truncated `apply.patch` on disk, and
+        # the same failure on the notes leaves a truncated `APPLY-NOTES.md`.
         # Raising over either and leaving it there is the worst of the options.
         # The patch is the sharper edge — the directory would hold a file named
-        # `fix.patch` that `git apply` will reject, or (with bad luck at a hunk
+        # `apply.patch` that `git apply` will reject, or (with bad luck at a hunk
         # boundary) apply *partially* — but the notes matter too: a
         # half-written one can lose the very "Applying and verifying" section
         # that says which commit the patch belongs to, and this directory is
         # also where a *previous* run's artifacts sit. Leaving last run's notes
         # next to no patch is a directory that documents a patch which is not
-        # there. Remove both, so the failure reads as "nothing here" — the same
-        # invariant the empty-patch branch above maintains.
-        for name in (PATCH_NAME, NOTES_NAME):
+        # there. Remove all three, so the failure reads as "nothing here" — the
+        # same invariant the empty-patch branch above maintains. `apply.prompt.txt`
+        # goes too: on its own it would document an apply that produced nothing.
+        for name in (PATCH_NAME, PROMPT_NAME, NOTES_NAME):
             with contextlib.suppress(OSError):
                 (out_dir / name).unlink(missing_ok=True)
         raise ArtifactWriteError(
-            f"could not write fix artifacts for {sel.candidate.id} to {out_dir}: {exc}"
+            f"could not write apply artifacts for {sel.candidate.id} to {out_dir}: {exc}"
         ) from exc
 
     return sorted(files), patch_produced, out_of_scope
@@ -339,11 +402,11 @@ def _process_candidate(
     repo_path: Path,
     base: Path,
     base_sha: str,
-    input: OneShotFixInput,
+    input: OneShotApplyInput,
     captured_at: str,
     direction: Direction,
     claude_runner: ClaudeRunner,
-    result: OneShotFixResult,
+    result: OneShotApplyResult,
 ) -> None:
     """Run the full per-candidate pipeline, appending to `result`."""
     # `create_worktree` is called *inside* the `try`, with `worktree` pre-set
@@ -364,17 +427,25 @@ def _process_candidate(
             captured_at=captured_at,
             direction=direction,
         )
-        prompt = build_fix_prompt(spec=spec, worktree=worktree.path)
+        prompt = build_apply_prompt(spec=spec, worktree=worktree.path)
+        # Built on both paths, not just under --print-prompt: it is what the
+        # CLI prints there and what `apply.prompt.txt` records here, and one
+        # value feeding both is what keeps the two byte-identical.
+        preview = PromptPreview(
+            candidate_id=sel.candidate.id,
+            module_qualified_name=sel.qn,
+            # The resolved path, matching the patch header's apply recipe rather
+            # than the as-recorded `spec.run.repo_path` the prompt body names —
+            # both blocks hand the reader a git command, and they must not point
+            # at two different spellings of the same repo.
+            repo_path=str(repo_path),
+            worktree=str(worktree.path),
+            worktree_parent=str(worktree.parent),
+            base_sha=base_sha,
+            prompt=prompt,
+        )
 
         if input.print_prompt:
-            preview = PromptPreview(
-                candidate_id=sel.candidate.id,
-                module_qualified_name=sel.qn,
-                worktree=str(worktree.path),
-                worktree_parent=str(worktree.parent),
-                base_sha=base_sha,
-                prompt=prompt,
-            )
             result.prompts.append(preview)
             # Only set once the handoff has actually succeeded, so a leaked
             # worktree can never coexist with a swallowed exception.
@@ -393,7 +464,7 @@ def _process_candidate(
         if worktree is not None and not keep_worktree:
             remove_worktree(worktree)
 
-    out_dir = _fix_dir(base, sel.qn, sel.candidate.id)
+    out_dir = _apply_dir(base, sel.qn, sel.candidate.id)
     files, patch_produced, out_of_scope = _write_artifacts(
         out_dir=out_dir,
         spec=spec,
@@ -403,11 +474,12 @@ def _process_candidate(
         patch=collection.patch,
         manifest=collection.manifest,
         change_summary=collection.change_summary,
+        preview=preview,
         agent_error=run.error,
         collect_error=collection.collect_error,
     )
-    result.fixes.append(
-        FixArtifact(
+    result.patches.append(
+        ApplyArtifact(
             candidate_id=sel.candidate.id,
             module_qualified_name=sel.qn,
             path=str(out_dir),
@@ -421,12 +493,12 @@ def _process_candidate(
     )
 
 
-def one_shot_fix(
-    input: OneShotFixInput,
-    config: OneShotFixConfig | None = None,
+def one_shot_apply(
+    input: OneShotApplyInput,
+    config: OneShotApplyConfig | None = None,
     *,
     claude_runner: ClaudeRunner | None = None,
-) -> OneShotFixResult:
+) -> OneShotApplyResult:
     """Turn one (or every) candidate into a patch plus its notes."""
     if input.print_prompt and input.candidate is None:
         raise SelectionError(
@@ -435,10 +507,10 @@ def one_shot_fix(
             "with nothing to clean them up"
         )
 
-    config = config or OneShotFixConfig()
+    config = config or OneShotApplyConfig()
     captured_at = config.captured_at or _now_iso()
-    runner = claude_runner or run_fix_claude
-    result = OneShotFixResult()
+    runner = claude_runner or run_apply_claude
+    result = OneShotApplyResult()
 
     # 1. locate + load the run.
     location = resolve_result_location(input.result)
@@ -486,11 +558,11 @@ def one_shot_fix(
                 claude_runner=runner,
                 result=result,
             )
-        except (PrepEvolveError, OneShotFixError) as exc:
+        except (PrepEvolveError, OneShotApplyError) as exc:
             if not batch:
                 raise
             result.skipped.append(
-                SkippedFix(
+                SkippedApply(
                     reason=str(exc),
                     candidate_id=sel.candidate.id,
                     module_qualified_name=sel.qn,
@@ -502,7 +574,7 @@ def one_shot_fix(
             # must not abandon the candidates still queued: each one of those
             # costs a paid agent session, and in a sweep they have not run yet.
             # `prep_evolve`'s loop is deliberately narrow because re-running it
-            # is free; a `fix` sweep that dies on candidate 2 of 10 throws away
+            # is free; a `apply` sweep that dies on candidate 2 of 10 throws away
             # eight sessions' worth of work that were never started, and the
             # one already-finished patch is written before this point, so it
             # survives.
@@ -515,7 +587,7 @@ def one_shot_fix(
             if not batch:
                 raise
             result.skipped.append(
-                SkippedFix(
+                SkippedApply(
                     # Worded so it cannot be read as a routine skip: an
                     # unexpected type here means a bug, not a candidate that
                     # legitimately could not be fixed.
@@ -533,11 +605,12 @@ def one_shot_fix(
 
 
 __all__ = [
-    "FixArtifact",
-    "OneShotFixConfig",
-    "OneShotFixInput",
-    "OneShotFixResult",
+    "ApplyArtifact",
+    "OneShotApplyConfig",
+    "OneShotApplyInput",
+    "OneShotApplyResult",
     "PromptPreview",
-    "SkippedFix",
-    "one_shot_fix",
+    "SkippedApply",
+    "one_shot_apply",
+    "render_prompt_block",
 ]

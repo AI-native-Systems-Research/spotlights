@@ -1,4 +1,4 @@
-"""`spotlights-engine init` installs the fix-candidate skill."""
+"""`spotlights-engine init` installs the apply-candidate skill."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import pytest
 
 from spotlights_engine.init_skills import _plan_install_items, install_skills
 
-REL = ".claude/commands/spotlights-fix-candidate.md"
+REL = ".claude/commands/spotlights-apply-candidate.md"
 
 
 def test_fix_candidate_is_in_the_install_plan() -> None:
@@ -37,7 +37,7 @@ def test_the_skill_collects_the_patch_against_the_base_commit(
     A bare `git diff` is index-vs-worktree, and `git add -N .` stages a
     deletion *fully* — so a bare diff drops a deleted file and the delete-half
     of a rename, silently. The interactive path would then produce a different,
-    incomplete patch from `spotlights-engine fix` for the same candidate.
+    incomplete patch from `spotlights-engine apply` for the same candidate.
     """
     monkeypatch.chdir(tmp_path)
     assert install_skills(scope="project") == 0
