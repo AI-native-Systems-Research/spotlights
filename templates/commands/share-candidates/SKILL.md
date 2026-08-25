@@ -32,7 +32,8 @@ your responsibility to run the ranking step first.
 
 4. **Report** the printed summary: bundle title, number of candidates exported,
    the `share-bundle/` path, the `share-candidates.zip` path, how many candidates
-   got evolve bundles (if any), and any skipped candidates.
+   got evolve bundles and how many got one-shot patches (if any), and any
+   skipped candidates.
 
 ## What the bundle contains
 
@@ -67,10 +68,56 @@ For each exported candidate that has evolve data, the bundle also gets:
 > `coral`, and `ground_truth.pass_condition` in `campaign.yaml` for `nous`. Each
 > engine's inlined README states this and the oracle Spotlights inferred.
 
+## One-shot apply bundles (automatic when present)
+
+If `spotlights-engine apply` (or `/spotlights-apply-candidate`) has run, its
+output lives in a sibling `apply/` tree beside `sorted/`
+(`<run>/apply/<module>/<candidate>/`). The build folds it in automatically — no
+flag needed. If there is no `apply/` tree, the build behaves exactly as above.
+
+For each exported candidate that has an `apply.patch`, the bundle also gets:
+
+- `candidates/modules/<module>/<file>__apply.html` — a "One-shot apply" page:
+  what a one-shot apply is, the unverified warning, an **Apply this patch**
+  strip (real base commit, a checkout placeholder derived from the producer's
+  repo name — `<YOUR_VLLM_CHECKOUT>`, falling back to `<YOUR_REPO_CHECKOUT>` —
+  and the `-3` and `patch -p1` fallbacks), the inlined `APPLY-NOTES.md`, and the
+  patch as a collapsible colorized diff.
+- `candidates/modules/<module>/<file>__apply/` — `apply.patch`, `APPLY-NOTES.md`
+  and `apply.prompt.txt` copied verbatim, plus an `apply.zip` carrying the same
+  files, unzipping into a tidy top-level `apply/` folder. Only the patch is
+  guaranteed present; the notes and the prompt each ship when the `apply/` tree
+  has them, and the page names the prompt in the apply strip when it does.
+- The candidate page gains a "One-shot apply" section, and its index card gains
+  an `apply · +X/−Y` badge and a footer link carrying the full
+  `N file(s) changed, +X/−Y` stat.
+
+A candidate directory holding only `APPLY-NOTES.md` and no patch — the
+legitimate "the change could not be made" outcome — is skipped entirely: no
+page, no badge.
+
+> **Nothing in an apply bundle was verified:** no test was run, no benchmark
+> was measured, no build was attempted. The apply page states this prominently,
+> and carries the candidate's recorded oracles as the verification recipe for
+> whoever has the hardware.
+
 ## Link handling (built into the script)
 
-- External URLs (arxiv, doi, docs) → clickable, open in a new tab.
+- External URLs (arxiv, doi, docs) → clickable, open in a new tab. All three
+  forms are covered: `<https://…>` autolinks, `[text](https://…)` links, and
+  bare `https://…` URLs in prose. Only `http(s)` is linkified — not bare
+  `www.`, not email addresses, not scheme-relative URLs.
+- Trailing sentence punctuation is not part of the link: `See https://arxiv.org/abs/2309.06180.`
+  links the URL and leaves the full stop outside it. Same for `,` `;` `:` and a
+  closing paren the URL did not open.
+- A URL inside a code span or a fenced code block stays literal text, and so
+  does every URL inside a rendered patch.
 - Module breadcrumbs (`../*.md`) and source `.py` paths → plain non-clickable text.
+
+Which pages this matters for: the sorted ranking writes its references as
+`<…>` autolinks, so candidate pages' reference links have always been
+clickable. `APPLY-NOTES.md` writes them bare, so the bare-URL rule is what
+makes an apply page's references clickable (roughly four per page).
 
 ## Notes
 
