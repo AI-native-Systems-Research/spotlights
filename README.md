@@ -69,9 +69,23 @@ spotlights-out/
     vllm_v1_kv_offload.md           # module page: candidates table
     vllm_v1_kv_offload/
       <symbol-slug>__cand-<module>-NNNN.md   # per-candidate write-up + proposals
+  evolve/
+    vllm_v1_kv_offload/
+      cand-<module>-NNNN/           # per-candidate 'prep-evolve'
+        coral/
+        nous/
+        skydiscover/
+  apply/
+    vllm_v1_kv_offload/
+      cand-<module>-NNNN/           # per-candidate 'apply'
+        APPLY-NOTES.md
+        apply.patch
+        apply.prompt.txt
   sorted/                           # written by /spotlights-sort-candidates
     sorted_candidates.md            # ranked table linking each candidate
     sorted_candidates.json          # machine-readable ranking
+    share-bundle/                   # written by /spotlights-share-candidates
+    share-candidates.zip            # written by /spotlights-share-candidates
 artifacts/
   spotlights_manager/               # checkpoints, raw transcripts (resumable)
     run_manifest.json               # provenance, token usage, and rate-table cost
@@ -111,7 +125,7 @@ For LiteLLM gateway config and a quick response check, see [docs/agent-cli-setup
 | `/spotlights-apply-candidate` | Implements one candidate as a reviewable patch, in-session, in a throwaway git worktree. Produces `apply.patch` + `apply.prompt.txt` + `APPLY-NOTES.md`. Runs no tests and no benchmarks; your checkout is never modified. |
 
 <a id="quickstart"></a>
-## Quickstart on a vLLM subset
+## Quickstart (Example on a vLLM subset)
 
 **Prerequisites:** Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/).
 
@@ -131,7 +145,7 @@ Pin a version by replacing `main` with any git tag, branch, or commit. No shell 
 > curl -fsSL https://raw.githubusercontent.com/AI-native-Systems-Research/spotlights/main/install.sh | sh
 > ```
 
-Or install from source for development ([editable](docs/INSTALL.md#from-source-development)):
+Or install from source for development ([Development install](docs/INSTALL.md#from-source-development)):
 
 ```bash
 git clone https://github.com/AI-native-Systems-Research/spotlights.git
@@ -152,7 +166,7 @@ spotlights-engine init      # installs the /spotlights-* Claude Code slash comma
 spotlights-engine doctor
 ```
 
-**4. Run the engine on one module.** Clone [vLLM](https://github.com/vllm-project/vllm) next to this repo, decide your objective, then run the engine:
+**4. Run the engine on one module.** For Example: Clone [vLLM](https://github.com/vllm-project/vllm) next to this repo, decide your objective, then run the engine:
 
 > [!TIP]
 > **Framing the objective (optional).** The run needs an `--objective` and, optionally, one or more `--hint`s. You can write them by hand, as below. Or, in Claude Code, run the optional [`/spotlights-objective-setting`](#skills) interview — it walks you through your goal and prints a ready-to-paste flag line (`--objective "…" --hint "…"`). Either path produces the same flags; the skill is just a convenience, never a required step.
@@ -167,7 +181,7 @@ spotlights-engine \
   --artifacts-dir ./artifacts
 ```
 
-A single-module run like this takes roughly **30–45 minutes** and a **few dollars** in API cost against the paid `claude`/`codex` CLIs. Cost scales with the number of included modules — the full 8-module example run checked in under `examples/vllm_subset/` cost about **$26** at default rates. Exact cost depends on your model pricing; see [docs/cost-and-manifest.md](docs/cost-and-manifest.md).
+A single-module run like this takes roughly **30–45 minutes** and a **few dollars** in API cost against the paid `claude`/`codex` CLIs. Cost scales with the number of included modules — the full 8-module example run checked in under [`examples/vllm_subset/`](examples/vllm_subset) cost about **$26** at default rates. Exact cost depends on your model pricing; see [docs/cost-and-manifest.md](docs/cost-and-manifest.md).
 
 `--include` accepts one or more slash-form leaf qualified names (repeat the flag or pass several values):
 
@@ -175,7 +189,7 @@ A single-module run like this takes roughly **30–45 minutes** and a **few doll
 spotlights-engine --include vllm/v1/kv_offload vllm/v1/attention/paged_kv ...
 ```
 
-**5. Rank the candidates by impact.** A finished run can surface ~100 candidates; the bundled `/spotlights-sort-candidates` slash command ranks them for your objective. In Claude Code, from the same directory:
+**5. Rank the candidates by impact (optional).** A finished run can surface ~100 candidates; the bundled `/spotlights-sort-candidates` slash command ranks them for your objective. In Claude Code, from the same directory:
 
 ```
 /spotlights-sort-candidates

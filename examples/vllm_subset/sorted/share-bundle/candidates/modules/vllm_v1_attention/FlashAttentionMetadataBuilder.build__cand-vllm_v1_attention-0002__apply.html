@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>One-shot apply — FlashAttentionMetadataBuilder.build</title>
+<style>
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #f6f7f9; color: #1a1d21;
+  font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+.wrap { max-width: 860px; margin: 0 auto; padding: 32px 24px 80px; }
+a { color: #2b6cb0; }
+h1 { font-size: 1.7rem; line-height: 1.25; margin: 0 0 .5rem; }
+h2 { font-size: 1.25rem; margin: 1.8rem 0 .6rem; border-bottom: 1px solid #e2e5e9; padding-bottom: .25rem; }
+h3 { font-size: 1.05rem; margin: 1.3rem 0 .4rem; }
+p { margin: .6rem 0; }
+ul { margin: .5rem 0 .8rem; padding-left: 1.4rem; }
+li { margin: .2rem 0; }
+code { background: #eef0f3; border-radius: 4px; padding: .1em .35em;
+  font: .9em/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+hr { border: 0; border-top: 1px solid #e2e5e9; margin: 1.6rem 0; }
+blockquote { margin: .8rem 0; padding: .5em .9em; background: #f6f7f9;
+  border-left: 3px solid #e2e5e9; border-radius: 0 6px 6px 0; color: #3a4149; }
+blockquote p { margin: .3rem 0; }
+.tw { overflow-x: auto; margin: .7rem 0 1rem; }
+table { border-collapse: collapse; font-size: .92rem; }
+th, td { border: 1px solid #e2e5e9; padding: .35em .6em; text-align: left;
+  vertical-align: top; }
+th { background: #f6f7f9; color: #3a4149; font-weight: 600; }
+.back { display: inline-block; margin-bottom: 1.2rem; font-size: .95rem; }
+.subtitle { color: #5a6169; margin: 0 0 1.6rem; }
+.card { display: block; background: #fff; border: 1px solid #e2e5e9; border-radius: 10px;
+  padding: 16px 18px; margin: 12px 0; text-decoration: none; color: inherit;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04); transition: box-shadow .12s, border-color .12s; }
+.card:hover { box-shadow: 0 3px 10px rgba(0,0,0,.08); border-color: #c7cdd4; }
+.card .row1 { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.rank { font-weight: 700; color: #2b6cb0; }
+.sym { font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.mod { color: #5a6169; font-size: .9rem; }
+/* align-items:center, not the flex default of stretch: a stretched .badge keeps
+   its border-radius:999px, so a badge shorter than a taller sibling renders as a
+   circle rather than a pill. flex-shrink:0 and .badge's nowrap keep any badge
+   from being squeezed until its text wraps and becomes that taller sibling;
+   .row1 wraps, so an overflowing row moves .badges to its own line instead. */
+.badges { margin-left: auto; display: flex; align-items: center; gap: 8px;
+  flex-wrap: wrap; flex-shrink: 0; }
+.badge { font-size: .78rem; padding: .12em .6em; border-radius: 999px; background: #eef0f3;
+  color: #3a4149; white-space: nowrap; }
+.badge.impact-high { background: #fde8e8; color: #9b1c1c; }
+.badge.score { background: #e6f4ea; color: #1e6b33; }
+.rationale { margin: .5rem 0 0; color: #3a4149; font-size: .95rem; }
+
+/* --- evolve bundles --- */
+.badge.evolve { background: #e8e3fd; color: #4c2a9b; }
+.card-main { display:block; text-decoration:none; color:inherit; }
+.card-foot { margin-top:.7rem; padding-top:.6rem; border-top:1px dashed #e2e5e9;
+  display:flex; gap:8px; flex-wrap:wrap; }
+/* margin-left:auto, not justify-content:space-between on .card-foot: the two
+   arms are independently optional, and space-between would leave a lone evolve
+   pill sitting left. An auto margin pins evolve right whether or not an apply
+   pill shares the row — so a column of cards has apply flush left and evolve
+   flush right on every one of them. */
+.evolve-link { display:inline-flex; align-items:center; gap:.45em; margin-left:auto;
+  font-size:.85rem; font-weight:600; color:#4c2a9b; background:#f1edfd;
+  border:1px solid #d9cffb; border-radius:999px; padding:.32em .85em;
+  text-decoration:none; }
+.evolve-link:hover { background:#e6ddfc; border-color:#c3b1f7; }
+.evolve-section { margin-top: 1.8rem; }
+.engine { background:#fff; border:1px solid #e2e5e9; border-radius:10px;
+  padding:14px 16px; margin:12px 0; }
+.engine h3 { margin:.1rem 0 .5rem; }
+.engine .cmd { background:#1a1d21; color:#e6e6e6; border-radius:6px;
+  padding:.5em .7em; font:.85em/1.4 ui-monospace,Menlo,Consolas,monospace;
+  overflow-x:auto; }
+.engine pre { background:#f6f7f9; border:1px solid #e2e5e9; border-radius:6px;
+  max-height:360px; overflow:auto; padding:.6em .8em; }
+.engine details { margin:.5rem 0; }
+.engine summary { cursor:pointer; font:.9rem/1.4 ui-monospace,Menlo,Consolas,monospace;
+  color:#3a4149; padding:.25em 0; }
+.engine summary .sz { color:#8a9099; }
+.dl { display:inline-flex; align-items:center; gap:.5em; margin:.2rem 0 1.4rem;
+  font-size:.95rem; font-weight:600; color:#fff; background:#4c2a9b;
+  border-radius:8px; padding:.5em 1em; text-decoration:none; }
+.dl:hover { background:#3d2080; }
+.engine .dl { margin:1rem 0 .1rem; font-size:.85rem; font-weight:600;
+  color:#4c2a9b; background:#f1edfd; border:1px solid #d9cffb; padding:.4em .85em; }
+.engine .dl:hover { background:#e6ddfc; border-color:#c3b1f7; }
+.orient { background:#f1edfd; border:1px solid #d9cffb; border-radius:10px;
+  padding:14px 16px; margin:.2rem 0 1.2rem; }
+.orient p { margin:.4rem 0; }
+.orient .warn { color:#8a5a00; }
+.about { background:#fbfbfc; border:1px solid #eef0f3; border-radius:8px;
+  padding:10px 14px; margin:.2rem 0 .8rem; }
+.about .tagline { margin:.1rem 0 .6rem; font-weight:600; }
+.about dl { display:grid; grid-template-columns:max-content minmax(0,1fr);
+  gap:.3em 1em; margin:0; }
+.about dt { color:#5a6169; font-size:.82rem; padding-top:.05em; }
+.about dd { margin:0; font-size:.9rem; min-width:0; }
+.about dd .warn { color:#9b1c1c; display:block; margin-top:.3rem; }
+.inst-label { font-size:.78rem; color:#5a6169; margin:.5rem 0 .15rem; }
+.inst-label:first-child { margin-top:.1rem; }
+.engine pre.inst { background:#1a1d21; color:#e6e6e6; border:0; border-radius:6px;
+  padding:.5em .7em; margin:.1rem 0; max-height:none; overflow-x:auto;
+  font:.85em/1.5 ui-monospace,Menlo,Consolas,monospace; }
+.about dd p { margin:.1rem 0 .3rem; }
+.about dd .ask { margin:.3rem 0 0; padding:.6em .8em; background:#eef6ff;
+  border-left:3px solid #2b6cb0; border-radius:0 6px 6px 0; color:#1a1d21;
+  font-style:italic; font-size:.88rem; }
+/* --- one-shot apply --- */
+.badge.apply { background:#fdf0d5; color:#8a5a00; }
+/* No auto margin here, deliberately: apply is emitted first, so it is already
+   flush left, and .evolve-link's margin-left:auto is what pushes evolve right. */
+.apply-link { display:inline-flex; align-items:center; gap:.45em;
+  font-size:.85rem; font-weight:600; color:#8a5a00; background:#fdf6e7;
+  border:1px solid #f0dfb8; border-radius:999px; padding:.32em .85em;
+  text-decoration:none; }
+.apply-link:hover { background:#fbeed2; border-color:#e6cf9c; }
+.apply-section { margin-top: 1.8rem; }
+.apply-strip { background:#fbfbfc; border:1px solid #eef0f3; border-radius:8px;
+  padding:10px 14px; margin:.2rem 0 1.2rem; }
+.apply-strip h2 { margin:.1rem 0 .5rem; border:0; padding:0; font-size:1.05rem; }
+.apply-strip pre { background:#1a1d21; color:#e6e6e6; border:0; border-radius:6px;
+  padding:.5em .7em; margin:.3rem 0; overflow-x:auto;
+  font:.85em/1.5 ui-monospace,Menlo,Consolas,monospace; }
+.apply-strip .note { font-size:.85rem; color:#5a6169; margin:.5rem 0 .1rem; }
+.apply-strip .sha { font:.85em/1.4 ui-monospace,Menlo,Consolas,monospace;
+  background:#eef0f3; border-radius:4px; padding:.1em .35em; }
+.apply-strip .dl { margin:.7rem 0 .2rem; font-size:.85rem; color:#8a5a00;
+  background:#fdf6e7; border:1px solid #f0dfb8; }
+.apply-strip .dl:hover { background:#fbeed2; border-color:#e6cf9c; }
+.diff { border:1px solid #e2e5e9; border-radius:8px; overflow:hidden;
+  margin:.6rem 0 1.2rem; }
+.diff .file { background:#f6f7f9; border-bottom:1px solid #e2e5e9;
+  padding:.4em .7em; display:flex; gap:.8em; align-items:baseline;
+  font:.85rem/1.4 ui-monospace,Menlo,Consolas,monospace; }
+.diff .file .p { font-weight:600; word-break:break-all; }
+.diff .file .st { margin-left:auto; white-space:nowrap; }
+.diff .file .st .a { color:#1e6b33; }
+.diff .file .st .r { color:#9b1c1c; }
+.diff pre { margin:0; padding:0; background:#fff; overflow-x:auto;
+  font:.82em/1.5 ui-monospace,Menlo,Consolas,monospace; }
+.diff .l { display:block; padding:0 .7em; white-space:pre; }
+.diff .d-add { background:#e6f4ea; color:#1e6b33; }
+.diff .d-del { background:#fde8e8; color:#9b1c1c; }
+.diff .d-hunk { background:#eef0f3; color:#5a6169; }
+/* the patch <details> is not inside .engine, so it needs its own summary rules
+   — these mirror `.engine summary` / `.engine summary .sz` above */
+.patch { margin:.5rem 0 1.2rem; }
+.patch summary { cursor:pointer; padding:.25em 0; color:#3a4149;
+  font:.9rem/1.4 ui-monospace,Menlo,Consolas,monospace; }
+.patch summary .sz { color:#8a9099; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="FlashAttentionMetadataBuilder.build__cand-vllm_v1_attention-0002.html">← Back to candidate</a>
+<h1>One-shot apply — FlashAttentionMetadataBuilder.build</h1>
+<p class="subtitle">cand-vllm_v1_attention-0002 · 1 file changed, +42/−6</p>
+<div class="orient"><p><strong>What is this?</strong> One attempt at implementing this candidate's proposal, as a reviewable patch — not an evolutionary search. Spotlights read the candidate and the research behind it, made the change in a throwaway worktree, and handed back the diff plus its notes. Nothing has been applied to any repository.</p><p class="warn">⚠️ Nothing here was verified. No test was run, no benchmark was measured, no build was attempted. The patch was produced in a fresh detached worktree with no virtualenv and no compiled extensions, on a machine that may lack the hardware the performance oracle needs. Treat it as a proposal faithfully implemented — not as a measured win.</p></div>
+<div class="apply-strip"><h2>Apply this patch</h2><p class="note">Base commit <span class="sha">83ad767eed3be3ee7f2df63be693bfaca5c7c922</span> — the patch assumes this exact commit.</p><p class="note">Run these from the folder this page sits in — <code>$PWD</code> must be the directory holding <code>FlashAttentionMetadataBuilder.build__cand-vllm_v1_attention-0002__apply/</code>.</p><pre>REPO=&lt;YOUR_VLLM_CHECKOUT&gt;
+git -C &quot;$REPO&quot; checkout 83ad767eed3be3ee7f2df63be693bfaca5c7c922
+git -C &quot;$REPO&quot; apply --check &quot;$PWD/FlashAttentionMetadataBuilder.build__cand-vllm_v1_attention-0002__apply/apply.patch&quot; \
+  &amp;&amp; git -C &quot;$REPO&quot; apply &quot;$PWD/FlashAttentionMetadataBuilder.build__cand-vllm_v1_attention-0002__apply/apply.patch&quot;</pre><p class="note">If it does not apply cleanly, <code>git -C "$REPO" apply -3 "$PWD/FlashAttentionMetadataBuilder.build__cand-vllm_v1_attention-0002__apply/apply.patch"</code> falls back to a three-way merge. Without git, <code>patch -p1 &lt; apply.patch</code> works from the repo root.</p><p class="note">The paths written inside <code>apply.patch</code> and <code>APPLY-NOTES.md</code> name the machine that produced them — substitute your own checkout, as above. The files are copied here byte-for-byte and were not rewritten.</p><p class="note">The zip also carries <code>apply.prompt.txt</code> — the verbatim instruction this patch was produced from. It records the attempt (and the throwaway worktree it ran in); applying the patch does not need it.</p><a class="dl" href="FlashAttentionMetadataBuilder.build__cand-vllm_v1_attention-0002__apply/apply.zip" download>⬇ Download patch (.zip)</a></div>
+<h1>Apply notes — cand-vllm_v1_attention-0002</h1>
+<ul>
+<li><strong>Candidate:</strong> <code>cand-vllm_v1_attention-0002</code></li>
+<li><strong>Module:</strong> <code>vllm/v1/attention</code></li>
+<li><strong>Repo:</strong> <code>/Users/iklamer/ai-native-systems/VSCodeProjects/vllm</code></li>
+<li><strong>Base commit:</strong> <code>83ad767eed3be3ee7f2df63be693bfaca5c7c922</code></li>
+<li><strong>Objective:</strong> reduce the median TTFT and median TPOT (Time Per Output Token) (direction: minimize)</li>
+</ul>
+<h2>In-scope files</h2>
+<ul>
+<li>vllm/v1/attention/backends/flash_attn.py:479-762 — FlashAttentionMetadataBuilder.build</li>
+</ul>
+<h2>Files changed</h2>
+<p>What the diff actually touched, derived from the patch itself — not from the declared scope above. Compare it against &quot;In-scope files&quot;: any disagreement is exactly what a reviewer needs to see before applying this patch.</p>
+<div class="tw"><table><tr><th>File</th><th>Change</th><th>Lines</th><th>Scope</th></tr><tr><td><code>vllm/v1/attention/backends/flash_attn.py</code></td><td>modified</td><td>+42/-6</td><td>in scope</td></tr></table></div>
+<p><strong>Totals:</strong> 1 file changed, +42/-6.</p>
+<h2>The proposal</h2>
+<p>Builds per-step FlashAttention metadata, including AOT scheduler metadata, DCP lengths, cascade tensors, multimodal prefix ranges, and R-SWA buffers.</p>
+<p><strong>Current approach:</strong> Runs a sequential Python-side build each step. The nested schedule() closure can recompute scheduler_metadata for repeated shapes; cascade paths allocate cu_prefix_query_lens and prefix_kv_lens tensors; multimodal and R-SWA paths perform staging-buffer copies into device buffers.</p>
+<p><strong>Why it was worth changing:</strong> This method is on the per-token metadata path. Concrete tunables include caching schedule() results by repeated shape, reusing cascade prefix tensors, batching H2D staging copies, and skipping inactive subpaths earlier. Correctness oracle is existing FlashAttention metadata tests and end-to-end token/output equality against the current implementation.</p>
+<h2>Research findings used</h2>
+<ul>
+<li>Cascade Inference: Memory Bandwidth Efficient Shared Prefix Batch Decoding (blog) — <a href="https://flashinfer.ai/2024/02/02/cascade-inference.html" target="_blank" rel="noopener">https://flashinfer.ai/2024/02/02/cascade-inference.html</a></li>
+</ul>
+<p>Use recursive attention state merging to split shared-prefix attention from per-request suffix attention, then dispatch each part to the kernel best suited for its reuse pattern. For multi-turn agentic workloads with repeated system/tool/document prefixes, the module could make cascade selection more shape-aware and extend it toward multi-level shared prefixes rather than relying on coarse gates.</p>
+<ul>
+<li>flashinfer.cascade (docs) — <a href="https://docs.flashinfer.ai/api/cascade.html" target="_blank" rel="noopener">https://docs.flashinfer.ai/api/cascade.html</a></li>
+</ul>
+<p>Cache cascade planning auxiliary structures and reuse them across multiple layer calls for the same decode step. The module could mirror this at metadata-build time by keying stable shape/page/cascade plans and reusing preallocated CUDA-graph buffers to lower per-step planning overhead and median TPOT.</p>
+<ul>
+<li>CUDA C++ Best Practices Guide (docs) — <a href="https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html" target="_blank" rel="noopener">https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html</a></li>
+</ul>
+<p>Minimize host-device transfers, batch many small transfers into one contiguous transfer, and use pinned memory for asynchronous copies. The module could apply this to attention metadata construction by packing indptr, last-page lengths, multimodal ranges, and split metadata into fewer staged H2D copies or moving cheap prefix computations onto device.</p>
+<ul>
+<li>CUDA Graphs (docs) — <a href="https://docs.vllm.ai/en/v0.21.0/design/cuda_graphs/" target="_blank" rel="noopener">https://docs.vllm.ai/en/v0.21.0/design/cuda_graphs/</a></li>
+</ul>
+<p>Use a batch-descriptor-driven CUDA graph dispatcher that separately handles uniform decode and mixed/prefill batches, with backend capability fallbacks. The attention module could tighten its fast-plan and metadata decisions around stable batch descriptors so CUDA-graph-compatible decode routes avoid redundant planning while mixed batches safely fall back.</p>
+<h2>Recorded oracles</h2>
+<p>These are carried forward <strong>verbatim</strong> from the candidate. They are the verification recipe for a machine that can run them.</p>
+<p><strong>Correctness:</strong> _(none recorded)_</p>
+<p><strong>Performance:</strong> TTFT, TPOT</p>
+<blockquote><p><strong>Nothing in this directory was verified.</strong> No test was run, no benchmark was measured, no build was attempted. The patch was produced in a fresh detached worktree with no virtualenv and no compiled extensions, on a machine that may lack the hardware the performance oracle needs. Treat this as a proposal faithfully implemented — not as a measured win.</p></blockquote>
+<h2>What changed and why</h2>
+<h1>Change summary</h1>
+<h2>What changed</h2>
+<p><code>FlashAttentionMetadataBuilder.build</code> in <code>vllm/v1/attention/backends/flash_attn.py</code> (the cascade branch, lines ~638-690 in the new file) no longer allocates fresh device tensors on every step for the cascade prefix bookkeeping.</p>
+<p>Before, each cascade-active call did:</p>
+<pre><code>cu_prefix_query_lens = torch.tensor(
+    [0, num_actual_tokens], dtype=torch.int32, device=self.device
+)
+prefix_kv_lens = torch.tensor(
+    [common_prefix_len], dtype=torch.int32, device=self.device
+)</code></pre>
+<p>Each of those <code>torch.tensor(...)</code> calls builds the tiny int32 list on the CPU (pageable memory), performs a fresh device allocation, and issues an implicit CPU→GPU copy — twice per step, on the per-token metadata critical path.</p>
+<p>After, both tensors are lazily allocated once on the first cascade step and cached on the builder instance as <code>self._cascade_prefix_buffers</code>:</p>
+<ul>
+<li>pinned host staging buffers (<code>torch.zeros(..., pin_memory=PIN_MEMORY)</code>) and</li>
+<li>persistent device buffers (<code>torch.zeros(..., device=self.device)</code>).</li>
+</ul>
+<p>On every subsequent cascade step, <code>build</code> only:</p>
+<ul>
+<li>writes the two scalar values (<code>num_actual_tokens</code>, <code>common_prefix_len</code>) into</li>
+</ul>
+<p>the pinned staging buffers, then</p>
+<ul>
+<li>issues a <code>non_blocking=True</code> <code>copy_</code> from each pinned buffer to its device</li>
+</ul>
+<p>buffer.</p>
+<p>The two <code>torch.tensor(...)</code> fresh device allocations and their pageable-memory implicit H2D transfers are gone from the per-step path. <code>cu_prefix_query_lens</code> and <code>prefix_kv_lens</code> continue to be passed downstream to <code>schedule()</code> and <code>cascade_attention</code> with identical shapes, dtypes, devices, and values, so the kernel-facing contract is unchanged.</p>
+<h2>Why</h2>
+<p>The target&#x27;s <code>evolve_rationale</code> explicitly names &quot;cascade paths allocate cu_prefix_query_lens and prefix_kv_lens tensors&quot; as one of the concrete tunables. In a multi-turn agentic decode workload the cascade branch fires on every step, so removing two small H2D launches + allocations per step is a direct hit against median TPOT. On cascade-active prefill it also shaves TTFT.</p>
+<h2>Findings / proposals drawn on</h2>
+<ul>
+<li>**Proposal 3 (&quot;Coalesce per-step H2D metadata copies and eliminate cascade</li>
+</ul>
+<p>tiny-tensor allocations&quot;)** — direct match. The proposal calls out these exact lines and prescribes: replace <code>torch.tensor(..., device=self.device)</code> with persistent buffers + pinned staging + async copies, per the CUDA C++ Best Practices Guide section 10.1 (&quot;Data Transfer Between Host and Device&quot;).</p>
+<ul>
+<li><strong>Finding #3 (CUDA C++ Best Practices Guide)</strong> — provides the underlying</li>
+</ul>
+<p>rationale: pinned + non-blocking copies for small transfers, avoid repeated allocations. The implementation mirrors the existing pattern this file already uses in the mm_prefix and R-SWA branches (see <code>self.mm_prefix_query_ranges_cpu</code> at line 471 and its <code>copy_(..., non_blocking=True)</code> at line 740).</p>
+<p>Proposals 1, 2, 4, and 5 (shape-aware cascade dispatch, shape-keyed <code>schedule()</code> caching, batch-descriptor-driven plan caching, and cross-step pipelined AOT scheduler) were considered but <strong>not</strong> implemented in this change. All four require caching <code>get_scheduler_metadata</code> outputs (or their inputs) across steps, and the correctness envelope for that is significantly larger: <code>schedule()</code> inputs include the <code>cache_seqlens</code> and <code>cu_seqlens_q</code> tensors, whose <strong>contents</strong> vary step-to-step even when scalar shapes match. Caching the returned scheduler-metadata tensor by scalar shape alone would produce stale work distributions and risk correctness regressions on the per-token path. A safe version of those proposals needs either a content-fingerprint check (expensive), a proof from the caller that scheduling is insensitive to those tensor contents (not established from the in-scope code), or an off-critical-path pipelined implementation (proposal 5, which requires cross-step state and a helper stream — beyond the scoped edit to <code>build</code>).</p>
+<h2>What a reviewer should check by hand</h2>
+<p>1. <strong>Correctness — value &amp; shape parity.</strong> The persistent buffers have the same dtype (<code>torch.int32</code>), same shapes (<code>(2,)</code> and <code>(1,)</code>), same device, and after the two <code>copy_</code> calls carry the same values (<code>[0, num_actual_tokens]</code> and <code>[common_prefix_len]</code>) as the old <code>torch.tensor</code> construction. Downstream consumer <code>cascade_attention</code> (see <code>descale_shape = (cu_prefix_query_lens.shape[0] - 1, ...)</code> and <code>cu_seqlens_q=cu_prefix_query_lens</code> around line 1701–1708) reads shape and values only — unchanged. 2. <strong>Aliasing across steps.</strong> The returned metadata carries references to the persistent buffers. This is safe because (a) <code>build</code> is called once per forward step and the returned metadata is consumed by that step&#x27;s kernels, (b) both the <code>copy_</code> on the compute stream and the downstream cascade kernels launch on the same stream and are therefore ordered, and (c) the pattern is identical to how this same file already handles <code>mm_prefix_query_ranges_gpu</code> (line 738–744) and <code>persistent_rswa_prefix_lens</code> (line 753–758). If any consumer *does* retain and read <code>attn_metadata.cu_prefix_query_lens</code> / <code>prefix_kv_lens</code> across a subsequent <code>build</code> call, it would see updated values — worth grepping to confirm none do; a scan of this file shows both are only ever read inline within the same step&#x27;s <code>cascade_attention</code> call. 3. <strong>Cold path unchanged.</strong> Non-cascade calls never touch <code>_cascade_prefix_buffers</code>, so builders that never see <code>common_prefix_len &gt; 0</code> pay no memory or init cost. 4. <strong>DCP path unchanged.</strong> The <code>self.dcp_world_size &gt; 1</code> branch is a separate control-flow arm and was not modified. 5. <strong><code>pin_memory=PIN_MEMORY</code></strong> — <code>PIN_MEMORY</code> is already imported from <code>vllm.utils.torch_utils</code> at the top of the file (line 15–19) and is the same flag every other pinned-staging buffer in this builder uses. No new imports.</p>
+<h2>Scope discipline</h2>
+<ul>
+<li>Only edited within the <code>build</code> method (lines 479–762 as scoped).</li>
+<li>No changes to <code>__init__</code>, <code>FlashAttentionMetadata</code> dataclass, or any file</li>
+</ul>
+<p>outside <code>vllm/v1/attention/backends/flash_attn.py</code>.</p>
+<ul>
+<li>The persistent buffers are attached lazily to <code>self</code> on first cascade step,</li>
+</ul>
+<p>keeping all edits strictly inside the in-scope range.</p>
+<ul>
+<li>No tests, benchmarks, builds, or git write commands run — this worktree</li>
+</ul>
+<p>cannot execute them.</p>
+<h2>Applying and verifying this patch</h2>
+<p>Run this from the directory containing this file — the same directory <code>apply.patch</code> sits in:</p>
+<pre><code>git -C /Users/iklamer/ai-native-systems/VSCodeProjects/vllm checkout 83ad767eed3be3ee7f2df63be693bfaca5c7c922
+git -C /Users/iklamer/ai-native-systems/VSCodeProjects/vllm apply --check &quot;$PWD/apply.patch&quot; &amp;&amp; git -C /Users/iklamer/ai-native-systems/VSCodeProjects/vllm apply &quot;$PWD/apply.patch&quot;
+
+# the recorded correctness oracle — run it on a machine that can:
+# (no correctness oracle was recorded for this candidate)</code></pre>
+<p>If the patch does not apply cleanly, <code>git -C /Users/iklamer/ai-native-systems/VSCodeProjects/vllm apply -3 &quot;$PWD/apply.patch&quot;</code> falls back to a three-way merge. Without git, <code>patch -p1 &lt; apply.patch</code> works from the repo root.</p>
+<h2>The patch</h2>
+<details class="patch"><summary>apply.patch <span class="sz">— 3 KB · <a href="FlashAttentionMetadataBuilder.build__cand-vllm_v1_attention-0002__apply/apply.patch">open raw ↗</a></span></summary><div class="diff"><div class="file"><span class="p">vllm/v1/attention/backends/flash_attn.py</span><span class="st"><span class="a">+42</span> <span class="r">−6</span></span></div><pre><span class="l">index 97f30736fd..6991f4a05d 100755
+</span><span class="l d-hunk">@@ -636,12 +636,48 @@ class FlashAttentionMetadataBuilder(AttentionMetadataBuilder[FlashAttentionMetad
+</span><span class="l">                     causal=False,
+</span><span class="l">                 )
+</span><span class="l">         elif use_cascade:
+</span><span class="l d-del">-            cu_prefix_query_lens = torch.tensor(
+</span><span class="l d-del">-                [0, num_actual_tokens], dtype=torch.int32, device=self.device
+</span><span class="l d-del">-            )
+</span><span class="l d-del">-            prefix_kv_lens = torch.tensor(
+</span><span class="l d-del">-                [common_prefix_len], dtype=torch.int32, device=self.device
+</span><span class="l d-del">-            )
+</span><span class="l d-add">+            # Cascade prefix tensors have fixed tiny shapes ((2,) and (1,))
+</span><span class="l d-add">+            # that never depend on the batch, so allocate once and update
+</span><span class="l d-add">+            # values in place across steps.  In multi-turn agentic decoding
+</span><span class="l d-add">+            # this cascade branch fires every step; skipping the fresh
+</span><span class="l d-add">+            # torch.tensor()+H2D on each call removes two small device
+</span><span class="l d-add">+            # allocations and their implicit CPU-&gt;GPU copies from the
+</span><span class="l d-add">+            # per-step metadata critical path.
+</span><span class="l d-add">+            cascade_buffers = getattr(self, &quot;_cascade_prefix_buffers&quot;, None)
+</span><span class="l d-add">+            if cascade_buffers is None:
+</span><span class="l d-add">+                cu_prefix_query_lens_cpu = torch.zeros(
+</span><span class="l d-add">+                    2, dtype=torch.int32, pin_memory=PIN_MEMORY
+</span><span class="l d-add">+                )
+</span><span class="l d-add">+                prefix_kv_lens_cpu = torch.zeros(
+</span><span class="l d-add">+                    1, dtype=torch.int32, pin_memory=PIN_MEMORY
+</span><span class="l d-add">+                )
+</span><span class="l d-add">+                cu_prefix_query_lens_gpu = torch.zeros(
+</span><span class="l d-add">+                    2, dtype=torch.int32, device=self.device
+</span><span class="l d-add">+                )
+</span><span class="l d-add">+                prefix_kv_lens_gpu = torch.zeros(
+</span><span class="l d-add">+                    1, dtype=torch.int32, device=self.device
+</span><span class="l d-add">+                )
+</span><span class="l d-add">+                cascade_buffers = (
+</span><span class="l d-add">+                    cu_prefix_query_lens_cpu,
+</span><span class="l d-add">+                    prefix_kv_lens_cpu,
+</span><span class="l d-add">+                    cu_prefix_query_lens_gpu,
+</span><span class="l d-add">+                    prefix_kv_lens_gpu,
+</span><span class="l d-add">+                )
+</span><span class="l d-add">+                self._cascade_prefix_buffers = cascade_buffers
+</span><span class="l d-add">+            (
+</span><span class="l d-add">+                cu_prefix_query_lens_cpu,
+</span><span class="l d-add">+                prefix_kv_lens_cpu,
+</span><span class="l d-add">+                cu_prefix_query_lens,
+</span><span class="l d-add">+                prefix_kv_lens,
+</span><span class="l d-add">+            ) = cascade_buffers
+</span><span class="l d-add">+            # Stage tiny host-side updates then batch them into a single
+</span><span class="l d-add">+            # non-blocking H2D copy per tensor (CUDA best-practices guide,
+</span><span class="l d-add">+            # section 10.1: prefer pinned memory + async copies for small
+</span><span class="l d-add">+            # transfers).
+</span><span class="l d-add">+            cu_prefix_query_lens_cpu[1] = num_actual_tokens
+</span><span class="l d-add">+            prefix_kv_lens_cpu[0] = common_prefix_len
+</span><span class="l d-add">+            cu_prefix_query_lens.copy_(cu_prefix_query_lens_cpu, non_blocking=True)
+</span><span class="l d-add">+            prefix_kv_lens.copy_(prefix_kv_lens_cpu, non_blocking=True)
+</span><span class="l">             # Use GPU tensor directly - no CPU sync needed
+</span><span class="l">             suffix_kv_lens = seq_lens[:num_reqs] - common_prefix_len
+</span><span class="l">             prefix_scheduler_metadata = schedule(
+</span></pre></div></details>
+</div>
+</body>
+</html>
