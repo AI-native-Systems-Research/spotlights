@@ -201,16 +201,18 @@ def main(argv: list[str] | None = None) -> int:
         print(render_prompt_block(preview), end="")
 
     for artifact in result.patches:
-        # Three distinct states, not two: a failed diff also has no patch, but
-        # printing it as "notes only" would read as the benign "the agent chose
-        # not to edit anything" when the truth is that its edits were lost.
+        # File count first, matching `prep-evolve`'s per-bundle line, so a sweep
+        # over both arms scans as one column. The count alone cannot carry the
+        # three distinct outcomes, though — a failed diff also has no patch, and
+        # printing it like the benign "the agent chose not to edit anything"
+        # would hide the one case whose edits were lost and needs a re-run. So
+        # the two abnormal states keep a suffix; the normal one reads bare.
+        detail = f"{len(artifact.files)} files"
         if artifact.collection_error:
-            state = "notes only (patch collection FAILED)"
-        elif artifact.patch_produced:
-            state = "patch + notes"
-        else:
-            state = "notes only (no patch)"
-        print(f"{artifact.candidate_id}: {artifact.path} ({state})")
+            detail += ", patch collection FAILED"
+        elif not artifact.patch_produced:
+            detail += ", no patch"
+        print(f"{artifact.candidate_id}: {artifact.path} ({detail})")
         if artifact.collection_error:
             print(
                 f"warning: {artifact.candidate_id}: could not collect the patch: "
@@ -231,6 +233,16 @@ def main(argv: list[str] | None = None) -> int:
         print(
             "apply: nothing was verified — no tests and no benchmarks were run. "
             "See APPLY-NOTES.md for the recorded oracles.",
+            file=sys.stderr,
+        )
+    if result.patches or result.skipped:
+        # The same closing tally `prep-evolve` prints, on stderr for the same
+        # reason: stdout stays the machine-readable one-line-per-candidate list.
+        # Gated because `--print-prompt` writes nothing and skips nothing, and
+        # "0 candidate(s) written" under a prompt dump reads as a failure.
+        print(
+            f"apply: {len(result.patches)} candidate(s) written, "
+            f"{len(result.skipped)} skipped",
             file=sys.stderr,
         )
     for s in result.skipped:
