@@ -1,0 +1,67 @@
+# spotlights one-shot apply
+# candidate: cand-vllm_v1_attention-0002
+# module:    vllm/v1/attention
+# repo:      /Users/iklamer/ai-native-systems/VSCodeProjects/vllm
+# base:      83ad767eed3be3ee7f2df63be693bfaca5c7c922
+# apply with (from the directory containing this patch):
+#   git -C /Users/iklamer/ai-native-systems/VSCodeProjects/vllm checkout 83ad767eed3be3ee7f2df63be693bfaca5c7c922
+#   git -C /Users/iklamer/ai-native-systems/VSCodeProjects/vllm apply "$PWD/apply.patch"
+diff --git a/vllm/v1/attention/backends/flash_attn.py b/vllm/v1/attention/backends/flash_attn.py
+index 97f30736fd..6991f4a05d 100755
+--- a/vllm/v1/attention/backends/flash_attn.py
++++ b/vllm/v1/attention/backends/flash_attn.py
+@@ -636,12 +636,48 @@ class FlashAttentionMetadataBuilder(AttentionMetadataBuilder[FlashAttentionMetad
+                     causal=False,
+                 )
+         elif use_cascade:
+-            cu_prefix_query_lens = torch.tensor(
+-                [0, num_actual_tokens], dtype=torch.int32, device=self.device
+-            )
+-            prefix_kv_lens = torch.tensor(
+-                [common_prefix_len], dtype=torch.int32, device=self.device
+-            )
++            # Cascade prefix tensors have fixed tiny shapes ((2,) and (1,))
++            # that never depend on the batch, so allocate once and update
++            # values in place across steps.  In multi-turn agentic decoding
++            # this cascade branch fires every step; skipping the fresh
++            # torch.tensor()+H2D on each call removes two small device
++            # allocations and their implicit CPU->GPU copies from the
++            # per-step metadata critical path.
++            cascade_buffers = getattr(self, "_cascade_prefix_buffers", None)
++            if cascade_buffers is None:
++                cu_prefix_query_lens_cpu = torch.zeros(
++                    2, dtype=torch.int32, pin_memory=PIN_MEMORY
++                )
++                prefix_kv_lens_cpu = torch.zeros(
++                    1, dtype=torch.int32, pin_memory=PIN_MEMORY
++                )
++                cu_prefix_query_lens_gpu = torch.zeros(
++                    2, dtype=torch.int32, device=self.device
++                )
++                prefix_kv_lens_gpu = torch.zeros(
++                    1, dtype=torch.int32, device=self.device
++                )
++                cascade_buffers = (
++                    cu_prefix_query_lens_cpu,
++                    prefix_kv_lens_cpu,
++                    cu_prefix_query_lens_gpu,
++                    prefix_kv_lens_gpu,
++                )
++                self._cascade_prefix_buffers = cascade_buffers
++            (
++                cu_prefix_query_lens_cpu,
++                prefix_kv_lens_cpu,
++                cu_prefix_query_lens,
++                prefix_kv_lens,
++            ) = cascade_buffers
++            # Stage tiny host-side updates then batch them into a single
++            # non-blocking H2D copy per tensor (CUDA best-practices guide,
++            # section 10.1: prefer pinned memory + async copies for small
++            # transfers).
++            cu_prefix_query_lens_cpu[1] = num_actual_tokens
++            prefix_kv_lens_cpu[0] = common_prefix_len
++            cu_prefix_query_lens.copy_(cu_prefix_query_lens_cpu, non_blocking=True)
++            prefix_kv_lens.copy_(prefix_kv_lens_cpu, non_blocking=True)
+             # Use GPU tensor directly - no CPU sync needed
+             suffix_kv_lens = seq_lens[:num_reqs] - common_prefix_len
+             prefix_scheduler_metadata = schedule(

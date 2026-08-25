@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AsyncOutput.get_output</title>
+<style>
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #f6f7f9; color: #1a1d21;
+  font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+.wrap { max-width: 860px; margin: 0 auto; padding: 32px 24px 80px; }
+a { color: #2b6cb0; }
+h1 { font-size: 1.7rem; line-height: 1.25; margin: 0 0 .5rem; }
+h2 { font-size: 1.25rem; margin: 1.8rem 0 .6rem; border-bottom: 1px solid #e2e5e9; padding-bottom: .25rem; }
+h3 { font-size: 1.05rem; margin: 1.3rem 0 .4rem; }
+p { margin: .6rem 0; }
+ul { margin: .5rem 0 .8rem; padding-left: 1.4rem; }
+li { margin: .2rem 0; }
+code { background: #eef0f3; border-radius: 4px; padding: .1em .35em;
+  font: .9em/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+hr { border: 0; border-top: 1px solid #e2e5e9; margin: 1.6rem 0; }
+blockquote { margin: .8rem 0; padding: .5em .9em; background: #f6f7f9;
+  border-left: 3px solid #e2e5e9; border-radius: 0 6px 6px 0; color: #3a4149; }
+blockquote p { margin: .3rem 0; }
+.tw { overflow-x: auto; margin: .7rem 0 1rem; }
+table { border-collapse: collapse; font-size: .92rem; }
+th, td { border: 1px solid #e2e5e9; padding: .35em .6em; text-align: left;
+  vertical-align: top; }
+th { background: #f6f7f9; color: #3a4149; font-weight: 600; }
+.back { display: inline-block; margin-bottom: 1.2rem; font-size: .95rem; }
+.subtitle { color: #5a6169; margin: 0 0 1.6rem; }
+.card { display: block; background: #fff; border: 1px solid #e2e5e9; border-radius: 10px;
+  padding: 16px 18px; margin: 12px 0; text-decoration: none; color: inherit;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04); transition: box-shadow .12s, border-color .12s; }
+.card:hover { box-shadow: 0 3px 10px rgba(0,0,0,.08); border-color: #c7cdd4; }
+.card .row1 { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.rank { font-weight: 700; color: #2b6cb0; }
+.sym { font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.mod { color: #5a6169; font-size: .9rem; }
+/* align-items:center, not the flex default of stretch: a stretched .badge keeps
+   its border-radius:999px, so a badge shorter than a taller sibling renders as a
+   circle rather than a pill. flex-shrink:0 and .badge's nowrap keep any badge
+   from being squeezed until its text wraps and becomes that taller sibling;
+   .row1 wraps, so an overflowing row moves .badges to its own line instead. */
+.badges { margin-left: auto; display: flex; align-items: center; gap: 8px;
+  flex-wrap: wrap; flex-shrink: 0; }
+.badge { font-size: .78rem; padding: .12em .6em; border-radius: 999px; background: #eef0f3;
+  color: #3a4149; white-space: nowrap; }
+.badge.impact-high { background: #fde8e8; color: #9b1c1c; }
+.badge.score { background: #e6f4ea; color: #1e6b33; }
+.rationale { margin: .5rem 0 0; color: #3a4149; font-size: .95rem; }
+
+/* --- evolve bundles --- */
+.badge.evolve { background: #e8e3fd; color: #4c2a9b; }
+.card-main { display:block; text-decoration:none; color:inherit; }
+.card-foot { margin-top:.7rem; padding-top:.6rem; border-top:1px dashed #e2e5e9;
+  display:flex; gap:8px; flex-wrap:wrap; }
+/* margin-left:auto, not justify-content:space-between on .card-foot: the two
+   arms are independently optional, and space-between would leave a lone evolve
+   pill sitting left. An auto margin pins evolve right whether or not an apply
+   pill shares the row — so a column of cards has apply flush left and evolve
+   flush right on every one of them. */
+.evolve-link { display:inline-flex; align-items:center; gap:.45em; margin-left:auto;
+  font-size:.85rem; font-weight:600; color:#4c2a9b; background:#f1edfd;
+  border:1px solid #d9cffb; border-radius:999px; padding:.32em .85em;
+  text-decoration:none; }
+.evolve-link:hover { background:#e6ddfc; border-color:#c3b1f7; }
+.evolve-section { margin-top: 1.8rem; }
+.engine { background:#fff; border:1px solid #e2e5e9; border-radius:10px;
+  padding:14px 16px; margin:12px 0; }
+.engine h3 { margin:.1rem 0 .5rem; }
+.engine .cmd { background:#1a1d21; color:#e6e6e6; border-radius:6px;
+  padding:.5em .7em; font:.85em/1.4 ui-monospace,Menlo,Consolas,monospace;
+  overflow-x:auto; }
+.engine pre { background:#f6f7f9; border:1px solid #e2e5e9; border-radius:6px;
+  max-height:360px; overflow:auto; padding:.6em .8em; }
+.engine details { margin:.5rem 0; }
+.engine summary { cursor:pointer; font:.9rem/1.4 ui-monospace,Menlo,Consolas,monospace;
+  color:#3a4149; padding:.25em 0; }
+.engine summary .sz { color:#8a9099; }
+.dl { display:inline-flex; align-items:center; gap:.5em; margin:.2rem 0 1.4rem;
+  font-size:.95rem; font-weight:600; color:#fff; background:#4c2a9b;
+  border-radius:8px; padding:.5em 1em; text-decoration:none; }
+.dl:hover { background:#3d2080; }
+.engine .dl { margin:1rem 0 .1rem; font-size:.85rem; font-weight:600;
+  color:#4c2a9b; background:#f1edfd; border:1px solid #d9cffb; padding:.4em .85em; }
+.engine .dl:hover { background:#e6ddfc; border-color:#c3b1f7; }
+.orient { background:#f1edfd; border:1px solid #d9cffb; border-radius:10px;
+  padding:14px 16px; margin:.2rem 0 1.2rem; }
+.orient p { margin:.4rem 0; }
+.orient .warn { color:#8a5a00; }
+.about { background:#fbfbfc; border:1px solid #eef0f3; border-radius:8px;
+  padding:10px 14px; margin:.2rem 0 .8rem; }
+.about .tagline { margin:.1rem 0 .6rem; font-weight:600; }
+.about dl { display:grid; grid-template-columns:max-content minmax(0,1fr);
+  gap:.3em 1em; margin:0; }
+.about dt { color:#5a6169; font-size:.82rem; padding-top:.05em; }
+.about dd { margin:0; font-size:.9rem; min-width:0; }
+.about dd .warn { color:#9b1c1c; display:block; margin-top:.3rem; }
+.inst-label { font-size:.78rem; color:#5a6169; margin:.5rem 0 .15rem; }
+.inst-label:first-child { margin-top:.1rem; }
+.engine pre.inst { background:#1a1d21; color:#e6e6e6; border:0; border-radius:6px;
+  padding:.5em .7em; margin:.1rem 0; max-height:none; overflow-x:auto;
+  font:.85em/1.5 ui-monospace,Menlo,Consolas,monospace; }
+.about dd p { margin:.1rem 0 .3rem; }
+.about dd .ask { margin:.3rem 0 0; padding:.6em .8em; background:#eef6ff;
+  border-left:3px solid #2b6cb0; border-radius:0 6px 6px 0; color:#1a1d21;
+  font-style:italic; font-size:.88rem; }
+/* --- one-shot apply --- */
+.badge.apply { background:#fdf0d5; color:#8a5a00; }
+/* No auto margin here, deliberately: apply is emitted first, so it is already
+   flush left, and .evolve-link's margin-left:auto is what pushes evolve right. */
+.apply-link { display:inline-flex; align-items:center; gap:.45em;
+  font-size:.85rem; font-weight:600; color:#8a5a00; background:#fdf6e7;
+  border:1px solid #f0dfb8; border-radius:999px; padding:.32em .85em;
+  text-decoration:none; }
+.apply-link:hover { background:#fbeed2; border-color:#e6cf9c; }
+.apply-section { margin-top: 1.8rem; }
+.apply-strip { background:#fbfbfc; border:1px solid #eef0f3; border-radius:8px;
+  padding:10px 14px; margin:.2rem 0 1.2rem; }
+.apply-strip h2 { margin:.1rem 0 .5rem; border:0; padding:0; font-size:1.05rem; }
+.apply-strip pre { background:#1a1d21; color:#e6e6e6; border:0; border-radius:6px;
+  padding:.5em .7em; margin:.3rem 0; overflow-x:auto;
+  font:.85em/1.5 ui-monospace,Menlo,Consolas,monospace; }
+.apply-strip .note { font-size:.85rem; color:#5a6169; margin:.5rem 0 .1rem; }
+.apply-strip .sha { font:.85em/1.4 ui-monospace,Menlo,Consolas,monospace;
+  background:#eef0f3; border-radius:4px; padding:.1em .35em; }
+.apply-strip .dl { margin:.7rem 0 .2rem; font-size:.85rem; color:#8a5a00;
+  background:#fdf6e7; border:1px solid #f0dfb8; }
+.apply-strip .dl:hover { background:#fbeed2; border-color:#e6cf9c; }
+.diff { border:1px solid #e2e5e9; border-radius:8px; overflow:hidden;
+  margin:.6rem 0 1.2rem; }
+.diff .file { background:#f6f7f9; border-bottom:1px solid #e2e5e9;
+  padding:.4em .7em; display:flex; gap:.8em; align-items:baseline;
+  font:.85rem/1.4 ui-monospace,Menlo,Consolas,monospace; }
+.diff .file .p { font-weight:600; word-break:break-all; }
+.diff .file .st { margin-left:auto; white-space:nowrap; }
+.diff .file .st .a { color:#1e6b33; }
+.diff .file .st .r { color:#9b1c1c; }
+.diff pre { margin:0; padding:0; background:#fff; overflow-x:auto;
+  font:.82em/1.5 ui-monospace,Menlo,Consolas,monospace; }
+.diff .l { display:block; padding:0 .7em; white-space:pre; }
+.diff .d-add { background:#e6f4ea; color:#1e6b33; }
+.diff .d-del { background:#fde8e8; color:#9b1c1c; }
+.diff .d-hunk { background:#eef0f3; color:#5a6169; }
+/* the patch <details> is not inside .engine, so it needs its own summary rules
+   — these mirror `.engine summary` / `.engine summary .sz` above */
+.patch { margin:.5rem 0 1.2rem; }
+.patch summary { cursor:pointer; padding:.25em 0; color:#3a4149;
+  font:.9rem/1.4 ui-monospace,Menlo,Consolas,monospace; }
+.patch summary .sz { color:#8a9099; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="../../../index.html">← Back to index</a>
+<h1>AsyncOutput.get_output</h1>
+<p><code>← vllm/v1/worker</code></p>
+<ul>
+<li><strong>File:</strong> <code>vllm/v1/worker/gpu/async_utils.py</code> (lines 32–102)</li>
+<li><strong>Symbol:</strong> <code>AsyncOutput.get_output</code></li>
+<li><strong>Kind:</strong> region</li>
+<li><strong>Estimated impact:</strong> high</li>
+<li><strong>Id:</strong> <code>cand-vllm_v1_worker-0027</code></li>
+</ul>
+<h2>Description</h2>
+<p>New GPU runner asynchronous output staging and final materialization of sampled tokens, logprobs, NaN counts, routed experts, and EP fault status.</p>
+<h2>Current approach</h2>
+<p>Records a copy-stream event, synchronizes in get_output, converts sampled_token_ids and num_sampled_tokens NumPy arrays to Python lists, trims each row in a Python loop, and may call .item() plus mask.cpu().tolist() for fault reporting.</p>
+<h2>Estimated impact explanation</h2>
+<p>This is the new runner counterpart to the legacy post-sample host roundtrip; reducing blocking conversion and Python row work lowers median TPOT in async multi-turn decode.</p>
+<h2>Evolve rationale</h2>
+<p>The copy_event.synchronize, sampled_token_ids.tolist, num_sampled_tokens_np.tolist, per-row trim loop, and _has_fault.item are concrete sync/materialization targets. tests/v1/streaming_input/test_gpu_model_runner_v2_streaming.py, tests/v1/sample/test_logprobs.py, and tests/v1/worker/test_gpu_model_runner.py validate visible output, logprob, and error semantics.</p>
+<h2>Deep research proposals</h2>
+<h3>1. Batch AsyncOutput materialization across a multi-step decode window</h3>
+<ul>
+<li><strong>Finding:</strong> <code>find-vllm_v1_worker-0001</code> — *[RFC]: Multi-Step Scheduling*</li>
+<li><strong>Source URL:</strong> <a href="https://github.com/vllm-project/vllm/issues/6854" target="_blank" rel="noopener">https://github.com/vllm-project/vllm/issues/6854</a></li>
+<li><strong>Created by:</strong> proposal_from_finding_creator</li>
+</ul>
+<p><strong>Detailed description.</strong></p>
+<p>Extend AsyncOutput in vllm/v1/worker/gpu/async_utils.py (lines 32-102) so that when the runner is executing a lookahead window of N decode steps for the same request batch, per-step sampled_token_ids and num_sampled_tokens remain resident on GPU and are appended to a per-request GPU buffer instead of triggering a copy-stream D2H + copy_event.synchronize + tolist + per-row trim on every step. Concretely: (1) add a &#x27;lookahead&#x27; mode to AsyncOutput where __init__ still records a copy event on the copy stream but only enqueues D2H copies for tensors that are actually needed to advance the next step&#x27;s input metadata (which under multi-step is handled by GPU kernels, so nothing) and defers sampled_token_ids/num_sampled_tokens copies; (2) accumulate GPU-side per-step sampled tokens into a preallocated [N, max_reqs, max_spec+1] tensor; (3) on the final step of the window, issue a single D2H copy of the accumulated tensor plus num_sampled_tokens, and let get_output perform one tolist and one vectorized trim (numpy slicing keyed off num_sampled_tokens_np) that produces the list-of-lists ModelRunnerOutput.sampled_token_ids the scheduler expects; (4) for intermediate steps, return a lightweight AsyncModelRunnerOutput that produces an empty/no-op ModelRunnerOutput so the scheduler does not observe them. Logprobs, num_nans, routed_experts, and _has_fault paths retain their current per-step behavior when they are actually requested, since those are typically not used in pure decode lookahead; when they are requested the window collapses to N=1 to preserve semantics. The change keeps the existing single-step call path (N=1) byte-for-byte identical, so tests/v1/streaming_input/test_gpu_model_runner_v2_streaming.py, tests/v1/sample/test_logprobs.py, and tests/v1/worker/test_gpu_model_runner.py continue to exercise the current code path.</p>
+<p><strong>Proposal rationale.</strong></p>
+<p>The candidate&#x27;s evolve_rationale explicitly identifies copy_event.synchronize, sampled_token_ids.tolist, num_sampled_tokens_np.tolist, the per-row trim loop, and _has_fault.item as concrete sync/materialization targets that dominate host overhead in the async decode path. The finding&#x27;s core insight — amortize per-step output materialization and scheduler roundtrips across an N-step decode window while keeping sampled tokens on GPU — maps directly onto these targets: at N=8, the per-step tolist+trim+synchronize cost is paid once instead of eight times, which is exactly the median-TPOT lever the caller context (multi-turn agentic, TPOT-sensitive) is asking for. The finding also validates the specific mechanism (GPU-resident sampled tokens, delayed scheduler sync) that the candidate would need to adopt, and this candidate is the natural host-side integration point because it is already the single place where sampled tokens transition from GPU to the ModelRunnerOutput contract. The change is transferable and scoped to this candidate&#x27;s file even though the broader multi-step architecture requires scheduler cooperation, because the AsyncOutput class is the exact boundary at which per-step host materialization can be turned into per-window host materialization.</p>
+<hr>
+<h2>Agent proposals</h2>
+<h3>1. Land sampler outputs directly in pinned/UVA host buffers to eliminate per-step D2H copy and synchronize</h3>
+<ul>
+<li><strong>Agent:</strong> claude</li>
+</ul>
+<p><strong>Detailed description.</strong></p>
+<p>In vllm/v1/worker/gpu/async_utils.py:22-66, replace the pattern where sampled_token_ids, num_sampled_tokens, num_nans, and _has_fault are produced on GPU and then D2H-copied non-blocking on copy_stream with UVA-backed output buffers taken from a per-runner UvaBufferPool (already defined in vllm/v1/worker/gpu/buffer_utils.py:44-101, providing pinned CPU tensors with an accelerator UVA view). Concretely: (1) the sampler in vllm/v1/worker/gpu/sample/ writes sampled_token_ids and num_sampled_tokens into a UvaBuffer.uva view sized [max_reqs, max_spec+1] and [max_reqs], and similarly for num_nans and (as a single-element int8) the EP fault flag; (2) AsyncOutput.__init__ stops enqueuing async_copy_to_np for these tensors on copy_stream and instead retains references to the UvaBuffer.np NumPy views — no copy event needed for the integer-shaped outputs; (3) get_output waits on a lightweight main-stream event that fires when the sampling kernel finishes (writes through UVA to pinned host memory are visible to the host on kernel completion), and only synchronizes copy_event when logprobs_tensors / prompt_logprobs_dict / routed_experts_cpu are present (those paths keep their current copy-stream D2H); (4) replace the sampled_token_ids.tolist() + per-row Python trim loop at lines 75-78 with a vectorized construction that slices each row of the pinned NumPy view to num_sampled_tokens_np[i] before calling tolist(), avoiding the transient full-width max_reqs*(max_spec+1) Python-int allocation that the current code deletes immediately after creating; (5) for the EP-fault path (lines 94-100), the pinned single-element fault flag makes _has_fault a numpy scalar read rather than a .item() device sync, so the common no-fault path no longer forces a host wait even when check_ep_fault=True. Correctness with tests/v1/streaming_input/test_gpu_model_runner_v2_streaming.py, tests/v1/sample/test_logprobs.py, and tests/v1/worker/test_gpu_model_runner.py is preserved because the observable ModelRunnerOutput fields are byte-identical (same integer contents, same trimmed list-of-lists shape); the change is fenced behind is_uva_available() from vllm.utils.platform_utils with a fallback to the current D2H path.</p>
+<p><strong>Novelty rationale.</strong></p>
+<p>The existing deep_research_proposal (find-vllm_v1_worker-0001) amortizes per-step materialization across an N-step decode window but still relies on non-blocking D2H copies plus event synchronization at window boundaries, and explicitly collapses to N=1 when logprobs/nans/routed_experts are requested. This proposal is orthogonal: it eliminates the D2H copy path itself for the integer-shaped outputs by reusing the codebase&#x27;s already-existing UvaBufferPool infrastructure in vllm/v1/worker/gpu/buffer_utils.py so kernel writes land directly in host-visible pinned memory. It (a) improves the N=1 single-step path that the batching proposal falls back to and does not accelerate — directly benefiting the multi-turn agentic TTFT/TPOT objective when the workload is not a clean lookahead window; (b) targets the _has_fault.item() device sync (lines 94) which the batching proposal does not touch; (c) replaces the transient full-width Python list-of-lists allocation on lines 75-78 with per-row numpy slicing, addressing Python-object churn that batching leaves in place. The two proposals compose cleanly: with UVA-backed outputs plus multi-step batching, an N-step window would have zero per-step D2H copies and a single vectorized host-side trim at window close.</p>
+<hr>
+<h3>2. Introduce a lazy ModelRunnerOutput token view to defer Python list materialization</h3>
+<ul>
+<li><strong>Agent:</strong> codex</li>
+</ul>
+<p><strong>Detailed description.</strong></p>
+<p>Change <code>AsyncOutput.get_output</code> in <code>vllm/v1/worker/gpu/async_utils.py</code> so the common sampled-token path returns a small sequence-like wrapper over the host <code>sampled_token_ids</code> and <code>num_sampled_tokens_np</code> arrays instead of immediately executing <code>sampled_token_ids.tolist()</code>, <code>num_sampled_tokens_np.tolist()</code>, and the per-row trim loop. The wrapper would implement the list-of-lists contract expected by downstream scheduler code (<code>__len__</code>, <code>__iter__</code>, <code>__getitem__</code>, equality against ordinary lists if tests require it), slicing <code>sampled_token_ids[i, :num_sampled_tokens_np[i]]</code> and converting only the row that is actually consumed. <code>ModelRunnerOutput.sampled_token_ids</code> can accept this wrapper via a narrow type alias such as <code>Sequence[Sequence[int]]</code>, while preserving an explicit <code>.to_list()</code> or compatibility conversion at serialization/test boundaries that truly require a concrete Python <code>list</code>. Keep logprobs, <code>num_nans</code>, routed experts, and EP fault reporting unchanged; this is strictly a host-side materialization change inside the candidate&#x27;s finalization path. Add focused tests near the existing worker/sample suites that assert observable indexing/iteration/equality behavior matches the current trimmed list-of-lists for single-token and speculative multi-token rows.</p>
+<p><strong>Novelty rationale.</strong></p>
+<p>The deep_research_proposal batches GPU-resident sampled-token materialization across a multi-step decode window, but still performs concrete host list materialization at the window boundary. Agent A&#x27;s proposal changes where GPU writes land by using pinned/UVA host buffers and also still constructs trimmed Python lists, just with less transient full-width allocation. This proposal is orthogonal: it does not change D2H transfer mechanics or decode-window scheduling at all. It targets the Python object churn after host arrays already exist by making <code>ModelRunnerOutput.sampled_token_ids</code> lazy and row-oriented, so workloads that only inspect or append a subset of rows avoid allocating every token id as a Python int on every output finalization.</p>
+<hr>
+</div>
+</body>
+</html>

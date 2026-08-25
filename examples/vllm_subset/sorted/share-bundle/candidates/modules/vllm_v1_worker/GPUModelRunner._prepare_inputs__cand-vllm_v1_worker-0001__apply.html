@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>One-shot apply — GPUModelRunner._prepare_inputs</title>
+<style>
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #f6f7f9; color: #1a1d21;
+  font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+.wrap { max-width: 860px; margin: 0 auto; padding: 32px 24px 80px; }
+a { color: #2b6cb0; }
+h1 { font-size: 1.7rem; line-height: 1.25; margin: 0 0 .5rem; }
+h2 { font-size: 1.25rem; margin: 1.8rem 0 .6rem; border-bottom: 1px solid #e2e5e9; padding-bottom: .25rem; }
+h3 { font-size: 1.05rem; margin: 1.3rem 0 .4rem; }
+p { margin: .6rem 0; }
+ul { margin: .5rem 0 .8rem; padding-left: 1.4rem; }
+li { margin: .2rem 0; }
+code { background: #eef0f3; border-radius: 4px; padding: .1em .35em;
+  font: .9em/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+hr { border: 0; border-top: 1px solid #e2e5e9; margin: 1.6rem 0; }
+blockquote { margin: .8rem 0; padding: .5em .9em; background: #f6f7f9;
+  border-left: 3px solid #e2e5e9; border-radius: 0 6px 6px 0; color: #3a4149; }
+blockquote p { margin: .3rem 0; }
+.tw { overflow-x: auto; margin: .7rem 0 1rem; }
+table { border-collapse: collapse; font-size: .92rem; }
+th, td { border: 1px solid #e2e5e9; padding: .35em .6em; text-align: left;
+  vertical-align: top; }
+th { background: #f6f7f9; color: #3a4149; font-weight: 600; }
+.back { display: inline-block; margin-bottom: 1.2rem; font-size: .95rem; }
+.subtitle { color: #5a6169; margin: 0 0 1.6rem; }
+.card { display: block; background: #fff; border: 1px solid #e2e5e9; border-radius: 10px;
+  padding: 16px 18px; margin: 12px 0; text-decoration: none; color: inherit;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04); transition: box-shadow .12s, border-color .12s; }
+.card:hover { box-shadow: 0 3px 10px rgba(0,0,0,.08); border-color: #c7cdd4; }
+.card .row1 { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.rank { font-weight: 700; color: #2b6cb0; }
+.sym { font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.mod { color: #5a6169; font-size: .9rem; }
+/* align-items:center, not the flex default of stretch: a stretched .badge keeps
+   its border-radius:999px, so a badge shorter than a taller sibling renders as a
+   circle rather than a pill. flex-shrink:0 and .badge's nowrap keep any badge
+   from being squeezed until its text wraps and becomes that taller sibling;
+   .row1 wraps, so an overflowing row moves .badges to its own line instead. */
+.badges { margin-left: auto; display: flex; align-items: center; gap: 8px;
+  flex-wrap: wrap; flex-shrink: 0; }
+.badge { font-size: .78rem; padding: .12em .6em; border-radius: 999px; background: #eef0f3;
+  color: #3a4149; white-space: nowrap; }
+.badge.impact-high { background: #fde8e8; color: #9b1c1c; }
+.badge.score { background: #e6f4ea; color: #1e6b33; }
+.rationale { margin: .5rem 0 0; color: #3a4149; font-size: .95rem; }
+
+/* --- evolve bundles --- */
+.badge.evolve { background: #e8e3fd; color: #4c2a9b; }
+.card-main { display:block; text-decoration:none; color:inherit; }
+.card-foot { margin-top:.7rem; padding-top:.6rem; border-top:1px dashed #e2e5e9;
+  display:flex; gap:8px; flex-wrap:wrap; }
+/* margin-left:auto, not justify-content:space-between on .card-foot: the two
+   arms are independently optional, and space-between would leave a lone evolve
+   pill sitting left. An auto margin pins evolve right whether or not an apply
+   pill shares the row — so a column of cards has apply flush left and evolve
+   flush right on every one of them. */
+.evolve-link { display:inline-flex; align-items:center; gap:.45em; margin-left:auto;
+  font-size:.85rem; font-weight:600; color:#4c2a9b; background:#f1edfd;
+  border:1px solid #d9cffb; border-radius:999px; padding:.32em .85em;
+  text-decoration:none; }
+.evolve-link:hover { background:#e6ddfc; border-color:#c3b1f7; }
+.evolve-section { margin-top: 1.8rem; }
+.engine { background:#fff; border:1px solid #e2e5e9; border-radius:10px;
+  padding:14px 16px; margin:12px 0; }
+.engine h3 { margin:.1rem 0 .5rem; }
+.engine .cmd { background:#1a1d21; color:#e6e6e6; border-radius:6px;
+  padding:.5em .7em; font:.85em/1.4 ui-monospace,Menlo,Consolas,monospace;
+  overflow-x:auto; }
+.engine pre { background:#f6f7f9; border:1px solid #e2e5e9; border-radius:6px;
+  max-height:360px; overflow:auto; padding:.6em .8em; }
+.engine details { margin:.5rem 0; }
+.engine summary { cursor:pointer; font:.9rem/1.4 ui-monospace,Menlo,Consolas,monospace;
+  color:#3a4149; padding:.25em 0; }
+.engine summary .sz { color:#8a9099; }
+.dl { display:inline-flex; align-items:center; gap:.5em; margin:.2rem 0 1.4rem;
+  font-size:.95rem; font-weight:600; color:#fff; background:#4c2a9b;
+  border-radius:8px; padding:.5em 1em; text-decoration:none; }
+.dl:hover { background:#3d2080; }
+.engine .dl { margin:1rem 0 .1rem; font-size:.85rem; font-weight:600;
+  color:#4c2a9b; background:#f1edfd; border:1px solid #d9cffb; padding:.4em .85em; }
+.engine .dl:hover { background:#e6ddfc; border-color:#c3b1f7; }
+.orient { background:#f1edfd; border:1px solid #d9cffb; border-radius:10px;
+  padding:14px 16px; margin:.2rem 0 1.2rem; }
+.orient p { margin:.4rem 0; }
+.orient .warn { color:#8a5a00; }
+.about { background:#fbfbfc; border:1px solid #eef0f3; border-radius:8px;
+  padding:10px 14px; margin:.2rem 0 .8rem; }
+.about .tagline { margin:.1rem 0 .6rem; font-weight:600; }
+.about dl { display:grid; grid-template-columns:max-content minmax(0,1fr);
+  gap:.3em 1em; margin:0; }
+.about dt { color:#5a6169; font-size:.82rem; padding-top:.05em; }
+.about dd { margin:0; font-size:.9rem; min-width:0; }
+.about dd .warn { color:#9b1c1c; display:block; margin-top:.3rem; }
+.inst-label { font-size:.78rem; color:#5a6169; margin:.5rem 0 .15rem; }
+.inst-label:first-child { margin-top:.1rem; }
+.engine pre.inst { background:#1a1d21; color:#e6e6e6; border:0; border-radius:6px;
+  padding:.5em .7em; margin:.1rem 0; max-height:none; overflow-x:auto;
+  font:.85em/1.5 ui-monospace,Menlo,Consolas,monospace; }
+.about dd p { margin:.1rem 0 .3rem; }
+.about dd .ask { margin:.3rem 0 0; padding:.6em .8em; background:#eef6ff;
+  border-left:3px solid #2b6cb0; border-radius:0 6px 6px 0; color:#1a1d21;
+  font-style:italic; font-size:.88rem; }
+/* --- one-shot apply --- */
+.badge.apply { background:#fdf0d5; color:#8a5a00; }
+/* No auto margin here, deliberately: apply is emitted first, so it is already
+   flush left, and .evolve-link's margin-left:auto is what pushes evolve right. */
+.apply-link { display:inline-flex; align-items:center; gap:.45em;
+  font-size:.85rem; font-weight:600; color:#8a5a00; background:#fdf6e7;
+  border:1px solid #f0dfb8; border-radius:999px; padding:.32em .85em;
+  text-decoration:none; }
+.apply-link:hover { background:#fbeed2; border-color:#e6cf9c; }
+.apply-section { margin-top: 1.8rem; }
+.apply-strip { background:#fbfbfc; border:1px solid #eef0f3; border-radius:8px;
+  padding:10px 14px; margin:.2rem 0 1.2rem; }
+.apply-strip h2 { margin:.1rem 0 .5rem; border:0; padding:0; font-size:1.05rem; }
+.apply-strip pre { background:#1a1d21; color:#e6e6e6; border:0; border-radius:6px;
+  padding:.5em .7em; margin:.3rem 0; overflow-x:auto;
+  font:.85em/1.5 ui-monospace,Menlo,Consolas,monospace; }
+.apply-strip .note { font-size:.85rem; color:#5a6169; margin:.5rem 0 .1rem; }
+.apply-strip .sha { font:.85em/1.4 ui-monospace,Menlo,Consolas,monospace;
+  background:#eef0f3; border-radius:4px; padding:.1em .35em; }
+.apply-strip .dl { margin:.7rem 0 .2rem; font-size:.85rem; color:#8a5a00;
+  background:#fdf6e7; border:1px solid #f0dfb8; }
+.apply-strip .dl:hover { background:#fbeed2; border-color:#e6cf9c; }
+.diff { border:1px solid #e2e5e9; border-radius:8px; overflow:hidden;
+  margin:.6rem 0 1.2rem; }
+.diff .file { background:#f6f7f9; border-bottom:1px solid #e2e5e9;
+  padding:.4em .7em; display:flex; gap:.8em; align-items:baseline;
+  font:.85rem/1.4 ui-monospace,Menlo,Consolas,monospace; }
+.diff .file .p { font-weight:600; word-break:break-all; }
+.diff .file .st { margin-left:auto; white-space:nowrap; }
+.diff .file .st .a { color:#1e6b33; }
+.diff .file .st .r { color:#9b1c1c; }
+.diff pre { margin:0; padding:0; background:#fff; overflow-x:auto;
+  font:.82em/1.5 ui-monospace,Menlo,Consolas,monospace; }
+.diff .l { display:block; padding:0 .7em; white-space:pre; }
+.diff .d-add { background:#e6f4ea; color:#1e6b33; }
+.diff .d-del { background:#fde8e8; color:#9b1c1c; }
+.diff .d-hunk { background:#eef0f3; color:#5a6169; }
+/* the patch <details> is not inside .engine, so it needs its own summary rules
+   — these mirror `.engine summary` / `.engine summary .sz` above */
+.patch { margin:.5rem 0 1.2rem; }
+.patch summary { cursor:pointer; padding:.25em 0; color:#3a4149;
+  font:.9rem/1.4 ui-monospace,Menlo,Consolas,monospace; }
+.patch summary .sz { color:#8a9099; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="GPUModelRunner._prepare_inputs__cand-vllm_v1_worker-0001.html">← Back to candidate</a>
+<h1>One-shot apply — GPUModelRunner._prepare_inputs</h1>
+<p class="subtitle">cand-vllm_v1_worker-0001 · 1 file changed, +77/−42</p>
+<div class="orient"><p><strong>What is this?</strong> One attempt at implementing this candidate's proposal, as a reviewable patch — not an evolutionary search. Spotlights read the candidate and the research behind it, made the change in a throwaway worktree, and handed back the diff plus its notes. Nothing has been applied to any repository.</p><p class="warn">⚠️ Nothing here was verified. No test was run, no benchmark was measured, no build was attempted. The patch was produced in a fresh detached worktree with no virtualenv and no compiled extensions, on a machine that may lack the hardware the performance oracle needs. Treat it as a proposal faithfully implemented — not as a measured win.</p></div>
+<div class="apply-strip"><h2>Apply this patch</h2><p class="note">Base commit <span class="sha">83ad767eed3be3ee7f2df63be693bfaca5c7c922</span> — the patch assumes this exact commit.</p><p class="note">Run these from the folder this page sits in — <code>$PWD</code> must be the directory holding <code>GPUModelRunner._prepare_inputs__cand-vllm_v1_worker-0001__apply/</code>.</p><pre>REPO=&lt;YOUR_VLLM_CHECKOUT&gt;
+git -C &quot;$REPO&quot; checkout 83ad767eed3be3ee7f2df63be693bfaca5c7c922
+git -C &quot;$REPO&quot; apply --check &quot;$PWD/GPUModelRunner._prepare_inputs__cand-vllm_v1_worker-0001__apply/apply.patch&quot; \
+  &amp;&amp; git -C &quot;$REPO&quot; apply &quot;$PWD/GPUModelRunner._prepare_inputs__cand-vllm_v1_worker-0001__apply/apply.patch&quot;</pre><p class="note">If it does not apply cleanly, <code>git -C "$REPO" apply -3 "$PWD/GPUModelRunner._prepare_inputs__cand-vllm_v1_worker-0001__apply/apply.patch"</code> falls back to a three-way merge. Without git, <code>patch -p1 &lt; apply.patch</code> works from the repo root.</p><p class="note">The paths written inside <code>apply.patch</code> and <code>APPLY-NOTES.md</code> name the machine that produced them — substitute your own checkout, as above. The files are copied here byte-for-byte and were not rewritten.</p><p class="note">The zip also carries <code>apply.prompt.txt</code> — the verbatim instruction this patch was produced from. It records the attempt (and the throwaway worktree it ran in); applying the patch does not need it.</p><a class="dl" href="GPUModelRunner._prepare_inputs__cand-vllm_v1_worker-0001__apply/apply.zip" download>⬇ Download patch (.zip)</a></div>
+<h1>Apply notes — cand-vllm_v1_worker-0001</h1>
+<ul>
+<li><strong>Candidate:</strong> <code>cand-vllm_v1_worker-0001</code></li>
+<li><strong>Module:</strong> <code>vllm/v1/worker</code></li>
+<li><strong>Repo:</strong> <code>/Users/iklamer/ai-native-systems/VSCodeProjects/vllm</code></li>
+<li><strong>Base commit:</strong> <code>83ad767eed3be3ee7f2df63be693bfaca5c7c922</code></li>
+<li><strong>Objective:</strong> reduce the median TTFT and median TPOT (Time Per Output Token) (direction: minimize)</li>
+</ul>
+<h2>In-scope files</h2>
+<ul>
+<li>vllm/v1/worker/gpu_model_runner.py:2001-2323 — GPUModelRunner._prepare_inputs</li>
+</ul>
+<h2>Files changed</h2>
+<p>What the diff actually touched, derived from the patch itself — not from the declared scope above. Compare it against &quot;In-scope files&quot;: any disagreement is exactly what a reviewer needs to see before applying this patch.</p>
+<div class="tw"><table><tr><th>File</th><th>Change</th><th>Lines</th><th>Scope</th></tr><tr><td><code>vllm/v1/worker/gpu_model_runner.py</code></td><td>modified</td><td>+77/-42</td><td>in scope</td></tr></table></div>
+<p><strong>Totals:</strong> 1 file changed, +77/-42.</p>
+<h2>The proposal</h2>
+<p>Main legacy runner per-step CPU-to-GPU input preparation for request indices, positions, token indices, query_start_loc, optimistic sequence lengths, discard masks, slot mapping, and spec-decode counts.</p>
+<p><strong>Current approach:</strong> Uses several NumPy/Torch CPU passes, torch.index_select, repeated CpuGpuBuffer.copy_to_gpu calls, a per-request prompt-embeds loop, a req_ids list walk for num_tokens, and an event synchronize before staging num_accepted_tokens.</p>
+<p><strong>Why it was worth changing:</strong> The method runs every non-empty legacy runner step on the TTFT/TPOT path. Coalescing H2D staging, removing Python request walks, and replacing the accepted-token sync contract can preserve positions, query_start_loc, slot_mapping, and request-state semantics covered by tests/v1/worker/test_gpu_model_runner.py::test_update_states_* and tests/v1/attention/test_attention_backends.py.</p>
+<h2>Research findings used</h2>
+<ul>
+<li>[RFC]: Multi-Step Scheduling (issue) — <a href="https://github.com/vllm-project/vllm/issues/6854" target="_blank" rel="noopener">https://github.com/vllm-project/vllm/issues/6854</a></li>
+</ul>
+<p>Adopt a worker-local multi-step decode loop that keeps sampled tokens on GPU, advances next-step input metadata with CUDA kernels, and delays scheduler/output synchronization until lookahead slots are exhausted. This directly targets median TPOT by amortizing per-token Python input prep, output materialization, and scheduler overhead across multiple decode iterations in agentic multi-turn traffic.</p>
+<ul>
+<li>[Performance]: Fully Async Spec-Decoding | Make <code>seq_lens_cpu</code> in CommonAttentionMetadata optional (issue) — <a href="https://github.com/vllm-project/vllm/issues/29134" target="_blank" rel="noopener">https://github.com/vllm-project/vllm/issues/29134</a></li>
+</ul>
+<p>Make CPU sequence-length metadata optional and push spec-decode metadata consumers toward device-resident sequence lengths and upper bounds. This would remove host/device syncs that block overlapping next-step input preparation with current forward execution, especially when verifying multiple drafted tokens.</p>
+<ul>
+<li>Model Runner V2 Design Document (docs) — <a href="https://docs.vllm.ai/en/v0.17.0/design/model_runner_v2/" target="_blank" rel="noopener">https://docs.vllm.ai/en/v0.17.0/design/model_runner_v2/</a></li>
+</ul>
+<p>Decouple persistent request state from per-step input tensors, assign active requests stable rows, and gather per-step inputs from mostly GPU-resident state. This reduces request-churn bookkeeping and avoids tensor-wide reordering on the critical TTFT/TPOT path.</p>
+<ul>
+<li>vLLM v0.6.0: 2.7x Throughput Improvement and 5x Latency Reduction (blog) — <a href="https://vllm-project.github.io/2024/09/05/perf-update.html" target="_blank" rel="noopener">https://vllm-project.github.io/2024/09/05/perf-update.html</a></li>
+</ul>
+<p>Overlap output processing with the next model execution step instead of synchronously converting GPU tensors to Python lists and checking stop criteria after every token. The worker output path could further delay or batch materialization to reduce TPOT bubbles from token IDs, logprobs, NaN counts, and fault flags.</p>
+<h2>Recorded oracles</h2>
+<p>These are carried forward <strong>verbatim</strong> from the candidate. They are the verification recipe for a machine that can run them.</p>
+<p><strong>Correctness:</strong></p>
+<ul>
+<li><code>pytest tests/v1/worker/test_gpu_model_runner.py</code></li>
+<li><code>pytest tests/v1/attention/test_attention_backends.py</code></li>
+</ul>
+<p><strong>Performance:</strong> TTFT, TPOT</p>
+<blockquote><p><strong>Nothing in this directory was verified.</strong> No test was run, no benchmark was measured, no build was attempted. The patch was produced in a fresh detached worktree with no virtualenv and no compiled extensions, on a machine that may lack the hardware the performance oracle needs. Treat this as a proposal faithfully implemented — not as a measured win.</p></blockquote>
+<h2>What changed and why</h2>
+<h1>_prepare_inputs pure-decode CPU fast path</h1>
+<h2>What changed</h2>
+<p>Added a small <code>pure_decode</code> branch at the top of <code>GPUModelRunner._prepare_inputs</code> (<code>vllm/v1/worker/gpu_model_runner.py</code>, formerly lines 2018–2073). When every scheduled request has exactly one token (i.e. <code>total_num_scheduled_tokens == num_reqs</code>, the common multi-turn agentic decode case) and no request uses inline prompt embeddings, the CPU input preparation is short-circuited:</p>
+<p>1. <code>req_indices</code> becomes <code>self.arange_np[:num_reqs]</code> (a view) instead of the <code>np.repeat(arange, num_scheduled_tokens)</code> call. 2. <code>cu_num_tokens</code> becomes the view <code>self.arange_np[1 : num_reqs + 1]</code> instead of <code>_get_cumsum_and_arange(num_scheduled_tokens, ...)</code> which otherwise runs a cumsum, a <code>np.repeat</code>, and a <code>np.subtract</code> into <code>self.query_pos.np</code>. 3. <code>self.query_pos.np[:num_reqs]</code> is filled with zeros directly, so the downstream <code>self.query_pos.copy_to_gpu(total_num_scheduled_tokens)</code> still copies the correct values. 4. <code>positions_np</code> is aliased to <code>self.input_batch.num_computed_tokens_cpu[:num_reqs]</code> — the &quot;compute pos = num_computed + query_pos&quot; step degenerates to just <code>num_computed</code>. 5. The <code>token_ids_cpu_tensor.flatten() + torch.index_select</code> gather — which builds a (max_num_reqs * max_model_len) flattened view every step — is replaced by a direct 2D fancy-index gather <code>token_ids_cpu[arange, positions]</code> sized <code>num_reqs</code>. The equivalent change is applied to <code>is_token_ids</code> when <code>enable_prompt_embeds</code> is on.</p>
+<p>The <code>else</code> branch is unchanged and is byte-for-byte the same as the prior implementation, so all non-decode-only batches (chunked prefill, mixed prefill/decode, speculative decode with drafts, prompt-embed batches) keep the exact existing code path.</p>
+<p>Everything downstream of the branch (<code>query_start_loc</code>, <code>optimistic_seq_lens_cpu</code>, <code>_compute_prev_positions</code>, <code>num_tokens</code> discard mask, <code>num_accepted_tokens</code> sync, <code>req_indices.copy_to_gpu</code>, <code>num_computed_tokens</code> update, GPU <code>positions</code> / <code>seq_lens</code> computation, <code>_prepare_input_ids</code>, mrope/xdrope copies, spec-decode metadata, LoRA hot-swap, return values) is untouched.</p>
+<h2>Why this should reduce TTFT / TPOT</h2>
+<p>For the workload named in the task (multi-turn agentic decode), the overwhelmingly common step shape is &quot;N requests, each with one scheduled token&quot; (bonus tokens per accepted decode step, no draft or partial prefill). The CPU wall time inside <code>_prepare_inputs</code> is a real fraction of that step&#x27;s TTFT/TPOT because the method runs every non-empty legacy runner step and the model itself is fast per step at low batch sizes.</p>
+<p>Removed per-step CPU work when the fast path is taken:</p>
+<ul>
+<li><code>np.repeat(arange_np[:num_reqs], num_scheduled_tokens)</code> — allocates</li>
+</ul>
+<p>and writes a fresh <code>num_reqs</code>-element int64 array.</p>
+<ul>
+<li><code>_get_cumsum_and_arange</code>: <code>np.cumsum</code> + <code>np.repeat</code> +</li>
+</ul>
+<p><code>np.subtract(..., out=...)</code> — three passes over <code>num_scheduled_tokens</code>-sized arrays.</p>
+<ul>
+<li><code>num_computed_tokens_cpu[req_indices] + query_pos.np[:total]</code> —</li>
+</ul>
+<p>numpy fancy-index gather + addition into a new array.</p>
+<ul>
+<li><code>positions_np + req_indices * max_model_len</code> — another new</li>
+</ul>
+<p>intermediate array.</p>
+<ul>
+<li><code>torch.from_numpy(token_indices)</code> + <code>torch.index_select</code> on the</li>
+</ul>
+<p>flattened <code>token_ids_cpu_tensor</code> (whose flat size is <code>max_num_reqs * max_model_len</code>, which for the default max_model_len is enormous even though the gather only pulls <code>num_reqs</code> values).</p>
+<p>The replacement performs one contiguous 1D copy of length <code>num_reqs</code> plus a tiny bookkeeping fill. There are no additional H2D transfers — the GPU work below the branch is identical either way (same <code>query_pos</code>, <code>req_indices</code>, <code>num_scheduled_tokens</code> H2Ds of size <code>num_reqs</code>, same <code>positions</code>/<code>seq_lens</code>/<code>slot_mapping</code> construction).</p>
+<h2>Proposals this draws on</h2>
+<p>Directly implements the <code>[claude]</code> proposal: &quot;Add a pure-decode fast path in <code>_prepare_inputs</code> that skips <code>np.repeat</code>, cumsum, and <code>index_select</code> when every request has <code>num_scheduled_tokens == 1</code>&quot;. That proposal explicitly argues this is the only in-scope change of the five listed that eliminates the CPU side of the per-step work (proposals #1–#4 all attack sync/staging or propose cross-file state refactors and metadata contract changes, which would require edits outside the allowed file range).</p>
+<p>Not adopted (and why):</p>
+<ul>
+<li>Multi-step decoding, async spec metadata, MRV2 persistent state,</li>
+</ul>
+<p>and one-step-deferred <code>num_accepted_tokens</code> sync all require changes to files outside the allowed scope (attention metadata contracts, scheduler/output pipeline, request-state ownership, worker/runner glue). None are implementable as a faithful, self-contained edit to <code>_prepare_inputs</code>.</p>
+<h2>What a reviewer should check by hand</h2>
+<p>1. <strong>Correctness of the fast-path gate.</strong> <code>pure_decode = (total_num_scheduled_tokens == num_reqs) and not req_prompt_embeds</code>. Since every scheduled request has <code>num_scheduled_tokens[i] &gt;= 0</code> and the sum equals the count, each <code>num_scheduled_tokens[i]</code> must be exactly 1. Confirm this holds — in particular that <code>num_reqs</code> here is the count of active input-batch rows, not something that could include padding with zero scheduled tokens. (Reading <code>self.input_batch.num_reqs</code> at 2015 and the way callers construct <code>num_scheduled_tokens</code> should confirm this: the caller builds <code>num_scheduled_tokens</code> from the same active-row set.) 2. <strong><code>cu_num_tokens</code> dtype.</strong> In the slow path it comes from <code>np.cumsum(int32)</code>; on 64-bit numpy this is typically int64. In the fast path it is the int64 view <code>arange_np[1:num_reqs+1]</code>. Downstream uses (<code>query_start_loc.np[1:num_reqs+1] = cu_num_tokens</code>, an int32 destination that will safely downcast; <code>.fill(cu_num_tokens[-1])</code>; and passing to <code>_calc_spec_decode_metadata</code>, which cannot be reached in pure-decode because spec decode requires at least one request with <code>num_scheduled_tokens[i] &gt;= 2</code>) are dtype-flexible. 3. <strong><code>query_pos.np[:num_reqs] = 0</code></strong> is required so the later <code>self.query_pos.copy_to_gpu(total_num_scheduled_tokens)</code> uploads zeros for the <code>num_reqs</code> positions we care about. Confirm no other consumer of <code>query_pos.gpu[num_reqs:]</code> matters in this call — the <code>positions[:total_num_scheduled_tokens]</code> computation only reads <code>query_pos.gpu[:total_num_scheduled_tokens]</code> and <code>total_num_scheduled_tokens == num_reqs</code> in the fast path. 4. <strong><code>token_ids_cpu</code> gather semantics.</strong> <code>token_ids_cpu</code> is an int32 2D numpy view of <code>token_ids_cpu_tensor</code> (shape <code>(max_num_reqs, max_model_len)</code>). Fancy indexing <code>token_ids_cpu[arange, positions]</code> returns a 1D int32 array of length <code>num_reqs</code>; assigning it into <code>self.input_ids.np[:num_reqs]</code> (an int32 view of the pinned CPU buffer) writes the same values the old flatten + <code>index_select</code> did. Similarly for <code>is_token_ids</code>. 5. <strong>No behavioral change on non-pure-decode.</strong> The <code>else</code> branch is the previous code verbatim; there are no shared side effects between branches beyond writing to buffers that both branches also write to (<code>query_pos.np</code>, <code>input_ids.cpu</code>, <code>is_token_ids.cpu</code>). 6. <strong>Recorded oracles.</strong> <code>pytest tests/v1/worker/test_gpu_model_runner.py</code> and <code>pytest tests/v1/attention/test_attention_backends.py</code> should both pass; the change does not alter attention metadata, request states, or output shapes.</p>
+<h2>Applying and verifying this patch</h2>
+<p>Run this from the directory containing this file — the same directory <code>apply.patch</code> sits in:</p>
+<pre><code>git -C /Users/iklamer/ai-native-systems/VSCodeProjects/vllm checkout 83ad767eed3be3ee7f2df63be693bfaca5c7c922
+git -C /Users/iklamer/ai-native-systems/VSCodeProjects/vllm apply --check &quot;$PWD/apply.patch&quot; &amp;&amp; git -C /Users/iklamer/ai-native-systems/VSCodeProjects/vllm apply &quot;$PWD/apply.patch&quot;
+
+# the recorded correctness oracles — run them all on a machine that can:
+pytest tests/v1/worker/test_gpu_model_runner.py
+pytest tests/v1/attention/test_attention_backends.py</code></pre>
+<p>If the patch does not apply cleanly, <code>git -C /Users/iklamer/ai-native-systems/VSCodeProjects/vllm apply -3 &quot;$PWD/apply.patch&quot;</code> falls back to a three-way merge. Without git, <code>patch -p1 &lt; apply.patch</code> works from the repo root.</p>
+<h2>The patch</h2>
+<details class="patch"><summary>apply.patch <span class="sz">— 7 KB · <a href="GPUModelRunner._prepare_inputs__cand-vllm_v1_worker-0001__apply/apply.patch">open raw ↗</a></span></summary><div class="diff"><div class="file"><span class="p">vllm/v1/worker/gpu_model_runner.py</span><span class="st"><span class="a">+77</span> <span class="r">−42</span></span></div><pre><span class="l">index 43f5c45323..1fce4ec8b5 100644
+</span><span class="l d-hunk">@@ -2019,58 +2019,93 @@ class GPUModelRunner(
+</span><span class="l">         # This way, we can overlap the copy with the following CPU operations.
+</span><span class="l">         self.input_batch.block_table.commit_block_table(num_reqs)
+</span><span class="l"> 
+</span><span class="l d-del">-        # Get request indices.
+</span><span class="l d-del">-        # E.g., [2, 5, 3] -&gt; [0, 0, 1, 1, 1, 1, 1, 2, 2, 2]
+</span><span class="l d-del">-        req_indices = np.repeat(self.arange_np[:num_reqs], num_scheduled_tokens)
+</span><span class="l d-add">+        # Fast path for pure-decode batches (every request has exactly one
+</span><span class="l d-add">+        # scheduled token, which is the common case for multi-turn agentic
+</span><span class="l d-add">+        # decode steps). Skips np.repeat, cumsum+arange, the flatten
+</span><span class="l d-add">+        # +index_select gather, and the query_pos numpy scratch write; each
+</span><span class="l d-add">+        # request contributes exactly one row-local position.
+</span><span class="l d-add">+        pure_decode = (
+</span><span class="l d-add">+            total_num_scheduled_tokens == num_reqs
+</span><span class="l d-add">+            and not self.input_batch.req_prompt_embeds
+</span><span class="l d-add">+        )
+</span><span class="l d-add">+        if pure_decode:
+</span><span class="l d-add">+            req_indices = self.arange_np[:num_reqs]
+</span><span class="l d-add">+            # cu_num_tokens = [1, 2, ..., num_reqs]
+</span><span class="l d-add">+            cu_num_tokens = self.arange_np[1 : num_reqs + 1]
+</span><span class="l d-add">+            # query_pos is all zeros for pure decode.
+</span><span class="l d-add">+            self.query_pos.np[:num_reqs] = 0
+</span><span class="l d-add">+            positions_np = self.input_batch.num_computed_tokens_cpu[:num_reqs]
+</span><span class="l d-add">+
+</span><span class="l d-add">+            # Calculate M-RoPE / XD-RoPE positions (unchanged semantics).
+</span><span class="l d-add">+            if self.uses_mrope:
+</span><span class="l d-add">+                self._calc_mrope_positions(scheduler_output)
+</span><span class="l d-add">+            if self.uses_xdrope_dim &gt; 0:
+</span><span class="l d-add">+                self._calc_xdrope_positions(scheduler_output)
+</span><span class="l d-add">+
+</span><span class="l d-add">+            # Gather one token per request from token_ids_cpu:
+</span><span class="l d-add">+            #   input_ids.cpu[i] = token_ids_cpu[i, positions_np[i]]
+</span><span class="l d-add">+            # Avoids the flatten + index_select over the entire
+</span><span class="l d-add">+            # (max_num_reqs * max_model_len) tensor.
+</span><span class="l d-add">+            self.input_ids.np[:num_reqs] = self.input_batch.token_ids_cpu[
+</span><span class="l d-add">+                req_indices, positions_np
+</span><span class="l d-add">+            ]
+</span><span class="l d-add">+            if self.enable_prompt_embeds:
+</span><span class="l d-add">+                self.is_token_ids.np[:num_reqs] = self.input_batch.is_token_ids[
+</span><span class="l d-add">+                    req_indices, positions_np
+</span><span class="l d-add">+                ]
+</span><span class="l d-add">+        else:
+</span><span class="l d-add">+            # Get request indices.
+</span><span class="l d-add">+            # E.g., [2, 5, 3] -&gt; [0, 0, 1, 1, 1, 1, 1, 2, 2, 2]
+</span><span class="l d-add">+            req_indices = np.repeat(self.arange_np[:num_reqs], num_scheduled_tokens)
+</span><span class="l"> 
+</span><span class="l d-del">-        # cu_num_tokens: [2, 5, 3] -&gt; [2, 7, 10]
+</span><span class="l d-del">-        # self.query_pos.np[:10]: [0, 1, 0, 1, 2, 3, 4, 0, 1, 2]
+</span><span class="l d-del">-        cu_num_tokens = self._get_cumsum_and_arange(
+</span><span class="l d-del">-            num_scheduled_tokens, self.query_pos.np
+</span><span class="l d-del">-        )
+</span><span class="l d-add">+            # cu_num_tokens: [2, 5, 3] -&gt; [2, 7, 10]
+</span><span class="l d-add">+            # self.query_pos.np[:10]: [0, 1, 0, 1, 2, 3, 4, 0, 1, 2]
+</span><span class="l d-add">+            cu_num_tokens = self._get_cumsum_and_arange(
+</span><span class="l d-add">+                num_scheduled_tokens, self.query_pos.np
+</span><span class="l d-add">+            )
+</span><span class="l"> 
+</span><span class="l d-del">-        # Get positions.
+</span><span class="l d-del">-        positions_np = (
+</span><span class="l d-del">-            self.input_batch.num_computed_tokens_cpu[req_indices]
+</span><span class="l d-del">-            + self.query_pos.np[: cu_num_tokens[-1]]
+</span><span class="l d-del">-        )
+</span><span class="l d-add">+            # Get positions.
+</span><span class="l d-add">+            positions_np = (
+</span><span class="l d-add">+                self.input_batch.num_computed_tokens_cpu[req_indices]
+</span><span class="l d-add">+                + self.query_pos.np[: cu_num_tokens[-1]]
+</span><span class="l d-add">+            )
+</span><span class="l"> 
+</span><span class="l d-del">-        # Calculate M-RoPE positions.
+</span><span class="l d-del">-        # Only relevant for models using M-RoPE (e.g, Qwen2-VL)
+</span><span class="l d-del">-        if self.uses_mrope:
+</span><span class="l d-del">-            self._calc_mrope_positions(scheduler_output)
+</span><span class="l d-add">+            # Calculate M-RoPE positions.
+</span><span class="l d-add">+            # Only relevant for models using M-RoPE (e.g, Qwen2-VL)
+</span><span class="l d-add">+            if self.uses_mrope:
+</span><span class="l d-add">+                self._calc_mrope_positions(scheduler_output)
+</span><span class="l"> 
+</span><span class="l d-del">-        # Calculate XD-RoPE positions.
+</span><span class="l d-del">-        # Only relevant for models using XD-RoPE (e.g, HunYuan-VL)
+</span><span class="l d-del">-        if self.uses_xdrope_dim &gt; 0:
+</span><span class="l d-del">-            self._calc_xdrope_positions(scheduler_output)
+</span><span class="l d-add">+            # Calculate XD-RoPE positions.
+</span><span class="l d-add">+            # Only relevant for models using XD-RoPE (e.g, HunYuan-VL)
+</span><span class="l d-add">+            if self.uses_xdrope_dim &gt; 0:
+</span><span class="l d-add">+                self._calc_xdrope_positions(scheduler_output)
+</span><span class="l"> 
+</span><span class="l d-del">-        # Get token indices.
+</span><span class="l d-del">-        # E.g., [0, 1, 0, 1, 2, 3, 4, 0, 1, 2]
+</span><span class="l d-del">-        # -&gt; [0, 1, M, M + 1, M + 2, M + 3, M + 4, 2 * M, 2 * M + 1, 2 * M + 2]
+</span><span class="l d-del">-        # where M is the max_model_len.
+</span><span class="l d-del">-        token_indices = (
+</span><span class="l d-del">-            positions_np + req_indices * self.input_batch.token_ids_cpu.shape[1]
+</span><span class="l d-del">-        )
+</span><span class="l d-del">-        token_indices_tensor = torch.from_numpy(token_indices)
+</span><span class="l d-add">+            # Get token indices.
+</span><span class="l d-add">+            # E.g., [0, 1, 0, 1, 2, 3, 4, 0, 1, 2]
+</span><span class="l d-add">+            # -&gt; [0, 1, M, M + 1, M + 2, M + 3, M + 4, 2 * M, 2 * M + 1, 2 * M + 2]
+</span><span class="l d-add">+            # where M is the max_model_len.
+</span><span class="l d-add">+            token_indices = (
+</span><span class="l d-add">+                positions_np + req_indices * self.input_batch.token_ids_cpu.shape[1]
+</span><span class="l d-add">+            )
+</span><span class="l d-add">+            token_indices_tensor = torch.from_numpy(token_indices)
+</span><span class="l"> 
+</span><span class="l d-del">-        # NOTE(woosuk): We use torch.index_select instead of np.take here
+</span><span class="l d-del">-        # because torch.index_select is much faster than np.take for large
+</span><span class="l d-del">-        # tensors.
+</span><span class="l d-del">-        torch.index_select(
+</span><span class="l d-del">-            self.input_batch.token_ids_cpu_tensor.flatten(),
+</span><span class="l d-del">-            0,
+</span><span class="l d-del">-            token_indices_tensor,
+</span><span class="l d-del">-            out=self.input_ids.cpu[:total_num_scheduled_tokens],
+</span><span class="l d-del">-        )
+</span><span class="l d-del">-        if self.enable_prompt_embeds:
+</span><span class="l d-del">-            is_token_ids = self.input_batch.is_token_ids_tensor.flatten()
+</span><span class="l d-add">+            # NOTE(woosuk): We use torch.index_select instead of np.take here
+</span><span class="l d-add">+            # because torch.index_select is much faster than np.take for large
+</span><span class="l d-add">+            # tensors.
+</span><span class="l">             torch.index_select(
+</span><span class="l d-del">-                is_token_ids,
+</span><span class="l d-add">+                self.input_batch.token_ids_cpu_tensor.flatten(),
+</span><span class="l">                 0,
+</span><span class="l">                 token_indices_tensor,
+</span><span class="l d-del">-                out=self.is_token_ids.cpu[:total_num_scheduled_tokens],
+</span><span class="l d-add">+                out=self.input_ids.cpu[:total_num_scheduled_tokens],
+</span><span class="l">             )
+</span><span class="l d-add">+            if self.enable_prompt_embeds:
+</span><span class="l d-add">+                is_token_ids = self.input_batch.is_token_ids_tensor.flatten()
+</span><span class="l d-add">+                torch.index_select(
+</span><span class="l d-add">+                    is_token_ids,
+</span><span class="l d-add">+                    0,
+</span><span class="l d-add">+                    token_indices_tensor,
+</span><span class="l d-add">+                    out=self.is_token_ids.cpu[:total_num_scheduled_tokens],
+</span><span class="l d-add">+                )
+</span><span class="l"> 
+</span><span class="l">         # Because we did not pre-allocate a massive prompt_embeds CPU tensor on
+</span><span class="l">         # the InputBatch, we need to fill in the prompt embeds into the expected
+</span></pre></div></details>
+</div>
+</body>
+</html>

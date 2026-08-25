@@ -1,0 +1,2209 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Evolve — FlashAttentionMetadataBuilder.build</title>
+<style>
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #f6f7f9; color: #1a1d21;
+  font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+.wrap { max-width: 860px; margin: 0 auto; padding: 32px 24px 80px; }
+a { color: #2b6cb0; }
+h1 { font-size: 1.7rem; line-height: 1.25; margin: 0 0 .5rem; }
+h2 { font-size: 1.25rem; margin: 1.8rem 0 .6rem; border-bottom: 1px solid #e2e5e9; padding-bottom: .25rem; }
+h3 { font-size: 1.05rem; margin: 1.3rem 0 .4rem; }
+p { margin: .6rem 0; }
+ul { margin: .5rem 0 .8rem; padding-left: 1.4rem; }
+li { margin: .2rem 0; }
+code { background: #eef0f3; border-radius: 4px; padding: .1em .35em;
+  font: .9em/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+hr { border: 0; border-top: 1px solid #e2e5e9; margin: 1.6rem 0; }
+blockquote { margin: .8rem 0; padding: .5em .9em; background: #f6f7f9;
+  border-left: 3px solid #e2e5e9; border-radius: 0 6px 6px 0; color: #3a4149; }
+blockquote p { margin: .3rem 0; }
+.tw { overflow-x: auto; margin: .7rem 0 1rem; }
+table { border-collapse: collapse; font-size: .92rem; }
+th, td { border: 1px solid #e2e5e9; padding: .35em .6em; text-align: left;
+  vertical-align: top; }
+th { background: #f6f7f9; color: #3a4149; font-weight: 600; }
+.back { display: inline-block; margin-bottom: 1.2rem; font-size: .95rem; }
+.subtitle { color: #5a6169; margin: 0 0 1.6rem; }
+.card { display: block; background: #fff; border: 1px solid #e2e5e9; border-radius: 10px;
+  padding: 16px 18px; margin: 12px 0; text-decoration: none; color: inherit;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04); transition: box-shadow .12s, border-color .12s; }
+.card:hover { box-shadow: 0 3px 10px rgba(0,0,0,.08); border-color: #c7cdd4; }
+.card .row1 { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.rank { font-weight: 700; color: #2b6cb0; }
+.sym { font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.mod { color: #5a6169; font-size: .9rem; }
+/* align-items:center, not the flex default of stretch: a stretched .badge keeps
+   its border-radius:999px, so a badge shorter than a taller sibling renders as a
+   circle rather than a pill. flex-shrink:0 and .badge's nowrap keep any badge
+   from being squeezed until its text wraps and becomes that taller sibling;
+   .row1 wraps, so an overflowing row moves .badges to its own line instead. */
+.badges { margin-left: auto; display: flex; align-items: center; gap: 8px;
+  flex-wrap: wrap; flex-shrink: 0; }
+.badge { font-size: .78rem; padding: .12em .6em; border-radius: 999px; background: #eef0f3;
+  color: #3a4149; white-space: nowrap; }
+.badge.impact-high { background: #fde8e8; color: #9b1c1c; }
+.badge.score { background: #e6f4ea; color: #1e6b33; }
+.rationale { margin: .5rem 0 0; color: #3a4149; font-size: .95rem; }
+
+/* --- evolve bundles --- */
+.badge.evolve { background: #e8e3fd; color: #4c2a9b; }
+.card-main { display:block; text-decoration:none; color:inherit; }
+.card-foot { margin-top:.7rem; padding-top:.6rem; border-top:1px dashed #e2e5e9;
+  display:flex; gap:8px; flex-wrap:wrap; }
+/* margin-left:auto, not justify-content:space-between on .card-foot: the two
+   arms are independently optional, and space-between would leave a lone evolve
+   pill sitting left. An auto margin pins evolve right whether or not an apply
+   pill shares the row — so a column of cards has apply flush left and evolve
+   flush right on every one of them. */
+.evolve-link { display:inline-flex; align-items:center; gap:.45em; margin-left:auto;
+  font-size:.85rem; font-weight:600; color:#4c2a9b; background:#f1edfd;
+  border:1px solid #d9cffb; border-radius:999px; padding:.32em .85em;
+  text-decoration:none; }
+.evolve-link:hover { background:#e6ddfc; border-color:#c3b1f7; }
+.evolve-section { margin-top: 1.8rem; }
+.engine { background:#fff; border:1px solid #e2e5e9; border-radius:10px;
+  padding:14px 16px; margin:12px 0; }
+.engine h3 { margin:.1rem 0 .5rem; }
+.engine .cmd { background:#1a1d21; color:#e6e6e6; border-radius:6px;
+  padding:.5em .7em; font:.85em/1.4 ui-monospace,Menlo,Consolas,monospace;
+  overflow-x:auto; }
+.engine pre { background:#f6f7f9; border:1px solid #e2e5e9; border-radius:6px;
+  max-height:360px; overflow:auto; padding:.6em .8em; }
+.engine details { margin:.5rem 0; }
+.engine summary { cursor:pointer; font:.9rem/1.4 ui-monospace,Menlo,Consolas,monospace;
+  color:#3a4149; padding:.25em 0; }
+.engine summary .sz { color:#8a9099; }
+.dl { display:inline-flex; align-items:center; gap:.5em; margin:.2rem 0 1.4rem;
+  font-size:.95rem; font-weight:600; color:#fff; background:#4c2a9b;
+  border-radius:8px; padding:.5em 1em; text-decoration:none; }
+.dl:hover { background:#3d2080; }
+.engine .dl { margin:1rem 0 .1rem; font-size:.85rem; font-weight:600;
+  color:#4c2a9b; background:#f1edfd; border:1px solid #d9cffb; padding:.4em .85em; }
+.engine .dl:hover { background:#e6ddfc; border-color:#c3b1f7; }
+.orient { background:#f1edfd; border:1px solid #d9cffb; border-radius:10px;
+  padding:14px 16px; margin:.2rem 0 1.2rem; }
+.orient p { margin:.4rem 0; }
+.orient .warn { color:#8a5a00; }
+.about { background:#fbfbfc; border:1px solid #eef0f3; border-radius:8px;
+  padding:10px 14px; margin:.2rem 0 .8rem; }
+.about .tagline { margin:.1rem 0 .6rem; font-weight:600; }
+.about dl { display:grid; grid-template-columns:max-content minmax(0,1fr);
+  gap:.3em 1em; margin:0; }
+.about dt { color:#5a6169; font-size:.82rem; padding-top:.05em; }
+.about dd { margin:0; font-size:.9rem; min-width:0; }
+.about dd .warn { color:#9b1c1c; display:block; margin-top:.3rem; }
+.inst-label { font-size:.78rem; color:#5a6169; margin:.5rem 0 .15rem; }
+.inst-label:first-child { margin-top:.1rem; }
+.engine pre.inst { background:#1a1d21; color:#e6e6e6; border:0; border-radius:6px;
+  padding:.5em .7em; margin:.1rem 0; max-height:none; overflow-x:auto;
+  font:.85em/1.5 ui-monospace,Menlo,Consolas,monospace; }
+.about dd p { margin:.1rem 0 .3rem; }
+.about dd .ask { margin:.3rem 0 0; padding:.6em .8em; background:#eef6ff;
+  border-left:3px solid #2b6cb0; border-radius:0 6px 6px 0; color:#1a1d21;
+  font-style:italic; font-size:.88rem; }
+/* --- one-shot apply --- */
+.badge.apply { background:#fdf0d5; color:#8a5a00; }
+/* No auto margin here, deliberately: apply is emitted first, so it is already
+   flush left, and .evolve-link's margin-left:auto is what pushes evolve right. */
+.apply-link { display:inline-flex; align-items:center; gap:.45em;
+  font-size:.85rem; font-weight:600; color:#8a5a00; background:#fdf6e7;
+  border:1px solid #f0dfb8; border-radius:999px; padding:.32em .85em;
+  text-decoration:none; }
+.apply-link:hover { background:#fbeed2; border-color:#e6cf9c; }
+.apply-section { margin-top: 1.8rem; }
+.apply-strip { background:#fbfbfc; border:1px solid #eef0f3; border-radius:8px;
+  padding:10px 14px; margin:.2rem 0 1.2rem; }
+.apply-strip h2 { margin:.1rem 0 .5rem; border:0; padding:0; font-size:1.05rem; }
+.apply-strip pre { background:#1a1d21; color:#e6e6e6; border:0; border-radius:6px;
+  padding:.5em .7em; margin:.3rem 0; overflow-x:auto;
+  font:.85em/1.5 ui-monospace,Menlo,Consolas,monospace; }
+.apply-strip .note { font-size:.85rem; color:#5a6169; margin:.5rem 0 .1rem; }
+.apply-strip .sha { font:.85em/1.4 ui-monospace,Menlo,Consolas,monospace;
+  background:#eef0f3; border-radius:4px; padding:.1em .35em; }
+.apply-strip .dl { margin:.7rem 0 .2rem; font-size:.85rem; color:#8a5a00;
+  background:#fdf6e7; border:1px solid #f0dfb8; }
+.apply-strip .dl:hover { background:#fbeed2; border-color:#e6cf9c; }
+.diff { border:1px solid #e2e5e9; border-radius:8px; overflow:hidden;
+  margin:.6rem 0 1.2rem; }
+.diff .file { background:#f6f7f9; border-bottom:1px solid #e2e5e9;
+  padding:.4em .7em; display:flex; gap:.8em; align-items:baseline;
+  font:.85rem/1.4 ui-monospace,Menlo,Consolas,monospace; }
+.diff .file .p { font-weight:600; word-break:break-all; }
+.diff .file .st { margin-left:auto; white-space:nowrap; }
+.diff .file .st .a { color:#1e6b33; }
+.diff .file .st .r { color:#9b1c1c; }
+.diff pre { margin:0; padding:0; background:#fff; overflow-x:auto;
+  font:.82em/1.5 ui-monospace,Menlo,Consolas,monospace; }
+.diff .l { display:block; padding:0 .7em; white-space:pre; }
+.diff .d-add { background:#e6f4ea; color:#1e6b33; }
+.diff .d-del { background:#fde8e8; color:#9b1c1c; }
+.diff .d-hunk { background:#eef0f3; color:#5a6169; }
+/* the patch <details> is not inside .engine, so it needs its own summary rules
+   — these mirror `.engine summary` / `.engine summary .sz` above */
+.patch { margin:.5rem 0 1.2rem; }
+.patch summary { cursor:pointer; padding:.25em 0; color:#3a4149;
+  font:.9rem/1.4 ui-monospace,Menlo,Consolas,monospace; }
+.patch summary .sz { color:#8a9099; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="FlashAttentionMetadataBuilder.build__cand-vllm_v1_attention-0002.html">← Back to candidate</a>
+<h1>Evolve bundles — FlashAttentionMetadataBuilder.build</h1>
+<p class="subtitle">cand-vllm_v1_attention-0002 · 3 engine(s): coral, skydiscover, nous</p>
+<div class="orient"><p><strong>What is this?</strong> Each section below is a ready-to-run bundle for a different <em>evolver</em> — an evolutionary code-search engine. Spotlights already chose <em>what</em> to optimize (the target symbol and objective); an evolver repeatedly mutates the in-scope code to improve it. <strong>You only need to run one.</strong></p><p class="warn">⚠️ Every bundle is launchable, but produces no meaningful score until you complete its evaluator/grader — the performance measurement ships as a <code>TODO</code>. See each engine's README (or config) below for the exact oracle Spotlights inferred.</p></div>
+<div class="engine"><h3>coral</h3>
+<div class="about"><p class="tagline">Agentic multi-file evolver — an LLM agent edits a git worktree of the repo.</p><dl><dt>Repository</dt><dd><a href="https://github.com/Human-Agent-Society/CORAL" target="_blank" rel="noopener">https://github.com/Human-Agent-Society/CORAL ↗</a></dd><dt>Install</dt><dd><div class="inst-label">Shell installer</div><pre class="inst">curl -fsSL https://raw.githubusercontent.com/Human-Agent-Society/CORAL/main/install.sh | sh</pre><div class="inst-label">Claude Code plugin</div><pre class="inst">/plugin marketplace add Human-Agent-Society/CORAL
+/plugin install coral@coral-marketplace</pre></dd><dt>Edit scope</dt><dd>Multi-file: the agent may edit any in-scope file in a git worktree.</dd><dt>Native config</dt><dd><code>task.yaml</code></dd><dt>You must write</dt><dd><code>the grader + seed directories</code></dd><dt>Quickstart</dt><dd><p>Open the target repo (make sure task.yaml&#x27;s <code>repo_path</code> points to the same location — update it if needed), then ask Claude Code — replacing &lt;CORAL_BUNDLE_PATH&gt; with the path to wherever you unpacked this bundle:</p><blockquote class="ask">use coral to optimize this — start from the bundle at &lt;CORAL_BUNDLE_PATH&gt;. Don&#x27;t change what task.yaml defines — the goal, in-scope file, oracle, metric, and direction are fixed. Fill only the gaps: write the grader, set up the seed, and add whatever&#x27;s needed so the grader cleanly scores the seed. The seed should be the full repo so the agent can read everything, but the grader must reject any attempt that modifies or adds a file outside the allowlist — configured as target_files (or allowed_paths) under grader.args in task.yaml.</blockquote></dd><dt>Prerequisites</dt><dd>Python 3, an LLM API key for the model named in the config (e.g. <code>ANTHROPIC_API_KEY</code>), the target repo checked out at the run's commit, and a server with all the hardware the benchmark needs (e.g. a GPU) to build and measure the target.</dd></dl></div>
+<div class="cmd">$ coral start --config task.yaml</div>
+<h1>Evolve bundle — vllm · vllm/v1/attention · cand-vllm_v1_attention-0002 · coral</h1>
+<p>Generated by <code>spotlights-engine prep-evolve</code>. This bundle is ready to start by hand; <strong>running the evolve, scoring, and interpreting results are up to you.</strong></p>
+<h2>Run it</h2>
+<pre><code>coral start --config task.yaml</code></pre>
+<h2>⚠️ The evaluation gap — you must complete the evaluator</h2>
+<p>This bundle ships a <strong>launchable but degenerate</strong> evaluator: the correctness gate is wired from what Spotlights parsed, but the performance measurement is a <code># TODO</code>. Until you implement it, scores are not meaningful.</p>
+<p>What Spotlights believes the oracle is:</p>
+<ul>
+<li><strong>Correctness:</strong> (none parsed — add one)</li>
+<li><strong>Performance:</strong> TTFT, TPOT</li>
+<li><strong>Direction:</strong> minimize</li>
+</ul>
+<p>Complete the measurement in <code>grader/grader.py</code> before trusting any result.</p>
+<h2>In scope</h2>
+<p>Only these files may change:</p>
+<ul>
+<li><code>vllm/v1/attention/backends/flash_attn.py</code>:479–762 (<code>FlashAttentionMetadataBuilder.build</code>)</li>
+</ul>
+<h2>Objective</h2>
+<p>reduce the median TTFT and median TPOT (Time Per Output Token)</p>
+<p>The full research findings and proposals are embedded directly in the native config (the evaluator/grader prompt or system message).</p>
+<details><summary>task.yaml <span class="sz">— 11 KB · <a href="FlashAttentionMetadataBuilder.build__cand-vllm_v1_attention-0002__evolve/coral/task.yaml">open raw ↗</a></span></summary><pre><code># Generated by spotlights-engine prep-evolve.
+# Run: coral start --config task.yaml
+# You must write grader/grader.py (a Grader(TaskGrader) subclass) before
+# scores are meaningful — CORAL auto-discovers it by convention.
+task:
+  name: vllm · vllm/v1/attention · FlashAttentionMetadataBuilder.build
+  description: |
+    Optimize vllm for: reduce the median TTFT and median TPOT (Time Per Output Token) (direction: minimize).
+
+    In-scope files:
+    - vllm/v1/attention/backends/flash_attn.py:479–762 (`FlashAttentionMetadataBuilder.build`, the selected candidate)
+
+    ## Optimization goal
+    reduce the median TTFT and median TPOT (Time Per Output Token) — workload: Multi-turn agentic workload (direction: minimize)
+
+    ## Target
+    - `FlashAttentionMetadataBuilder.build` in vllm/v1/attention/backends/flash_attn.py:479–762 (impact: high)
+
+    Current approach: Runs a sequential Python-side build each step. The nested schedule() closure can recompute scheduler_metadata for repeated shapes; cascade paths allocate cu_prefix_query_lens and prefix_kv_lens tensors; multimodal and R-SWA paths perform staging-buffer copies into device buffers.
+    Why it&#x27;s worth evolving: This method is on the per-token metadata path. Concrete tunables include caching schedule() results by repeated shape, reusing cascade prefix tensors, batching H2D staging copies, and skipping inactive subpaths earlier. Correctness oracle is existing FlashAttention metadata tests and end-to-end token/output equality against the current implementation.
+    Performance oracle: TTFT, TPOT
+
+    ## Research findings (4)
+    1. Cascade Inference: Memory Bandwidth Efficient Shared Prefix Batch Decoding — blog — https://flashinfer.ai/2024/02/02/cascade-inference.html
+       Technique: Use recursive attention state merging to split shared-prefix attention from per-request suffix attention, then dispatch each part to the kernel best suited for its reuse pattern. For multi-turn agentic workloads with repeated system/tool/document prefixes, the module could make cascade selection more shape-aware and extend it toward multi-level shared prefixes rather than relying on coarse gates. | Evidence: &quot;Quote: &quot;Use multi-query (prefill/append) attention kernel&quot; and &quot;Use batch decode attention kernel&quot;. Pointer: Cascade Inference: The Algorithm, steps 1-2.&quot;
+    2. flashinfer.cascade — docs — https://docs.flashinfer.ai/api/cascade.html
+       Technique: Cache cascade planning auxiliary structures and reuse them across multiple layer calls for the same decode step. The module could mirror this at metadata-build time by keying stable shape/page/cascade plans and reusing preallocated CUDA-graph buffers to lower per-step planning overhead and median TPOT. | Evidence: &quot;Quote: &quot;auxiliary data structures can be reused across multiple batch decode attention calls&quot;. Pointer: MultiLevelCascadeAttentionWrapper example note.&quot;
+    3. CUDA C++ Best Practices Guide — docs — https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html
+       Technique: Minimize host-device transfers, batch many small transfers into one contiguous transfer, and use pinned memory for asynchronous copies. The module could apply this to attention metadata construction by packing indptr, last-page lengths, multimodal ranges, and split metadata into fewer staged H2D copies or moving cheap prefix computations onto device. | Evidence: &quot;Quote: &quot;batching many small transfers into one larger transfer performs significantly better&quot;. Pointer: Data Transfer Between Host and Device, section 10.1.&quot;
+    4. CUDA Graphs — docs — https://docs.vllm.ai/en/v0.21.0/design/cuda_graphs/
+       Technique: Use a batch-descriptor-driven CUDA graph dispatcher that separately handles uniform decode and mixed/prefill batches, with backend capability fallbacks. The attention module could tighten its fast-plan and metadata decisions around stable batch descriptors so CUDA-graph-compatible decode routes avoid redundant planning while mixed batches safely fall back. | Evidence: &quot;Quote: &quot;dispatch between full and piecewise cudagraph at runtime&quot;. Pointer: Motivation, lines 2736-2742.&quot;
+
+    ## Existing proposals (5)
+    ← seeds/inspiration, the evolver may extend or discard
+    - [proposal_from_finding_creator] Make cascade dispatch shape-aware and cache prefix scheduler metadata in FlashAttentionMetadataBuilder.build — The candidate&#x27;s evolve_rationale explicitly calls out `schedule()` recomputation for repeated shapes and cascade prefix-tensor allocation as concrete tunables, and its cascade branch (lines 638-662) is precisely the code path the finding describes: a two-pass split into shared-prefix multi-query attention and per-request suffix decode attention, followed by state merging. The finding&#x27;s specific contribution — that cascade selection should be more shape-aware and could be extended toward multi-level shared prefixes — targets a gap in this build: cascade currently activates on any positive `common_prefix_len` regardless of whether the two-pass path is actually cheaper, and there is no reuse of the prefix-side scheduler metadata or prefix cu_seqlens/kv_lens tensors across steps even though multi-turn agentic workloads (the caller&#x27;s stated workload) hit the identical shared-prefix shape on every decode step. Together these changes reduce Python-side work and per-step allocation on the metadata path each generated token traverses, which directly maps to the candidate&#x27;s stated median TPOT / TTFT objective without touching the kernel-selection contract used downstream in forward(). (from finding #1: Cascade Inference: Memory Bandwidth Efficient Shared Prefix Batch Decoding)
+    - [proposal_from_finding_creator] Cache cascade planning artifacts across steps in FlashAttentionMetadataBuilder.build — The finding documents that FlashInfer&#x27;s cascade wrappers explicitly reuse auxiliary planning data structures across multiple decode attention calls, which is directly analogous to the per-step planning work FlashAttentionMetadataBuilder.build performs on the cascade path and inside schedule(). The candidate&#x27;s evolve_rationale already calls out caching schedule() results by repeated shape and reusing cascade prefix tensors as concrete tunables, and in a multi-turn agentic decode workload the cascade shape key is typically stable across steps, so a shape-keyed reuse strategy targets exactly the median TPOT hot path this method sits on without changing numerical behavior (correctness is guarded by existing FlashAttention metadata tests and end-to-end token equality). (from finding #2: flashinfer.cascade)
+    - [proposal_from_finding_creator] Coalesce per-step H2D metadata copies and eliminate cascade tiny-tensor allocations in FlashAttentionMetadataBuilder.build — The finding directly addresses two concrete inefficiencies in build&#x27;s per-step path that the candidate&#x27;s evolve_rationale explicitly flags: (a) cascade paths allocate cu_prefix_query_lens and prefix_kv_lens tensors via torch.tensor with device=self.device, which triggers an implicit H2D transfer plus a fresh device allocation on every step cascade is active; and (b) mm_prefix and R-SWA both perform independent H2D staging copies. The CUDA Best Practices Guide&#x27;s &quot;batch many small transfers&quot; and &quot;use pinned memory for asynchronous copies&quot; recommendations map 1:1 onto these sites. For a multi-turn agentic workload where build runs every decode step, cutting even a handful of small H2D launches per step reduces per-token host overhead and improves median TPOT; on prefill steps (where cascade and mm_prefix are more likely active) it also reduces TTFT. The change is transferable, scoped to build, and correctness is checkable via the existing metadata tests and end-to-end equality oracle called out in the candidate. (from finding #3: CUDA C++ Best Practices Guide)
+    - [proposal_from_finding_creator] Cache CUDA-graph-compatible plans keyed by stable batch descriptors in FlashAttentionMetadataBuilder.build — The candidate&#x27;s evolve_rationale explicitly names caching schedule() by repeated shape and reusing cascade prefix tensors as concrete tunables, and its hot path is exactly the per-step decode metadata build that the CUDA-graph design targets. The finding contributes the specific structuring idea of a batch-descriptor-driven dispatcher with a graph-compatible fast path and a safe fallback, which maps directly onto separating uniform-decode replays (dominant in multi-turn agentic TPOT) from mixed/prefill builds (TTFT). This addresses the gap that the current build recomputes scheduler_metadata and reallocates cascade tensors even when successive decode steps share the same shape, which is the common case under CUDA graphs. (from finding #4: CUDA Graphs)
+    - [claude] Pipeline AOT scheduler_metadata across steps via a helper-thread build so build() returns before get_scheduler_metadata finishes — None of the four listed deep_research_proposals move `get_scheduler_metadata` off the critical path via cross-step pipelining. Findings 0001 and 0004 propose *shape-keyed caching* of the cascade branch&#x27;s `prefix_scheduler_metadata` and cascade prefix tensors — they only hit when the same shape recurs, and they still execute synchronously inside the current step on the first occurrence and after any invalidation. Finding 0009 introduces a batch-descriptor cache for CUDA-graph-compatible replay but likewise operates synchronously within one step and targets the descriptor-keyed cache lookup, not asynchronous overlap with the model forward. Finding 0006 targets H2D transfer batching and pinned buffers, not compute latency of the scheduler planner itself. This proposal is orthogonal: it addresses the *latency of the planner call*, not its allocation cost or its cacheability, by exploiting that in a uniform-decode multi-turn agentic workload the next step&#x27;s shape is deterministically derivable one step in advance, so the planner call can execute concurrently with the current step&#x27;s model forward on a helper stream and be awaited (as a cheap stream wait) at the next build() entry. This composes cleanly with all four listed cache-based proposals — a cache hit short-circuits before the speculation is consumed — and directly attacks median TPOT beyond what cache reuse alone can achieve, since it removes wall-clock time from the per-token critical path even on cache misses within the class of uniform-decode transitions. (agent proposal, no source finding)
+  tips: |-
+    This method is on the per-token metadata path. Concrete tunables include caching schedule() results by repeated shape, reusing cascade prefix tensors, batching H2D staging copies, and skipping inactive subpaths earlier. Correctness oracle is existing FlashAttention metadata tests and end-to-end token/output equality against the current implementation.
+
+    For multi-turn decode this runs every model step and directly contributes to median TPOT; for prefills it also contributes to TTFT. Reducing Python work, allocation, and H2D preparation compounds across generated tokens.
+
+    Stay within these files: vllm/v1/attention/backends/flash_attn.py. Edits outside them are rejected by the grader.
+grader:
+  timeout: 600
+  direction: minimize
+  args:
+    target_files:
+    - vllm/v1/attention/backends/flash_attn.py
+    correctness_oracle: []
+    performance_oracle: TTFT, TPOT
+    primary_metric: TTFT, TPOT
+workspace:
+  repo_path: /Users/iklamer/ai-native-systems/VSCodeProjects/vllm
+  results_dir: ./results
+  setup: []
+agents:
+  count: 1
+  runtime: claude_code
+  model: sonnet
+</code></pre></details>
+<a class="dl" href="FlashAttentionMetadataBuilder.build__cand-vllm_v1_attention-0002__evolve/coral.zip" download>⬇ Download coral files (.zip)</a>
+</div>
+<div class="engine"><h3>skydiscover</h3>
+<div class="about"><p class="tagline">LLM-driven evolutionary search over a single marked code region.</p><dl><dt>Repository</dt><dd><a href="https://github.com/skydiscover-ai/skydiscover" target="_blank" rel="noopener">https://github.com/skydiscover-ai/skydiscover ↗</a></dd><dt>Install</dt><dd><pre class="inst">pip install skydiscover</pre></dd><dt>Edit scope</dt><dd>Single file: only the region between # EVOLVE-BLOCK-START and # EVOLVE-BLOCK-END changes.</dd><dt>Native config</dt><dd><code>config.yaml + seed.py</code></dd><dt>You must write</dt><dd><code>evaluator.py</code> — <a href="https://github.com/skydiscover-ai/skydiscover/blob/main/README.md#%EF%B8%8F-what-you-write" target="_blank" rel="noopener">what to write ↗</a></dd><dt>Prerequisites</dt><dd>Python 3, an LLM API key for the model named in the config (e.g. <code>ANTHROPIC_API_KEY</code>), the target repo checked out at the run's commit, and a server with all the hardware the benchmark needs (e.g. a GPU) to build and measure the target.</dd></dl></div>
+<div class="cmd">$ skydiscover-run seed.py evaluator.py -c config.yaml</div>
+<h1>Evolve bundle — vllm · vllm/v1/attention · cand-vllm_v1_attention-0002 · skydiscover</h1>
+<p>Generated by <code>spotlights-engine prep-evolve</code>. This bundle is ready to start by hand; <strong>running the evolve, scoring, and interpreting results are up to you.</strong></p>
+<h2>Run it</h2>
+<pre><code>skydiscover-run seed.py evaluator.py -c config.yaml</code></pre>
+<h2>⚠️ The evaluation gap — you must complete the evaluator</h2>
+<p>This bundle ships a <strong>launchable but degenerate</strong> evaluator: the correctness gate is wired from what Spotlights parsed, but the performance measurement is a <code># TODO</code>. Until you implement it, scores are not meaningful.</p>
+<p>What Spotlights believes the oracle is:</p>
+<ul>
+<li><strong>Correctness:</strong> (none parsed — add one)</li>
+<li><strong>Performance:</strong> TTFT, TPOT</li>
+<li><strong>Direction:</strong> minimize</li>
+</ul>
+<p>Complete the measurement in <code>evaluator.py</code> before trusting any result.</p>
+<h2>In scope</h2>
+<p>Only these files may change:</p>
+<ul>
+<li><code>vllm/v1/attention/backends/flash_attn.py</code>:479–762 (<code>FlashAttentionMetadataBuilder.build</code>)</li>
+</ul>
+<h2>Objective</h2>
+<p>reduce the median TTFT and median TPOT (Time Per Output Token)</p>
+<p>The full research findings and proposals are embedded directly in the native config (the evaluator/grader prompt or system message).</p>
+<details><summary>config.yaml <span class="sz">— 11 KB · <a href="FlashAttentionMetadataBuilder.build__cand-vllm_v1_attention-0002__evolve/skydiscover/config.yaml">open raw ↗</a></span></summary><pre><code># Generated by spotlights-engine prep-evolve.
+# Run: skydiscover-run seed.py evaluator.py -c config.yaml
+language: python
+max_iterations: 50
+checkpoint_interval: 10
+llm:
+  models:
+  - name: anthropic/claude-sonnet-4-6
+    weight: 1.0
+    max_tokens: 32000
+    timeout: 600
+prompt:
+  system_message: |
+    You are optimizing `FlashAttentionMetadataBuilder.build` in repository vllm.
+
+    Objective: reduce the median TTFT and median TPOT (Time Per Output Token) (direction: minimize).
+
+    What this code does: Builds per-step FlashAttention metadata, including AOT scheduler metadata, DCP lengths, cascade tensors, multimodal prefix ranges, and R-SWA buffers.
+    Current approach: Runs a sequential Python-side build each step. The nested schedule() closure can recompute scheduler_metadata for repeated shapes; cascade paths allocate cu_prefix_query_lens and prefix_kv_lens tensors; multimodal and R-SWA paths perform staging-buffer copies into device buffers.
+    Why evolve it: This method is on the per-token metadata path. Concrete tunables include caching schedule() results by repeated shape, reusing cascade prefix tensors, batching H2D staging copies, and skipping inactive subpaths earlier. Correctness oracle is existing FlashAttention metadata tests and end-to-end token/output equality against the current implementation.
+
+    Only the region between # EVOLVE-BLOCK-START and # EVOLVE-BLOCK-END may change; everything else is fixed scaffolding.
+
+    ## Optimization goal
+    reduce the median TTFT and median TPOT (Time Per Output Token) — workload: Multi-turn agentic workload (direction: minimize)
+
+    ## Target
+    - `FlashAttentionMetadataBuilder.build` in vllm/v1/attention/backends/flash_attn.py:479–762 (impact: high)
+
+    Current approach: Runs a sequential Python-side build each step. The nested schedule() closure can recompute scheduler_metadata for repeated shapes; cascade paths allocate cu_prefix_query_lens and prefix_kv_lens tensors; multimodal and R-SWA paths perform staging-buffer copies into device buffers.
+    Why it&#x27;s worth evolving: This method is on the per-token metadata path. Concrete tunables include caching schedule() results by repeated shape, reusing cascade prefix tensors, batching H2D staging copies, and skipping inactive subpaths earlier. Correctness oracle is existing FlashAttention metadata tests and end-to-end token/output equality against the current implementation.
+    Performance oracle: TTFT, TPOT
+
+    ## Research findings (4)
+    1. Cascade Inference: Memory Bandwidth Efficient Shared Prefix Batch Decoding — blog — https://flashinfer.ai/2024/02/02/cascade-inference.html
+       Technique: Use recursive attention state merging to split shared-prefix attention from per-request suffix attention, then dispatch each part to the kernel best suited for its reuse pattern. For multi-turn agentic workloads with repeated system/tool/document prefixes, the module could make cascade selection more shape-aware and extend it toward multi-level shared prefixes rather than relying on coarse gates. | Evidence: &quot;Quote: &quot;Use multi-query (prefill/append) attention kernel&quot; and &quot;Use batch decode attention kernel&quot;. Pointer: Cascade Inference: The Algorithm, steps 1-2.&quot;
+    2. flashinfer.cascade — docs — https://docs.flashinfer.ai/api/cascade.html
+       Technique: Cache cascade planning auxiliary structures and reuse them across multiple layer calls for the same decode step. The module could mirror this at metadata-build time by keying stable shape/page/cascade plans and reusing preallocated CUDA-graph buffers to lower per-step planning overhead and median TPOT. | Evidence: &quot;Quote: &quot;auxiliary data structures can be reused across multiple batch decode attention calls&quot;. Pointer: MultiLevelCascadeAttentionWrapper example note.&quot;
+    3. CUDA C++ Best Practices Guide — docs — https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html
+       Technique: Minimize host-device transfers, batch many small transfers into one contiguous transfer, and use pinned memory for asynchronous copies. The module could apply this to attention metadata construction by packing indptr, last-page lengths, multimodal ranges, and split metadata into fewer staged H2D copies or moving cheap prefix computations onto device. | Evidence: &quot;Quote: &quot;batching many small transfers into one larger transfer performs significantly better&quot;. Pointer: Data Transfer Between Host and Device, section 10.1.&quot;
+    4. CUDA Graphs — docs — https://docs.vllm.ai/en/v0.21.0/design/cuda_graphs/
+       Technique: Use a batch-descriptor-driven CUDA graph dispatcher that separately handles uniform decode and mixed/prefill batches, with backend capability fallbacks. The attention module could tighten its fast-plan and metadata decisions around stable batch descriptors so CUDA-graph-compatible decode routes avoid redundant planning while mixed batches safely fall back. | Evidence: &quot;Quote: &quot;dispatch between full and piecewise cudagraph at runtime&quot;. Pointer: Motivation, lines 2736-2742.&quot;
+
+    ## Existing proposals (5)
+    ← seeds/inspiration, the evolver may extend or discard
+    - [proposal_from_finding_creator] Make cascade dispatch shape-aware and cache prefix scheduler metadata in FlashAttentionMetadataBuilder.build — The candidate&#x27;s evolve_rationale explicitly calls out `schedule()` recomputation for repeated shapes and cascade prefix-tensor allocation as concrete tunables, and its cascade branch (lines 638-662) is precisely the code path the finding describes: a two-pass split into shared-prefix multi-query attention and per-request suffix decode attention, followed by state merging. The finding&#x27;s specific contribution — that cascade selection should be more shape-aware and could be extended toward multi-level shared prefixes — targets a gap in this build: cascade currently activates on any positive `common_prefix_len` regardless of whether the two-pass path is actually cheaper, and there is no reuse of the prefix-side scheduler metadata or prefix cu_seqlens/kv_lens tensors across steps even though multi-turn agentic workloads (the caller&#x27;s stated workload) hit the identical shared-prefix shape on every decode step. Together these changes reduce Python-side work and per-step allocation on the metadata path each generated token traverses, which directly maps to the candidate&#x27;s stated median TPOT / TTFT objective without touching the kernel-selection contract used downstream in forward(). (from finding #1: Cascade Inference: Memory Bandwidth Efficient Shared Prefix Batch Decoding)
+    - [proposal_from_finding_creator] Cache cascade planning artifacts across steps in FlashAttentionMetadataBuilder.build — The finding documents that FlashInfer&#x27;s cascade wrappers explicitly reuse auxiliary planning data structures across multiple decode attention calls, which is directly analogous to the per-step planning work FlashAttentionMetadataBuilder.build performs on the cascade path and inside schedule(). The candidate&#x27;s evolve_rationale already calls out caching schedule() results by repeated shape and reusing cascade prefix tensors as concrete tunables, and in a multi-turn agentic decode workload the cascade shape key is typically stable across steps, so a shape-keyed reuse strategy targets exactly the median TPOT hot path this method sits on without changing numerical behavior (correctness is guarded by existing FlashAttention metadata tests and end-to-end token equality). (from finding #2: flashinfer.cascade)
+    - [proposal_from_finding_creator] Coalesce per-step H2D metadata copies and eliminate cascade tiny-tensor allocations in FlashAttentionMetadataBuilder.build — The finding directly addresses two concrete inefficiencies in build&#x27;s per-step path that the candidate&#x27;s evolve_rationale explicitly flags: (a) cascade paths allocate cu_prefix_query_lens and prefix_kv_lens tensors via torch.tensor with device=self.device, which triggers an implicit H2D transfer plus a fresh device allocation on every step cascade is active; and (b) mm_prefix and R-SWA both perform independent H2D staging copies. The CUDA Best Practices Guide&#x27;s &quot;batch many small transfers&quot; and &quot;use pinned memory for asynchronous copies&quot; recommendations map 1:1 onto these sites. For a multi-turn agentic workload where build runs every decode step, cutting even a handful of small H2D launches per step reduces per-token host overhead and improves median TPOT; on prefill steps (where cascade and mm_prefix are more likely active) it also reduces TTFT. The change is transferable, scoped to build, and correctness is checkable via the existing metadata tests and end-to-end equality oracle called out in the candidate. (from finding #3: CUDA C++ Best Practices Guide)
+    - [proposal_from_finding_creator] Cache CUDA-graph-compatible plans keyed by stable batch descriptors in FlashAttentionMetadataBuilder.build — The candidate&#x27;s evolve_rationale explicitly names caching schedule() by repeated shape and reusing cascade prefix tensors as concrete tunables, and its hot path is exactly the per-step decode metadata build that the CUDA-graph design targets. The finding contributes the specific structuring idea of a batch-descriptor-driven dispatcher with a graph-compatible fast path and a safe fallback, which maps directly onto separating uniform-decode replays (dominant in multi-turn agentic TPOT) from mixed/prefill builds (TTFT). This addresses the gap that the current build recomputes scheduler_metadata and reallocates cascade tensors even when successive decode steps share the same shape, which is the common case under CUDA graphs. (from finding #4: CUDA Graphs)
+    - [claude] Pipeline AOT scheduler_metadata across steps via a helper-thread build so build() returns before get_scheduler_metadata finishes — None of the four listed deep_research_proposals move `get_scheduler_metadata` off the critical path via cross-step pipelining. Findings 0001 and 0004 propose *shape-keyed caching* of the cascade branch&#x27;s `prefix_scheduler_metadata` and cascade prefix tensors — they only hit when the same shape recurs, and they still execute synchronously inside the current step on the first occurrence and after any invalidation. Finding 0009 introduces a batch-descriptor cache for CUDA-graph-compatible replay but likewise operates synchronously within one step and targets the descriptor-keyed cache lookup, not asynchronous overlap with the model forward. Finding 0006 targets H2D transfer batching and pinned buffers, not compute latency of the scheduler planner itself. This proposal is orthogonal: it addresses the *latency of the planner call*, not its allocation cost or its cacheability, by exploiting that in a uniform-decode multi-turn agentic workload the next step&#x27;s shape is deterministically derivable one step in advance, so the planner call can execute concurrently with the current step&#x27;s model forward on a helper stream and be awaited (as a cheap stream wait) at the next build() entry. This composes cleanly with all four listed cache-based proposals — a cache hit short-circuits before the speculation is consumed — and directly attacks median TPOT beyond what cache reuse alone can achieve, since it removes wall-clock time from the per-token critical path even on cache misses within the class of uniform-decode transitions. (agent proposal, no source finding)
+search:
+  type: adaevolve
+evaluator:
+  timeout: 600
+monitor:
+  enabled: true
+</code></pre></details>
+<details><summary>seed.py <span class="sz">— 70 KB · <a href="FlashAttentionMetadataBuilder.build__cand-vllm_v1_attention-0002__evolve/skydiscover/seed.py">open raw ↗</a></span></summary><pre><code># SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+&quot;&quot;&quot;Attention layer with FlashAttention.&quot;&quot;&quot;
+
+import copy
+import functools
+from dataclasses import dataclass
+from typing import ClassVar
+
+import numpy as np
+import torch
+
+from vllm.model_executor.layers.attention import Attention
+from vllm.platforms import current_platform
+from vllm.utils.torch_utils import (
+    PIN_MEMORY,
+    canonicalize_singleton_dim_strides,
+    is_quantized_kv_cache,
+)
+from vllm.v1.attention.backend import (
+    AttentionBackend,
+    AttentionImpl,
+    AttentionType,
+    MultipleOf,
+)
+from vllm.v1.attention.backends.fa_utils import (
+    flash_attn_supports_kv_cache_dtype,
+    flash_attn_supports_quant_query_input,
+    get_flash_attn_version,
+    is_fa_version_supported,
+    is_flash_attn_varlen_func_available,
+)
+from vllm.v1.attention.backends.utils import (
+    fill_mm_prefix_query_ranges,
+    get_dcp_local_seq_lens,
+)
+from vllm.v1.attention.ops.common import cp_lse_ag_out_rs
+from vllm.v1.attention.ops.dcp_alltoall import dcp_a2a_lse_reduce
+from vllm.v1.attention.ops.merge_attn_states import merge_attn_states
+from vllm.v1.worker.workspace import current_workspace_manager
+
+if is_flash_attn_varlen_func_available():
+    from vllm.v1.attention.backends.fa_utils import (
+        flash_attn_supports_sinks,
+        flash_attn_varlen_func,
+        get_scheduler_metadata,
+        reshape_and_cache_flash,
+    )
+import vllm.envs as envs
+from vllm.config import (
+    VllmConfig,
+    get_current_vllm_config_or_none,
+    get_layers_from_vllm_config,
+)
+from vllm.config.cache import CacheDType
+from vllm.distributed.parallel_state import get_dcp_group
+from vllm.logger import init_logger
+from vllm.platforms.interface import DeviceCapability
+from vllm.utils.math_utils import cdiv, round_up
+from vllm.v1.attention.backend import (
+    AttentionCGSupport,
+    AttentionMetadataBuilder,
+    CommonAttentionMetadata,
+)
+from vllm.v1.attention.backends.utils import get_kv_cache_layout
+from vllm.v1.kv_cache_interface import AttentionSpec, KVCacheSpec
+from vllm.v1.worker.cp_utils import (
+    run_split_fa2_dcp_context_attention,
+    should_skip_dcp_context_attention,
+    should_split_fa2_dcp_context_attention,
+    split_dcp_context_queries,
+)
+
+logger = init_logger(__name__)
+
+
+class FlashAttentionBackend(AttentionBackend):
+    supported_dtypes: ClassVar[list[torch.dtype]] = [torch.float16, torch.bfloat16]
+    supported_kv_cache_dtypes: ClassVar[list[CacheDType]] = [
+        &quot;auto&quot;,
+        &quot;float16&quot;,
+        &quot;bfloat16&quot;,
+        &quot;fp8&quot;,
+        &quot;fp8_e4m3&quot;,
+    ]
+
+    @staticmethod
+    def get_supported_kernel_block_sizes() -&gt; list[int | MultipleOf]:
+        return [MultipleOf(16)]
+
+    forward_includes_kv_cache_update: bool = False
+
+    @classmethod
+    def get_preferred_block_size(cls, default_block_size: int) -&gt; int:
+        if current_platform.is_xpu():
+            return max(default_block_size, 64)
+        return super().get_preferred_block_size(default_block_size)
+
+    @staticmethod
+    def get_name() -&gt; str:
+        return &quot;FLASH_ATTN&quot;
+
+    @classmethod
+    def supports_sliding_window(cls) -&gt; bool:
+        return True
+
+    @classmethod
+    def supports_batch_invariance(cls) -&gt; bool:
+        return True
+
+    @classmethod
+    def supports_non_causal(cls) -&gt; bool:
+        return True
+
+    @classmethod
+    def supports_attn_type(cls, attn_type: str) -&gt; bool:
+        &quot;&quot;&quot;FlashAttention supports all attention types.&quot;&quot;&quot;
+        return attn_type in (
+            AttentionType.DECODER,
+            AttentionType.ENCODER,
+            AttentionType.ENCODER_ONLY,
+            AttentionType.ENCODER_DECODER,
+        )
+
+    @classmethod
+    def supports_per_head_quant_scales(cls) -&gt; bool:
+        fa_version = get_flash_attn_version()
+        return fa_version is not None and fa_version &gt;= 3
+
+    @staticmethod
+    def get_impl_cls() -&gt; type[&quot;FlashAttentionImpl&quot;]:
+        return FlashAttentionImpl
+
+    @staticmethod
+    def get_builder_cls() -&gt; type[&quot;FlashAttentionMetadataBuilder&quot;]:
+        return FlashAttentionMetadataBuilder
+
+    @staticmethod
+    def get_kv_cache_shape(
+        num_blocks: int,
+        block_size: int,
+        num_kv_heads: int,
+        head_size: int,
+        cache_dtype_str: str = &quot;auto&quot;,
+    ) -&gt; tuple[int, ...]:
+        if block_size % 16 != 0:
+            raise ValueError(&quot;Block size must be a multiple of 16.&quot;)
+        # K and V are packed into the content dim: logical (B, H, N, 2*D).
+        return (num_blocks, num_kv_heads, block_size, 2 * head_size)
+
+    @staticmethod
+    def get_kv_cache_stride_order(
+        include_num_layers_dimension: bool = False,
+    ) -&gt; tuple[int, ...]:
+        # `stride_order` indicates the permutation that gets us from
+        # `get_kv_cache_shape` (logical (B, H, N, 2*D)) to the actual memory
+        # layout we want.
+        cache_layout = get_kv_cache_layout()
+        if cache_layout == &quot;NHD&quot; and include_num_layers_dimension:
+            # (num_blocks, num_layers, block_size, num_kv_heads, 2*head_size)
+            return (1, 0, 3, 2, 4)
+        elif cache_layout == &quot;NHD&quot;:
+            # (num_blocks, block_size, num_kv_heads, 2*head_size)
+            stride_order = (0, 2, 1, 3)
+        elif cache_layout == &quot;HND&quot; and include_num_layers_dimension:
+            # (num_blocks, num_kv_heads, num_layers, block_size, 2*head_size)
+            return (1, 2, 0, 3, 4)
+        elif cache_layout == &quot;HND&quot;:
+            # (num_blocks, num_kv_heads, block_size, 2*head_size)
+            stride_order = (0, 1, 2, 3)
+        else:
+            raise ValueError(f&quot;Unknown cache layout format {cache_layout}.&quot;)
+        return stride_order
+
+    @classmethod
+    def supports_head_size(cls, head_size: int) -&gt; bool:
+        if head_size % 8 != 0:
+            return False
+        if head_size &lt;= 256:
+            return True
+        if is_fa_version_supported(4):
+            return head_size &lt;= 512
+        return False
+
+    @classmethod
+    def supports_kv_cache_dtype(cls, kv_cache_dtype: CacheDType | None) -&gt; bool:
+        if kv_cache_dtype is None:
+            return True
+        if kv_cache_dtype not in cls.supported_kv_cache_dtypes:
+            return False
+        if is_quantized_kv_cache(kv_cache_dtype):
+            return flash_attn_supports_kv_cache_dtype(kv_cache_dtype)
+        return True
+
+    @classmethod
+    def supports_mm_prefix(cls) -&gt; bool:
+        return is_fa_version_supported(4)
+
+    @classmethod
+    def supports_sink(cls) -&gt; bool:
+        if not is_flash_attn_varlen_func_available():
+            return False
+        return flash_attn_supports_sinks()
+
+    @classmethod
+    def supports_compute_capability(cls, capability: DeviceCapability) -&gt; bool:
+        return capability &gt;= DeviceCapability(8, 0)
+
+    @classmethod
+    def supports_combination(
+        cls,
+        head_size: int,
+        dtype: torch.dtype,
+        kv_cache_dtype: CacheDType | None,
+        block_size: int | None,
+        use_mla: bool,
+        has_sink: bool,
+        use_sparse: bool,
+        use_mm_prefix: bool,
+        device_capability: DeviceCapability,
+    ) -&gt; str | None:
+        if has_sink and device_capability &lt; DeviceCapability(9, 0):
+            return &quot;sink not supported on compute capability &lt; 9.0&quot;
+        if (
+            kv_cache_dtype is not None
+            and is_quantized_kv_cache(kv_cache_dtype)
+            and not flash_attn_supports_kv_cache_dtype(
+                kv_cache_dtype,
+                head_size=head_size,
+                head_size_v=head_size,
+                has_sinks=has_sink,
+            )
+        ):
+            return &quot;FP8 KV cache requires FA3 on SM90 or FA4 on SM100&quot;
+        if (
+            use_mm_prefix
+            and get_flash_attn_version(head_size=head_size, has_sinks=has_sink) != 4
+        ):
+            return (
+                &quot;mm_prefix (PrefixLM bidirectional attention) requires &quot;
+                &quot;FlashAttention v4, which does not resolve for this &quot;
+                &quot;head_size&quot;
+            )
+        return None
+
+
+@dataclass
+class FlashAttentionMetadata:
+    # NOTE(sang): Definition of context_len, query_len, and seq_len.
+    # |---------- N-1 iteration --------|
+    # |---------------- N iteration ---------------------|
+    # |- tokenA -|......................|-- newTokens ---|
+    # |---------- context_len ----------|
+    # |-------------------- seq_len ---------------------|
+    #                                   |-- query_len ---|
+
+    num_actual_tokens: int  # Number of tokens excluding padding.
+    max_query_len: int
+    query_start_loc: torch.Tensor
+    max_seq_len: int
+    seq_lens: torch.Tensor
+    block_table: torch.Tensor
+    slot_mapping: torch.Tensor
+
+    # For cascade attention.
+    use_cascade: bool
+    common_prefix_len: int
+    cu_prefix_query_lens: torch.Tensor | None
+    prefix_kv_lens: torch.Tensor | None
+    suffix_kv_lens: torch.Tensor | None
+
+    # For GQA DCP
+    max_dcp_context_kv_len: int | None = None
+    dcp_context_kv_lens: torch.Tensor | None = None
+
+    # Split counts for FA2 DCP context attention. num_prefill_* tracks
+    # context-bearing extend rows; pure prefills do not attend to DCP context.
+    num_decode_reqs: int = 0
+    num_prefill_reqs: int = 0
+    num_decode_tokens: int = 0
+    num_prefill_tokens: int = 0
+
+    # Optional aot scheduling
+    scheduler_metadata: torch.Tensor | None = None
+    prefix_scheduler_metadata: torch.Tensor | None = None
+    max_num_splits: int = 0
+
+    causal: bool | torch.Tensor = True
+
+    sliding_window: tuple[int, int] | None = None
+
+    # PrefixLM bidirectional range containing each scheduled query token.
+    # Shape: (num_actual_tokens, 2) int32, absolute [start, end] bounds;
+    # (-1, -1) for query tokens outside every multimodal range.
+    mm_prefix_query_range_tensor: torch.Tensor | None = None
+
+    # Reference Sliding Window Attention (R-SWA) fields.
+    # rswa_prefix_lens:  per-request prompt lengths [num_reqs], int32, CUDA.
+    # rswa_window:       sliding window size (scalar int, for logic checks).
+    # rswa_window_tensor: [1] int32 CUDA tensor — pre-allocated in build() so
+    #   no CPU→CUDA copy is needed inside forward() during CUDA graph capture.
+    # Only populated when the model uses R-SWA (Unlimited-OCR).
+    rswa_prefix_lens: torch.Tensor | None = None
+    rswa_window: int | None = None
+    rswa_window_tensor: torch.Tensor | None = None
+
+
+def _get_sliding_window_configs(
+    vllm_config: VllmConfig,
+) -&gt; set[tuple[int, int] | None]:
+    &quot;&quot;&quot;Get the set of all sliding window configs used in the model.
+
+    Only inspects FlashAttentionImpl layers. Other backends (e.g.
+    TurboQuant, MLA) use their own metadata builders and are skipped.
+    &quot;&quot;&quot;
+    sliding_window_configs: set[tuple[int, int] | None] = set()
+    layers = get_layers_from_vllm_config(vllm_config, Attention)
+    for layer in layers.values():
+        if not isinstance(layer.impl, FlashAttentionImpl):
+            continue
+        sliding_window_configs.add(layer.impl.sliding_window)
+    return sliding_window_configs
+
+
+def _maybe_symmetrize_window(
+    window: tuple[int, int] | None,
+    causal: bool | torch.Tensor,
+) -&gt; tuple[int, int] | None:
+    &quot;&quot;&quot;Make a causal sliding window ``(w, 0)`` symmetric ``(w, w)`` when attention
+    is non-causal, so bidirectional queries attend in both directions. Leaves
+    full-attention ``(-1, -1)`` and already-symmetric windows untouched.
+    &quot;&quot;&quot;
+    non_causal = isinstance(causal, torch.Tensor) or causal is False
+    if window is not None and window[0] &gt;= 0 and window[1] == 0 and non_causal:
+        return (window[0], window[0])
+    return window
+
+
+class FlashAttentionMetadataBuilder(AttentionMetadataBuilder[FlashAttentionMetadata]):
+    # FA3:
+    # Supports full cudagraphs for all cases.
+    #
+    # FA2:
+    # For FA2, a graph is captured with max_query_len=1, (which is what we
+    # capture by default for num_tokens &lt;= max_num_seqs when there is no
+    # spec-decode) then these graphs will not work for mixed prefill-decode
+    # (unlike FA3). This is due to special max_query_len=1 packed-GQA handling
+    # in FA2.
+    # In summary if we are running with spec decodes the graphs would
+    # work for mixed prefill-decode and uniform-decode. But for non-spec decodes
+    # the graphs would not work for mixed prefill-decode; sorta the inverse
+    # of UNIFORM_SINGLE_TOKEN_DECODE.
+    # There&#x27;s probably a better way to describe this using `AttentionCGSupport`
+    # but for now just set it to `UNIFORM_BATCH` to get use to drop down
+    # to FULL_AND_PIECEWISE.
+    # TODO(luka, lucas): audit FA2 as part of:
+    #  https://github.com/vllm-project/vllm/issues/22945
+    _cudagraph_support = (
+        AttentionCGSupport.ALWAYS
+        if get_flash_attn_version() == 3
+        else AttentionCGSupport.UNIFORM_BATCH
+    )
+    supports_update_block_table: bool = True
+
+    @classmethod
+    def get_cudagraph_support(
+        cls,
+        vllm_config: &quot;VllmConfig&quot;,
+        kv_cache_spec: &quot;KVCacheSpec&quot;,
+    ) -&gt; AttentionCGSupport:
+        return cls._cudagraph_support
+
+    def __init__(
+        self,
+        kv_cache_spec: AttentionSpec,
+        layer_names: list[str],
+        vllm_config: VllmConfig,
+        device: torch.device,
+    ):
+        super().__init__(kv_cache_spec, layer_names, vllm_config, device)
+        self.model_config = vllm_config.model_config
+        self.parallel_config = vllm_config.parallel_config
+        self.cache_config = vllm_config.cache_config
+        self.compilation_config = vllm_config.compilation_config
+        self.attention_config = vllm_config.attention_config
+
+        self.num_heads_q = self.model_config.get_num_attention_heads(
+            self.parallel_config
+        )
+        self.num_heads_kv = self.model_config.get_num_kv_heads(self.parallel_config)
+        self.kv_cache_dtype = kv_cache_spec.dtype
+        self.headdim = self.model_config.get_head_size()
+        self.block_size = kv_cache_spec.block_size
+
+        self.max_num_splits = 0  # No upper bound on the number of splits.
+        self.aot_schedule = get_flash_attn_version() == 3
+
+        try:
+            from vllm.distributed.parallel_state import get_dcp_group
+
+            self.dcp_world_size = get_dcp_group().world_size
+            self.dcp_rank = get_dcp_group().rank_in_group
+        except AssertionError:
+            # DCP might not be initialized in testing
+            self.dcp_world_size = 1
+            self.dcp_rank = 0
+
+        self.cp_kv_cache_interleave_size = (
+            self.parallel_config.cp_kv_cache_interleave_size
+        )
+
+        self.use_full_cuda_graph = (
+            self.compilation_config.cudagraph_mode.has_full_cudagraphs()
+        )
+        self.max_cudagraph_size = self.compilation_config.max_cudagraph_capture_size
+
+        if self.use_full_cuda_graph and self.aot_schedule:
+            # FA3 scheduler_metadata size: 1 + round_up(batch_size, 4) * 4
+            # The +1 is for the tile_count_semaphore (synchronization).
+            # The 4 slots per batch element (num_prepare_batch_vectors) are:
+            #   prepare_varlen + dynamic_split + sort_batches + head_swizzle
+            # See: https://github.com/vllm-project/flash-attention/blob/5824e6e/hopper/flash_api.cpp#L664-L671  # noqa: E501
+            max_batch_size = max(
+                vllm_config.scheduler_config.max_num_seqs,
+                self.max_cudagraph_size or 0,
+            )
+            self.scheduler_metadata = torch.zeros(
+                1 + round_up(max_batch_size, 4) * 4,
+                dtype=torch.int32,
+                device=self.device,
+            )
+            # When using cuda graph, we need to set the upper bound of the
+            # number of splits so that large enough intermediate buffers are
+            # pre-allocated during capture.
+            self.max_num_splits = (
+                self.attention_config.flash_attn_max_num_splits_for_cuda_graph
+            )
+
+        if self.dcp_world_size &gt; 1:
+            max_num_reqs = vllm_config.scheduler_config.max_num_seqs
+            self._dcp_context_kv_lens = torch.zeros(
+                max_num_reqs,
+                dtype=torch.int32,
+                device=self.device,
+            )
+
+        # Sliding window size to be used with the AOT scheduler will be
+        # populated on first build() call.
+        self.aot_sliding_window: tuple[int, int] | None = None
+
+        # R-SWA: persistent CUDA-graph-safe buffers owned by this builder.
+        self.rswa_window: int | None = self.model_config.rswa_window
+        self.persistent_rswa_prefix_lens: torch.Tensor | None = None
+        self.persistent_rswa_window_tensor: torch.Tensor | None = None
+        if self.rswa_window is not None:
+            max_num_reqs = vllm_config.scheduler_config.max_num_seqs
+            self.persistent_rswa_prefix_lens = torch.zeros(
+                max_num_reqs, dtype=torch.int32, device=self.device
+            )
+            self.persistent_rswa_window_tensor = torch.tensor(
+                [self.rswa_window], dtype=torch.int32, device=self.device
+            )
+
+        # mm_prefix: persistent staging + device buffers owned by this builder,
+        # sized by scheduled query tokens so build() never allocates.
+        self.mm_prefix_query_ranges_cpu: torch.Tensor | None = None
+        self.mm_prefix_query_ranges_np: np.ndarray | None = None
+        self.mm_prefix_query_ranges_gpu: torch.Tensor | None = None
+        if self.model_config.is_mm_prefix_lm:
+            max_num_tokens = vllm_config.scheduler_config.max_num_batched_tokens
+            self.mm_prefix_query_ranges_cpu = torch.empty(
+                (max_num_tokens, 2), dtype=torch.int32, pin_memory=PIN_MEMORY
+            )
+            self.mm_prefix_query_ranges_np = self.mm_prefix_query_ranges_cpu.numpy()
+            self.mm_prefix_query_ranges_gpu = torch.empty(
+                (max_num_tokens, 2), dtype=torch.int32, device=self.device
+            )
+
+# EVOLVE-BLOCK-START
+    def build(
+        self,
+        common_prefix_len: int,
+        common_attn_metadata: CommonAttentionMetadata,
+        fast_build: bool = False,
+    ) -&gt; FlashAttentionMetadata:
+        &quot;&quot;&quot;
+        fast_build disables AOT scheduling, used when there will be few
+        iterations i.e. spec-decode
+        &quot;&quot;&quot;
+        num_reqs = common_attn_metadata.num_reqs
+        num_actual_tokens = common_attn_metadata.num_actual_tokens
+        max_query_len = common_attn_metadata.max_query_len
+        max_seq_len = common_attn_metadata.max_seq_len
+        query_start_loc = common_attn_metadata.query_start_loc
+        seq_lens = common_attn_metadata.seq_lens
+        block_table_tensor = common_attn_metadata.block_table_tensor
+        slot_mapping = common_attn_metadata.slot_mapping
+        causal = common_attn_metadata.causal
+
+        # Disable AOT schedule for spec-decode proposer (not worth the overhead)
+        # and for batch invariance (schedule varies with max_seqlen_q/k).
+        aot_schedule = (
+            self.aot_schedule and not fast_build and not envs.VLLM_BATCH_INVARIANT
+        )
+
+        if self.aot_sliding_window is None:
+            self.aot_sliding_window = (-1, -1)
+            # For the AOT scheduler we need the sliding window value to be
+            # constant for all layers to. We have to populate this on the first
+            # build() call so the layers are constructed (cannot populate)
+            # in __init__.
+            if aot_schedule:
+                sliding_window_configs = _get_sliding_window_configs(self.vllm_config)
+                if len(sliding_window_configs) == 1:
+                    sliding_window_config = sliding_window_configs.pop()
+                    if sliding_window_config is not None:
+                        self.aot_sliding_window = sliding_window_config
+                elif len(sliding_window_configs) &gt; 1:
+                    self.aot_schedule = False
+                    aot_schedule = False
+
+        max_num_splits = 0  # 0 means use FA3&#x27;s heuristics, not CG compatible
+        if (
+            self.use_full_cuda_graph
+            and self.max_cudagraph_size is not None
+            and num_actual_tokens &lt;= self.max_cudagraph_size
+        ):
+            # NOTE(woosuk): Setting num_splits &gt; 1 may increase the memory
+            # usage, because the intermediate buffers of size [num_splits,
+            # num_heads, num_tokens, head_size] are allocated. Therefore,
+            # we only set num_splits when using cuda graphs.
+            max_num_splits = self.max_num_splits
+
+        if envs.VLLM_BATCH_INVARIANT:
+            max_num_splits = 1
+
+        def schedule(
+            batch_size, cu_query_lens, max_query_len, seqlens, max_seq_len, causal
+        ):
+            cache_dtype = self.cache_config.cache_dtype
+            if is_quantized_kv_cache(cache_dtype):
+                qkv_dtype = current_platform.fp8_dtype()
+            else:
+                qkv_dtype = self.kv_cache_dtype
+            if aot_schedule:
+                return get_scheduler_metadata(
+                    batch_size=batch_size,
+                    max_seqlen_q=max_query_len,
+                    max_seqlen_k=max_seq_len,
+                    num_heads_q=self.num_heads_q * self.dcp_world_size,
+                    num_heads_kv=self.num_heads_kv,
+                    headdim=self.headdim,
+                    cache_seqlens=seqlens,
+                    qkv_dtype=qkv_dtype,
+                    cu_seqlens_q=cu_query_lens,
+                    page_size=self.block_size,
+                    causal=causal,
+                    window_size=_maybe_symmetrize_window(
+                        self.aot_sliding_window, causal
+                    ),
+                    num_splits=max_num_splits,
+                )
+            return None
+
+        use_cascade = common_prefix_len &gt; 0
+        max_dcp_context_kv_len = 0
+        dcp_context_kv_lens = None
+        num_decode_reqs = 0
+        num_prefill_reqs = 0
+        num_decode_tokens = 0
+        num_prefill_tokens = 0
+
+        cu_prefix_query_lens = None
+        prefix_kv_lens = None
+        suffix_kv_lens = None
+        prefix_scheduler_metadata = None
+
+        if self.dcp_world_size &gt; 1:
+            query_lens = query_start_loc[1:] - query_start_loc[:-1]
+            context_kv_lens = seq_lens - query_lens
+            local_context_kv_lens = get_dcp_local_seq_lens(
+                context_kv_lens,
+                self.dcp_world_size,
+                self.dcp_rank,
+                self.cp_kv_cache_interleave_size,
+            )
+            self._dcp_context_kv_lens[:num_reqs] = local_context_kv_lens
+            self._dcp_context_kv_lens[num_reqs:] = 0
+            dcp_context_kv_lens = self._dcp_context_kv_lens[:num_reqs]
+
+            skip_dcp_context_attention = False
+            if common_attn_metadata.seq_lens_cpu_upper_bound is not None:
+                query_lens_cpu = (
+                    common_attn_metadata.query_start_loc_cpu[1 : num_reqs + 1]
+                    - common_attn_metadata.query_start_loc_cpu[:num_reqs]
+                )
+                context_kv_lens_cpu = (
+                    common_attn_metadata.seq_lens_cpu_upper_bound[:num_reqs]
+                    - query_lens_cpu
+                )
+                skip_dcp_context_attention = should_skip_dcp_context_attention(
+                    context_kv_lens_cpu
+                )
+
+            if max_query_len &gt; 1:
+                (
+                    num_decode_reqs,
+                    num_prefill_reqs,
+                    num_decode_tokens,
+                    num_prefill_tokens,
+                ) = split_dcp_context_queries(
+                    common_attn_metadata.query_start_loc_cpu,
+                    common_attn_metadata.seq_lens_cpu_upper_bound,
+                    max_query_len,
+                    num_actual_tokens,
+                )
+
+            # After DCP distribution, the maximum number of tokens for any rank is
+            # ceil(L / (N * I)) * I, where L is max_seq_len, N is dcp_world_size,
+            # and I is cp_kv_cache_interleave_size.
+            # This eliminates GPU-&gt;CPU sync while minimizing workspace over-allocation.
+            if skip_dcp_context_attention:
+                max_dcp_context_kv_len = 0
+                scheduler_metadata = None
+            else:
+                num_partitions = self.dcp_world_size * self.cp_kv_cache_interleave_size
+                max_dcp_context_kv_len = (
+                    (max_seq_len + num_partitions - 1) // num_partitions
+                ) * self.cp_kv_cache_interleave_size
+
+                scheduler_metadata = schedule(
+                    batch_size=num_reqs,
+                    cu_query_lens=query_start_loc,
+                    max_query_len=max_query_len,
+                    seqlens=dcp_context_kv_lens,
+                    max_seq_len=max_dcp_context_kv_len,
+                    causal=False,
+                )
+        elif use_cascade:
+            cu_prefix_query_lens = torch.tensor(
+                [0, num_actual_tokens], dtype=torch.int32, device=self.device
+            )
+            prefix_kv_lens = torch.tensor(
+                [common_prefix_len], dtype=torch.int32, device=self.device
+            )
+            # Use GPU tensor directly - no CPU sync needed
+            suffix_kv_lens = seq_lens[:num_reqs] - common_prefix_len
+            prefix_scheduler_metadata = schedule(
+                batch_size=1,
+                cu_query_lens=cu_prefix_query_lens,
+                max_query_len=num_actual_tokens,
+                seqlens=prefix_kv_lens,
+                max_seq_len=common_prefix_len,
+                causal=False,
+            )
+            scheduler_metadata = schedule(
+                batch_size=num_reqs,
+                cu_query_lens=query_start_loc,
+                max_query_len=max_query_len,
+                seqlens=suffix_kv_lens,
+                max_seq_len=max_seq_len - common_prefix_len,
+                causal=True,
+            )
+        else:
+            scheduler_metadata = schedule(
+                batch_size=num_reqs,
+                cu_query_lens=query_start_loc,
+                max_query_len=max_query_len,
+                seqlens=seq_lens,
+                max_seq_len=max_seq_len,
+                causal=causal,
+            )
+        # For FA3 + full cudagraph
+        if self.use_full_cuda_graph and scheduler_metadata is not None:
+            n = scheduler_metadata.shape[0]
+            self.scheduler_metadata[:n] = scheduler_metadata
+            # NOTE(woosuk): We should zero out the rest of the scheduler
+            # metadata to guarantee the correctness. Otherwise, some thread
+            # blocks may use the invalid scheduler metadata and overwrite the
+            # output buffer.
+            self.scheduler_metadata[n:] = 0
+            scheduler_metadata = self.scheduler_metadata[:n]
+
+        if isinstance(causal, torch.Tensor) and causal.dtype != torch.int32:
+            causal = causal.to(torch.int32)
+
+        # Symmetrize the spec&#x27;s sliding_window for non-causal attention
+        group_sliding_window = getattr(self.kv_cache_spec, &quot;sliding_window&quot;, None)
+        base_window = (
+            (-1, -1) if group_sliding_window is None else (group_sliding_window - 1, 0)
+        )
+        effective_sliding_window = _maybe_symmetrize_window(base_window, causal)
+
+        attn_metadata = FlashAttentionMetadata(
+            num_actual_tokens=num_actual_tokens,
+            max_query_len=max_query_len,
+            query_start_loc=query_start_loc,
+            max_seq_len=max_seq_len,
+            seq_lens=seq_lens,
+            block_table=block_table_tensor,
+            slot_mapping=slot_mapping,
+            max_dcp_context_kv_len=max_dcp_context_kv_len,
+            dcp_context_kv_lens=dcp_context_kv_lens,
+            num_decode_reqs=num_decode_reqs,
+            num_prefill_reqs=num_prefill_reqs,
+            num_decode_tokens=num_decode_tokens,
+            num_prefill_tokens=num_prefill_tokens,
+            use_cascade=use_cascade,
+            common_prefix_len=common_prefix_len,
+            scheduler_metadata=scheduler_metadata,
+            cu_prefix_query_lens=cu_prefix_query_lens,
+            prefix_kv_lens=prefix_kv_lens,
+            suffix_kv_lens=suffix_kv_lens,
+            prefix_scheduler_metadata=prefix_scheduler_metadata,
+            max_num_splits=max_num_splits,
+            causal=causal,
+            sliding_window=effective_sliding_window,
+        )
+
+        # Compute mm_prefix range tensor if the batch contains
+        # multimodal tokens with bidirectional ranges.  Built for every FA
+        # group; Gemma4 nulls the field for its non-sliding layers.
+        mm_ranges = common_attn_metadata.mm_req_doc_ranges
+        if mm_ranges is not None and self.mm_prefix_query_ranges_np is not None:
+            # The upper bound is exact for prefill rows, which is where
+            # mm_prefix ranges live; decode rows only ever get an optimistic
+            # (larger) context, moving them further past every range.
+            assert common_attn_metadata.seq_lens_cpu_upper_bound is not None, (
+                &quot;mm_prefix requires seq_lens_cpu_upper_bound&quot;
+            )
+            num_mm_tokens = fill_mm_prefix_query_ranges(
+                self.mm_prefix_query_ranges_np,
+                mm_ranges,
+                common_attn_metadata.query_start_loc_cpu,
+                common_attn_metadata.seq_lens_cpu_upper_bound,
+            )
+            if num_mm_tokens &gt; 0:
+                assert self.mm_prefix_query_ranges_cpu is not None
+                assert self.mm_prefix_query_ranges_gpu is not None
+                mm_query_ranges = self.mm_prefix_query_ranges_gpu[:num_mm_tokens]
+                mm_query_ranges.copy_(
+                    self.mm_prefix_query_ranges_cpu[:num_mm_tokens],
+                    non_blocking=True,
+                )
+                attn_metadata.mm_prefix_query_range_tensor = mm_query_ranges
+
+        # R-SWA: copy prefix lengths into persistent buffers (outside the
+        # compiled region) so forward() never allocates during CUDA graph
+        # capture.  rswa_window is a static model config scalar read here.
+        if (
+            self.rswa_window is not None
+            and common_attn_metadata.rswa_prefix_lens is not None
+        ):
+            assert self.persistent_rswa_prefix_lens is not None
+            assert self.persistent_rswa_window_tensor is not None
+            src = common_attn_metadata.rswa_prefix_lens
+            rswa_prefix_lens = self.persistent_rswa_prefix_lens[:num_reqs]
+            rswa_prefix_lens.copy_(src[:num_reqs], non_blocking=True)
+            attn_metadata.rswa_prefix_lens = rswa_prefix_lens
+            attn_metadata.rswa_window = self.rswa_window
+            attn_metadata.rswa_window_tensor = self.persistent_rswa_window_tensor
+
+        return attn_metadata
+# EVOLVE-BLOCK-END
+
+    def update_block_table(
+        self,
+        metadata: FlashAttentionMetadata,
+        blk_table: torch.Tensor,
+        slot_mapping: torch.Tensor,
+    ) -&gt; FlashAttentionMetadata:
+        new_metadata = copy.copy(metadata)
+        new_metadata.block_table = blk_table
+        new_metadata.slot_mapping = slot_mapping
+        return new_metadata
+
+    def use_cascade_attention(self, *args, **kwargs) -&gt; bool:
+        return use_cascade_attention(*args, **kwargs)
+
+
+class FlashAttentionImpl(AttentionImpl):
+    can_return_lse_for_decode: bool = True
+
+    def __init__(
+        self,
+        num_heads: int,
+        head_size: int,
+        scale: float,
+        num_kv_heads: int,
+        alibi_slopes: list[float] | None,
+        sliding_window: int | None,
+        kv_cache_dtype: str,
+        logits_soft_cap: float | None = None,
+        attn_type: AttentionType = AttentionType.DECODER,
+        kv_sharing_target_layer_name: str | None = None,
+        sinks: torch.Tensor | None = None,
+    ) -&gt; None:
+        self.num_heads = num_heads
+        self.head_size = head_size
+        self.scale = float(scale)
+        self.num_kv_heads = num_kv_heads
+        if alibi_slopes is not None:
+            alibi_slopes = torch.tensor(alibi_slopes, dtype=torch.float32)
+        self.alibi_slopes = alibi_slopes
+        if sliding_window is None:
+            self.sliding_window = (-1, -1)
+        elif attn_type == AttentionType.ENCODER_ONLY:
+            self.sliding_window = (sliding_window - 1, sliding_window - 1)
+        else:
+            self.sliding_window = (sliding_window - 1, 0)
+        self.kv_cache_dtype = kv_cache_dtype
+        if logits_soft_cap is None:
+            # In flash-attn, setting logits_soft_cap as 0 means no soft cap.
+            logits_soft_cap = 0
+        self.logits_soft_cap = logits_soft_cap
+        self.kv_sharing_target_layer_name = kv_sharing_target_layer_name
+
+        self.num_queries_per_kv = self.num_heads // self.num_kv_heads
+
+        self.attn_type = attn_type
+        self.vllm_flash_attn_version = get_flash_attn_version(
+            requires_alibi=alibi_slopes is not None,
+            requires_local_attention=sliding_window is not None,
+            head_size=head_size,
+            has_sinks=sinks is not None,
+        )
+        logger.info_once(
+            &quot;Using FlashAttention version %s&quot;,
+            self.vllm_flash_attn_version,
+        )
+        # Cache the batch invariant result for use in forward passes
+        self.batch_invariant_enabled = envs.VLLM_BATCH_INVARIANT
+
+        if is_quantized_kv_cache(
+            self.kv_cache_dtype
+        ) and not flash_attn_supports_kv_cache_dtype(
+            self.kv_cache_dtype,
+            requires_alibi=alibi_slopes is not None,
+            head_size=head_size,
+            head_size_v=head_size,
+            has_sinks=sinks is not None,
+        ):
+            raise NotImplementedError(
+                f&quot;FlashAttention does not support {self.kv_cache_dtype}&quot;
+                &quot; kv-cache on this device.&quot;
+            )
+
+        self.sinks = sinks
+        if self.sinks is not None:
+            assert flash_attn_supports_sinks(), (
+                &quot;Sinks are only supported in FlashAttention 3&quot;
+            )
+            assert self.sinks.shape[0] == num_heads, (
+                &quot;Sinks must have the same number of heads as the number of &quot;
+                &quot;heads in the layer&quot;
+            )
+
+        self.supports_quant_query_input = flash_attn_supports_quant_query_input()
+
+        vllm_config = get_current_vllm_config_or_none()
+        dcp_a2a = (
+            vllm_config is not None
+            and vllm_config.parallel_config.decode_context_parallel_size &gt; 1
+            and vllm_config.parallel_config.dcp_comm_backend == &quot;a2a&quot;
+        )
+        self.dcp_combine = dcp_a2a_lse_reduce if dcp_a2a else cp_lse_ag_out_rs
+
+        self._dcp_dtype: torch.dtype | None = None
+        self._dcp_max_num_tokens: int = 0
+        if vllm_config is not None and self.dcp_world_size &gt; 1:
+            self._dcp_dtype = vllm_config.model_config.dtype
+            self._dcp_max_num_tokens = (
+                vllm_config.scheduler_config.max_num_batched_tokens
+            )
+
+    def forward(
+        self,
+        layer: torch.nn.Module,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        kv_cache: torch.Tensor,
+        attn_metadata: FlashAttentionMetadata,
+        output: torch.Tensor,
+        output_scale: torch.Tensor | None = None,
+        output_block_scale: torch.Tensor | None = None,
+    ) -&gt; torch.Tensor:
+        &quot;&quot;&quot;Forward pass with FlashAttention.
+
+        Args:
+            query: shape = [num_tokens, num_heads, head_size]
+            key: shape = [num_tokens, num_kv_heads, head_size]
+            value: shape = [num_tokens, num_kv_heads, head_size]
+            kv_cache: shape =
+                [num_blocks, num_kv_heads, block_size, 2 * head_size]
+            attn_metadata: Metadata for attention.
+        Returns:
+            shape = [num_tokens, num_heads * head_size]
+        NOTE: FP8 quantization, flash-attn expect the size of
+              {q,k,v}_descale to be (num_sequences, num_kv_heads).
+              We use torch&#x27;s .expand() to avoid duplicating values
+        &quot;&quot;&quot;
+        assert self.vllm_flash_attn_version is not None, (
+            &quot;FlashAttention version not detected.&quot;
+        )
+
+        if output_scale is not None or output_block_scale is not None:
+            raise NotImplementedError(
+                &quot;fused output quantization is not yet supported for FlashAttentionImpl&quot;
+            )
+
+        if attn_metadata is None:
+            # Profiling run.
+            return output.fill_(0)
+
+        attn_type = self.attn_type
+
+        # IMPORTANT!
+        # NOTE(woosuk): With piece-wise CUDA graphs, this method is executed in
+        # eager-mode PyTorch. Thus, we need to be careful about any CPU overhead
+        # in this method. For example, `view` and `slice` (or `[:n]`) operations
+        # are surprisingly slow even in the case they do not invoke any GPU ops.
+        # Minimize the PyTorch ops in this method as much as possible.
+        # Whenever making a change in this method, please benchmark the
+        # performance to make sure it does not introduce any overhead.
+
+        num_actual_tokens = attn_metadata.num_actual_tokens
+
+        # Handle encoder attention differently - no KV cache needed
+        if attn_type in (AttentionType.ENCODER_ONLY, AttentionType.ENCODER):
+            # For encoder attention,
+            # we use direct Q, K, V tensors without caching
+            return self._forward_encoder_attention(
+                query[:num_actual_tokens],
+                key[:num_actual_tokens],
+                value[:num_actual_tokens],
+                output[:num_actual_tokens],
+                attn_metadata,
+                layer,
+            )
+
+        # (B, H, N, 2*D) -&gt; ((B, N, H, D), (B, N, H, D))
+        key_cache, value_cache = kv_cache.transpose(1, 2).split(self.head_size, dim=-1)
+        # Fix degenerate strides on size-1 dims (e.g. num_kv_heads=1 with TP).
+        # FA3/4 on H100+ uses TMA, which requires ≥16-byte stride alignment.
+        # See vllm.utils.torch_utils.canonicalize_singleton_dim_strides.
+        fixed_k = canonicalize_singleton_dim_strides(key_cache)
+        fixed_v = canonicalize_singleton_dim_strides(value_cache)
+        if fixed_k is not key_cache or fixed_v is not value_cache:
+            logger.debug(
+                &quot;Canonicalized degenerate KV cache strides (FlashAttention): &quot;
+                &quot;shape=%s, key strides before=%s after=%s, &quot;
+                &quot;value strides before=%s after=%s&quot;,
+                key_cache.shape,
+                key_cache.stride(),
+                fixed_k.stride(),
+                value_cache.stride(),
+                fixed_v.stride(),
+            )
+        key_cache, value_cache = fixed_k, fixed_v
+
+        if is_quantized_kv_cache(self.kv_cache_dtype):
+            # queries are quantized in the attention layer
+            key_cache = key_cache.view(current_platform.fp8_dtype())
+            value_cache = value_cache.view(current_platform.fp8_dtype())
+
+        if not attn_metadata.use_cascade:
+            cu_seqlens_q = attn_metadata.query_start_loc
+            seqused_k = attn_metadata.seq_lens
+            max_seqlen_q = attn_metadata.max_query_len
+            max_seqlen_k = attn_metadata.max_seq_len
+            block_table = attn_metadata.block_table
+            scheduler_metadata = attn_metadata.scheduler_metadata
+
+            descale_shape = (cu_seqlens_q.shape[0] - 1, self.num_kv_heads)
+
+            q_descale = (
+                layer._q_scale.expand(descale_shape)
+                if self.supports_quant_query_input
+                else None
+            )
+            k_descale = layer._k_scale.expand(descale_shape)
+            v_descale = layer._v_scale.expand(descale_shape)
+
+            if self.dcp_world_size &gt; 1:
+                self._forward_with_dcp(
+                    query[:num_actual_tokens],
+                    key[:num_actual_tokens],
+                    value[:num_actual_tokens],
+                    key_cache,
+                    value_cache,
+                    output[:num_actual_tokens],
+                    attn_metadata,
+                    q_descale=q_descale,
+                    k_descale=k_descale,
+                    v_descale=v_descale,
+                )
+                return output
+            else:
+                window = (
+                    attn_metadata.sliding_window
+                    if attn_metadata.sliding_window is not None
+                    else self.sliding_window
+                )
+                sliding_window_size: list[int] | None = (
+                    list(window) if window is not None else None
+                )
+
+                causal = attn_metadata.causal
+                is_dynamic_causal = isinstance(causal, torch.Tensor)
+
+                mm_prefix_query_ranges = attn_metadata.mm_prefix_query_range_tensor
+                mm_mask_mod = None
+                mm_aux = None
+                if (
+                    mm_prefix_query_ranges is not None
+                    and not is_dynamic_causal
+                    and causal is True
+                    and self.vllm_flash_attn_version == 4
+                ):
+                    # Use the layer impl&#x27;s window, not attn_metadata&#x27;s. The
+                    # metadata field comes from kv_cache_spec (model-wide, e.g.
+                    # Gemma4&#x27;s 512), while the impl holds the per-layer window
+                    # the mask_mod must encode (e.g. a test override).
+                    # Triton convention: 1 + window_size[0]. Global layers store
+                    # (-1, -1) → sw stays None.
+                    layer_window = self.sliding_window
+                    sw_val = (
+                        1 + layer_window[0]
+                        if layer_window is not None and layer_window[0] &gt;= 0
+                        else None
+                    )
+                    # Gemma4: also clamp the bidirectional block to the
+                    # sliding window when the layer opts in
+                    # (mm_prefix_clamp_sliding_window flag from PR #47217).
+                    mm_clamp_sw = 0
+                    if (
+                        getattr(layer, &quot;mm_prefix_clamp_sliding_window&quot;, False)
+                        and sw_val is not None
+                    ):
+                        mm_clamp_sw = sw_val
+                    mm_mask_mod = _make_mm_prefix_mask_mod(
+                        sliding_window=mm_clamp_sw,
+                        sliding_window_left=sw_val,
+                    )
+                    mm_aux = [mm_prefix_query_ranges, attn_metadata.query_start_loc]
+                    # mm_prefix is (causal ∧ window) ∨ bidirectional-range —
+                    # not ⊆ causal. FA #155 stopped auto-clearing causal/local
+                    # when mask_mod is set, so the caller must disable them or
+                    # the built-in causal path shorts out / clips the mask_mod.
+                    causal = False
+                    sliding_window_size = None
+
+                # R-SWA: use CuTE-DSL mask_mod on FA4 for exact token-level
+                # mask without block-size approximation.  The mask_mod encodes
+                # &quot;causal AND (kv &lt; prefix_len OR q - kv &lt; rswa_window)&quot;, which
+                # supersedes any FA-layer sliding_window_size parameter.
+                rswa_mask_mod_fn = None
+                rswa_aux = None
+                if (
+                    attn_metadata.rswa_prefix_lens is not None
+                    and self.vllm_flash_attn_version == 4
+                    and not is_dynamic_causal
+                ):
+                    rswa_mask_mod_fn = _make_rswa_mask_mod()
+                    rswa_aux = [
+                        attn_metadata.rswa_prefix_lens.to(torch.int32),
+                        attn_metadata.rswa_window_tensor,  # pre-allocated CUDA tensor
+                    ]
+                    # mask_mod fully expresses R-SWA; disable FA&#x27;s own window.
+                    sliding_window_size = None
+
+                dynamic_causal = None
+                if isinstance(causal, torch.Tensor):
+                    if self.vllm_flash_attn_version != 4:
+                        raise NotImplementedError(
+                            &quot;Per-sequence causal requires FA4. Current version: &quot;
+                            f&quot;FA{self.vllm_flash_attn_version}&quot;
+                        )
+                    dynamic_causal = causal
+                    has_window = (
+                        sliding_window_size is not None and sliding_window_size[1] &gt;= 0
+                    )
+                    causal = not has_window
+
+                flash_attn_varlen_func(
+                    q=query[:num_actual_tokens],
+                    k=key_cache,
+                    v=value_cache,
+                    out=output[:num_actual_tokens],
+                    cu_seqlens_q=cu_seqlens_q,
+                    max_seqlen_q=max_seqlen_q,
+                    seqused_k=seqused_k,
+                    max_seqlen_k=max_seqlen_k,
+                    softmax_scale=self.scale,
+                    causal=causal,
+                    alibi_slopes=self.alibi_slopes,
+                    window_size=sliding_window_size,
+                    block_table=block_table,
+                    softcap=self.logits_soft_cap,
+                    scheduler_metadata=scheduler_metadata,
+                    fa_version=self.vllm_flash_attn_version,
+                    q_descale=q_descale,
+                    k_descale=k_descale,
+                    v_descale=v_descale,
+                    dynamic_causal=dynamic_causal,
+                    num_splits=attn_metadata.max_num_splits,
+                    s_aux=self.sinks,
+                    mask_mod=rswa_mask_mod_fn or mm_mask_mod,
+                    aux_tensors=rswa_aux or mm_aux,
+                )
+                return output
+
+        # Cascade attention (rare case).
+        cascade_attention(
+            output[:num_actual_tokens],
+            query[:num_actual_tokens],
+            key_cache,
+            value_cache,
+            cu_query_lens=attn_metadata.query_start_loc,
+            max_query_len=attn_metadata.max_query_len,
+            cu_prefix_query_lens=attn_metadata.cu_prefix_query_lens,
+            prefix_kv_lens=attn_metadata.prefix_kv_lens,
+            suffix_kv_lens=attn_metadata.suffix_kv_lens,
+            max_kv_len=attn_metadata.max_seq_len,
+            softmax_scale=self.scale,
+            alibi_slopes=self.alibi_slopes,
+            sliding_window=self.sliding_window,
+            logits_soft_cap=self.logits_soft_cap,
+            block_table=attn_metadata.block_table,
+            common_prefix_len=attn_metadata.common_prefix_len,
+            max_num_splits=attn_metadata.max_num_splits,
+            fa_version=self.vllm_flash_attn_version,
+            prefix_scheduler_metadata=attn_metadata.prefix_scheduler_metadata,
+            suffix_scheduler_metadata=attn_metadata.scheduler_metadata,
+            q_descale=layer._q_scale,
+            k_descale=layer._k_scale,
+            v_descale=layer._v_scale,
+            s_aux=self.sinks,
+        )
+        return output
+
+    def do_kv_cache_update(
+        self,
+        layer: torch.nn.Module,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        kv_cache: torch.Tensor,
+        slot_mapping: torch.Tensor,
+    ) -&gt; None:
+        if self.attn_type in (AttentionType.ENCODER_ONLY, AttentionType.ENCODER):
+            # For encoder attention,
+            # we use direct Q, K, V tensors without caching
+            return
+
+        # Scatter write into the KV cache using slot_mapping indices.
+        # No TMA kernel is invoked here, so stride canonicalization is not needed.
+        # (B, H, N, 2*D) -&gt; ((B, N, H, D), (B, N, H, D))
+        key_cache, value_cache = kv_cache.transpose(1, 2).split(self.head_size, dim=-1)
+
+        # Reshape the input keys and values and store them in the cache.
+        # Skip this if sharing KV cache with an earlier attention layer.
+        # NOTE(woosuk): Here, key and value are padded while slot_mapping is
+        # not padded. However, we don&#x27;t need to do key[:num_actual_tokens]
+        # and value[:num_actual_tokens] because the reshape_and_cache_flash
+        # op uses the slot_mapping&#x27;s shape to determine the number of
+        # actual tokens.
+        reshape_and_cache_flash(
+            key,
+            value,
+            key_cache,
+            value_cache,
+            slot_mapping,
+            self.kv_cache_dtype,
+            layer._k_scale,
+            layer._v_scale,
+        )
+
+    def _forward_with_dcp(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        key_cache: torch.Tensor,
+        value_cache: torch.Tensor,
+        output: torch.Tensor,
+        attn_metadata: FlashAttentionMetadata,
+        q_descale: torch.Tensor | None = None,
+        k_descale: torch.Tensor | None = None,
+        v_descale: torch.Tensor | None = None,
+    ) -&gt; torch.Tensor:
+        assert self.vllm_flash_attn_version is not None, (
+            &quot;FlashAttention version not detected.&quot;
+        )
+
+        cu_seqlens_q = attn_metadata.query_start_loc
+        max_seqlen_q = attn_metadata.max_query_len
+        block_table = attn_metadata.block_table
+
+        query = query.contiguous()
+        if attn_metadata.max_dcp_context_kv_len == 0:
+            flash_attn_varlen_func(
+                q=query,
+                k=key,
+                v=value,
+                out=output,
+                cu_seqlens_q=cu_seqlens_q,
+                max_seqlen_q=max_seqlen_q,
+                cu_seqlens_k=cu_seqlens_q,
+                max_seqlen_k=max_seqlen_q,
+                softmax_scale=self.scale,
+                causal=attn_metadata.causal,
+                alibi_slopes=self.alibi_slopes,
+                window_size=list(self.sliding_window)
+                if self.sliding_window is not None
+                else None,
+                softcap=self.logits_soft_cap,
+                return_softmax_lse=True,
+                fa_version=self.vllm_flash_attn_version,
+                q_descale=q_descale,
+                k_descale=k_descale,
+                v_descale=v_descale,
+                num_splits=attn_metadata.max_num_splits,
+            )
+            return output
+
+        query_across_dcp = get_dcp_group().all_gather(query, dim=1)
+        sliding_window_size = (
+            list(self.sliding_window) if self.sliding_window is not None else None
+        )
+        n = query_across_dcp.shape[0]
+        num_reqs = cu_seqlens_q.shape[0] - 1
+        num_decodes = attn_metadata.num_decode_reqs
+        num_context_prefills = attn_metadata.num_prefill_reqs
+        num_decode_tokens = attn_metadata.num_decode_tokens
+        num_context_prefill_tokens = attn_metadata.num_prefill_tokens
+        split_dcp_context = should_split_fa2_dcp_context_attention(
+            self.vllm_flash_attn_version,
+            max_seqlen_q,
+            num_reqs,
+            num_decodes,
+            num_context_prefills,
+        )
+        dcp_context_out_tokens = max(n, self._dcp_max_num_tokens)
+        dcp_context_out_spec = (
+            (
+                dcp_context_out_tokens,
+                self.num_heads * self.dcp_world_size,
+                self.head_size,
+            ),
+            self._dcp_dtype,
+        )
+        (dcp_context_out_workspace,) = current_workspace_manager().get_simultaneous(
+            dcp_context_out_spec,
+        )
+        dcp_context_out = dcp_context_out_workspace[:n]
+
+        if split_dcp_context:
+            # TODO: Remove this DCP + FA2 mixed decode/prefill workaround once
+            # FA4 supports this Qwen3.5 shape.
+            assert attn_metadata.dcp_context_kv_lens is not None
+            assert attn_metadata.max_dcp_context_kv_len is not None
+            assert self.vllm_flash_attn_version is not None
+            context_attn_out, context_lse = run_split_fa2_dcp_context_attention(
+                flash_attn_varlen_func,
+                query_across_dcp,
+                key_cache,
+                value_cache,
+                dcp_context_out,
+                cu_seqlens_q,
+                max_seqlen_q,
+                attn_metadata.dcp_context_kv_lens,
+                attn_metadata.max_dcp_context_kv_len,
+                self.scale,
+                self.alibi_slopes,
+                sliding_window_size,
+                block_table,
+                self.logits_soft_cap,
+                self.vllm_flash_attn_version,
+                q_descale,
+                k_descale,
+                v_descale,
+                attn_metadata.max_num_splits,
+                self.num_heads,
+                self.dcp_world_size,
+                num_decodes,
+                num_context_prefills,
+                num_decode_tokens,
+                num_context_prefill_tokens,
+            )
+        else:
+            context_attn_out, context_lse = flash_attn_varlen_func(
+                q=query_across_dcp,
+                k=key_cache,
+                v=value_cache,
+                out=dcp_context_out,
+                cu_seqlens_q=cu_seqlens_q,
+                max_seqlen_q=max_seqlen_q,
+                seqused_k=attn_metadata.dcp_context_kv_lens,
+                max_seqlen_k=attn_metadata.max_dcp_context_kv_len,
+                softmax_scale=self.scale,
+                causal=False,
+                alibi_slopes=self.alibi_slopes,
+                window_size=sliding_window_size,
+                block_table=block_table,
+                softcap=self.logits_soft_cap,
+                return_softmax_lse=True,
+                scheduler_metadata=attn_metadata.scheduler_metadata,
+                fa_version=self.vllm_flash_attn_version,
+                q_descale=q_descale,
+                k_descale=k_descale,
+                v_descale=v_descale,
+                num_splits=attn_metadata.max_num_splits,
+            )
+        # FA returns LSE in shape [ H, B ] but DCP combine wants [ B, H ]
+        context_attn_out_cor, context_lse_cor = self.dcp_combine(
+            context_attn_out,
+            context_lse.transpose(0, 1),
+            get_dcp_group(),
+            return_lse=True,
+        )
+        context_lse_cor = context_lse_cor.transpose(0, 1).contiguous()
+
+        query_attn_out, query_lse = flash_attn_varlen_func(
+            q=query,
+            k=key,
+            v=value,
+            out=output,
+            cu_seqlens_q=cu_seqlens_q,
+            max_seqlen_q=max_seqlen_q,
+            cu_seqlens_k=cu_seqlens_q,
+            max_seqlen_k=max_seqlen_q,
+            softmax_scale=self.scale,
+            causal=attn_metadata.causal,
+            alibi_slopes=self.alibi_slopes,
+            window_size=sliding_window_size,
+            softcap=self.logits_soft_cap,
+            return_softmax_lse=True,
+            fa_version=self.vllm_flash_attn_version,
+            q_descale=q_descale,
+            k_descale=k_descale,
+            v_descale=v_descale,
+            num_splits=attn_metadata.max_num_splits,
+        )
+        assert context_attn_out_cor.shape == query_attn_out.shape
+        assert context_lse_cor.shape == query_lse.shape
+        merge_attn_states(
+            output,
+            context_attn_out_cor,
+            context_lse_cor,
+            query_attn_out,
+            query_lse,
+        )
+
+    def _forward_encoder_attention(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        output: torch.Tensor,
+        attn_metadata: FlashAttentionMetadata,
+        layer: torch.nn.Module,
+    ) -&gt; torch.Tensor:
+        &quot;&quot;&quot;Forward pass for encoder attention without KV cache.
+
+        Args:
+            query: shape = [num_encoder_tokens, num_heads, head_size]
+            key: shape = [num_encoder_tokens, num_kv_heads, head_size]
+            value: shape = [num_encoder_tokens, num_kv_heads, head_size]
+            output: shape = [num_encoder_tokens, num_heads, head_size]
+            attn_metadata: Encoder attention metadata
+            layer: The attention layer
+        &quot;&quot;&quot;
+        assert self.vllm_flash_attn_version is not None, (
+            &quot;FlashAttention version not detected.&quot;
+        )
+
+        # For encoder attention, process FP8 quantization if needed
+        if is_quantized_kv_cache(self.kv_cache_dtype):
+            raise NotImplementedError(
+                &quot;quantization is not supported for encoder attention&quot;
+            )
+
+        # Use encoder-specific metadata for sequence information
+        cu_seqlens_q = attn_metadata.query_start_loc
+        cu_seqlens_k = attn_metadata.query_start_loc
+        max_seqlen_q = attn_metadata.max_query_len
+        max_seqlen_k = attn_metadata.max_query_len
+
+        descale_shape = (
+            cu_seqlens_q.shape[0] - 1,  # type: ignore[union-attr]
+            self.num_kv_heads,
+        )
+
+        # Call flash attention directly on Q, K, V tensors
+        sliding_window_size = (
+            list(self.sliding_window) if self.sliding_window is not None else None
+        )
+        flash_attn_varlen_func(
+            q=query,
+            k=key,
+            v=value,
+            out=output,
+            cu_seqlens_q=cu_seqlens_q,
+            cu_seqlens_k=cu_seqlens_k,
+            max_seqlen_q=max_seqlen_q,
+            max_seqlen_k=max_seqlen_k,
+            softmax_scale=self.scale,
+            causal=False,  # Encoder attention is bidirectional
+            alibi_slopes=self.alibi_slopes,
+            window_size=sliding_window_size,
+            softcap=self.logits_soft_cap,
+            fa_version=self.vllm_flash_attn_version,
+            q_descale=layer._q_scale.expand(descale_shape)  # type: ignore[operator]
+            if self.supports_quant_query_input
+            else None,
+            k_descale=layer._k_scale.expand(descale_shape),  # type: ignore[operator]
+            v_descale=layer._v_scale.expand(descale_shape),  # type: ignore[operator]
+            num_splits=1 if self.batch_invariant_enabled else 0,
+            s_aux=self.sinks,
+        )
+
+        return output
+
+
+@functools.cache
+def _make_mm_prefix_mask_mod(
+    sliding_window: int = 0,
+    sliding_window_left: int | None = None,
+):
+    &quot;&quot;&quot;Build a CuTE-DSL mask_mod implementing
+    ``(causal AND sliding_window) OR mm_prefix``.
+
+    Cached so identical ``(sliding_window, sliding_window_left)`` reuse the
+    same function object. FA4&#x27;s ``hash_callable`` mixes ``repr()`` of closure
+    cells into the compile key; the nested ``_load_q_range`` would otherwise
+    get a new address each call and force a full JIT recompile every forward.
+
+    The FA4 kernel passes *local* ``q_idx`` (0-based within the current
+    prefill chunk) while ``kv_idx`` is absolute (0-based over the full
+    KV cache).  We recover the absolute Q position via
+    ``q_abs = q_idx + seqlen_k - seqlen_q`` (the context-length offset)
+    so that causal, sliding-window, and mm_prefix range comparisons all
+    use consistent absolute positions.  This matches the Triton
+    reference path (``compute_kv_seq_mask``).
+
+    ``aux_tensors[0]`` holds the absolute ``[start, end]`` bounds of the
+    mm_prefix range containing each scheduled query token (``(-1, -1)`` when
+    none), and ``aux_tensors[1]`` is ``cu_seqlens_q``, used to turn the local
+    ``q_idx`` into a packed row index.  Because mm_prefix ranges never overlap,
+    ``r_start &lt;= kv_idx &lt;= r_end`` is exactly &quot;query and key share a range&quot;, so
+    no key-side lookup is needed and ``kv_idx`` is never used as an index.
+    The ``(-1, -1)`` sentinel falls out for free: ``kv_idx &lt;= -1`` is false for
+    every valid key.
+
+    ``sliding_window_left`` enforces the sliding window on the causal
+    term (None = full causal, no window).  ``sliding_window`` clamps the
+    bidirectional block to the window (0 = unclamped; &gt;0 = Gemma4 local
+    layers via ``mm_prefix_clamp_sliding_window``).
+    &quot;&quot;&quot;
+    import cutlass
+    import cutlass.cute as cute
+    from cutlass import Int32  # type: ignore[attr-defined]
+
+    from vllm.vllm_flash_attn.cute.utils import (  # type: ignore[import-untyped]
+        scalar_to_ssa,
+        ssa_to_scalar,
+    )
+
+    @cute.jit
+    def _load_q_range(q_idx, seqlen_info, aux_tensors, batch_idx):
+        &quot;&quot;&quot;Load the mm_prefix range bounds for this query row.
+
+        Both loads depend only on the query index, so they hoist out of the
+        unrolled per-element mask loop.  ``ssa_to_scalar`` reads lane 0, so one
+        call must not span query rows (hence the ``__vec_size__`` pin below).
+        Clamping keeps ``token_idx`` in bounds for partial tiles and padded
+        (``seqlen_q == 0``) rows; neither produces output.
+        &quot;&quot;&quot;
+        q_ranges = aux_tensors[0]
+        cu_seqlens_q = aux_tensors[1]
+        b = batch_idx[0]
+        q_local = cutlass.min(ssa_to_scalar(q_idx), seqlen_info.seqlen_q - Int32(1))
+        token_idx = cutlass.max(cu_seqlens_q[b] + q_local, Int32(0))
+        return (
+            scalar_to_ssa(q_ranges[token_idx, 0], Int32),
+            scalar_to_ssa(q_ranges[token_idx, 1], Int32),
+        )
+
+    if sliding_window_left is not None:
+
+        @cute.jit
+        def mm_prefix_mask_mod(
+            batch_idx: cute.TensorSSA,
+            head_idx: cute.TensorSSA,
+            q_idx: cute.TensorSSA,
+            kv_idx: cute.TensorSSA,
+            seqlen_info,
+            aux_tensors,
+        ):
+            ctx_off = scalar_to_ssa(seqlen_info.seqlen_k - seqlen_info.seqlen_q, Int32)
+            q_abs = q_idx + ctx_off
+            sw = scalar_to_ssa(Int32(sliding_window_left), Int32)
+            keep = (kv_idx &lt;= q_abs) &amp; ((q_abs - kv_idx) &lt; sw)
+            r_start, r_end = _load_q_range(q_idx, seqlen_info, aux_tensors, batch_idx)
+            mm = (kv_idx &gt;= r_start) &amp; (kv_idx &lt;= r_end)
+            if sliding_window &gt; 0:
+                mm = mm &amp; ((q_abs - kv_idx) &lt; sw)
+            keep = keep | mm
+            return keep
+
+    else:
+
+        @cute.jit
+        def mm_prefix_mask_mod(
+            batch_idx: cute.TensorSSA,
+            head_idx: cute.TensorSSA,
+            q_idx: cute.TensorSSA,
+            kv_idx: cute.TensorSSA,
+            seqlen_info,
+            aux_tensors,
+        ):
+            ctx_off = scalar_to_ssa(seqlen_info.seqlen_k - seqlen_info.seqlen_q, Int32)
+            q_abs = q_idx + ctx_off
+            keep = kv_idx &lt;= q_abs
+            r_start, r_end = _load_q_range(q_idx, seqlen_info, aux_tensors, batch_idx)
+            keep = keep | ((kv_idx &gt;= r_start) &amp; (kv_idx &lt;= r_end))
+            return keep
+
+    mm_prefix_mask_mod.use_fast_sampling = True
+    mm_prefix_mask_mod.__vec_size__ = 1  # _load_q_range takes lane 0 of q_idx
+    return mm_prefix_mask_mod
+
+
+def _make_rswa_mask_mod():
+    &quot;&quot;&quot;Build a CuTE-DSL mask_mod for Reference Sliding Window Attention (R-SWA).
+
+    FA4 varlen + paged-KV convention (verified from cute/mask.py apply_mask):
+      q_idx  = LOCAL query-token offset (0 .. seqlen_q - 1) within this sequence.
+      kv_idx = LOCAL KV-token position (0 .. seqlen_k - 1) within this sequence.
+
+    To recover the ABSOLUTE token position (needed for causal and the sliding
+    window distance), use the standard offset:
+      abs_q = q_idx + (seqlen_k - seqlen_q)
+
+    R-SWA keep condition:
+      abs_q &gt;= kv_idx                    (causal: KV at or before the query)
+      AND (kv_idx &lt; prefix_len           (global prefix is always visible)
+           OR  abs_q - kv_idx &lt; window)  (generated tokens: sliding window)
+
+    aux_tensors[0]: prefix_lens [num_reqs] int32 — per-request prefill length.
+    aux_tensors[1]: rswa_window [1]        int32 — decode sliding window size.
+
+    use_fast_sampling=True lets FA4 skip fully-masked KV blocks (gap blocks)
+    without loading their data.
+    &quot;&quot;&quot;
+    import cutlass.cute as cute
+    from cutlass import Int32  # type: ignore[attr-defined]
+
+    from vllm.vllm_flash_attn.cute.utils import (  # type: ignore[import-untyped]
+        scalar_to_ssa,
+    )
+
+    @cute.jit
+    def rswa_mask_mod(
+        batch_idx: cute.TensorSSA,
+        head_idx: cute.TensorSSA,
+        q_idx: cute.TensorSSA,
+        kv_idx: cute.TensorSSA,
+        seqlen_info,
+        aux_tensors,
+    ):
+        b = batch_idx[0]
+        prefix_len = scalar_to_ssa(aux_tensors[0][b], Int32)
+        window = scalar_to_ssa(aux_tensors[1][0], Int32)
+        # Convert local q offset to absolute token position.
+        offset = scalar_to_ssa(seqlen_info.seqlen_k - seqlen_info.seqlen_q, Int32)
+        abs_q = q_idx + offset
+        causal = kv_idx &lt;= abs_q
+        in_prefix = kv_idx &lt; prefix_len
+        in_window = (abs_q - kv_idx) &lt; window
+        return causal &amp; (in_prefix | in_window)
+
+    rswa_mask_mod.use_fast_sampling = True
+    return rswa_mask_mod
+
+
+def use_cascade_attention(
+    common_prefix_len: int,
+    query_lens: np.ndarray,
+    num_query_heads: int,
+    num_kv_heads: int,
+    use_alibi: bool,
+    use_sliding_window: bool,
+    use_local_attention: bool,
+    num_sms: int,
+    dcp_world_size: int,
+) -&gt; bool:
+    &quot;&quot;&quot;Decide whether to use cascade attention.
+
+    This function 1) checks whether cascade attention is supported with the
+    given configuration, and 2) heuristically decides whether using cascade
+    attention can improve performance.
+    &quot;&quot;&quot;
+    # Too short common prefix. Probably not worth using cascade attention.
+    # We use an arbitrary threshold of 256 tokens. TODO: Tune this threshold.
+    # NOTE(woosuk): This is the common case. We should return False as soon as
+    # possible to avoid any unnecessary computation.
+    if common_prefix_len &lt; 256:
+        return False
+    # Cascade attention is currently not supported with these variants.
+    if use_alibi or use_sliding_window or use_local_attention:
+        return False
+    # Too few queries. Probably not worth using cascade attention.
+    # We use an arbitrary threshold of 8 queries. TODO: Tune this threshold.
+    num_reqs = len(query_lens)
+    if num_reqs &lt; 8:
+        return False
+    # disable cascade attention for DCP
+    if dcp_world_size &gt; 1:
+        return False
+
+    # Heuristics to decide whether using cascade attention is beneficial.
+    # 1. When FlashDecoding is not used for normal attention, cascade attention
+    #    is likely to be faster since it saves memory bandwidth.
+    num_queries_per_kv = num_query_heads // num_kv_heads
+    # The criteria for using FlashDecoding can be found in the following link:
+    # https://github.com/vllm-project/flash-attention/blob/96266b1111111f3d11aabefaf3bacbab6a89d03c/csrc/flash_attn/flash_api.cpp#L535
+    use_flash_decoding = (
+        num_queries_per_kv &gt; 1
+        and not use_sliding_window
+        and not use_alibi
+        and np.all(query_lens == 1)
+    )
+    if not use_flash_decoding:
+        # Use cascade attention.
+        return True
+
+    # 2. When FlashDecoding is used for normal attention, it is not clear
+    #    whether cascade attention is beneficial, because FlashDecoding can
+    #    launch more CTAs than cascade attention.
+    #    We use a simple performance model to compare the two methods.
+    #    NOTE(woosuk): The performance model is very rough and may not be
+    #    accurate.
+    num_tokens = num_reqs
+    # NOTE(woosuk): These are default tile sizes. flash-attn might use
+    # different tile sizes (e.g., 64 or 256) depending on the configuration.
+    q_tile_size = 128
+    kv_tile_size = 128
+    num_prefix_tiles = cdiv(common_prefix_len, kv_tile_size)
+
+    cascade_ctas = num_query_heads * cdiv(num_tokens, q_tile_size)
+    cascade_waves = cdiv(cascade_ctas, num_sms)
+    cascade_time = cascade_waves * num_prefix_tiles
+
+    flash_decoding_ctas = (
+        num_reqs * num_kv_heads * cdiv(num_queries_per_kv, q_tile_size)
+    )
+    flash_decoding_ctas *= num_prefix_tiles
+    flash_decoding_time = cdiv(flash_decoding_ctas, num_sms)
+
+    # Use cascade attention if it is faster than FlashDecoding.
+    return cascade_time &lt; flash_decoding_time
+
+
+def cascade_attention(
+    output: torch.Tensor,
+    query: torch.Tensor,
+    key_cache: torch.Tensor,
+    value_cache: torch.Tensor,
+    cu_query_lens: torch.Tensor,
+    max_query_len: int,
+    cu_prefix_query_lens: torch.Tensor,
+    prefix_kv_lens: torch.Tensor,
+    suffix_kv_lens: torch.Tensor,
+    max_kv_len: int,
+    softmax_scale: float,
+    alibi_slopes: torch.Tensor | None,
+    sliding_window: tuple[int, int],
+    logits_soft_cap: float,
+    block_table: torch.Tensor,
+    common_prefix_len: int,
+    max_num_splits: int,
+    fa_version: int,
+    prefix_scheduler_metadata: torch.Tensor | None = None,
+    suffix_scheduler_metadata: torch.Tensor | None = None,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
+    s_aux: torch.Tensor | None = None,
+) -&gt; torch.Tensor:
+    assert alibi_slopes is None, &quot;Cascade attention does not support ALiBi.&quot;
+    # TODO: Support sliding window.
+    assert sliding_window == (-1, -1), (
+        &quot;Cascade attention does not support sliding window.&quot;
+    )
+
+    num_tokens = query.shape[0]
+    block_size = key_cache.shape[-3]
+    assert common_prefix_len % block_size == 0
+    num_common_kv_blocks = common_prefix_len // block_size
+    assert num_common_kv_blocks &gt; 0
+    descale_shape = (cu_prefix_query_lens.shape[0] - 1, key_cache.shape[-2])
+
+    # Process shared prefix.
+    prefix_output, prefix_lse = flash_attn_varlen_func(
+        q=query,
+        k=key_cache,
+        v=value_cache,
+        cu_seqlens_q=cu_prefix_query_lens,
+        seqused_k=prefix_kv_lens,
+        max_seqlen_q=num_tokens,
+        max_seqlen_k=common_prefix_len,
+        softmax_scale=softmax_scale,
+        causal=False,
+        window_size=list(sliding_window),
+        block_table=block_table[:1],
+        softcap=logits_soft_cap,
+        return_softmax_lse=True,
+        scheduler_metadata=prefix_scheduler_metadata,
+        fa_version=fa_version,
+        q_descale=q_descale.expand(descale_shape) if q_descale is not None else None,
+        k_descale=k_descale.expand(descale_shape) if k_descale is not None else None,
+        v_descale=v_descale.expand(descale_shape) if v_descale is not None else None,
+        # s_aux is incorporated into prefix_lse inside the GPU kernel,
+        # enabling its effect during the final attention merge.
+        s_aux=s_aux,
+        num_splits=1 if envs.VLLM_BATCH_INVARIANT else max_num_splits,
+    )
+
+    descale_shape = (cu_query_lens.shape[0] - 1, key_cache.shape[-2])
+
+    # Process suffix per query.
+    suffix_output, suffix_lse = flash_attn_varlen_func(
+        q=query,
+        k=key_cache,
+        v=value_cache,
+        cu_seqlens_q=cu_query_lens,
+        seqused_k=suffix_kv_lens,
+        max_seqlen_q=max_query_len,
+        max_seqlen_k=max_kv_len - common_prefix_len,
+        softmax_scale=softmax_scale,
+        causal=True,
+        window_size=list(sliding_window),
+        block_table=block_table[:, num_common_kv_blocks:],
+        softcap=logits_soft_cap,
+        return_softmax_lse=True,
+        scheduler_metadata=suffix_scheduler_metadata,
+        fa_version=fa_version,
+        q_descale=q_descale.expand(descale_shape) if q_descale is not None else None,
+        k_descale=k_descale.expand(descale_shape) if k_descale is not None else None,
+        v_descale=v_descale.expand(descale_shape) if v_descale is not None else None,
+        num_splits=1 if envs.VLLM_BATCH_INVARIANT else max_num_splits,
+    )
+
+    # Merge prefix and suffix outputs, and store the result in output.
+    merge_attn_states(output, prefix_output, prefix_lse, suffix_output, suffix_lse)
+</code></pre></details>
+<a class="dl" href="FlashAttentionMetadataBuilder.build__cand-vllm_v1_attention-0002__evolve/skydiscover.zip" download>⬇ Download skydiscover files (.zip)</a>
+</div>
+<div class="engine"><h3>nous</h3>
+<div class="about"><p class="tagline">Runs experiment &#x27;arms&#x27; that apply code_changes[] across the target (alias: agentic-strategy-evolution).</p><dl><dt>Repository</dt><dd><a href="https://github.com/AI-native-Systems-Research/agentic-strategy-evolution" target="_blank" rel="noopener">https://github.com/AI-native-Systems-Research/agentic-strategy-evolution ↗</a></dd><dt>Install</dt><dd><pre class="inst">pip install &quot;git+https://github.com/AI-native-Systems-Research/agentic-strategy-evolution.git@reflective&quot;</pre></dd><dt>Edit scope</dt><dd>Multi-file: experiment arms with code_changes[].</dd><dt>Native config</dt><dd><code>campaign.yaml</code></dd><dt>You must write</dt><dd><code>ground_truth.pass_condition</code> in <code>campaign.yaml</code> — a concrete pass/fail rule.</dd><dt>Prerequisites</dt><dd>Python 3, an LLM API key for the model named in the config (e.g. <code>ANTHROPIC_API_KEY</code>), the target repo checked out at the run's commit, and a server with all the hardware the benchmark needs (e.g. a GPU) to build and measure the target.</dd></dl></div>
+<div class="cmd">$ NOUS_CAMPAIGN_PARENT=$PWD/nous_runs nous run campaign.yaml</div>
+<h1>Evolve bundle — vllm · vllm/v1/attention · cand-vllm_v1_attention-0002 · nous</h1>
+<p>Generated by <code>spotlights-engine prep-evolve</code>. This bundle is ready to start by hand; <strong>running the evolve, scoring, and interpreting results are up to you.</strong></p>
+<h2>Run it</h2>
+<pre><code>NOUS_CAMPAIGN_PARENT=$PWD/nous_runs nous run campaign.yaml</code></pre>
+<h2>⚠️ The evaluation gap — you must define the pass condition</h2>
+<p>This campaign is <strong>launchable but unscored</strong>. <code>campaign.yaml</code> names the metric and which way it should move, but <code>ground_truth.pass_condition</code> is a <code>TODO</code>. Nous will run and report numbers; nothing decides whether those numbers count as a win until you write that rule.</p>
+<p>What Spotlights believes the oracle is:</p>
+<ul>
+<li><strong>Correctness:</strong> (none parsed — add one)</li>
+<li><strong>Performance:</strong> TTFT, TPOT</li>
+<li><strong>Direction:</strong> minimize</li>
+</ul>
+<p>Replace the <code>pass_condition</code> TODO under <code>ground_truth</code> in <code>campaign.yaml</code> before trusting any result. Spotlights knows the metric and its direction, not how much movement counts as a win. A concrete rule for this candidate looks like:</p>
+<pre><code>ground_truth:
+  pass_condition: &gt;-
+    every one of TTFT, TPOT decreases by at least 5% versus the seed baseline,
+    with all correctness checks passing</code></pre>
+<p>Choose the threshold from your own benchmark&#x27;s noise floor.</p>
+<h2>In scope</h2>
+<p>Only these files may change:</p>
+<ul>
+<li><code>vllm/v1/attention/backends/flash_attn.py</code>:479–762 (<code>FlashAttentionMetadataBuilder.build</code>)</li>
+</ul>
+<h2>Objective</h2>
+<p>reduce the median TTFT and median TPOT (Time Per Output Token)</p>
+<p>The full research findings and proposals are embedded directly in the native config (the evaluator/grader prompt or system message).</p>
+<details><summary>campaign.yaml <span class="sz">— 13 KB · <a href="FlashAttentionMetadataBuilder.build__cand-vllm_v1_attention-0002__evolve/nous/campaign.yaml">open raw ↗</a></span></summary><pre><code># Generated by spotlights-engine prep-evolve.
+# Run: NOUS_CAMPAIGN_PARENT=$PWD/nous_runs nous run campaign.yaml
+research_question: &#x27;Does changing `FlashAttentionMetadataBuilder.build` in vllm achieve: reduce the median
+  TTFT and median TPOT (Time Per Output Token)?&#x27;
+run_id: vllm-vllm-v1-attention-cand-vllm-v1-attention-0002
+target_system:
+  name: vllm
+  description: |
+    vLLM is a high-throughput, memory-efficient inference and serving engine for LLMs. It is a Python library (with C++/CUDA/HIP/Triton kernels and a small Rust component) built on PyTorch, exposing OpenAI/Anthropic/Cohere-compatible REST, gRPC, MCP, and offline APIs. Architecturally it is a layered engine: an entrypoints/API layer over an EngineCore (v1 rewrite; v0 legacy in engine/) that orchestrates a scheduler, KV-cache manager, model executor, and pluggable per-device workers, with hardware-abstracted platforms, torch.compile integration, distributed/parallel state, LoRA, multimodal, quantization, and structured-output/tool/reasoning parser subsystems.
+    Module vllm/v1/attention: Attention backend selection and metadata for v1&#x27;s paged/chunked scheduling.
+
+    In-scope targets:
+    - vllm/v1/attention/backends/flash_attn.py:479–762 (`FlashAttentionMetadataBuilder.build`)
+
+    ## Optimization goal
+    reduce the median TTFT and median TPOT (Time Per Output Token) — workload: Multi-turn agentic workload (direction: minimize)
+
+    ## Target
+    - `FlashAttentionMetadataBuilder.build` in vllm/v1/attention/backends/flash_attn.py:479–762 (impact: high)
+
+    Current approach: Runs a sequential Python-side build each step. The nested schedule() closure can recompute scheduler_metadata for repeated shapes; cascade paths allocate cu_prefix_query_lens and prefix_kv_lens tensors; multimodal and R-SWA paths perform staging-buffer copies into device buffers.
+    Why it&#x27;s worth evolving: This method is on the per-token metadata path. Concrete tunables include caching schedule() results by repeated shape, reusing cascade prefix tensors, batching H2D staging copies, and skipping inactive subpaths earlier. Correctness oracle is existing FlashAttention metadata tests and end-to-end token/output equality against the current implementation.
+    Performance oracle: TTFT, TPOT
+
+    ## Research findings (4)
+    1. Cascade Inference: Memory Bandwidth Efficient Shared Prefix Batch Decoding — blog — https://flashinfer.ai/2024/02/02/cascade-inference.html
+       Technique: Use recursive attention state merging to split shared-prefix attention from per-request suffix attention, then dispatch each part to the kernel best suited for its reuse pattern. For multi-turn agentic workloads with repeated system/tool/document prefixes, the module could make cascade selection more shape-aware and extend it toward multi-level shared prefixes rather than relying on coarse gates. | Evidence: &quot;Quote: &quot;Use multi-query (prefill/append) attention kernel&quot; and &quot;Use batch decode attention kernel&quot;. Pointer: Cascade Inference: The Algorithm, steps 1-2.&quot;
+    2. flashinfer.cascade — docs — https://docs.flashinfer.ai/api/cascade.html
+       Technique: Cache cascade planning auxiliary structures and reuse them across multiple layer calls for the same decode step. The module could mirror this at metadata-build time by keying stable shape/page/cascade plans and reusing preallocated CUDA-graph buffers to lower per-step planning overhead and median TPOT. | Evidence: &quot;Quote: &quot;auxiliary data structures can be reused across multiple batch decode attention calls&quot;. Pointer: MultiLevelCascadeAttentionWrapper example note.&quot;
+    3. CUDA C++ Best Practices Guide — docs — https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html
+       Technique: Minimize host-device transfers, batch many small transfers into one contiguous transfer, and use pinned memory for asynchronous copies. The module could apply this to attention metadata construction by packing indptr, last-page lengths, multimodal ranges, and split metadata into fewer staged H2D copies or moving cheap prefix computations onto device. | Evidence: &quot;Quote: &quot;batching many small transfers into one larger transfer performs significantly better&quot;. Pointer: Data Transfer Between Host and Device, section 10.1.&quot;
+    4. CUDA Graphs — docs — https://docs.vllm.ai/en/v0.21.0/design/cuda_graphs/
+       Technique: Use a batch-descriptor-driven CUDA graph dispatcher that separately handles uniform decode and mixed/prefill batches, with backend capability fallbacks. The attention module could tighten its fast-plan and metadata decisions around stable batch descriptors so CUDA-graph-compatible decode routes avoid redundant planning while mixed batches safely fall back. | Evidence: &quot;Quote: &quot;dispatch between full and piecewise cudagraph at runtime&quot;. Pointer: Motivation, lines 2736-2742.&quot;
+
+    ## Existing proposals (5)
+    ← seeds/inspiration, the evolver may extend or discard
+    - [proposal_from_finding_creator] Make cascade dispatch shape-aware and cache prefix scheduler metadata in FlashAttentionMetadataBuilder.build — The candidate&#x27;s evolve_rationale explicitly calls out `schedule()` recomputation for repeated shapes and cascade prefix-tensor allocation as concrete tunables, and its cascade branch (lines 638-662) is precisely the code path the finding describes: a two-pass split into shared-prefix multi-query attention and per-request suffix decode attention, followed by state merging. The finding&#x27;s specific contribution — that cascade selection should be more shape-aware and could be extended toward multi-level shared prefixes — targets a gap in this build: cascade currently activates on any positive `common_prefix_len` regardless of whether the two-pass path is actually cheaper, and there is no reuse of the prefix-side scheduler metadata or prefix cu_seqlens/kv_lens tensors across steps even though multi-turn agentic workloads (the caller&#x27;s stated workload) hit the identical shared-prefix shape on every decode step. Together these changes reduce Python-side work and per-step allocation on the metadata path each generated token traverses, which directly maps to the candidate&#x27;s stated median TPOT / TTFT objective without touching the kernel-selection contract used downstream in forward(). (from finding #1: Cascade Inference: Memory Bandwidth Efficient Shared Prefix Batch Decoding)
+    - [proposal_from_finding_creator] Cache cascade planning artifacts across steps in FlashAttentionMetadataBuilder.build — The finding documents that FlashInfer&#x27;s cascade wrappers explicitly reuse auxiliary planning data structures across multiple decode attention calls, which is directly analogous to the per-step planning work FlashAttentionMetadataBuilder.build performs on the cascade path and inside schedule(). The candidate&#x27;s evolve_rationale already calls out caching schedule() results by repeated shape and reusing cascade prefix tensors as concrete tunables, and in a multi-turn agentic decode workload the cascade shape key is typically stable across steps, so a shape-keyed reuse strategy targets exactly the median TPOT hot path this method sits on without changing numerical behavior (correctness is guarded by existing FlashAttention metadata tests and end-to-end token equality). (from finding #2: flashinfer.cascade)
+    - [proposal_from_finding_creator] Coalesce per-step H2D metadata copies and eliminate cascade tiny-tensor allocations in FlashAttentionMetadataBuilder.build — The finding directly addresses two concrete inefficiencies in build&#x27;s per-step path that the candidate&#x27;s evolve_rationale explicitly flags: (a) cascade paths allocate cu_prefix_query_lens and prefix_kv_lens tensors via torch.tensor with device=self.device, which triggers an implicit H2D transfer plus a fresh device allocation on every step cascade is active; and (b) mm_prefix and R-SWA both perform independent H2D staging copies. The CUDA Best Practices Guide&#x27;s &quot;batch many small transfers&quot; and &quot;use pinned memory for asynchronous copies&quot; recommendations map 1:1 onto these sites. For a multi-turn agentic workload where build runs every decode step, cutting even a handful of small H2D launches per step reduces per-token host overhead and improves median TPOT; on prefill steps (where cascade and mm_prefix are more likely active) it also reduces TTFT. The change is transferable, scoped to build, and correctness is checkable via the existing metadata tests and end-to-end equality oracle called out in the candidate. (from finding #3: CUDA C++ Best Practices Guide)
+    - [proposal_from_finding_creator] Cache CUDA-graph-compatible plans keyed by stable batch descriptors in FlashAttentionMetadataBuilder.build — The candidate&#x27;s evolve_rationale explicitly names caching schedule() by repeated shape and reusing cascade prefix tensors as concrete tunables, and its hot path is exactly the per-step decode metadata build that the CUDA-graph design targets. The finding contributes the specific structuring idea of a batch-descriptor-driven dispatcher with a graph-compatible fast path and a safe fallback, which maps directly onto separating uniform-decode replays (dominant in multi-turn agentic TPOT) from mixed/prefill builds (TTFT). This addresses the gap that the current build recomputes scheduler_metadata and reallocates cascade tensors even when successive decode steps share the same shape, which is the common case under CUDA graphs. (from finding #4: CUDA Graphs)
+    - [claude] Pipeline AOT scheduler_metadata across steps via a helper-thread build so build() returns before get_scheduler_metadata finishes — None of the four listed deep_research_proposals move `get_scheduler_metadata` off the critical path via cross-step pipelining. Findings 0001 and 0004 propose *shape-keyed caching* of the cascade branch&#x27;s `prefix_scheduler_metadata` and cascade prefix tensors — they only hit when the same shape recurs, and they still execute synchronously inside the current step on the first occurrence and after any invalidation. Finding 0009 introduces a batch-descriptor cache for CUDA-graph-compatible replay but likewise operates synchronously within one step and targets the descriptor-keyed cache lookup, not asynchronous overlap with the model forward. Finding 0006 targets H2D transfer batching and pinned buffers, not compute latency of the scheduler planner itself. This proposal is orthogonal: it addresses the *latency of the planner call*, not its allocation cost or its cacheability, by exploiting that in a uniform-decode multi-turn agentic workload the next step&#x27;s shape is deterministically derivable one step in advance, so the planner call can execute concurrently with the current step&#x27;s model forward on a helper stream and be awaited (as a cheap stream wait) at the next build() entry. This composes cleanly with all four listed cache-based proposals — a cache hit short-circuits before the speculation is consumed — and directly attacks median TPOT beyond what cache reuse alone can achieve, since it removes wall-clock time from the per-token critical path even on cache misses within the class of uniform-decode transitions. (agent proposal, no source finding)
+  observable_metrics:
+  - TTFT
+  - TPOT
+  controllable_knobs:
+  - FlashAttentionMetadataBuilder.build (vllm/v1/attention/backends/flash_attn.py)
+  repo_path: /Users/iklamer/ai-native-systems/VSCodeProjects/vllm
+theory_references:
+- name: &#x27;Cascade Inference: Memory Bandwidth Efficient Shared Prefix Batch Decoding&#x27;
+  statement: Use recursive attention state merging to split shared-prefix attention from per-request suffix
+    attention, then dispatch each part to the kernel best suited for its reuse pattern. For multi-turn
+    agentic workloads with repeated system/tool/document prefixes, the module could make cascade selection
+    more shape-aware and extend it toward multi-level shared prefixes rather than relying on coarse gates.
+  use_as: sanity_check
+  independent_of_detector: false
+- name: flashinfer.cascade
+  statement: Cache cascade planning auxiliary structures and reuse them across multiple layer calls for
+    the same decode step. The module could mirror this at metadata-build time by keying stable shape/page/cascade
+    plans and reusing preallocated CUDA-graph buffers to lower per-step planning overhead and median TPOT.
+  use_as: sanity_check
+  independent_of_detector: false
+- name: CUDA C++ Best Practices Guide
+  statement: Minimize host-device transfers, batch many small transfers into one contiguous transfer,
+    and use pinned memory for asynchronous copies. The module could apply this to attention metadata construction
+    by packing indptr, last-page lengths, multimodal ranges, and split metadata into fewer staged H2D
+    copies or moving cheap prefix computations onto device.
+  use_as: sanity_check
+  independent_of_detector: false
+- name: CUDA Graphs
+  statement: Use a batch-descriptor-driven CUDA graph dispatcher that separately handles uniform decode
+    and mixed/prefill batches, with backend capability fallbacks. The attention module could tighten its
+    fast-plan and metadata decisions around stable batch descriptors so CUDA-graph-compatible decode routes
+    avoid redundant planning while mixed batches safely fall back.
+  use_as: sanity_check
+  independent_of_detector: false
+ground_truth:
+  pre_registered: false
+  primary_metric: TTFT, TPOT
+  direction_claim: TTFT, TPOT should decrease
+  workload: Multi-turn agentic workload
+  pass_condition: &#x27;TODO: define a concrete pass/fail rule&#x27;
+prompts:
+  methodology_layer: prompts/methodology
+</code></pre></details>
+<a class="dl" href="FlashAttentionMetadataBuilder.build__cand-vllm_v1_attention-0002__evolve/nous.zip" download>⬇ Download nous files (.zip)</a>
+</div>
+</div>
+</body>
+</html>

@@ -1,0 +1,78 @@
+CANDIDATE: cand-vllm_v1_worker-0001
+MODULE:    vllm/v1/worker
+BASE:      83ad767eed3be3ee7f2df63be693bfaca5c7c922
+REPO:      /Users/iklamer/ai-native-systems/VSCodeProjects/vllm
+WORKTREE:  /var/folders/kz/y8lkg03s2sz6nx38ls4rlqxh0000gn/T/spotlights-apply-7fynr2iq/worktree
+WORKTREE_PARENT:  /var/folders/kz/y8lkg03s2sz6nx38ls4rlqxh0000gn/T/spotlights-apply-7fynr2iq
+NOTE: WORKTREE and WORKTREE_PARENT are throwaway paths, deleted when the
+      run finishes — and the prompt below names WORKTREE as its working
+      directory. In a saved copy of this file both are a historical record,
+      not a directory you can enter. To run this prompt again, make an
+      equivalent checkout and use that as the working directory instead:
+        git -C /Users/iklamer/ai-native-systems/VSCodeProjects/vllm worktree add --detach <dir> 83ad767eed3be3ee7f2df63be693bfaca5c7c922
+PROMPT:
+You are implementing ONE proposed optimization in an isolated git worktree.
+
+Working directory: /var/folders/kz/y8lkg03s2sz6nx38ls4rlqxh0000gn/T/spotlights-apply-7fynr2iq/worktree
+This is a detached worktree of /Users/iklamer/ai-native-systems/VSCodeProjects/vllm at commit 83ad767eed3be3ee7f2df63be693bfaca5c7c922.
+It is throwaway. It has no build artifacts, no virtualenv, and no compiled
+extensions — nothing in it is runnable.
+
+## Optimization goal
+reduce the median TTFT and median TPOT (Time Per Output Token) — workload: Multi-turn agentic workload (direction: minimize)
+
+## Target
+- `GPUModelRunner._prepare_inputs` in vllm/v1/worker/gpu_model_runner.py:2001–2323 (impact: high)
+
+Current approach: Uses several NumPy/Torch CPU passes, torch.index_select, repeated CpuGpuBuffer.copy_to_gpu calls, a per-request prompt-embeds loop, a req_ids list walk for num_tokens, and an event synchronize before staging num_accepted_tokens.
+Why it's worth evolving: The method runs every non-empty legacy runner step on the TTFT/TPOT path. Coalescing H2D staging, removing Python request walks, and replacing the accepted-token sync contract can preserve positions, query_start_loc, slot_mapping, and request-state semantics covered by tests/v1/worker/test_gpu_model_runner.py::test_update_states_* and tests/v1/attention/test_attention_backends.py.
+Correctness oracle: pytest tests/v1/worker/test_gpu_model_runner.py, pytest tests/v1/attention/test_attention_backends.py
+Performance oracle: TTFT, TPOT
+
+## Research findings (4)
+1. [RFC]: Multi-Step Scheduling — issue — https://github.com/vllm-project/vllm/issues/6854
+   Technique: Adopt a worker-local multi-step decode loop that keeps sampled tokens on GPU, advances next-step input metadata with CUDA kernels, and delays scheduler/output synchronization until lookahead slots are exhausted. This directly targets median TPOT by amortizing per-token Python input prep, output materialization, and scheduler overhead across multiple decode iterations in agentic multi-turn traffic. | Evidence: "Quote: "Multi-step decoding will be able to amortize all these overheads over n-steps at a time." Quote: "Update inputs for the next step. We use Cuda kernels for faster updates because Torch is too slow." Pointer: Motivation and High level Algorithm, lines 166-174 and 213-220."
+2. [Performance]: Fully Async Spec-Decoding | Make `seq_lens_cpu` in CommonAttentionMetadata optional — issue — https://github.com/vllm-project/vllm/issues/29134
+   Technique: Make CPU sequence-length metadata optional and push spec-decode metadata consumers toward device-resident sequence lengths and upper bounds. This would remove host/device syncs that block overlapping next-step input preparation with current forward execution, especially when verifying multiple drafted tokens. | Evidence: "Quote: "Ultimately in-order to realize fully async spec decoding we need to build attention metadata without knowing `seq_lens_cpu` (using device `seq_lens` on device is fine...)." Pointer: Proposal to improve performance, lines 166-180."
+3. Model Runner V2 Design Document — docs — https://docs.vllm.ai/en/v0.17.0/design/model_runner_v2/
+   Technique: Decouple persistent request state from per-step input tensors, assign active requests stable rows, and gather per-step inputs from mostly GPU-resident state. This reduces request-churn bookkeeping and avoids tensor-wide reordering on the critical TTFT/TPOT path. | Evidence: "Quote: "MRV2 decouples persistent state tensors from per-step input tensors." Quote: "Large state tensors are mostly stored on GPU memory, so gather runs in parallel on the GPU with low overhead." Pointer: Persistent Batch / MRV2's Solution, lines 2360-2367."
+4. vLLM v0.6.0: 2.7x Throughput Improvement and 5x Latency Reduction — blog — https://vllm-project.github.io/2024/09/05/perf-update.html
+   Technique: Overlap output processing with the next model execution step instead of synchronously converting GPU tensors to Python lists and checking stop criteria after every token. The worker output path could further delay or batch materialization to reduce TPOT bubbles from token IDs, logprobs, NaN counts, and fault flags. | Evidence: "Quote: "we introduced asynchronous output processing, which overlaps the output processing with model execution." Quote: "vLLM now delays it, performing the processing of the `n`-th step output while executing the `n+1`-th step." Pointer: Asynchronous output processing section."
+
+## Existing proposals (5)
+← seeds/inspiration, the evolver may extend or discard
+- [proposal_from_finding_creator] Amortize _prepare_inputs via worker-local multi-step decode with on-GPU input advancement — The candidate's dominant per-step costs are exactly the ones the RFC identifies as amortizable: repeated small H2D copies via CpuGpuBuffer.copy_to_gpu, NumPy/Torch CPU passes to rebuild positions/query_start_loc/slot_mapping, a Python req_ids walk for num_tokens, and an event synchronize before staging num_accepted_tokens. The finding's core technique (keep tokens on GPU, advance next-step metadata with CUDA kernels, defer sync) maps directly onto these hotspots and targets median TPOT on the multi-turn agentic workload named in the caller context, where decode-heavy steps dominate. It does not merely restate the current approach: it replaces per-step CPU staging with on-device advancement and changes the accepted-token sync contract, which the candidate's evolve_rationale explicitly flags as in-scope. (from finding #1: [RFC]: Multi-Step Scheduling)
+- [proposal_from_finding_creator] Defer seq_lens host materialization in _prepare_inputs to enable async spec-decode overlap — The candidate explicitly calls out an event.synchronize() before staging num_accepted_tokens and repeated small H2D copies as the dominant per-step host costs on the TPOT path; the finding argues that removing the requirement to know seq_lens_cpu when building attention metadata is precisely what unblocks overlapping next-step input prep with the current forward, which is the same sync this candidate wants to remove. Making seq_lens_cpu optional in the metadata contract is the enabling change that lets _prepare_inputs skip the host-visible sequence-length materialization and the accepted-token sync, directly targeting the median TPOT in low-batch multi-turn agentic decode where the sync-per-step tax dominates. It is transferable rather than topically adjacent because the finding names the exact metadata field and consumer pattern (spec-decode verifying multiple drafted tokens) that this method assembles. (from finding #2: [Performance]: Fully Async Spec-Decoding | Make `seq_lens_cpu` in CommonAttentionMetadata optional)
+- [proposal_from_finding_creator] Adopt MRV2 persistent-state pattern: gather per-step inputs on GPU from GPU-resident state — The finding is vLLM's own MRV2 design document, which explicitly names the exact bottlenecks called out in the candidate's evolve_rationale: per-step host bookkeeping and tensor-wide reordering on the TTFT/TPOT path. The quoted claim that 'Large state tensors are mostly stored on GPU memory, so gather runs in parallel on the GPU with low overhead' directly targets the candidate's CPU-side positions/token_indices/index_select pipeline and the many small H2D copies. Stable row assignments (persistent batch) eliminate the async-mode prev_positions reordering, which is the specific reason the num_accepted_tokens D2H sync exists today. Because MRV2 is a vLLM design doc rather than an external technique, the mapping to this file is concrete and low-risk: state tensors already have a CpuGpuBuffer abstraction that can be repurposed to hold GPU-primary state. This especially helps the caller's stated multi-turn agentic workload, where low-batch decode makes the fixed per-step Python/H2D overhead dominant in median TPOT. (from finding #3: Model Runner V2 Design Document)
+- [proposal_from_finding_creator] Remove the per-step accepted-tokens sync from _prepare_inputs by deferring num_accepted_tokens materialization one step — The candidate explicitly lists 'an event synchronize before staging num_accepted_tokens' as a per-step host cost on the TTFT/TPOT path, and the finding's central technique is exactly this: eliminate a host-side synchronous checkpoint by overlapping it with the next step's model execution ('performing the processing of the n-th step output while executing the (n+1)-th step'). The gap addressed is the CPU bubble the sync introduces on every non-empty legacy step, which is disproportionately painful in the caller's stated low-batch multi-turn agentic decode workload where per-step CPU overhead dominates TPOT. The rest of the finding (delaying token-id/logprobs conversion) is not applicable to _prepare_inputs and is deliberately excluded from the proposal. (from finding #4: vLLM v0.6.0: 2.7x Throughput Improvement and 5x Latency Reduction)
+- [claude] Add a pure-decode fast path in _prepare_inputs that skips np.repeat, cumsum, and index_select when every request has num_scheduled_tokens==1 — The four listed deep_research_proposals all target orthogonal mechanisms: on-GPU input advancement across a multi-step window (#1), making seq_lens_cpu optional in the attention-metadata contract (#2), MRV2 GPU-resident persistent state with stable rows (#3), and deferring the num_accepted_tokens D2H sync one step (#4). None of them eliminate the per-step CPU work of `np.repeat`, `_get_cumsum_and_arange`, the flatten+index_select gather, the `query_start_loc` NumPy write, or the `num_tokens` Python list comprehension — they all leave that code executing on the critical path and instead attack surrounding sync/staging. The fast path proposed here is a localized branch that pays off immediately without changing state ownership, attention-metadata contracts, or step boundaries, and it composes with all four: it makes the boundary step of proposal #1 cheaper, it removes work that proposals #2/#4 leave intact, and it is a much smaller intervention than the state refactor in #3. (agent proposal, no source finding)
+
+
+## In-scope files — do not edit anything else
+- vllm/v1/worker/gpu_model_runner.py:2001-2323 — GPUModelRunner._prepare_inputs
+
+## Oracles
+Correctness oracle (recorded, NOT run here):
+  pytest tests/v1/worker/test_gpu_model_runner.py
+  pytest tests/v1/attention/test_attention_backends.py
+Performance oracle (recorded, NOT measured here): TTFT, TPOT
+
+## What to do
+1. Read the in-scope code, and any other file you need for context.
+2. Implement the change described above, editing ONLY the in-scope files.
+   Prefer the smallest faithful implementation of the proposal over a rewrite.
+3. Write `CHANGE-SUMMARY.md` in the working-directory root: what you
+   changed, why, which findings/proposals you drew on, and anything a reviewer
+   should check by hand.
+
+## Hard rules
+- Do not run tests. Do not run benchmarks. Do not try to build or install
+  anything. This worktree cannot execute them, and a fabricated result is
+  worse than none. The oracles above are recorded for whoever has the
+  hardware — they are not your task.
+- Do not commit, branch, stash, or otherwise run git write commands. The patch
+  is collected from your uncommitted working-tree changes.
+- Do not edit files outside the in-scope list.
+- If the change cannot be made faithfully within scope, make no edit and say
+  so in `CHANGE-SUMMARY.md`, with the reason. A missing patch is a fine
+  outcome; a patch that cannot be trusted is not.
