@@ -1,6 +1,6 @@
 # Changelog
 
-## v0 — first release (tag pending)
+## v0 — first release (v0.1.0)
 
 The first end-to-end version: point it at a repo and a goal, get a ranked, browsable map of the few places worth optimizing, each with evidence-backed proposals.
 
