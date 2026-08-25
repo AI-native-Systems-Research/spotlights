@@ -318,6 +318,7 @@ def test_render_index_lists_cards_with_html_hrefs():
 
 
 import filecmp
+import re
 import tempfile
 import zipfile as _zip
 
@@ -1286,6 +1287,107 @@ def test_render_index_shows_both_pills_with_apply_first():
     assert idx.index('class="apply-link"') < idx.index('class="evolve-link"')
     assert '<span class="badge apply">' in idx
     assert '<span class="badge evolve">evolve · 2</span>' in idx
+
+
+def _css_rule(selector):
+    """Return the declaration block for `selector` from the embedded stylesheet.
+
+    Matches the selector as a whole line-leading token so `.badge` does not also
+    pick up `.badge.apply`, and strips comments (which contain braces-free prose
+    but would otherwise pad the match).
+    """
+    body = re.sub(r"/\*.*?\*/", "", bb._CSS, flags=re.S)
+    m = re.search(r"(?m)^" + re.escape(selector) + r"\s*\{(.*?)\}", body, re.S)
+    assert m, f"no rule found for {selector}"
+    return " ".join(m.group(1).split())
+
+
+def test_no_badge_modifier_shares_a_name_with_a_block_rule():
+    # THE bug behind the misshapen apply badge. Every badge is `class="badge X"`,
+    # so a bare `.X { }` rule anywhere in the stylesheet also matches it — at equal
+    # specificity (0,1,0), and later in the sheet, so it WINS. `.apply` (the apply
+    # page's "Apply this patch" strip: padding 10px 14px, border-radius 8px) was
+    # therefore restyling `<span class="badge apply">` on the index: 10px of
+    # vertical padding where the other badges had .12em, and an 8px radius instead
+    # of the pill's 999px. Renaming the block to `.apply-strip` fixes it.
+    #
+    # Asserted over every modifier rather than just `apply`: the next badge colour
+    # someone adds is one bare rule away from the same silent override.
+    css = re.sub(r"/\*.*?\*/", "", bb._CSS, flags=re.S)
+    modifiers = {"apply", "evolve", "score", "impact-high"}
+    for mod in sorted(modifiers):
+        bare = re.findall(r"(?m)^\." + re.escape(mod) + r"(?=[\s,{])[^{]*", css)
+        assert not bare, f".{mod} is a badge modifier AND a block selector: {bare}"
+    # the modifier set above is the real one — a new badge class must join it
+    idx = bb.render_index(
+        {"title": "T"},
+        [{"rank": "1", "cand_id": "c", "module": "m", "symbol": "s", "impact": "high",
+          "score": "9", "rationale": "R", "html_href": "c.html",
+          "apply_stat": "1 file changed, +1/−1", "apply_badge_stat": "+1/−1",
+          "apply_href": "a.html", "evolve_count": 1, "evolve_engines": ["coral"],
+          "evolve_href": "e.html"}])
+    used = {c for m in re.finditer(r'class="badge ([^"]*)"', idx) for c in m.group(1).split()}
+    assert used <= modifiers, f"unchecked badge modifier(s): {used - modifiers}"
+
+
+def test_badges_row_keeps_every_badge_a_pill():
+    # Hardening around the fix above: the badges are flex items, so under the flex
+    # default (align-items:stretch) a badge shorter than a taller sibling inherits
+    # that height and its border-radius:999px turns it into a circle. Nothing
+    # produces a taller sibling today, but a squeezed badge whose text wrapped
+    # would — hence no-shrink and nowrap.
+    badges = _css_rule(".badges")
+    assert "align-items: center" in badges      # never stretch a rounded pill
+    assert "flex-shrink: 0" in badges           # never squeeze one narrower than its text
+    assert "white-space: nowrap" in _css_rule(".badge")   # so it cannot wrap to 2 lines
+    # .row1 must be free to move the whole group to its own line instead
+    assert "flex-wrap: wrap" in _css_rule(".card .row1")
+
+
+def test_apply_page_strip_uses_the_renamed_block_class():
+    fx = {"header": {"base": "abc123"}, "stat": bb.diffstat(SAMPLE_PATCH),
+          "patch_text": SAMPLE_PATCH, "notes_text": None, "patch_kb": 7.1}
+    out = bb.render_apply_page("cand-a-0001", "foo", fx, "foo__apply", "foo.html")
+    assert '<div class="apply-strip">' in out
+    assert '<div class="apply">' not in out
+    # the strip's own styling must have survived the rename
+    assert "border-radius:8px" in _css_rule(".apply-strip")
+    assert "Apply this patch" in out and "apply -3" in out
+
+
+def test_footer_pins_apply_left_and_evolve_right():
+    # Both arms are independently optional, so alignment cannot come from
+    # justify-content: space-between — that leaves a lone evolve pill on the left.
+    # An auto left margin on evolve holds the right edge in all three shapes.
+    assert "margin-left:auto" in _css_rule(".evolve-link").replace(" ", "")
+    assert "margin-left:auto" not in _css_rule(".apply-link").replace(" ", "")
+    assert "space-between" not in _css_rule(".card-foot")
+
+    header = {"title": "T", "objective": "O"}
+
+    def _row(**kw):
+        r = {"rank": "1", "cand_id": "cand-a-0001", "module": "m", "symbol": "foo",
+             "impact": "high", "score": "96", "rationale": "R",
+             "html_href": "c.html"}
+        r.update(kw)
+        return r
+
+    both = bb.render_index(header, [_row(
+        apply_stat="1 file changed, +69/−26", apply_badge_stat="+69/−26",
+        apply_href="a.html", evolve_count=2, evolve_engines=["coral", "nous"],
+        evolve_href="e.html")])
+    evolve_only = bb.render_index(header, [_row(
+        evolve_count=2, evolve_engines=["coral", "nous"], evolve_href="e.html")])
+    apply_only = bb.render_index(header, [_row(
+        apply_stat="1 file changed, +69/−26", apply_badge_stat="+69/−26",
+        apply_href="a.html")])
+
+    # apply always precedes evolve in source order, which is what puts it left
+    assert both.index('class="apply-link"') < both.index('class="evolve-link"')
+    # and the right-pinning class is the one used in the evolve-only card too —
+    # the case the old CSS got wrong, where the pill sat left with nothing beside it
+    assert 'class="evolve-link"' in evolve_only
+    assert 'class="apply-link"' in apply_only
 
 
 def test_render_index_apply_only_row_has_no_evolve_markup():

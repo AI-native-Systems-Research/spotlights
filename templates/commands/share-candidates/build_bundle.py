@@ -351,8 +351,15 @@ th { background: #f6f7f9; color: #3a4149; font-weight: 600; }
 .rank { font-weight: 700; color: #2b6cb0; }
 .sym { font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .mod { color: #5a6169; font-size: .9rem; }
-.badges { margin-left: auto; display: flex; gap: 8px; }
-.badge { font-size: .78rem; padding: .12em .6em; border-radius: 999px; background: #eef0f3; color: #3a4149; }
+/* align-items:center, not the flex default of stretch: a stretched .badge keeps
+   its border-radius:999px, so a badge shorter than a taller sibling renders as a
+   circle rather than a pill. flex-shrink:0 and .badge's nowrap keep any badge
+   from being squeezed until its text wraps and becomes that taller sibling;
+   .row1 wraps, so an overflowing row moves .badges to its own line instead. */
+.badges { margin-left: auto; display: flex; align-items: center; gap: 8px;
+  flex-wrap: wrap; flex-shrink: 0; }
+.badge { font-size: .78rem; padding: .12em .6em; border-radius: 999px; background: #eef0f3;
+  color: #3a4149; white-space: nowrap; }
 .badge.impact-high { background: #fde8e8; color: #9b1c1c; }
 .badge.score { background: #e6f4ea; color: #1e6b33; }
 .rationale { margin: .5rem 0 0; color: #3a4149; font-size: .95rem; }
@@ -362,7 +369,12 @@ th { background: #f6f7f9; color: #3a4149; font-weight: 600; }
 .card-main { display:block; text-decoration:none; color:inherit; }
 .card-foot { margin-top:.7rem; padding-top:.6rem; border-top:1px dashed #e2e5e9;
   display:flex; gap:8px; flex-wrap:wrap; }
-.evolve-link { display:inline-flex; align-items:center; gap:.45em;
+/* margin-left:auto, not justify-content:space-between on .card-foot: the two
+   arms are independently optional, and space-between would leave a lone evolve
+   pill sitting left. An auto margin pins evolve right whether or not an apply
+   pill shares the row — so a column of cards has apply flush left and evolve
+   flush right on every one of them. */
+.evolve-link { display:inline-flex; align-items:center; gap:.45em; margin-left:auto;
   font-size:.85rem; font-weight:600; color:#4c2a9b; background:#f1edfd;
   border:1px solid #d9cffb; border-radius:999px; padding:.32em .85em;
   text-decoration:none; }
@@ -410,24 +422,26 @@ th { background: #f6f7f9; color: #3a4149; font-weight: 600; }
   font-style:italic; font-size:.88rem; }
 /* --- one-shot apply --- */
 .badge.apply { background:#fdf0d5; color:#8a5a00; }
+/* No auto margin here, deliberately: apply is emitted first, so it is already
+   flush left, and .evolve-link's margin-left:auto is what pushes evolve right. */
 .apply-link { display:inline-flex; align-items:center; gap:.45em;
   font-size:.85rem; font-weight:600; color:#8a5a00; background:#fdf6e7;
   border:1px solid #f0dfb8; border-radius:999px; padding:.32em .85em;
   text-decoration:none; }
 .apply-link:hover { background:#fbeed2; border-color:#e6cf9c; }
 .apply-section { margin-top: 1.8rem; }
-.apply { background:#fbfbfc; border:1px solid #eef0f3; border-radius:8px;
+.apply-strip { background:#fbfbfc; border:1px solid #eef0f3; border-radius:8px;
   padding:10px 14px; margin:.2rem 0 1.2rem; }
-.apply h2 { margin:.1rem 0 .5rem; border:0; padding:0; font-size:1.05rem; }
-.apply pre { background:#1a1d21; color:#e6e6e6; border:0; border-radius:6px;
+.apply-strip h2 { margin:.1rem 0 .5rem; border:0; padding:0; font-size:1.05rem; }
+.apply-strip pre { background:#1a1d21; color:#e6e6e6; border:0; border-radius:6px;
   padding:.5em .7em; margin:.3rem 0; overflow-x:auto;
   font:.85em/1.5 ui-monospace,Menlo,Consolas,monospace; }
-.apply .note { font-size:.85rem; color:#5a6169; margin:.5rem 0 .1rem; }
-.apply .sha { font:.85em/1.4 ui-monospace,Menlo,Consolas,monospace;
+.apply-strip .note { font-size:.85rem; color:#5a6169; margin:.5rem 0 .1rem; }
+.apply-strip .sha { font:.85em/1.4 ui-monospace,Menlo,Consolas,monospace;
   background:#eef0f3; border-radius:4px; padding:.1em .35em; }
-.apply .dl { margin:.7rem 0 .2rem; font-size:.85rem; color:#8a5a00;
+.apply-strip .dl { margin:.7rem 0 .2rem; font-size:.85rem; color:#8a5a00;
   background:#fdf6e7; border:1px solid #f0dfb8; }
-.apply .dl:hover { background:#fbeed2; border-color:#e6cf9c; }
+.apply-strip .dl:hover { background:#fbeed2; border-color:#e6cf9c; }
 .diff { border:1px solid #e2e5e9; border-radius:8px; overflow:hidden;
   margin:.6rem 0 1.2rem; }
 .diff .file { background:#f6f7f9; border-bottom:1px solid #e2e5e9;
@@ -1060,7 +1074,7 @@ def render_apply_page(cand_id: str, symbol: str, fx: dict,
         f"git -C \"$REPO\" checkout {base or '<BASE_COMMIT>'}\n"
         f"git -C \"$REPO\" apply --check \"$PWD/{raw_reldir}/apply.patch\" \\\n"
         f"  && git -C \"$REPO\" apply \"$PWD/{raw_reldir}/apply.patch\"")
-    apply_parts = ['<div class="apply"><h2>Apply this patch</h2>']
+    apply_parts = ['<div class="apply-strip"><h2>Apply this patch</h2>']
     if base:
         apply_parts.append(
             f'<p class="note">Base commit <span class="sha">{html.escape(base)}</span>'
