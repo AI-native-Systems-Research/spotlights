@@ -35,17 +35,18 @@ def test_env_var_beats_bundled(tmp_path, monkeypatch):
     assert (cfg.claude, cfg.codex) == ("from-env", "also-env")
 
 
-def test_bundled_file_is_the_fallback(monkeypatch):
-    """With no env var, the shipped file is read — and ships codex pinned.
+def test_bundled_file_ships_blank_so_behaviour_is_unchanged(monkeypatch):
+    """The shipped file pins nothing.
 
-    `codex: gpt-5.5` in the bundled file preserves the default that was
-    hardcoded in `DiscoveryConfig` before this config existed.
+    Blank on both keys is what makes this feature a pure addition: no step
+    changes model, and the resume `config_fingerprint` of every existing run dir
+    still matches. Pinning `codex` here would silently move steps 3 and 5 off
+    `~/.codex/config.toml` and invalidate those run dirs.
     """
     monkeypatch.delenv(MODELS_ENV_VAR, raising=False)
 
     cfg = load_model_config()
-    assert cfg.codex == "gpt-5.5"
-    assert cfg.claude is None  # shipped blank: inherit the CLI's own default
+    assert cfg == ModelConfig(claude=None, codex=None)
 
 
 def test_missing_file_is_all_inherit(tmp_path, monkeypatch):

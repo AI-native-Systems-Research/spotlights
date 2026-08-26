@@ -56,11 +56,13 @@ class DiscoveryConfig(BaseModel):
     # Global model id passed to `claude --model`. None means "inherit the CLI's
     # own default"; see `spotlights_engine.model_config`.
     claude_model: str | None = None
-    # None means "inherit the CLI's own default" (no `-c model=...`), matching
-    # `claude_model` above. The bundled `models.yaml` supplies the value the
-    # engine used to hardcode here, so a default install is unchanged; blanking
-    # the file now genuinely inherits instead of silently re-pinning.
-    codex_model: str | None = Field(default=None, pattern=r"^[\w.\-/]+$")
+    # `None` means "inherit the CLI's own default" (no `-c model=...`). The
+    # default stays `gpt-5.5` rather than None: this value is part of the resume
+    # `config_fingerprint`, so changing it would invalidate every run dir created
+    # before `models.yaml` existed. A blank value in `models.yaml` therefore
+    # leaves step 2 on `gpt-5.5`; set an explicit id to change it everywhere.
+    # The pattern allows `[...]` for context-window variants (e.g. `x[1m]`).
+    codex_model: str | None = Field(default="gpt-5.5", pattern=r"^[\w.\-/\[\]]+$")
     codex_reasoning_effort: Literal["minimal", "low", "medium", "high", "xhigh"] = "high"
 
 

@@ -54,11 +54,10 @@ A run's model has to be something you choose, not something inherited from
 whoever's machine it ran on — otherwise the same command produces different
 results for different people.
 
-Out of the box the bundled `models.yaml` pins **Codex to `gpt-5.5`** (the id the
-engine used to hardcode for candidate discovery, now applied to every step) and
-leaves **Claude blank**, meaning it inherits `~/.claude/settings.json`. Claude is
-blank on purpose: its ids are gateway-specific aliases, so a shipped default
-would break anyone on a different gateway.
+The bundled `models.yaml` ships **blank**, so out of the box nothing changes:
+Claude inherits `~/.claude/settings.json`, Codex inherits `~/.codex/config.toml`,
+and every existing run dir still resumes. Model ids are gateway-specific aliases,
+so there is no default that would be right for everyone.
 
 Two ways to pin it. Both are global: one Claude model and one Codex model for
 every step of the pipeline.
@@ -82,6 +81,11 @@ Leave a value blank to inherit that CLI's own default. The whole file is
 optional — a missing file, a missing key, and a blank value all mean "inherit".
 To force inherit for one run even though the file pins something, pass the flag
 empty: `--codex-model ""`.
+
+One exception: candidate discovery (step 2) has a built-in Codex default of
+`gpt-5.5`, kept so run dirs created before this config existed still resume. A
+blank `codex` therefore leaves step 2 on `gpt-5.5` while steps 3 and 5 inherit
+your `config.toml`. Setting `codex` makes all three agree.
 
 Precedence, highest first:
 

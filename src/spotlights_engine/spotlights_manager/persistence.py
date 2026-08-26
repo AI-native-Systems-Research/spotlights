@@ -267,15 +267,31 @@ def _stable_hash(payload: Any) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+#: Model-selection fields that are omitted from the fingerprint when unset.
+#: These were added after run dirs existed in the wild; including a new key —
+#: even with a null value — changes the hash and makes every older run dir fail
+#: `--resume`. Omitting them while unset keeps a default config hashing exactly
+#: as it did before they existed, and a *set* value still invalidates resume,
+#: which is what the fingerprint is for. Same reasoning as the
+#: `enable_deep_research` omission in `build_input_fingerprint`.
+_OPTIONAL_MODEL_FIELDS = ("claude_model",)
+
+
 def hash_pydantic_excluding(model: BaseModel | None, *, exclude: set[str]) -> str:
     """Stable hash of a pydantic model with selected fields excluded.
 
     Used for `config_fingerprint` so that changing manager-owned path fields
     (`artifacts_dir`, `repo_path`) doesn't trigger a spurious resume mismatch.
+    Unset model-selection fields are excluded too; see `_OPTIONAL_MODEL_FIELDS`.
     """
     if model is None:
         return _stable_hash(None)
-    payload = model.model_dump(mode="json", exclude=exclude)
+    unset_models = {
+        field
+        for field in _OPTIONAL_MODEL_FIELDS
+        if getattr(model, field, None) is None
+    }
+    payload = model.model_dump(mode="json", exclude=exclude | unset_models)
     return _stable_hash(payload)
 
 

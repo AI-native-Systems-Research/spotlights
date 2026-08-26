@@ -36,6 +36,7 @@ from spotlights_engine.model_config import (
     MODELS_ENV_VAR,
     ModelConfig,
     load_model_config,
+    models_path,
 )
 from spotlights_engine.module_deep_research import (
     CodexExecOptions,
@@ -428,18 +429,27 @@ def _build_input(args: argparse.Namespace) -> SpotlightsManagerInput:
 _MODEL_ID_RE = re.compile(r"^[\w.\-/\[\]]+$")
 
 
-def _validate_model_id(flag: str, value: str) -> None:
+def _validate_model_id(source: str, value: str, *, from_flag: bool) -> None:
     """Reject a model id that would fail deeper in the stack.
 
     `DiscoveryConfig.codex_model` carries a pattern, so an id with a `:` in it
     used to blow up inside pydantic well after `--dry-run` had reported the run
-    as fine. Checking both flags here fails fast and identically.
+    as fine. Both flags and file values are checked here so they fail fast and
+    identically.
+
+    A flag error goes through argparse (usage text, exit 2). A file value raises
+    instead: printing argparse usage for a typo in `models.yaml` would point the
+    reader at the wrong thing, so the message names the file.
     """
-    if not _MODEL_ID_RE.match(value):
-        _build_argparser().error(
-            f"{flag}: {value!r} is not a valid model id (expected letters, "
-            "digits, and any of . - _ / [ ])"
-        )
+    if _MODEL_ID_RE.match(value):
+        return
+    detail = (
+        f"{value!r} is not a valid model id (expected letters, digits, and any "
+        "of . - _ / [ ])"
+    )
+    if from_flag:
+        _build_argparser().error(f"{source}: {detail}")
+    raise ValueError(f"{source}: {detail}")
 
 
 def _resolve_models(args: argparse.Namespace) -> tuple[str | None, str | None]:
@@ -466,10 +476,21 @@ def _resolve_models(args: argparse.Namespace) -> tuple[str | None, str | None]:
     else:
         codex = args.codex_model.strip() or None
 
+    file_path = models_path()
     if claude:
-        _validate_model_id("--claude-model", claude)
+        from_flag = args.claude_model is not None
+        _validate_model_id(
+            "--claude-model" if from_flag else f"{file_path} (claude)",
+            claude,
+            from_flag=from_flag,
+        )
     if codex:
-        _validate_model_id("--codex-model", codex)
+        from_flag = args.codex_model is not None
+        _validate_model_id(
+            "--codex-model" if from_flag else f"{file_path} (codex)",
+            codex,
+            from_flag=from_flag,
+        )
     return claude, codex
 
 

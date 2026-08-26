@@ -3,20 +3,25 @@
 # Leave a value blank to inherit that CLI's own default — `~/.claude/settings.json`
 # for claude, `~/.codex/config.toml` for codex.
 #
-# Shipped as-is: codex is pinned to the id the engine used to hardcode for
-# candidate discovery, so a default install keeps running Codex on gpt-5.5 —
-# now consistently, in every step rather than only step 2. claude is left blank
-# because its ids are gateway-specific aliases: pinning one here would break
-# anyone pointed at a different gateway. Set it to whatever yours exposes.
+# Ships blank on purpose. Blank means nothing changes: no step switches model,
+# and every existing run dir still resumes (these values are part of the resume
+# fingerprint). Pinning something here would be a silent change to whoever
+# upgrades. Model ids are also gateway-specific aliases, so a shipped default
+# would be wrong for anyone on a different gateway.
+#
+# Set a value to apply it to every step:
+#
+#     claude: aws/claude-opus-4-8
+#     codex: gpt-5.5
+#
+# One exception worth knowing: candidate discovery (step 2) has its own built-in
+# Codex default of gpt-5.5, kept for resume compatibility. Leaving `codex` blank
+# leaves step 2 on gpt-5.5 while steps 3 and 5 inherit ~/.codex/config.toml.
+# Setting `codex` here makes all three consistent.
 #
 # Override for a single run without editing this file:
 #
 #     spotlights-engine --claude-model aws/claude-opus-4-8 --codex-model gpt-5.5 ...
-#
-# Pass an empty value to force "inherit" for one run, even though codex is
-# pinned below:
-#
-#     spotlights-engine --codex-model "" ...
 #
 # Or keep your own copy anywhere and point `SPOTLIGHTS_MODELS_FILE` at it, which
 # is the sane option when the engine is installed as a tool and this file lives
@@ -26,4 +31,4 @@
 # came from.
 
 claude:            # e.g. aws/claude-opus-4-8, aws/claude-opus-5, opus, sonnet
-codex: gpt-5.5     # e.g. gpt-5.5
+codex:             # e.g. gpt-5.5 (step 2 already defaults to this)
