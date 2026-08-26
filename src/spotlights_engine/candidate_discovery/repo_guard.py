@@ -21,6 +21,11 @@ from spotlights_engine.candidate_discovery.errors import DiscoveryMutationError
 
 _EXCLUDE_DIRS = frozenset({".git", "__pycache__", ".venv"})
 
+# Finder/Spotlight write these into directories they touch, including while an
+# agent is mid-invocation. They are OS metadata, not target-repo content, so
+# their appearance must not read as a mutation.
+_EXCLUDE_FILES = frozenset({".DS_Store", ".localized"})
+
 
 @dataclass(frozen=True)
 class _GitSnapshot:
@@ -59,6 +64,9 @@ class RepoGuard:
         )
 
     def _git_status(self) -> bytes:
+        return _filter_status(self._git_status_raw())
+
+    def _git_status_raw(self) -> bytes:
         result = subprocess.run(
             [
                 "git",
@@ -80,6 +88,8 @@ class RepoGuard:
         for root, dirs, files in os.walk(self._repo_path):
             dirs[:] = [d for d in dirs if d not in _EXCLUDE_DIRS]
             for name in files:
+                if name in _EXCLUDE_FILES:
+                    continue
                 full = Path(root) / name
                 rel = full.relative_to(self._repo_path).as_posix()
                 try:
@@ -103,6 +113,37 @@ class RepoGuard:
             return {"before_bytes": before.decode("utf-8", "replace"),
                     "after_bytes": after.decode("utf-8", "replace")}
         return _manifest_diff(before, after)
+
+
+def _filter_status(raw: bytes) -> bytes:
+    """Drop `_EXCLUDE_FILES` entries from `git status --porcelain=v1 -z` output.
+
+    The manifest snapshot skips OS metadata by name, but in git mode the status
+    bytes are part of the snapshot too, so an untracked `.DS_Store` appearing
+    mid-invocation would still read as a mutation. Records are NUL-terminated
+    `XY <path>`; rename/copy records are followed by a second NUL-terminated
+    origin path, which is dropped with its record.
+    """
+    fields = raw.split(b"\x00")
+    kept: list[bytes] = []
+    i = 0
+    while i < len(fields):
+        record = fields[i]
+        if not record:
+            i += 1
+            continue
+        # "XY " prefix, then the path.
+        code, _, path = record[:2], record[2:3], record[3:]
+        has_origin = b"R" in code or b"C" in code
+        excluded = Path(path.decode("utf-8", "replace")).name in _EXCLUDE_FILES
+        if not excluded:
+            kept.append(record)
+            if has_origin and i + 1 < len(fields):
+                kept.append(fields[i + 1])
+        i += 2 if has_origin else 1
+    if not kept:
+        return b""
+    return b"\x00".join(kept) + b"\x00"
 
 
 def _manifest_diff(
