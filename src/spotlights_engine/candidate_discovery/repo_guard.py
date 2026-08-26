@@ -21,11 +21,16 @@ from spotlights_engine.candidate_discovery.errors import DiscoveryMutationError
 
 _EXCLUDE_DIRS = frozenset({".git", "__pycache__", ".venv"})
 
+# Finder/Spotlight write these into directories they touch, including while an
+# agent is mid-invocation. They are OS metadata, not target-repo content, so
+# their appearance must not read as a mutation.
+_EXCLUDE_FILES = frozenset({".DS_Store", ".localized"})
+
 
 @dataclass(frozen=True)
 class _GitSnapshot:
     status: bytes
-    manifest: dict[str, tuple[int, int, str]]
+    manifest: dict[str, tuple[int, str]]
 
 
 class RepoGuard:
@@ -59,6 +64,9 @@ class RepoGuard:
         )
 
     def _git_status(self) -> bytes:
+        return _filter_status(self._git_status_raw())
+
+    def _git_status_raw(self) -> bytes:
         result = subprocess.run(
             [
                 "git",
@@ -75,19 +83,21 @@ class RepoGuard:
         )
         return result.stdout
 
-    def _manifest_snapshot(self) -> dict[str, tuple[int, int, str]]:
-        manifest: dict[str, tuple[int, int, str]] = {}
+    def _manifest_snapshot(self) -> dict[str, tuple[int, str]]:
+        manifest: dict[str, tuple[int, str]] = {}
         for root, dirs, files in os.walk(self._repo_path):
             dirs[:] = [d for d in dirs if d not in _EXCLUDE_DIRS]
             for name in files:
+                if name in _EXCLUDE_FILES:
+                    continue
                 full = Path(root) / name
                 rel = full.relative_to(self._repo_path).as_posix()
                 try:
                     st = full.lstat()
                 except OSError:
-                    manifest[rel] = (0, 0, "missing")
+                    manifest[rel] = (0, "missing")
                     continue
-                manifest[rel] = (st.st_mtime_ns, st.st_size, _xattr_digest(full))
+                manifest[rel] = (st.st_size, _content_digest(full))
         return manifest
 
     def _diff(self, before, after):
@@ -105,9 +115,40 @@ class RepoGuard:
         return _manifest_diff(before, after)
 
 
+def _filter_status(raw: bytes) -> bytes:
+    """Drop `_EXCLUDE_FILES` entries from `git status --porcelain=v1 -z` output.
+
+    The manifest snapshot skips OS metadata by name, but in git mode the status
+    bytes are part of the snapshot too, so an untracked `.DS_Store` appearing
+    mid-invocation would still read as a mutation. Records are NUL-terminated
+    `XY <path>`; rename/copy records are followed by a second NUL-terminated
+    origin path, which is dropped with its record.
+    """
+    fields = raw.split(b"\x00")
+    kept: list[bytes] = []
+    i = 0
+    while i < len(fields):
+        record = fields[i]
+        if not record:
+            i += 1
+            continue
+        # "XY " prefix, then the path.
+        code, _, path = record[:2], record[2:3], record[3:]
+        has_origin = b"R" in code or b"C" in code
+        excluded = Path(path.decode("utf-8", "replace")).name in _EXCLUDE_FILES
+        if not excluded:
+            kept.append(record)
+            if has_origin and i + 1 < len(fields):
+                kept.append(fields[i + 1])
+        i += 2 if has_origin else 1
+    if not kept:
+        return b""
+    return b"\x00".join(kept) + b"\x00"
+
+
 def _manifest_diff(
-    before: dict[str, tuple[int, int, str]],
-    after: dict[str, tuple[int, int, str]],
+    before: dict[str, tuple[int, str]],
+    after: dict[str, tuple[int, str]],
 ) -> dict[str, list[str]]:
     before_keys = set(before)
     after_keys = set(after)
@@ -117,25 +158,24 @@ def _manifest_diff(
     return {"added": added, "removed": removed, "changed": changed}
 
 
-def _xattr_digest(path: Path) -> str:
-    if not hasattr(os, "listxattr"):
-        return "no-xattr-api"
-    try:
-        names = sorted(os.listxattr(path, follow_symlinks=False))
-    except OSError:
-        return "xattr-unavailable"
-    if not names:
-        return "no-xattrs"
+def _content_digest(path: Path) -> str:
+    """SHA-256 of the file's contents. Detects real mutation (write) while
+    ignoring macOS metadata / mtime / xattr churn from Spotlight, Time Machine,
+    Finder, etc., which repeatedly touch files during agent runs. Symlinks
+    hash their target-path bytes so link redirects still register as changes.
+    """
     hasher = hashlib.sha256()
-    for name in names:
-        try:
-            value = os.getxattr(path, name, follow_symlinks=False)
-        except OSError:
-            value = b""
-        hasher.update(name.encode("utf-8"))
-        hasher.update(b"\x00")
-        hasher.update(value)
-        hasher.update(b"\x00")
+    try:
+        if path.is_symlink():
+            target = os.readlink(path).encode("utf-8", "replace")
+            hasher.update(b"symlink:")
+            hasher.update(target)
+            return hasher.hexdigest()
+        with path.open("rb") as f:
+            for chunk in iter(lambda: f.read(65536), b""):
+                hasher.update(chunk)
+    except OSError:
+        return "unreadable"
     return hasher.hexdigest()
 
 
