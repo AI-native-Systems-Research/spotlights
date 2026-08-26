@@ -338,8 +338,10 @@ def _write_artifacts(
     `ArtifactWriteError`, which the batch loop already knows how to record as
     a per-candidate skip. Left bare, it would propagate past that loop's
     handler and abandon every candidate still queued. The cleanup covers the
-    three artifacts written all-or-nothing; `manifest.json` has its own guard
-    below and never triggers it.
+    three artifacts written all-or-nothing plus any `manifest.json` a *previous*
+    apply of this candidate left here — reruns share the directory, and a stale
+    manifest surviving alone would be the unreadable state above. This run's
+    manifest is written after the handler, so the handler can never reach it.
     """
     patch_produced = bool(patch.strip())
     out_of_scope = out_of_scope_files(spec, manifest) if patch_produced else []
@@ -409,10 +411,14 @@ def _write_artifacts(
         # that says which commit the patch belongs to, and this directory is
         # also where a *previous* run's artifacts sit. Leaving last run's notes
         # next to no patch is a directory that documents a patch which is not
-        # there. Remove all three, so the failure reads as "nothing here" — the
+        # there. Remove all four, so the failure reads as "nothing here" — the
         # same invariant the empty-patch branch above maintains. `apply.prompt.txt`
         # goes too: on its own it would document an apply that produced nothing.
-        for name in (PATCH_NAME, PROMPT_NAME, NOTES_NAME):
+        # `manifest.json` is in the tuple for the stale case only: this run's is
+        # written after this handler and so is unreachable from here, but a
+        # previous run's would otherwise survive alone — accounting for a patch
+        # that is not there, the one state this handler exists to prevent.
+        for name in (PATCH_NAME, PROMPT_NAME, NOTES_NAME, MANIFEST_NAME):
             with contextlib.suppress(OSError):
                 (out_dir / name).unlink(missing_ok=True)
         raise ArtifactWriteError(

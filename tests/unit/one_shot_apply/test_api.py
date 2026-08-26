@@ -715,11 +715,49 @@ def test_a_notes_write_that_fails_partway_leaves_neither_artifact_behind(
     # own it documents an apply that left nothing else behind.
     assert not (out_dir / "apply.patch").exists()
     assert not (out_dir / "apply.prompt.txt").exists()
-    # The notes write fails *before* the manifest write, which now sits under
-    # its own guard after this handler — so the manifest was never reached, let
-    # alone created. Absent for a different reason than the three above, and
-    # still absent.
+    # The notes write fails *before* the manifest write, which sits under its
+    # own guard after this handler — so this run's manifest was never reached,
+    # let alone created. Absent for a different reason than the three above, and
+    # still absent. The stale case is the next test.
     assert not (out_dir / "manifest.json").exists()
+
+
+def test_a_failed_write_also_clears_a_previous_runs_manifest(
+    run, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reruns share the directory, so "nothing here" has to mean all four names.
+
+    This run's `manifest.json` is written after the cleanup handler and is
+    unreachable from it — but a *previous* apply of this candidate left one in
+    the same directory. If the handler skipped that name, a failed rerun would
+    leave last run's accounting sitting alone beside no patch and no notes:
+    accounting for a patch that is not there, which is the one state the
+    handler exists to prevent.
+    """
+    run_dir, repo = run
+    out_dir = run_dir / "apply" / "v1_attention" / CAND_ID
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "manifest.json").write_text('{"stale": true}\n', encoding="utf-8")
+
+    real_write_text = Path.write_text
+
+    def _fail_the_notes(self: Path, data: str, *args: object, **kwargs: object) -> int:
+        if self.name != "APPLY-NOTES.md":
+            return real_write_text(self, data, *args, **kwargs)  # type: ignore[arg-type]
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(Path, "write_text", _fail_the_notes)
+
+    with pytest.raises(ArtifactWriteError):
+        one_shot_apply(
+            OneShotApplyInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+            claude_runner=_runner(),
+        )
+
+    assert not (out_dir / "manifest.json").exists()
+    assert not (out_dir / "apply.patch").exists()
+    assert not (out_dir / "APPLY-NOTES.md").exists()
+    assert not (out_dir / "apply.prompt.txt").exists()
 
 
 def test_a_manifest_write_that_fails_leaves_the_patch_and_its_notes_behind(
