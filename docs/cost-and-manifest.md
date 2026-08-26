@@ -27,9 +27,10 @@ answer "what actually ran". See [Choosing models](agent-cli-setup.md#choosing-mo
 ## `apply` reports its own cost, separately
 
 `spotlights-engine apply` does not appear in `run_manifest.json`. Each applied
-candidate gets its own `manifest.json` beside its `apply.patch`, with the same
-`cost` / `external_cost` / `models_used` / `timing` blocks and the same rate
-tables.
+candidate gets its own `manifest.json` beside its `apply.patch`, priced from the
+same rate tables and carrying the same `cost` / `external_cost` / `models_used`
+/ `timing` shape wherever the two describe the same thing — apply's `timing` has
+no `accumulated_duration_s`, which is a sum over a parallel run's modules.
 
 This is deliberate, and it is the answer when a run's recorded cost is lower
 than the bill: apply runs *after* the run, against a repo state the run never

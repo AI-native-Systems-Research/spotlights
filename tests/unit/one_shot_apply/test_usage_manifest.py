@@ -8,6 +8,7 @@ test (see the rate-table failure case).
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -43,15 +44,17 @@ USAGE = AgentUsage(
 )
 
 
-def _build(**overrides):
-    kwargs = dict(
+def _build(**overrides: object) -> ApplyUsageManifest:
+    """Build a manifest with every table injected; `rates=None, external_rates=None`
+    switches one call over to the real loaders."""
+    kwargs: dict[str, object] = dict(
         candidate_id="cand-pkg_a-0001",
         module_qualified_name="pkg/a",
         date="2026-08-26T12:00:00+00:00",
         objective="reduce end-to-end page latency",
         target_commit_sha="641b9806",
         repo_url="git@github.com:example/repo.git",
-        spotlights_commit_sha="e1c787c9",
+        spotlights_sha="e1c787c9",
         usage=USAGE,
         duration_s=99.0,
         agent_error=None,
@@ -59,7 +62,7 @@ def _build(**overrides):
         external_rates=EXTERNAL_RATES,
     )
     kwargs.update(overrides)
-    return build_apply_usage_manifest(**kwargs)
+    return build_apply_usage_manifest(**kwargs)  # type: ignore[arg-type]
 
 
 def test_the_filename_is_unqualified_because_the_directory_qualifies_it() -> None:
@@ -180,13 +183,15 @@ def test_an_unresolved_model_falls_back_to_the_cli_family_rather_than_inventing_
     assert "unpriced models excluded from cost: anthropic:claude" in m.notes
 
 
-def test_unloadable_rate_tables_zero_the_cost_instead_of_raising(
-    tmp_path, monkeypatch
+def test_an_unloadable_contracted_rate_table_zeroes_only_that_cost(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """A pricing problem must not turn a successful 25-minute apply into a skip.
 
-    This is the one test that exercises the loader path (the others inject
-    tables), so it is what pins the `(OSError, ValueError)` guard.
+    One of the three tests that exercise the loader path (the others inject
+    tables), so it is what pins the contracted half of the `(OSError,
+    ValueError)` guard. The external table loads normally here and its figure
+    survives: each table is guarded on its own.
     """
     from spotlights_engine.costing.rates import RATES_ENV_VAR
 
@@ -194,23 +199,15 @@ def test_unloadable_rate_tables_zero_the_cost_instead_of_raising(
     bad.write_text("{not json at all", encoding="utf-8")
     monkeypatch.setenv(RATES_ENV_VAR, str(bad))
 
-    m = build_apply_usage_manifest(
-        candidate_id="cand-pkg_a-0001",
-        module_qualified_name="pkg/a",
-        date="2026-08-26T12:00:00+00:00",
-        objective="reduce latency",
-        target_commit_sha="641b9806",
-        repo_url="git@github.com:example/repo.git",
-        spotlights_commit_sha="e1c787c9",
-        usage=USAGE,
-        duration_s=99.0,
-        agent_error=None,
-    )
+    m = _build(rates=None, external_rates=None)
 
     assert m.cost.amount_usd == 0.0
+    assert "cost unavailable: could not load the contracted rate table:" in m.notes
+    # `external_cost` is priced from its own table, which loaded fine — the
+    # bundled amount is that table's business, not this test's.
     assert m.external_cost is not None
-    assert m.external_cost.amount_usd == 0.0
-    assert "cost unavailable: could not load the rate tables:" in m.notes
+    assert m.external_cost.amount_usd > 0.0
+    assert "external cost unavailable" not in m.notes
     # The rest of the manifest is intact — this is a pricing failure, not a
     # manifest failure.
     assert m.total_tokens == 37000
@@ -218,11 +215,54 @@ def test_unloadable_rate_tables_zero_the_cost_instead_of_raising(
     assert m.target.commit_sha == "641b9806"
 
 
+def test_an_unloadable_external_rate_table_leaves_the_billed_cost_intact(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`external_cost` is list price, audit-only, behind its own env var; `cost`
+    is the figure actually billed. Under one shared guard a broken external
+    table discarded a contracted figure that had already priced cleanly, which
+    is the regression this test exists to hold shut."""
+    from spotlights_engine.costing.rates import EXTERNAL_RATES_ENV_VAR
+
+    bad = tmp_path / "broken-external-rates.json"
+    bad.write_text("{not json at all", encoding="utf-8")
+    monkeypatch.setenv(EXTERNAL_RATES_ENV_VAR, str(bad))
+
+    m = _build(rates=None, external_rates=None)
+
+    assert m.cost.amount_usd > 0.0
+    assert m.cost.priced_token_share == 1.0
+    assert m.external_cost is not None
+    assert m.external_cost.amount_usd == 0.0
+    assert (
+        "external cost unavailable: could not load the public API rate table:" in m.notes
+    )
+    assert "cost unavailable: could not load the contracted rate table" not in m.notes
+
+
+def test_a_rate_table_path_that_does_not_exist_is_the_oserror_half_of_the_guard(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Malformed JSON covers the `ValueError` half; an env var pointing at a file
+    that was moved or deleted is the `OSError` half, which nothing else in the
+    suite reaches — narrowing the guard to `ValueError` would fail no test."""
+    from spotlights_engine.costing.rates import RATES_ENV_VAR
+
+    monkeypatch.setenv(RATES_ENV_VAR, str(tmp_path / "no-such-rates.json"))
+
+    m = _build(rates=None, external_rates=None)
+
+    assert m.cost.amount_usd == 0.0
+    assert "cost unavailable: could not load the contracted rate table:" in m.notes
+    assert m.external_cost is not None
+    assert m.external_cost.amount_usd > 0.0
+
+
 def test_missing_provenance_is_noted_but_never_fatal() -> None:
     """`resolve_repo_url` and `spotlights_commit_sha` degrade to "" rather than
     raising — a wheel install has no engine checkout, and a repo may have no
     origin remote. Both are worth saying out loud."""
-    m = _build(repo_url="", spotlights_commit_sha="")
+    m = _build(repo_url="", spotlights_sha="")
 
     assert m.target.repo_url == ""
     assert m.spotlights.commit_sha == ""
@@ -237,9 +277,25 @@ def test_notes_join_every_applicable_reason_like_the_run_manifest_does() -> None
         usage=None,
         agent_error="claude timed out after 1800.0s",
         repo_url="",
-        spotlights_commit_sha="",
+        spotlights_sha="",
     )
     assert m.notes == (
         "no usage records found: claude timed out after 1800.0s; "
         "target repo URL unavailable; Spotlights commit unavailable"
     )
+
+
+def test_the_committed_example_manifests_still_validate_against_the_model() -> None:
+    """The examples are documentation a reader trusts, and nothing else parses them.
+
+    `extra="forbid"` makes one `model_validate_json` catch both halves of the
+    drift: a field renamed in the model and a key left behind in the example.
+    The count is a floor, not an equality — more examples are welcome. Resolved
+    from `__file__` rather than the cwd, which pytest does not pin.
+    """
+    repo_root = Path(__file__).resolve().parents[3]
+    examples = sorted(repo_root.glob("examples/*/apply/*/*/manifest.json"))
+
+    assert len(examples) >= 2, f"no example manifests found under {repo_root}/examples"
+    for path in examples:
+        ApplyUsageManifest.model_validate_json(path.read_text(encoding="utf-8"))

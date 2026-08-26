@@ -622,6 +622,10 @@ def read_usage_records(
     Returns `(records, notes)`: `*.tmp` leftovers from interrupted atomic
     writes and unparseable files are skipped and reported as notes instead of
     failing the aggregation.
+
+    With no `step`, this reads the four *run* steps only and deliberately
+    excludes post-run steps such as `one_shot_apply`, whose spend must never
+    land in a run's totals (see the comment on the tuple below).
     """
     # Enumerated, NOT derived from `UsageStep` — deliberately. `UsageStep` also
     # carries "one_shot_apply", which must never be aggregated into a run:

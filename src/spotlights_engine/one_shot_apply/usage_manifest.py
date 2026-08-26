@@ -101,7 +101,7 @@ def build_apply_usage_manifest(
     objective: str,
     target_commit_sha: str,
     repo_url: str,
-    spotlights_commit_sha: str,
+    spotlights_sha: str,
     usage: AgentUsage | None,
     duration_s: float,
     agent_error: str | None,
@@ -160,19 +160,45 @@ def build_apply_usage_manifest(
 
     # Accounting must never cost a patch. A missing table (`OSError`), malformed
     # JSON (`JSONDecodeError`), or a bad rate row (pydantic `ValidationError`)
-    # — the latter two both `ValueError` subclasses — zero the cost blocks
-    # instead of turning a successful 25-minute apply into a skip.
-    try:
-        contracted = compute_cost(records, load_rates() if rates is None else rates)
-        external = compute_cost(
-            records,
-            load_external_rates() if external_rates is None else external_rates,
-            source="public-api-rate-table",
-        )
-    except (OSError, ValueError) as exc:
-        notes.append(f"cost unavailable: could not load the rate tables: {exc}")
-        contracted = compute_cost([], {})
-        external = compute_cost([], {}, source="public-api-rate-table")
+    # — the latter two both `ValueError` subclasses — zero a cost block instead
+    # of turning a successful 25-minute apply into a skip.
+    #
+    # One guard per table, because the two are not worth the same: `cost` comes
+    # from the contracted table and is the figure actually billed, while
+    # `external_cost` is list-price audit only, behind its own env var. A
+    # shared guard let an unloadable external table discard a contracted figure
+    # that had already priced cleanly.
+    #
+    # `compute_cost` runs outside both guards on purpose: it raises nothing a
+    # load failure would explain, so catching it here would report a pricing
+    # bug as "could not load the rate table" and point a debugger at the wrong
+    # file. On a failed load the records are zeroed along with the table — the
+    # cost is unknown, not partial, so `unpriced_models` must not fill up with
+    # models whose rates were never consulted.
+    contracted_records, contracted_table = records, rates
+    if contracted_table is None:
+        try:
+            contracted_table = load_rates()
+        except (OSError, ValueError) as exc:
+            notes.append(
+                f"cost unavailable: could not load the contracted rate table: {exc}"
+            )
+            contracted_records, contracted_table = [], {}
+
+    external_records, external_table = records, external_rates
+    if external_table is None:
+        try:
+            external_table = load_external_rates()
+        except (OSError, ValueError) as exc:
+            notes.append(
+                f"external cost unavailable: could not load the public API rate table: {exc}"
+            )
+            external_records, external_table = [], {}
+
+    contracted = compute_cost(contracted_records, contracted_table)
+    external = compute_cost(
+        external_records, external_table, source="public-api-rate-table"
+    )
 
     if contracted.unpriced_models:
         notes.append(
@@ -187,7 +213,7 @@ def build_apply_usage_manifest(
     # failed the run if HEAD could not be resolved, so it is always populated.
     if not repo_url:
         notes.append("target repo URL unavailable")
-    if not spotlights_commit_sha:
+    if not spotlights_sha:
         notes.append("Spotlights commit unavailable")
 
     return ApplyUsageManifest(
@@ -201,13 +227,14 @@ def build_apply_usage_manifest(
             # renders "goal (direction: minimize)".
             objective=objective,
         ),
-        spotlights=ApplySpotlights(commit_sha=spotlights_commit_sha),
+        spotlights=ApplySpotlights(commit_sha=spotlights_sha),
         models_used=aggregate_models_used(records),
         total_tokens=sum(record.total_tokens for record in records),
         cost=cost_block(contracted),
-        # Always populated — apply has no path that prices one table and not the
-        # other. The type stays nullable for shape-parity with `RunManifest`, so
-        # a consumer written against one file's cost blocks reads the other's.
+        # Populated on every path — zeroed, with a note, when its own table
+        # could not be loaded, never dropped. The type stays nullable for
+        # shape-parity with `RunManifest`, so a consumer written against one
+        # file's cost blocks reads the other's.
         external_cost=cost_block(external),
         timing=ApplyTiming(
             wall_clock_s=duration_s,

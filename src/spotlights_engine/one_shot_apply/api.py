@@ -306,7 +306,7 @@ def _write_artifacts(
     collect_error: str | None = None,
     usage_manifest: ApplyUsageManifest,
 ) -> tuple[list[str], bool, list[str]]:
-    """Write `apply.patch` (when non-empty), `apply.prompt.txt`, and `APPLY-NOTES.md`.
+    """Write `apply.patch` (when non-empty), `APPLY-NOTES.md`, `apply.prompt.txt`, `manifest.json`.
 
     Returns `(files, produced, out_of_scope)` — `out_of_scope` is computed
     once here, from `manifest` against `spec.targets`, and threaded both into
@@ -323,18 +323,23 @@ def _write_artifacts(
     outcome is "no edit" or "the diff failed" and the notes alone cannot say
     whether the instruction or the agent was at fault.
 
-    `manifest.json` is written last and unconditionally. Last because a SIGKILL
-    between writes must land on a state a reader reads correctly, and "patch +
-    notes + prompt, no manifest" is exactly what every apply directory looked
-    like before this file existed. Manifest-first would create the one state
-    that is not readable: accounting for a patch that is not there.
-    Unconditionally because a session that errored, produced no edit, or whose
-    diff failed still spent tokens, and that is when someone asks what it cost.
+    `manifest.json` is written last, unconditionally, and under its own guard.
+    Last because a SIGKILL between writes must land on a state a reader reads
+    correctly, and "patch + notes + prompt, no manifest" is exactly what every
+    apply directory looked like before this file existed. Manifest-first would
+    create the one state that is not readable: accounting for a patch that is
+    not there. Unconditionally because a session that errored, produced no
+    edit, or whose diff failed still spent tokens, and that is when someone
+    asks what it cost. Under its own guard because the patch is unrecoverable
+    once the worktree is gone: a failure to write the accounting must cost the
+    accounting only, never the patch.
 
     Every filesystem write is wrapped: an `OSError` becomes an
     `ArtifactWriteError`, which the batch loop already knows how to record as
     a per-candidate skip. Left bare, it would propagate past that loop's
-    handler and abandon every candidate still queued.
+    handler and abandon every candidate still queued. The cleanup covers the
+    three artifacts written all-or-nothing; `manifest.json` has its own guard
+    below and never triggers it.
     """
     patch_produced = bool(patch.strip())
     out_of_scope = out_of_scope_files(spec, manifest) if patch_produced else []
@@ -392,18 +397,6 @@ def _write_artifacts(
 
         (out_dir / PROMPT_NAME).write_text(render_prompt_block(preview), encoding="utf-8")
         files.append(PROMPT_NAME)
-
-        # `sort_keys=True`, matching how `run_manifest.json` is written
-        # (`persistence.py:89`): stable key order keeps a re-run's diff to the
-        # values that actually changed. Plain `write_text`, not the atomic
-        # helper, so this file behaves like the three beside it and is covered
-        # by the same cleanup below.
-        (out_dir / MANIFEST_NAME).write_text(
-            json.dumps(usage_manifest.model_dump(mode="json"), indent=2, sort_keys=True)
-            + "\n",
-            encoding="utf-8",
-        )
-        files.append(MANIFEST_NAME)
     except OSError as exc:
         # Neither `write_bytes` nor `write_text` is atomic: an `ENOSPC` partway
         # through a multi-MB patch leaves a truncated `apply.patch` on disk, and
@@ -419,12 +412,38 @@ def _write_artifacts(
         # there. Remove all three, so the failure reads as "nothing here" — the
         # same invariant the empty-patch branch above maintains. `apply.prompt.txt`
         # goes too: on its own it would document an apply that produced nothing.
-        for name in (PATCH_NAME, PROMPT_NAME, NOTES_NAME, MANIFEST_NAME):
+        for name in (PATCH_NAME, PROMPT_NAME, NOTES_NAME):
             with contextlib.suppress(OSError):
                 (out_dir / name).unlink(missing_ok=True)
         raise ArtifactWriteError(
             f"could not write apply artifacts for {sel.candidate.id} to {out_dir}: {exc}"
         ) from exc
+
+    # Accounting must never be the reason a patch write fails. The patch is
+    # unrecoverable — the worktree is already gone — while a directory holding
+    # patch + notes + prompt and no manifest is exactly what every apply
+    # directory looked like before this file existed, so a reader reads it
+    # correctly. Hence its own guard, outside the all-or-nothing write above:
+    # this failure costs the accounting and nothing else. `ValueError` is here
+    # for the serialization, not the write — `model_dump`/`json.dumps` are
+    # inside the guard and are not `OSError` sources.
+    #
+    # `sort_keys=True`, matching how `run_manifest.json` is written
+    # (`persistence.py:89`): stable key order keeps a re-run's diff to the
+    # values that actually changed.
+    try:
+        (out_dir / MANIFEST_NAME).write_text(
+            json.dumps(usage_manifest.model_dump(mode="json"), indent=2, sort_keys=True)
+            + "\n",
+            encoding="utf-8",
+        )
+        files.append(MANIFEST_NAME)
+    except (OSError, ValueError):
+        # A half-written manifest is worse than none: it parses as JSON or it
+        # does not, and a truncated one that happens to parse under-reports the
+        # spend. Remove it and leave the three artifacts that matter.
+        with contextlib.suppress(OSError):
+            (out_dir / MANIFEST_NAME).unlink(missing_ok=True)
 
     return sorted(files), patch_produced, out_of_scope
 
@@ -517,7 +536,7 @@ def _process_candidate(
         objective=spec.objective.goal,
         target_commit_sha=base_sha,
         repo_url=repo_url,
-        spotlights_commit_sha=spotlights_sha,
+        spotlights_sha=spotlights_sha,
         usage=run.usage,
         duration_s=run.duration_s,
         agent_error=run.error,
@@ -585,6 +604,12 @@ def one_shot_apply(
     # not shell out to git 40 extra times for two values that cannot change
     # mid-sweep. Both degrade to "" rather than raising — a repo may have no
     # origin remote, and a wheel install has no engine checkout.
+    #
+    # `repo_url` is re-derived from this checkout's `origin`, not read from the
+    # originating run's `provenance.repo_url`, so the two can disagree if
+    # `origin` was retargeted since the run. Harmless while apply has no
+    # `--repo-url`: the URL describes the checkout the patch was produced
+    # against, which is the checkout in hand.
     repo_url = resolve_repo_url(repo_path)
     spotlights_sha = spotlights_commit_sha()
 

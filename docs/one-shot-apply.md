@@ -144,8 +144,9 @@ apply.patch` works without git, run from the repo root instead.
 What this candidate's apply cost. One `claude -p` session runs per candidate,
 so this file accounts for 100% of the model spend behind the directory.
 
-- `models_used` / `total_tokens` — the four disjoint token buckets (input,
-  output, cache read, cache create).
+- `models_used` — the four disjoint token buckets (input, output, cache read,
+  cache create), grouped per model.
+- `total_tokens` — their sum, across every group.
 - `cost` — priced through the contracted rate table. `external_cost` — the
   same tokens at public list price, which is the figure to quote externally.
   When `priced_token_share` is below 1.0 the dollar amount is partial and
@@ -169,10 +170,13 @@ the CLI's exit handshake after the work is already done — so the file is
 written with `models_used: []`, zeroed costs, a real `wall_clock_s`, and the
 reason in `notes`. Nothing changes name or disappears.
 
-Summing a sweep:
+Summing a sweep, plus the companion line that says which manifests are
+degraded — each of those contributes `0.0` to the sum and nothing in the sum
+itself says so:
 
 ````bash
 jq -s 'map(.cost.amount_usd) | add' apply/*/*/manifest.json
+jq -r 'select(.notes != "") | "\(.candidate_id): \(.notes)"' apply/*/*/manifest.json
 ````
 
 The interactive `/spotlights-apply-candidate` path writes three files, not

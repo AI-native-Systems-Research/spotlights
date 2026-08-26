@@ -1,7 +1,7 @@
 """The durable per-invocation usage record.
 
-One record per in-scope model call (Claude or Codex, steps 2-5), written
-next to the step output it belongs to (`<module_dir>/<step>.usage/`). The
+One record per in-scope model call (Claude or Codex) for the four run steps,
+written next to the step output it belongs to (`<module_dir>/<step>.usage/`). The
 run manifest is a pure aggregation over these records, which is what makes
 resume/crash recovery correct: records are keyed by
 `(step, module_qualified_name, session_index, invocation_index, cli)` and a

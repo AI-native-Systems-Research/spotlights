@@ -715,10 +715,56 @@ def test_a_notes_write_that_fails_partway_leaves_neither_artifact_behind(
     # own it documents an apply that left nothing else behind.
     assert not (out_dir / "apply.patch").exists()
     assert not (out_dir / "apply.prompt.txt").exists()
-    # The notes write fails *before* the manifest write, so this file was never
-    # created — the assertion pins that the cleanup's `missing_ok=True` unlink
-    # stays harmless rather than that a file was removed.
+    # The notes write fails *before* the manifest write, which now sits under
+    # its own guard after this handler — so the manifest was never reached, let
+    # alone created. Absent for a different reason than the three above, and
+    # still absent.
     assert not (out_dir / "manifest.json").exists()
+
+
+def test_a_manifest_write_that_fails_leaves_the_patch_and_its_notes_behind(
+    run, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The one write whose failure must cost nothing but itself.
+
+    `manifest.json` is written after the `finally` that destroys the worktree,
+    so the patch beside it cannot be produced again — while a directory holding
+    patch + notes + prompt and no manifest is exactly what every apply
+    directory looked like before the manifest existed, i.e. a state a reader
+    reads correctly. So an `ENOSPC` on the last and smallest write degrades the
+    accounting instead of unlinking three good artifacts and raising
+    `ArtifactWriteError`, which the batch loop would record as a skipped
+    candidate for a patch that had already succeeded.
+    """
+    run_dir, repo = run
+    real_write_text = Path.write_text
+
+    def _fail_only_the_manifest(
+        self: Path, data: str, *args: object, **kwargs: object
+    ) -> int:
+        if self.name != "manifest.json":
+            return real_write_text(self, data, *args, **kwargs)  # type: ignore[arg-type]
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(Path, "write_text", _fail_only_the_manifest)
+
+    # No `pytest.raises`: the call returning at all is half of what this test
+    # asserts.
+    result = one_shot_apply(
+        OneShotApplyInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+        claude_runner=_runner(),
+    )
+
+    artifact = result.patches[0]
+    out_dir = Path(artifact.path)
+    assert artifact.patch_produced is True
+    assert (out_dir / "apply.patch").stat().st_size > 0
+    assert (out_dir / "APPLY-NOTES.md").exists()
+    assert (out_dir / "apply.prompt.txt").exists()
+    assert not (out_dir / "manifest.json").exists()
+    # The file list is the artifact's own record of what a reviewer will find,
+    # so it must not promise a manifest that is not there.
+    assert artifact.files == ["APPLY-NOTES.md", "apply.patch", "apply.prompt.txt"]
 
 
 def test_a_keyboard_interrupt_during_the_agent_session_leaks_no_worktree(run) -> None:
@@ -1016,7 +1062,11 @@ def test_a_session_that_produced_no_patch_still_gets_a_manifest(run) -> None:
     )
     assert m.models_used == []
     assert m.target.repo_url == origin
-    assert m.notes == "no usage records found: model unavailable"
+    # `startswith`, not equality: `spotlights_commit_sha()` shells out to `git
+    # rev-parse HEAD` and returns "" from a wheel/sdist export with no engine
+    # checkout, which appends a second, unrelated note. The degraded-usage
+    # sentence is what this test is about, and it is pinned in full.
+    assert m.notes.startswith("no usage records found: model unavailable")
 
 
 def test_print_prompt_writes_no_manifest(run) -> None:
