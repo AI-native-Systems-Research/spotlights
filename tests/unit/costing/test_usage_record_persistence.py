@@ -141,3 +141,39 @@ def test_provenance_pinned_in_manifest_and_read_back_unchanged(tmp_path: Path) -
     # Resume reads provenance back rather than recomputing it, so a resume from
     # a different working tree can't silently rewrite it.
     assert manifest["provenance"] == provenance
+
+
+def test_one_shot_apply_is_a_valid_step_but_never_aggregated_into_a_run(
+    tmp_path: Path,
+) -> None:
+    """Two properties that must hold together, which is why they share a test.
+
+    `apply` needs a constructible `UsageRecord` to reach `compute_cost` at all.
+    But `apply` runs *after* a run, against a repo state the run never saw, and
+    possibly many times over one run's output — so its spend must never reach a
+    run total. `read_usage_records` enumerates its own step tuple rather than
+    iterating `UsageStep`, and that divergence is the mechanism.
+    """
+    record = UsageRecord(
+        step="one_shot_apply",
+        module_qualified_name="pkg/a",
+        invocation_index=0,
+        invocation_id="cand-pkg_a-0001",
+        provider="anthropic",
+        cli="claude",
+        model="aws/claude-opus-5",
+        role="one_shot_apply",
+        input=10,
+        output=20,
+    )
+    assert record.step == "one_shot_apply"
+
+    mp = P.ModulePaths(tmp_path)
+    # Force it onto disk in the layout a run uses, to prove the *reader* is what
+    # excludes it — not the absence of a file.
+    P.write_usage_record(mp, record)
+    assert (tmp_path / "one_shot_apply.usage" / "s1.i0000.claude.json").is_file()
+
+    records, notes = P.read_usage_records(mp)
+    assert records == []
+    assert notes == []

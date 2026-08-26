@@ -623,6 +623,15 @@ def read_usage_records(
     writes and unparseable files are skipped and reported as notes instead of
     failing the aggregation.
     """
+    # Enumerated, NOT derived from `UsageStep` — deliberately. `UsageStep` also
+    # carries "one_shot_apply", which must never be aggregated into a run:
+    # `apply` runs after the run, against a repo state the run never analyzed,
+    # and can run many times over one run's candidates. Folding it in would
+    # mutate a published artifact and make a run's cost depend on how often
+    # someone applied its candidates afterwards. It writes its own sibling
+    # manifest.json instead (see `one_shot_apply/usage_manifest.py`). If you are
+    # adding a *run* step, add it here too; if you are adding a post-run step,
+    # do not.
     steps: tuple[UsageStep, ...] = (
         (step,)
         if step is not None

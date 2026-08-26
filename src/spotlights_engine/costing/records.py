@@ -6,6 +6,13 @@ run manifest is a pure aggregation over these records, which is what makes
 resume/crash recovery correct: records are keyed by
 `(step, module_qualified_name, session_index, invocation_index, cli)` and a
 step that re-runs clears its session's records before writing fresh ones.
+
+`"one_shot_apply"` is the exception on both counts: it is a post-run step, and
+it persists nothing here. It makes exactly one model call per candidate and
+writes its own sibling `manifest.json` in the same all-or-nothing artifact
+write as the patch, so there is no partial state for a durable intermediate
+record to protect. It uses this model only to reach `compute_cost` and
+`aggregate_models_used`.
 """
 
 from __future__ import annotations
@@ -21,6 +28,9 @@ UsageStep = Literal[
     "module_deep_research",
     "proposal_from_finding_creator",
     "agent_proposals",
+    # Post-run, and deliberately NOT part of any run's aggregation — see the
+    # module docstring and `persistence.read_usage_records`.
+    "one_shot_apply",
 ]
 
 UsageCli = Literal["claude", "codex"]
