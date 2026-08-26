@@ -685,11 +685,13 @@ def test_models_requested_reports_step_2s_default_not_a_blank() -> None:
     CLI chose when it did not — exactly the provenance question this field exists
     to answer.
     """
+    from spotlights_engine.modules_extractor import ExtractorConfig
     from spotlights_engine.spotlights_manager.orchestrator import _models_requested
 
     class _Cfg:
         models = None
         discovery = None
+        extractor = ExtractorConfig()
 
     requested = _models_requested(_Cfg())
     assert requested.codex == "gpt-5.5"

@@ -77,8 +77,11 @@ claude: aws/claude-opus-4-8
 codex: gpt-5.5
 ```
 
-Leave a value blank to inherit that CLI's own default. The whole file is
-optional — a missing file, a missing key, and a blank value all mean "inherit".
+Leave a value blank to inherit that CLI's own default. The file itself is
+optional, and a missing key or blank value means "inherit". One exception: if
+`SPOTLIGHTS_MODELS_FILE` names a file that does not exist, that is an error, not
+an empty config — a typo there would otherwise run on CLI defaults while you
+believed your pin was live. Use an empty file to mean "pin nothing".
 To force inherit for one run even though the file pins something, pass the flag
 empty: `--codex-model ""`.
 

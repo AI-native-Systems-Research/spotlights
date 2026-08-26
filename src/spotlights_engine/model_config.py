@@ -63,15 +63,25 @@ def load_model_config(path: Path | None = None) -> ModelConfig:
     """Load the global model selection.
 
     Precedence: explicit `path` > `SPOTLIGHTS_MODELS_FILE` env var > the bundled
-    `models.yaml`. A resolved path that does not exist, or a file that parses to
-    nothing, yields an all-inherit config rather than an error — the file is a
-    convenience, not a requirement.
+    `models.yaml`. A missing bundled file, or a file that parses to nothing,
+    yields an all-inherit config rather than an error — the file is a
+    convenience, not a requirement. A missing file that `SPOTLIGHTS_MODELS_FILE`
+    explicitly names *is* an error: that is a typo, not an absent convenience.
 
     Note this is only the *file* layer. `--claude-model` / `--codex-model`
     override whatever this returns, and are applied by the caller.
     """
     resolved = models_path(path)
     if not resolved.is_file():
+        # An absent *bundled* file is fine — the file is optional. But a path
+        # somebody explicitly named and got wrong is not: silently running on CLI
+        # defaults while they believe their pin is live is the worst outcome
+        # available, and `doctor` already fails on it. Keep the run path honest
+        # too, rather than having the two disagree.
+        if path is None and os.environ.get(MODELS_ENV_VAR):
+            raise ValueError(
+                f"{MODELS_ENV_VAR}={resolved} does not point to a readable file"
+            )
         return ModelConfig()
     try:
         payload = yaml.safe_load(resolved.read_text(encoding="utf-8"))

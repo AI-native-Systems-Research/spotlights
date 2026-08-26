@@ -49,13 +49,6 @@ def test_bundled_file_ships_blank_so_behaviour_is_unchanged(monkeypatch):
     assert cfg == ModelConfig(claude=None, codex=None)
 
 
-def test_missing_file_is_all_inherit(tmp_path, monkeypatch):
-    """A path that does not exist is not an error — the file is optional."""
-    monkeypatch.setenv(MODELS_ENV_VAR, str(tmp_path / "nope.yaml"))
-
-    assert load_model_config() == ModelConfig(claude=None, codex=None)
-
-
 def test_empty_file_is_all_inherit(tmp_path):
     """`yaml.safe_load` returns None for an empty document."""
     assert load_model_config(_write(tmp_path / "e.yaml", "")) == ModelConfig()
@@ -140,3 +133,33 @@ def test_env_var_path_is_tilde_expanded(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv(MODELS_ENV_VAR, "~/mine.yaml")
     assert models_path() == tmp_path / "mine.yaml"
+
+
+def test_typod_env_var_path_is_an_error_not_a_silent_inherit(monkeypatch, tmp_path):
+    """A path someone named and got wrong must not quietly mean "inherit".
+
+    An absent bundled file is a missing convenience; an absent file the env var
+    explicitly points at is a typo, and running on CLI defaults while the
+    operator believes their pin is live is the failure mode worth being loud
+    about. `doctor` already fails on it — the run path must agree.
+    """
+    monkeypatch.setenv(MODELS_ENV_VAR, str(tmp_path / "typo.yaml"))
+    with pytest.raises(ValueError, match="does not point to a readable file"):
+        load_model_config()
+
+
+def test_explicit_missing_path_still_returns_inherit(tmp_path):
+    """An explicit `path=` argument keeps the lenient behaviour.
+
+    Callers passing a path have already decided it is optional; only the env var
+    carries the "somebody typed this" signal.
+    """
+    assert load_model_config(tmp_path / "absent.yaml") == ModelConfig()
+
+
+def test_absent_bundled_file_is_not_an_error(monkeypatch, tmp_path):
+    import spotlights_engine.model_config as mc
+
+    monkeypatch.delenv(MODELS_ENV_VAR, raising=False)
+    monkeypatch.setattr(mc, "_BUNDLED_MODELS_PATH", tmp_path / "gone.yaml")
+    assert load_model_config() == ModelConfig()

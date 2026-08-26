@@ -18,8 +18,16 @@ CODEX = "gpt-5.5-test"
 
 @pytest.fixture
 def no_models_file(tmp_path, monkeypatch):
-    """Point the loader at a nonexistent file so only flags are in play."""
-    monkeypatch.setenv(MODELS_ENV_VAR, str(tmp_path / "absent.yaml"))
+    """Point the loader at an empty file so only flags are in play.
+
+    An *empty* file rather than a missing path: a path the env var names and that
+    does not exist is now a hard error, on the grounds that it is a typo rather
+    than an absent convenience. An empty file is the supported way to say "pin
+    nothing".
+    """
+    empty = tmp_path / "empty.yaml"
+    empty.write_text("", encoding="utf-8")
+    monkeypatch.setenv(MODELS_ENV_VAR, str(empty))
 
 
 def _config(argv: list[str]):
@@ -266,3 +274,20 @@ def test_models_are_in_the_fingerprint_only_once_something_is_pinned(no_models_f
     pinned = fingerprint(["--repo", ".", "--claude-model", CLAUDE])
     assert "models_hash" in pinned
     assert pinned != default
+
+
+def test_dry_run_reports_the_model_the_run_will_actually_use(no_models_file, capsys):
+    """Dry-run was the last surface still claiming Codex would inherit.
+
+    doctor and the run manifest both report step 2's built-in default; a dry run
+    that disagrees is worse than no dry run, because it is the surface people
+    check before spending money.
+    """
+    from spotlights_engine import cli
+
+    assert cli.main(["--dry-run", "--repo", "."]) == 0
+    out = capsys.readouterr().out
+    assert "codex-model: gpt-5.5" in out
+    assert "step 2 default" in out
+    # Claude has no built-in default, so it genuinely does inherit.
+    assert "claude-model:(CLI default)" in out

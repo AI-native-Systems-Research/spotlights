@@ -241,7 +241,18 @@ def _models_requested(cfg: SpotlightsManagerConfig) -> RunManifestModelsRequeste
     An empty string means the engine genuinely passed no `--model`.
     """
     discovery = cfg.discovery if cfg.discovery is not None else DiscoveryConfig()
-    claude = (cfg.models.claude if cfg.models else None) or ""
+    # Read Claude off the step configs too, not just `cfg.models`. A library
+    # caller setting `claude_model` on the per-step configs is documented as
+    # supported, and would otherwise be recorded as "the engine passed no
+    # model" — the opposite of the truth. The CLI stamps the same value into
+    # every step, so any of them is representative; check the ones that always
+    # exist first.
+    claude = (
+        (cfg.models.claude if cfg.models else None)
+        or cfg.extractor.claude_model
+        or discovery.claude_model
+        or ""
+    )
     return RunManifestModelsRequested(
         claude=claude,
         codex=discovery.codex_model or "",

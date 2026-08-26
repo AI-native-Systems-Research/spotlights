@@ -819,8 +819,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  max-parallel:{args.max_parallel}")
         if args.max_cost is not None:
             print(f"  max-cost:    ${args.max_cost:.2f}")
+        # Report what the engine will actually pass, not what the config says.
+        # Step 2 has a built-in Codex default, so `(CLI default)` here would be
+        # the same misreport doctor and the run manifest were fixed to avoid.
+        dry_codex_effective = dry_codex or DiscoveryConfig().codex_model
+        codex_label = dry_codex_effective or "(CLI default)"
+        if not dry_codex and dry_codex_effective:
+            codex_label = f"{dry_codex_effective} (step 2 default; steps 3+5 inherit)"
         print(f"  claude-model:{dry_claude or '(CLI default)'}")
-        print(f"  codex-model: {dry_codex or '(CLI default)'}")
+        print(f"  codex-model: {codex_label}")
         if not args.enable_deep_research:
             print("  deep-research: DISABLED (step 3 skipped, step 4 empty)")
         return 0
