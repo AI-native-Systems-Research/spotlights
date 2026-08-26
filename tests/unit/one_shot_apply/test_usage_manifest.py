@@ -148,3 +148,98 @@ def test_the_manifest_round_trips_through_json() -> None:
     m = _build()
     dumped = json.dumps(m.model_dump(mode="json"), indent=2, sort_keys=True) + "\n"
     assert ApplyUsageManifest.model_validate(json.loads(dumped)) == m
+
+
+def test_an_unpriced_model_is_named_in_both_notes_and_in_coverage() -> None:
+    """`amount_usd` stays a number when a model has no rate row, so the note and
+    `coverage.unpriced_models` are the only things telling a reader the figure
+    is partial. Both tables get their own line, because a model can be priced
+    contractually and not publicly."""
+    m = _build(usage=USAGE.model_copy(update={"model": "aws/claude-opus-9"}))
+
+    assert m.cost.amount_usd == 0.0
+    assert m.cost.priced_token_share == 0.0
+    assert m.cost.coverage.unpriced_models == ["anthropic:aws/claude-opus-9"]
+    assert m.notes == (
+        "unpriced models excluded from cost: anthropic:aws/claude-opus-9; "
+        "external: unpriced models excluded from cost: anthropic:aws/claude-opus-9"
+    )
+    # The tokens are still counted — only the dollars are missing.
+    assert m.total_tokens == 37000
+    assert len(m.models_used) == 1
+
+
+def test_an_unresolved_model_falls_back_to_the_cli_family_rather_than_inventing_one() -> None:
+    """No `fallback_model` is passed: a made-up name would silently price at
+    another model's rate. Unresolved becomes the unpriced `anthropic:claude`,
+    which is visible."""
+    m = _build(usage=USAGE.model_copy(update={"model": None}))
+
+    assert m.models_used[0].model == "claude"
+    assert m.cost.coverage.unpriced_models == ["anthropic:claude"]
+    assert "unpriced models excluded from cost: anthropic:claude" in m.notes
+
+
+def test_unloadable_rate_tables_zero_the_cost_instead_of_raising(
+    tmp_path, monkeypatch
+) -> None:
+    """A pricing problem must not turn a successful 25-minute apply into a skip.
+
+    This is the one test that exercises the loader path (the others inject
+    tables), so it is what pins the `(OSError, ValueError)` guard.
+    """
+    from spotlights_engine.costing.rates import RATES_ENV_VAR
+
+    bad = tmp_path / "broken-rates.json"
+    bad.write_text("{not json at all", encoding="utf-8")
+    monkeypatch.setenv(RATES_ENV_VAR, str(bad))
+
+    m = build_apply_usage_manifest(
+        candidate_id="cand-pkg_a-0001",
+        module_qualified_name="pkg/a",
+        date="2026-08-26T12:00:00+00:00",
+        objective="reduce latency",
+        target_commit_sha="641b9806",
+        repo_url="git@github.com:example/repo.git",
+        spotlights_commit_sha="e1c787c9",
+        usage=USAGE,
+        duration_s=99.0,
+        agent_error=None,
+    )
+
+    assert m.cost.amount_usd == 0.0
+    assert m.external_cost is not None
+    assert m.external_cost.amount_usd == 0.0
+    assert "cost unavailable: could not load the rate tables:" in m.notes
+    # The rest of the manifest is intact — this is a pricing failure, not a
+    # manifest failure.
+    assert m.total_tokens == 37000
+    assert m.timing.wall_clock_s == 99.0
+    assert m.target.commit_sha == "641b9806"
+
+
+def test_missing_provenance_is_noted_but_never_fatal() -> None:
+    """`resolve_repo_url` and `spotlights_commit_sha` degrade to "" rather than
+    raising — a wheel install has no engine checkout, and a repo may have no
+    origin remote. Both are worth saying out loud."""
+    m = _build(repo_url="", spotlights_commit_sha="")
+
+    assert m.target.repo_url == ""
+    assert m.spotlights.commit_sha == ""
+    assert m.notes == "target repo URL unavailable; Spotlights commit unavailable"
+
+
+def test_notes_join_every_applicable_reason_like_the_run_manifest_does() -> None:
+    """`"; ".join` over the parts that apply, matching
+    `build_run_manifest`'s assembly, so a reader who knows one file reads the
+    other."""
+    m = _build(
+        usage=None,
+        agent_error="claude timed out after 1800.0s",
+        repo_url="",
+        spotlights_commit_sha="",
+    )
+    assert m.notes == (
+        "no usage records found: claude timed out after 1800.0s; "
+        "target repo URL unavailable; Spotlights commit unavailable"
+    )
