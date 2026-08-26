@@ -9,10 +9,9 @@ step that re-runs clears its session's records before writing fresh ones.
 
 `"one_shot_apply"` is the exception on both counts: it is a post-run step, and
 it persists nothing here. It makes exactly one model call per candidate and
-writes its own sibling `manifest.json` in the same all-or-nothing artifact
-write as the patch, so there is no partial state for a durable intermediate
-record to protect. It uses this model only to reach `compute_cost` and
-`aggregate_models_used`.
+writes its own sibling `manifest.json` in a single write beside the patch, so
+there is no partial state for a durable intermediate record to protect. It uses
+this model only to reach `compute_cost` and `aggregate_models_used`.
 """
 
 from __future__ import annotations
