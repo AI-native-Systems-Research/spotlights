@@ -306,8 +306,11 @@ class CodexRunner(AgentRunner):
             "read-only",
             "-C",
             str(self._config.repo_path),
-            "-c",
-            f'model="{self._config.codex_model}"',
+            *(
+                ["-c", f'model="{self._config.codex_model}"']
+                if self._config.codex_model
+                else []
+            ),
             "-c",
             f'model_reasoning_effort="{self._config.codex_reasoning_effort}"',
         ]

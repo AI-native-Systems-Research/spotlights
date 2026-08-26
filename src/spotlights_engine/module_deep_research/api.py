@@ -124,6 +124,7 @@ def research_module(
     runner: ModuleResearchRunner | None = None,
     runners: Sequence[ModuleResearchRunner] | None = None,
     segment: str | None = None,
+    claude_model: str | None = None,
 ) -> ModuleDeepResearchOutput:
     """Run module deep research and return the architecture output contract.
 
@@ -138,6 +139,7 @@ def research_module(
         runner=runner,
         runners=runners,
         segment=segment,
+        claude_model=claude_model,
     ).output
 
 

@@ -219,12 +219,21 @@ def check_models() -> CheckResult:
     here means the engine passes no `--model` and the CLI picks for itself.
     """
     resolved = models_path()
+    from_env = bool(os.environ.get(MODELS_ENV_VAR))
     source = (
-        f"{MODELS_ENV_VAR}={resolved}"
-        if os.environ.get(MODELS_ENV_VAR)
-        else f"bundled {resolved.name}"
+        f"{MODELS_ENV_VAR}={resolved}" if from_env else f"bundled {resolved.name}"
     )
     if not resolved.is_file():
+        # An absent *bundled* file is fine — the file is optional and both CLIs
+        # fall back to their own default. An absent file that someone explicitly
+        # pointed the env var at is a typo, and silently using the CLI default
+        # while the operator believes their pin is active is the worst outcome.
+        if from_env:
+            return CheckResult(
+                name="models",
+                ok=False,
+                detail=f"{source} does not point to a readable file",
+            )
         return CheckResult(
             name="models",
             ok=True,

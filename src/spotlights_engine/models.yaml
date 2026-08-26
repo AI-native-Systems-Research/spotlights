@@ -1,20 +1,29 @@
 # Which model each agent CLI runs on, for every step of the pipeline.
 #
 # Leave a value blank to inherit that CLI's own default — `~/.claude/settings.json`
-# for claude, `~/.codex/config.toml` for codex. Blank is what you get if you
-# change nothing here, and is identical to the engine's behaviour before this
-# file existed.
+# for claude, `~/.codex/config.toml` for codex.
+#
+# Shipped as-is: codex is pinned to the id the engine used to hardcode for
+# candidate discovery, so a default install keeps running Codex on gpt-5.5 —
+# now consistently, in every step rather than only step 2. claude is left blank
+# because its ids are gateway-specific aliases: pinning one here would break
+# anyone pointed at a different gateway. Set it to whatever yours exposes.
 #
 # Override for a single run without editing this file:
 #
 #     spotlights-engine --claude-model aws/claude-opus-4-8 --codex-model gpt-5.5 ...
 #
+# Pass an empty value to force "inherit" for one run, even though codex is
+# pinned below:
+#
+#     spotlights-engine --codex-model "" ...
+#
 # Or keep your own copy anywhere and point `SPOTLIGHTS_MODELS_FILE` at it, which
 # is the sane option when the engine is installed as a tool and this file lives
 # somewhere awkward like site-packages.
 #
-# Note: model ids are whatever your gateway accepts. The examples below are
-# LiteLLM aliases and are not portable across gateways — check yours.
+# `spotlights-engine doctor` prints the effective model per CLI and where it
+# came from.
 
 claude:            # e.g. aws/claude-opus-4-8, aws/claude-opus-5, opus, sonnet
 codex: gpt-5.5     # e.g. gpt-5.5

@@ -202,6 +202,7 @@ def extract_with_telemetry(
         repo_path=repo,
         prompt=EXTRACTION_PROMPT,
         claude_bin=cfg.claude_bin,
+        claude_model=cfg.claude_model,
         max_turns=cfg.max_turns,
         timeout_s=cfg.timeout_s,
         artifacts_dir=run_dir,

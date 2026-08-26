@@ -110,3 +110,32 @@ def test_models_path_reports_the_file_without_reading_it(tmp_path, monkeypatch):
 
     explicit = tmp_path / "given.yaml"
     assert models_path(explicit) == explicit
+
+
+def test_malformed_yaml_raises_value_error_not_yaml_error(tmp_path):
+    """`yaml.YAMLError` is not a `ValueError`, so the loader must translate it.
+
+    Every caller guards config loading with `(OSError, ValueError)`. A raw
+    YAMLError would escape all of them and surface as a traceback.
+    """
+    path = _write(tmp_path / "bad.yaml", "claude: [unclosed\n")
+    with pytest.raises(ValueError, match="not valid YAML"):
+        load_model_config(path)
+
+
+def test_error_messages_name_the_offending_file(tmp_path):
+    """Both failure modes must say *which* file is wrong."""
+    bad_yaml = _write(tmp_path / "a.yaml", "claude: [unclosed\n")
+    with pytest.raises(ValueError, match=str(bad_yaml)):
+        load_model_config(bad_yaml)
+
+    bad_key = _write(tmp_path / "b.yaml", "cluade: x\n")
+    with pytest.raises(ValueError, match=str(bad_key)):
+        load_model_config(bad_key)
+
+
+def test_env_var_path_is_tilde_expanded(monkeypatch, tmp_path):
+    """The env var is typed by hand, so `~` has to work."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv(MODELS_ENV_VAR, "~/mine.yaml")
+    assert models_path() == tmp_path / "mine.yaml"

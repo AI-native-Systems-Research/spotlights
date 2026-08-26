@@ -159,13 +159,28 @@ def test_models_check_names_the_env_file_as_its_source(monkeypatch, tmp_path):
     assert "codex=CLI default" in res.detail
 
 
-def test_models_check_ok_when_the_file_is_absent(monkeypatch, tmp_path):
-    """The file is optional, so its absence is not a failed check."""
-    monkeypatch.setenv("SPOTLIGHTS_MODELS_FILE", str(tmp_path / "gone.yaml"))
+def test_models_check_ok_when_the_bundled_file_is_absent(monkeypatch, tmp_path):
+    """An absent *bundled* file is fine — the file is optional."""
+    monkeypatch.delenv("SPOTLIGHTS_MODELS_FILE", raising=False)
+    monkeypatch.setattr(doctor, "models_path", lambda *_a, **_kw: tmp_path / "gone.yaml")
 
     res = doctor.check_models()
     assert res.ok is True
     assert "own default" in res.detail
+
+
+def test_models_check_fails_when_the_env_var_points_nowhere(monkeypatch, tmp_path):
+    """A typo'd path must not pass green.
+
+    Silently falling back to the CLI default while the operator believes their
+    pin is active is the worst outcome available here.
+    """
+    missing = tmp_path / "typo.yaml"
+    monkeypatch.setenv("SPOTLIGHTS_MODELS_FILE", str(missing))
+
+    res = doctor.check_models()
+    assert res.ok is False
+    assert str(missing) in res.detail
 
 
 def test_models_check_fails_on_a_malformed_file(monkeypatch, tmp_path):

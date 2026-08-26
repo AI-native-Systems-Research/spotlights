@@ -20,6 +20,7 @@ from pathlib import Path
 
 import yaml
 from pydantic import BaseModel, ConfigDict, field_validator
+from pydantic import ValidationError as PydanticValidationError
 
 MODELS_ENV_VAR = "SPOTLIGHTS_MODELS_FILE"
 
@@ -50,11 +51,12 @@ def models_path(path: Path | None = None) -> Path:
     """The file `load_model_config` would read, without reading it.
 
     Exposed so `doctor` can report *where* the effective models came from.
+    `~` is expanded, since the env var is something a person types by hand.
     """
     if path is not None:
-        return path
+        return path.expanduser()
     env_path = os.environ.get(MODELS_ENV_VAR)
-    return Path(env_path) if env_path else _BUNDLED_MODELS_PATH
+    return Path(env_path).expanduser() if env_path else _BUNDLED_MODELS_PATH
 
 
 def load_model_config(path: Path | None = None) -> ModelConfig:
@@ -71,7 +73,14 @@ def load_model_config(path: Path | None = None) -> ModelConfig:
     resolved = models_path(path)
     if not resolved.is_file():
         return ModelConfig()
-    payload = yaml.safe_load(resolved.read_text(encoding="utf-8"))
+    try:
+        payload = yaml.safe_load(resolved.read_text(encoding="utf-8"))
+    except yaml.YAMLError as exc:
+        # `yaml.YAMLError` is NOT a `ValueError` (unlike `json`'s
+        # `JSONDecodeError`, which is). Callers guard config loading with
+        # `(OSError, ValueError)`, so a raw YAMLError would escape every one of
+        # them and surface as a traceback. Translate at the boundary.
+        raise ValueError(f"{resolved} is not valid YAML: {exc}") from exc
     if payload is None:
         return ModelConfig()
     if not isinstance(payload, dict):
@@ -79,7 +88,12 @@ def load_model_config(path: Path | None = None) -> ModelConfig:
             f"{resolved} must contain a YAML mapping of cli -> model id, "
             f"got {type(payload).__name__}"
         )
-    return ModelConfig.model_validate(payload)
+    try:
+        return ModelConfig.model_validate(payload)
+    except PydanticValidationError as exc:
+        # Pydantic's error *is* a ValueError, so this is not about the type —
+        # it is to name the offending file, which the bare error does not.
+        raise ValueError(f"{resolved}: {exc}") from exc
 
 
 __all__ = ["MODELS_ENV_VAR", "ModelConfig", "load_model_config", "models_path"]

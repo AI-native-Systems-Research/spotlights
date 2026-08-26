@@ -87,3 +87,39 @@ def test_review_iterations_still_works_alongside_a_model(no_models_file):
     assert cfg.discovery is not None
     assert cfg.discovery.num_review_iterations == 0
     assert cfg.discovery.claude_model == CLAUDE
+
+
+def test_explicit_empty_flag_means_inherit_and_beats_the_file(tmp_path, monkeypatch):
+    """`--codex-model ""` must be able to override a pinned file.
+
+    The bundled file pins Codex, so without this there is no command-line way to
+    ask for the CLI's own default.
+    """
+    (tmp_path / "m.yaml").write_text("codex: pinned-in-file\n", encoding="utf-8")
+    monkeypatch.setenv(MODELS_ENV_VAR, str(tmp_path / "m.yaml"))
+
+    assert _config([]).models.codex == "pinned-in-file"
+    assert _config(["--codex-model", ""]).models.codex is None
+    # Whitespace is the same request.
+    assert _config(["--codex-model", "   "]).models.codex is None
+
+
+def test_invalid_model_id_exits_rather_than_failing_deeper(no_models_file, capsys):
+    """A `:` fails DiscoveryConfig's pattern; catch it at the flag instead."""
+    with pytest.raises(SystemExit):
+        _config(["--codex-model", "bad:id"])
+    assert "not a valid model id" in capsys.readouterr().err
+
+
+def test_context_window_tag_is_a_valid_model_id(no_models_file):
+    """`[1m]` suffixes are real ids and must not be rejected."""
+    cfg = _config(["--claude-model", "aws/claude-opus-4-8[1m]"])
+    assert cfg.models.claude == "aws/claude-opus-4-8[1m]"
+
+
+def test_malformed_models_file_is_a_value_error_not_a_traceback(tmp_path, monkeypatch):
+    (tmp_path / "m.yaml").write_text("claude: [unclosed\n", encoding="utf-8")
+    monkeypatch.setenv(MODELS_ENV_VAR, str(tmp_path / "m.yaml"))
+
+    with pytest.raises(ValueError, match="not valid YAML"):
+        _config([])

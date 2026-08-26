@@ -25,6 +25,10 @@ from spotlights_engine.module_deep_research.codex_exec import (
 MODEL = "aws/claude-opus-4-8"
 
 
+class _StopAfterArgv(RuntimeError):
+    """Raised by a stub once argv has been captured, to skip the real work."""
+
+
 def _captured_argv(monkeypatch) -> list[list[str]]:
     """Intercept `subprocess.run`, record argv, and return a benign result.
 
@@ -56,11 +60,11 @@ def test_extractor_stage_argv(tmp_path, monkeypatch, model, expected):
 
     def fake_stream(*, argv, **kwargs):
         seen.append(list(argv))
-        raise RuntimeError("stop after argv capture")
+        raise _StopAfterArgv
 
     monkeypatch.setattr(claude_stage, "run_streaming_claude", fake_stream)
 
-    with pytest.raises(Exception):
+    with pytest.raises(_StopAfterArgv):
         claude_stage.run_structured_claude_stage(
             output_type=CodexExecOptions,  # any pydantic model; schema is stubbed
             repo_path=tmp_path,
@@ -167,3 +171,87 @@ def test_deep_research_claude_runner_gets_the_model(tmp_path):
     assert len(claude) == 1
     assert claude[0].options.model == MODEL
     assert "--model" in claude[0].build_command()
+
+
+# --- blank means inherit, all the way down --------------------------------------
+
+
+@pytest.mark.parametrize("model,expected", [("gpt-5.5", True), (None, False)])
+def test_discovery_codex_argv_model_is_optional(tmp_path, monkeypatch, model, expected):
+    """Step 2's Codex model must be able to inherit too.
+
+    It used to be a non-optional `str` pinned to `gpt-5.5`, so a blank value in
+    `models.yaml` could never actually reach the CLI's own default — the one
+    place where "blank means inherit" quietly was not true.
+    """
+    from spotlights_engine.candidate_discovery import agents as discovery_agents
+    from spotlights_engine.candidate_discovery.api import DiscoveryConfig
+
+    monkeypatch.setattr(discovery_agents.shutil, "which", lambda _n: "/bin/codex")
+    cfg = DiscoveryConfig(
+        repo_path=tmp_path, artifacts_dir=tmp_path / "a", codex_model=model
+    )
+    runner = discovery_agents.CodexRunner(cfg)
+    schema_path = tmp_path / "s.json"
+    schema_path.write_text("{}")
+    iter_dir = tmp_path / "iter"
+    iter_dir.mkdir()
+    argv = runner._build_argv(schema_path=schema_path, iter_dir=iter_dir)
+
+    c_values = [argv[i + 1] for i, x in enumerate(argv) if x == "-c"]
+    assert any('model="gpt-5.5"' == v for v in c_values) is expected
+    # The reasoning-effort `-c` is unconditional and must survive either way.
+    assert any("model_reasoning_effort=" in v for v in c_values)
+
+
+@pytest.mark.parametrize("model,expected", [(MODEL, True), (None, False)])
+def test_legacy_single_shot_extractor_argv(tmp_path, monkeypatch, model, expected):
+    """The `two_phase=False` path is a separate argv builder and was missed once."""
+    from spotlights_engine.modules_extractor import agent as extractor_agent
+
+    seen: list[list[str]] = []
+
+    monkeypatch.setattr(
+        extractor_agent, "resolve_claude_argv0", lambda _b: ["/bin/claude"]
+    )
+    monkeypatch.setattr(
+        extractor_agent, "ensure_claude_available", lambda *a, **k: None, raising=False
+    )
+
+    def fake_stream(*, argv, **kwargs):
+        seen.append(list(argv))
+        raise _StopAfterArgv
+
+    monkeypatch.setattr(
+        extractor_agent, "run_streaming_claude", fake_stream, raising=False
+    )
+
+    with pytest.raises(_StopAfterArgv):
+        extractor_agent.run_extraction(
+            repo_path=tmp_path,
+            prompt="p",
+            claude_model=model,
+            max_turns=3,
+            timeout_s=5,
+            on_event=None,
+        )
+
+    assert seen, "argv was never built"
+    assert (("--model" in seen[0]) and (MODEL in seen[0])) is expected
+
+
+def test_public_research_module_forwards_the_model(tmp_path, monkeypatch):
+    """The non-telemetry wrapper is the documented entrypoint for library users."""
+    from spotlights_engine.module_deep_research import api as dr_api
+
+    seen: dict[str, object] = {}
+
+    def fake_with_telemetry(request, **kwargs):
+        seen.update(kwargs)
+        raise _StopAfterArgv
+
+    monkeypatch.setattr(dr_api, "research_module_with_telemetry", fake_with_telemetry)
+    with pytest.raises(_StopAfterArgv):
+        dr_api.research_module(object(), claude_model=MODEL)
+
+    assert seen.get("claude_model") == MODEL

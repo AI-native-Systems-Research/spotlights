@@ -15,6 +15,7 @@ import argparse
 import dataclasses
 import json
 import logging
+import re
 import sys
 from pathlib import Path
 
@@ -424,6 +425,23 @@ def _build_input(args: argparse.Namespace) -> SpotlightsManagerInput:
     return SpotlightsManagerInput(**input_kwargs)
 
 
+_MODEL_ID_RE = re.compile(r"^[\w.\-/\[\]]+$")
+
+
+def _validate_model_id(flag: str, value: str) -> None:
+    """Reject a model id that would fail deeper in the stack.
+
+    `DiscoveryConfig.codex_model` carries a pattern, so an id with a `:` in it
+    used to blow up inside pydantic well after `--dry-run` had reported the run
+    as fine. Checking both flags here fails fast and identically.
+    """
+    if not _MODEL_ID_RE.match(value):
+        _build_argparser().error(
+            f"{flag}: {value!r} is not a valid model id (expected letters, "
+            "digits, and any of . - _ / [ ])"
+        )
+
+
 def _resolve_models(args: argparse.Namespace) -> tuple[str | None, str | None]:
     """The run's `(claude, codex)` model ids, or `None` to inherit the CLI default.
 
@@ -431,10 +449,27 @@ def _resolve_models(args: argparse.Namespace) -> tuple[str | None, str | None]:
     the bundled `models.yaml` > the agent CLI's own config. Resolved once, here,
     so every step config carries an explicit value and nothing deeper in the
     stack reads a config file.
+
+    A flag passed as an empty string (`--codex-model ""`) is an explicit request
+    to inherit, and beats a value in the file — otherwise a pinned bundled file
+    would leave no way to ask for the CLI's own default from the command line.
+    An omitted flag is `None` and falls through to the file.
     """
     file_cfg = load_model_config()
-    claude = args.claude_model if args.claude_model else file_cfg.claude
-    codex = args.codex_model if args.codex_model else file_cfg.codex
+
+    if args.claude_model is None:
+        claude = file_cfg.claude
+    else:
+        claude = args.claude_model.strip() or None
+    if args.codex_model is None:
+        codex = file_cfg.codex
+    else:
+        codex = args.codex_model.strip() or None
+
+    if claude:
+        _validate_model_id("--claude-model", claude)
+    if codex:
+        _validate_model_id("--codex-model", codex)
     return claude, codex
 
 
@@ -726,6 +761,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         include = _flatten_include(args.include)
         scope = ", ".join(include) if include else "(all modules)"
+        # Resolve models here as well: a dry run that reports "fine" and is
+        # followed by a real run that dies on a bad id or an unparseable
+        # models file is worse than no dry run at all.
+        try:
+            dry_claude, dry_codex = _resolve_models(args)
+        except (OSError, ValueError) as exc:
+            print(f"spotlights-engine: {exc}", file=sys.stderr)
+            return 2
         print("dry-run: no agents invoked, no cost incurred.")
         print(f"  repo:        {args.repo}")
         print(f"  objective:   {args.objective!r}")
@@ -733,6 +776,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  max-parallel:{args.max_parallel}")
         if args.max_cost is not None:
             print(f"  max-cost:    ${args.max_cost:.2f}")
+        print(f"  claude-model:{dry_claude or '(CLI default)'}")
+        print(f"  codex-model: {dry_codex or '(CLI default)'}")
         if not args.enable_deep_research:
             print("  deep-research: DISABLED (step 3 skipped, step 4 empty)")
         return 0
@@ -740,7 +785,12 @@ def main(argv: list[str] | None = None) -> int:
     _configure_logging(args)
 
     inp = _build_input(args)
-    cfg = _build_config(args)
+    try:
+        cfg = _build_config(args)
+    except (OSError, ValueError) as exc:
+        # A malformed or unreadable models file must not be a traceback.
+        print(f"spotlights-engine: {exc}", file=sys.stderr)
+        return 2
 
     result = run_with_telemetry(inp, config=cfg)
     _print_summary(result, deep_research_enabled=inp.enable_deep_research)

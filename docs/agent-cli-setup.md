@@ -50,10 +50,15 @@ requires_openai_auth = false  # gateway key, not an OpenAI sk- key
 
 ## Choosing models
 
-By default the engine passes no model to either CLI, so each one uses its own
-configuration — `~/.claude/settings.json` for Claude, `~/.codex/config.toml` for
-Codex. That makes a run's model depend on whoever's machine it ran on, which is
-no good for reproducing a result.
+A run's model has to be something you choose, not something inherited from
+whoever's machine it ran on — otherwise the same command produces different
+results for different people.
+
+Out of the box the bundled `models.yaml` pins **Codex to `gpt-5.5`** (the id the
+engine used to hardcode for candidate discovery, now applied to every step) and
+leaves **Claude blank**, meaning it inherits `~/.claude/settings.json`. Claude is
+blank on purpose: its ids are gateway-specific aliases, so a shipped default
+would break anyone on a different gateway.
 
 Two ways to pin it. Both are global: one Claude model and one Codex model for
 every step of the pipeline.
@@ -75,6 +80,8 @@ codex: gpt-5.5
 
 Leave a value blank to inherit that CLI's own default. The whole file is
 optional — a missing file, a missing key, and a blank value all mean "inherit".
+To force inherit for one run even though the file pins something, pass the flag
+empty: `--codex-model ""`.
 
 Precedence, highest first:
 
