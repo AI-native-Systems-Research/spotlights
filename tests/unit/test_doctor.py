@@ -155,8 +155,11 @@ def test_models_check_names_the_env_file_as_its_source(monkeypatch, tmp_path):
     assert res.ok is True
     assert str(models) in res.detail
     assert "claude=pinned" in res.detail
-    # A blank value reads as inherit, not as an empty string.
-    assert "codex=CLI default" in res.detail
+    # Codex reads as step 2's built-in default rather than "inherit": step 2
+    # pins gpt-5.5 regardless, so claiming inherit would be a lie the operator
+    # only discovers when a run 403s.
+    assert "codex=gpt-5.5" in res.detail
+    assert "step 2 default" in res.detail
 
 
 def test_models_check_ok_when_the_bundled_file_is_absent(monkeypatch, tmp_path):
@@ -191,3 +194,44 @@ def test_models_check_fails_on_a_malformed_file(monkeypatch, tmp_path):
     res = doctor.check_models()
     assert res.ok is False
     assert str(bad) in res.detail
+
+
+def test_codex_probe_uses_step_2s_default_when_nothing_is_configured(
+    monkeypatch, tmp_path
+):
+    """Probing "inherit" while step 2 pins a model is how a green doctor is
+    followed by a 403 on every module."""
+    monkeypatch.setenv("SPOTLIGHTS_MODELS_FILE", str(tmp_path / "absent.yaml"))
+    monkeypatch.setattr(doctor.shutil, "which", lambda _n: "/bin/" + _n)
+
+    seen: dict[str, str | None] = {}
+
+    def fake_probe(name, *, cwd=None, model=None):
+        seen[name] = model
+        return ProbeOutcome(ok=True, model=None, error="")
+
+    monkeypatch.setattr(doctor, "_probe_model", fake_probe)
+    doctor.run_checks()
+
+    assert seen["codex"] == "gpt-5.5"
+    # Claude has no such built-in default, so it really does inherit.
+    assert seen["claude"] is None
+
+
+def test_configured_codex_model_wins_over_step_2s_default(monkeypatch, tmp_path):
+    models = tmp_path / "m.yaml"
+    models.write_text("codex: my-alias\n", encoding="utf-8")
+    monkeypatch.setenv("SPOTLIGHTS_MODELS_FILE", str(models))
+    monkeypatch.setattr(doctor.shutil, "which", lambda _n: "/bin/" + _n)
+
+    seen: dict[str, str | None] = {}
+    monkeypatch.setattr(
+        doctor,
+        "_probe_model",
+        lambda name, *, cwd=None, model=None: (
+            seen.__setitem__(name, model),
+            ProbeOutcome(ok=True, model=None, error=""),
+        )[1],
+    )
+    doctor.run_checks()
+    assert seen["codex"] == "my-alias"

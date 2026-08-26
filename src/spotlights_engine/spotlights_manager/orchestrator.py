@@ -230,6 +230,24 @@ def _build_discovery_config(
     )
 
 
+def _models_requested(cfg: SpotlightsManagerConfig) -> RunManifestModelsRequested:
+    """What the engine actually asked each CLI for, for the run manifest.
+
+    Read off the step configs rather than `cfg.models`, because the two can
+    differ: step 2 carries a built-in `gpt-5.5` Codex default, so a blank
+    `models.codex` still results in the engine passing a model. Recording ""
+    there would claim "the CLI chose" when it did not.
+
+    An empty string means the engine genuinely passed no `--model`.
+    """
+    discovery = cfg.discovery if cfg.discovery is not None else DiscoveryConfig()
+    claude = (cfg.models.claude if cfg.models else None) or ""
+    return RunManifestModelsRequested(
+        claude=claude,
+        codex=discovery.codex_model or "",
+    )
+
+
 def _build_deep_research_options(
     cfg: SpotlightsManagerConfig,
     repo_path: Path,
@@ -1755,6 +1773,7 @@ async def _run_async(
         deep_research_cfg=config.deep_research,
         proposal_from_finding_cfg=config.proposal_from_finding,
         agent_proposals_cfg=config.agent_proposals,
+        models=config.models,
     )
     manifest = _ensure_resume_compatible(
         paths,
@@ -1935,10 +1954,7 @@ async def _run_async(
         num_candidates=num_candidates,
         module_status=counts,
         notes=usage_notes,
-        models_requested=RunManifestModelsRequested(
-            claude=(config.models.claude or "") if config.models else "",
-            codex=(config.models.codex or "") if config.models else "",
-        ),
+        models_requested=_models_requested(config),
     )
     P.write_run_manifest(paths, public_manifest)
 

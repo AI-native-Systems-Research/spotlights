@@ -202,3 +202,67 @@ def test_codex_context_window_tag_survives_the_downstream_pattern(no_models_file
     cfg = _config(["--codex-model", "gpt-5.5[1m]"])
     assert cfg.discovery is not None
     assert cfg.discovery.codex_model == "gpt-5.5[1m]"
+
+
+def test_explicit_empty_codex_flag_reaches_step_2(no_models_file):
+    """`--codex-model ""` is documented as "force inherit" — including step 2.
+
+    Step 2 is the one step with a built-in Codex default, so without threading
+    the explicit blank through, the documented promise silently did nothing
+    there while working everywhere else.
+    """
+    assert _config([]).discovery is None  # untouched: keeps the gpt-5.5 default
+
+    cfg = _config(["--codex-model", ""])
+    assert cfg.discovery is not None
+    assert cfg.discovery.codex_model is None
+
+
+def test_claude_model_accepts_ids_the_codex_pattern_would_reject(no_models_file):
+    """Real Claude ids contain colons; no Claude-side field constrains them.
+
+    Bedrock native ids end `...-v1:0` and OpenRouter uses `...:online`. The
+    Codex pattern exists only because `DiscoveryConfig.codex_model` enforces it.
+    """
+    for model_id in (
+        "anthropic.claude-opus-4-8-v1:0",
+        "anthropic/claude-opus-4.8:online",
+    ):
+        assert _config(["--claude-model", model_id]).models.claude == model_id
+
+
+def test_claude_model_still_rejects_an_unusable_id(no_models_file, capsys):
+    with pytest.raises(SystemExit):
+        _config(["--claude-model", "has a space"])
+    assert "not a valid model id" in capsys.readouterr().err
+
+
+def test_models_are_in_the_fingerprint_only_once_something_is_pinned(no_models_file):
+    """Step 3's Claude model lives only on `config.models`.
+
+    Without it in the fingerprint, a caller who set `models` and nothing else
+    could resume across a model change and mix two models' findings in one
+    result. But the key must stay absent by default, or every old run dir breaks.
+    """
+    from spotlights_engine.spotlights_manager.persistence import (
+        build_config_fingerprint,
+    )
+
+    def fingerprint(argv: list[str]) -> dict:
+        cfg = _config(argv)
+        return build_config_fingerprint(
+            module_filter=None,
+            extractor_cfg=cfg.extractor,
+            discovery_cfg=cfg.discovery,
+            deep_research_cfg=cfg.deep_research,
+            proposal_from_finding_cfg=cfg.proposal_from_finding,
+            agent_proposals_cfg=cfg.agent_proposals,
+            models=cfg.models,
+        )
+
+    default = fingerprint(["--repo", "."])
+    assert "models_hash" not in default
+
+    pinned = fingerprint(["--repo", ".", "--claude-model", CLAUDE])
+    assert "models_hash" in pinned
+    assert pinned != default

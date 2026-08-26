@@ -211,6 +211,22 @@ def check_rates() -> CheckResult:
     return CheckResult(name="rates", ok=False, detail="no rate table found")
 
 
+def _effective_codex_model(configured: str | None) -> str | None:
+    """The Codex model a run will really use when the config says nothing.
+
+    Candidate discovery (step 2) keeps a built-in `gpt-5.5` default — it is part
+    of the resume fingerprint, so it cannot be dropped. Reporting or probing
+    "inherit" while step 2 pins a model would make a green doctor followed by a
+    403 on every module. Steps 3 and 5 do inherit in that case, which is a
+    pre-existing asymmetry this only reports, never hides.
+    """
+    if configured:
+        return configured
+    from spotlights_engine.candidate_discovery.api import DiscoveryConfig
+
+    return DiscoveryConfig().codex_model
+
+
 def check_models() -> CheckResult:
     """Report the configured model per CLI and where the value came from.
 
@@ -243,9 +259,13 @@ def check_models() -> CheckResult:
         cfg = load_model_config()
     except (OSError, ValueError) as exc:
         return CheckResult(name="models", ok=False, detail=f"{source}: {exc}")
+    codex_effective = _effective_codex_model(cfg.codex)
+    codex_label = codex_effective or "CLI default"
+    if not cfg.codex and codex_effective:
+        codex_label = f"{codex_effective} (step 2 default; steps 3+5 inherit)"
     parts = [
-        f"{cli}={value or 'CLI default'}"
-        for cli, value in (("claude", cfg.claude), ("codex", cfg.codex))
+        f"claude={cfg.claude or 'CLI default'}",
+        f"codex={codex_label}",
     ]
     return CheckResult(
         name="models", ok=True, detail=f"{source} → {', '.join(parts)}"
@@ -268,7 +288,7 @@ def run_checks() -> list[CheckResult]:
         models = ModelConfig()
     return [
         probe_cli("claude", rates=rates, model=models.claude),
-        probe_cli("codex", rates=rates, model=models.codex),
+        probe_cli("codex", rates=rates, model=_effective_codex_model(models.codex)),
         rates_check,
         check_models(),
     ]

@@ -102,10 +102,12 @@ Two things worth knowing:
 - **Model ids are gateway-specific.** `aws/claude-opus-4-8` is a LiteLLM alias,
   not a portable name. Check what your gateway exposes.
 
-`spotlights-engine doctor` prints the effective model for each CLI and which file
-it came from. Each run's `run_manifest.json` records both `models_requested`
-(what you asked for) and `models_used` (what the CLIs reported back) — they can
-differ when the request is blank.
+`spotlights-engine doctor` prints the effective model for each CLI, which file it
+came from, and probes that model live — so a green check means the model a run
+will use actually works and is priced. Each run's `run_manifest.json` records
+both `models_requested` (what the engine asked for, step 2's built-in default
+included) and `models_used` (what the CLIs reported back) — they can differ when
+the request is blank.
 
 ## Verify
 

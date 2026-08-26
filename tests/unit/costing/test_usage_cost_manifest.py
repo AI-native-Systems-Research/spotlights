@@ -676,3 +676,21 @@ def test_run_manifest_requested_models_default_to_blank() -> None:
     )
     assert manifest.models_requested.claude == ""
     assert manifest.models_requested.codex == ""
+
+
+def test_models_requested_reports_step_2s_default_not_a_blank() -> None:
+    """A blank config still results in the engine passing a Codex model.
+
+    Step 2 carries a built-in `gpt-5.5` default, so recording "" would claim the
+    CLI chose when it did not — exactly the provenance question this field exists
+    to answer.
+    """
+    from spotlights_engine.spotlights_manager.orchestrator import _models_requested
+
+    class _Cfg:
+        models = None
+        discovery = None
+
+    requested = _models_requested(_Cfg())
+    assert requested.codex == "gpt-5.5"
+    assert requested.claude == ""  # no built-in default; genuinely inherits

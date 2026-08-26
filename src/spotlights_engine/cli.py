@@ -426,30 +426,41 @@ def _build_input(args: argparse.Namespace) -> SpotlightsManagerInput:
     return SpotlightsManagerInput(**input_kwargs)
 
 
-_MODEL_ID_RE = re.compile(r"^[\w.\-/\[\]]+$")
+#: What `DiscoveryConfig.codex_model` accepts. Validating against it here means a
+#: bad Codex id fails at the flag instead of inside pydantic after `--dry-run`
+#: has already reported the run as fine.
+_CODEX_MODEL_RE = re.compile(r"^[\w.\-/\[\]]+$")
+
+#: Claude ids are not constrained by any field downstream, and real ones contain
+#: characters the Codex pattern rejects — Bedrock's `...-v1:0`, OpenRouter's
+#: `...:online`. So only reject what could not be an argv value at all.
+_CLAUDE_MODEL_RE = re.compile(r"^\S+$")
 
 
-def _validate_model_id(source: str, value: str, *, from_flag: bool) -> None:
-    """Reject a model id that would fail deeper in the stack.
-
-    `DiscoveryConfig.codex_model` carries a pattern, so an id with a `:` in it
-    used to blow up inside pydantic well after `--dry-run` had reported the run
-    as fine. Both flags and file values are checked here so they fail fast and
-    identically.
+def _validate_model_id(
+    source: str, value: str, *, from_flag: bool, pattern: re.Pattern[str], expected: str
+) -> None:
+    """Reject a model id that would fail deeper in the stack, or is unusable.
 
     A flag error goes through argparse (usage text, exit 2). A file value raises
     instead: printing argparse usage for a typo in `models.yaml` would point the
     reader at the wrong thing, so the message names the file.
     """
-    if _MODEL_ID_RE.match(value):
+    if pattern.match(value):
         return
-    detail = (
-        f"{value!r} is not a valid model id (expected letters, digits, and any "
-        "of . - _ / [ ])"
-    )
+    detail = f"{value!r} is not a valid model id ({expected})"
     if from_flag:
         _build_argparser().error(f"{source}: {detail}")
     raise ValueError(f"{source}: {detail}")
+
+
+def _codex_explicitly_blank(args: argparse.Namespace) -> bool:
+    """True when the user passed `--codex-model ""` (as opposed to omitting it).
+
+    The distinction matters only for step 2, the one step with a built-in Codex
+    default that a blank value would otherwise not override.
+    """
+    return args.codex_model is not None and not args.codex_model.strip()
 
 
 def _resolve_models(args: argparse.Namespace) -> tuple[str | None, str | None]:
@@ -483,6 +494,8 @@ def _resolve_models(args: argparse.Namespace) -> tuple[str | None, str | None]:
             "--claude-model" if from_flag else f"{file_path} (claude)",
             claude,
             from_flag=from_flag,
+            pattern=_CLAUDE_MODEL_RE,
+            expected="no whitespace",
         )
     if codex:
         from_flag = args.codex_model is not None
@@ -490,6 +503,8 @@ def _resolve_models(args: argparse.Namespace) -> tuple[str | None, str | None]:
             "--codex-model" if from_flag else f"{file_path} (codex)",
             codex,
             from_flag=from_flag,
+            pattern=_CODEX_MODEL_RE,
+            expected="expected letters, digits, and any of . - _ / [ ]",
         )
     return claude, codex
 
@@ -526,6 +541,13 @@ def _build_config(args: argparse.Namespace) -> SpotlightsManagerConfig:
         discovery_kwargs["claude_model"] = claude_model
     if codex_model:
         discovery_kwargs["codex_model"] = codex_model
+    elif _codex_explicitly_blank(args):
+        # `DiscoveryConfig.codex_model` defaults to `gpt-5.5` (kept for resume
+        # compatibility), so "no value" cannot mean inherit here the way it does
+        # for every other step. An *explicitly* empty flag is a deliberate ask,
+        # and has to override that default or `--codex-model ""` would silently
+        # do nothing to step 2.
+        discovery_kwargs["codex_model"] = None
     discovery_cfg = DiscoveryConfig(**discovery_kwargs) if discovery_kwargs else None
 
     # Step 1 always has a config object, so stamp the model straight onto it.

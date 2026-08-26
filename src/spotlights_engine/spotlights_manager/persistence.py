@@ -328,6 +328,7 @@ def build_config_fingerprint(
     deep_research_cfg: BaseModel | None,
     proposal_from_finding_cfg: BaseModel | None,
     agent_proposals_cfg: BaseModel | None,
+    models: BaseModel | None = None,
 ) -> dict[str, Any]:
     effective_discovery_cfg = discovery_cfg or DiscoveryConfig()
     effective_deep_research_cfg = deep_research_cfg or CodexExecOptions()
@@ -352,7 +353,23 @@ def build_config_fingerprint(
         "agent_proposals_hash": hash_pydantic_excluding(
             effective_agent_proposals_cfg, exclude={"artifacts_dir", "repo_path"}
         ),
+        # Step 3's Claude model lives only here — it has no config object of its
+        # own — so without this key a caller who set `models` and nothing else
+        # could resume across a model change and silently mix two models'
+        # findings in one result. Omitted entirely when it pins nothing, so a
+        # default run's fingerprint is unchanged from before this key existed.
+        **_models_fingerprint(models),
     }
+
+
+def _models_fingerprint(models: BaseModel | None) -> dict[str, Any]:
+    """`{"models_hash": ...}` when a model is pinned, otherwise `{}`."""
+    if models is None:
+        return {}
+    payload = models.model_dump(mode="json")
+    if not any(payload.values()):
+        return {}
+    return {"models_hash": _stable_hash(payload)}
 
 
 def default_agent_proposals_hash() -> str:
