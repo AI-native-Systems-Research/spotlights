@@ -1,0 +1,5 @@
+{
+  "env": {
+    "ANTHROPIC_BASE_URL": "https://ete-litellm.ai-models.vpc.res.ibm.com"
+  }
+}

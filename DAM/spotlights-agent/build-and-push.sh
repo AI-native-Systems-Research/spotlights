@@ -38,7 +38,7 @@ fi
 
 QUAY_USER="${QUAY_USER:?set QUAY_USER to your quay.io username or org}"
 IMAGE="${IMAGE:-spotlights-agent}"
-TAG="${TAG:-0.1.1}"
+TAG="${TAG:-0.1.3}"
 PLATFORM_BASE_TAG="${PLATFORM_BASE_TAG:-latest}"
 
 REF="quay.io/${QUAY_USER}/${IMAGE}:${TAG}"
