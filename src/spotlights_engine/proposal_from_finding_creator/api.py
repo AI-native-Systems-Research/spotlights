@@ -252,6 +252,14 @@ async def _run_one_pair(
         assert config.repo_path is not None  # guarded in _validate_setup
         run_start = time.monotonic()
         try:
+            # Passed only when set: a caller-injected runner written before
+            # this argument existed would raise TypeError on an unexpected
+            # keyword, and the broad `except Exception` below would turn that
+            # signature mismatch into a silent "zero results" rather than a
+            # visible failure.
+            model_kwargs = (
+                {"claude_model": config.claude_model} if config.claude_model else {}
+            )
             run_result = await asyncio.to_thread(
                 runner,
                 pair_key=pair_key,
@@ -260,7 +268,7 @@ async def _run_one_pair(
                 repo_path=config.repo_path,
                 max_turns=config.claude_max_turns,
                 wallclock_s=config.per_pair_wallclock_s,
-                claude_model=config.claude_model,
+                **model_kwargs,
             )
         except Exception as exc:
             duration = time.monotonic() - run_start

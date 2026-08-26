@@ -19,6 +19,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel
+
 from spotlights_engine.agent_proposals import (
     AgentProposalsConfig,
     AgentProposalsSetupError,
@@ -247,16 +249,51 @@ def _models_requested(cfg: SpotlightsManagerConfig) -> RunManifestModelsRequeste
     # model" — the opposite of the truth. The CLI stamps the same value into
     # every step, so any of them is representative; check the ones that always
     # exist first.
-    claude = (
-        (cfg.models.claude if cfg.models else None)
-        or cfg.extractor.claude_model
-        or discovery.claude_model
-        or ""
+    claude = _first_set(
+        cfg.models.claude if cfg.models else None,
+        _explicit(cfg.extractor, "claude_model"),
+        _explicit(cfg.discovery, "claude_model"),
+        _explicit(cfg.proposal_from_finding, "claude_model"),
+        _explicit(cfg.agent_proposals, "claude_model"),
     )
-    return RunManifestModelsRequested(
-        claude=claude,
-        codex=discovery.codex_model or "",
+    codex = _first_set(
+        cfg.models.codex if cfg.models else None,
+        _explicit(cfg.discovery, "codex_model"),
+        _explicit(cfg.deep_research, "model"),
+        _explicit(cfg.agent_proposals, "codex_model"),
+        # Nothing was asked for explicitly, so fall back to what step 2 will
+        # nevertheless pass: its field default.
+        discovery.codex_model,
     )
+    return RunManifestModelsRequested(claude=claude, codex=codex)
+
+
+def _explicit(model: BaseModel | None, field: str) -> str | None:
+    """A field's value only when the caller actually set it.
+
+    `DiscoveryConfig.codex_model` defaults to `gpt-5.5`, so reading it plainly
+    cannot tell a request apart from a default — and the default would shadow a
+    model a library caller pinned on a different step. Pydantic records which
+    fields were supplied, so ask that instead.
+    """
+    if model is None or field not in model.model_fields_set:
+        return None
+    value = getattr(model, field, None)
+    return value if isinstance(value, str) and value else None
+
+
+def _first_set(*values: str | None) -> str:
+    """First non-empty value, or `""`. Used to find a model wherever it was set.
+
+    The CLI stamps one pair into every step, so any of them answers. A library
+    caller may set only one step's config, and every step that carries a model is
+    checked so that case is recorded truthfully rather than as `""` — which the
+    manifest defines as "the engine passed no model".
+    """
+    for value in values:
+        if value:
+            return value
+    return ""
 
 
 def _build_deep_research_options(

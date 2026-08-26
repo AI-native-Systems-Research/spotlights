@@ -822,10 +822,19 @@ def main(argv: list[str] | None = None) -> int:
         # Report what the engine will actually pass, not what the config says.
         # Step 2 has a built-in Codex default, so `(CLI default)` here would be
         # the same misreport doctor and the run manifest were fixed to avoid.
-        dry_codex_effective = dry_codex or DiscoveryConfig().codex_model
-        codex_label = dry_codex_effective or "(CLI default)"
-        if not dry_codex and dry_codex_effective:
-            codex_label = f"{dry_codex_effective} (step 2 default; steps 3+5 inherit)"
+        # An explicit `--codex-model ""` overrides step 2's built-in default in
+        # the real run, so the dry run must not claim otherwise.
+        if _codex_explicitly_blank(args):
+            codex_label = "(CLI default)"
+        elif dry_codex:
+            codex_label = dry_codex
+        else:
+            default_codex = DiscoveryConfig().codex_model
+            codex_label = (
+                f"{default_codex} (step 2 default; steps 3+5 inherit)"
+                if default_codex
+                else "(CLI default)"
+            )
         print(f"  claude-model:{dry_claude or '(CLI default)'}")
         print(f"  codex-model: {codex_label}")
         if not args.enable_deep_research:

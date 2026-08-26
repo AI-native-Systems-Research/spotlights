@@ -291,3 +291,49 @@ def test_dry_run_reports_the_model_the_run_will_actually_use(no_models_file, cap
     assert "step 2 default" in out
     # Claude has no built-in default, so it genuinely does inherit.
     assert "claude-model:(CLI default)" in out
+
+
+def test_a_runner_predating_the_model_argument_still_works():
+    """Injected runners must not break just because a new kwarg exists.
+
+    Steps 4 and 5 wrap the runner call in a broad `except Exception`, so a
+    `TypeError: unexpected keyword argument 'claude_model'` would not surface as
+    a crash — it would quietly become "zero proposals". Anyone with a runner
+    written against the old signature would see an empty result and no error.
+    So the kwarg is passed only when a model is actually set.
+    """
+    import asyncio
+    import inspect
+
+    from spotlights_engine.agent_proposals import api as ap_api
+
+    # A runner with the pre-change signature: no `claude_model`.
+    def old_runner(*, candidate_id, prompt, schema_text, repo_path, max_turns,
+                   wallclock_s):
+        return "ran"
+
+    params = inspect.signature(old_runner).parameters
+    assert "claude_model" not in params
+
+    async def call(model: str | None):
+        kwargs = {"claude_model": model} if model else {}
+        return await asyncio.to_thread(
+            old_runner,
+            candidate_id="c",
+            prompt="p",
+            schema_text="{}",
+            repo_path=".",
+            max_turns=1,
+            wallclock_s=1,
+            **kwargs,
+        )
+
+    # No model configured: the old runner is called cleanly.
+    assert asyncio.run(call(None)) == "ran"
+    # With a model, it does raise — which is correct and loud, not silent.
+    with pytest.raises(TypeError):
+        asyncio.run(call(CLAUDE))
+
+    # And the production call site uses exactly this conditional shape.
+    src = inspect.getsource(ap_api)
+    assert '{"claude_model": config.claude_model} if config.claude_model else {}' in src

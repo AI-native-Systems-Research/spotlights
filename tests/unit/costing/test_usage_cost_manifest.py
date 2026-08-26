@@ -685,14 +685,41 @@ def test_models_requested_reports_step_2s_default_not_a_blank() -> None:
     CLI chose when it did not — exactly the provenance question this field exists
     to answer.
     """
-    from spotlights_engine.modules_extractor import ExtractorConfig
+    from pathlib import Path
+
+    from spotlights_engine.spotlights_manager.api import SpotlightsManagerConfig
     from spotlights_engine.spotlights_manager.orchestrator import _models_requested
 
-    class _Cfg:
-        models = None
-        discovery = None
-        extractor = ExtractorConfig()
-
-    requested = _models_requested(_Cfg())
+    cfg = SpotlightsManagerConfig(
+        artifacts_dir=Path("/tmp/artifacts"), output_folder=Path("/tmp/out")
+    )
+    requested = _models_requested(cfg)
     assert requested.codex == "gpt-5.5"
     assert requested.claude == ""  # no built-in default; genuinely inherits
+
+
+def test_models_requested_finds_a_model_pinned_on_any_single_step() -> None:
+    """A library caller may configure one step and not the others.
+
+    Reading only `models` (or only the first two step configs) recorded such a
+    run as "the engine passed no model", the opposite of the truth. An explicitly
+    set value also has to win over another step's *field default*, which is why
+    the lookup asks pydantic which fields were actually supplied.
+    """
+    from pathlib import Path
+
+    from spotlights_engine.agent_proposals import AgentProposalsConfig
+    from spotlights_engine.spotlights_manager.api import SpotlightsManagerConfig
+    from spotlights_engine.spotlights_manager.orchestrator import _models_requested
+
+    cfg = SpotlightsManagerConfig(
+        artifacts_dir=Path("/tmp/artifacts"),
+        output_folder=Path("/tmp/out"),
+        agent_proposals=AgentProposalsConfig(
+            claude_model="pinned-claude", codex_model="pinned-codex"
+        ),
+    )
+    requested = _models_requested(cfg)
+    assert requested.claude == "pinned-claude"
+    # Not step 2's `gpt-5.5` default, which would otherwise shadow this.
+    assert requested.codex == "pinned-codex"

@@ -455,13 +455,18 @@ def _process_candidate(
             keep_worktree = True
             return
 
+        # Passed only when set, so a runner injected by a caller who predates
+        # this argument keeps working instead of raising TypeError.
+        model_kwargs = (
+            {"claude_model": input.claude_model} if input.claude_model else {}
+        )
         run = claude_runner(
             candidate_id=sel.candidate.id,
             prompt=prompt,
             worktree=worktree.path,
             max_turns=input.max_turns,
             wallclock_s=input.wallclock_s,
-            claude_model=input.claude_model,
+            **model_kwargs,
         )
         collection = collect_patch(worktree)
     finally:
