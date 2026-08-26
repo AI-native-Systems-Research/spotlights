@@ -66,6 +66,24 @@ class RunManifestCost(BaseModel):
     by_model: list[ByModelCost] = Field(default_factory=list)
 
 
+def cost_block(summary: CostSummary) -> RunManifestCost:
+    """Project a `CostSummary` onto the manifest's cost block.
+
+    Drops `CostSummary.unpriced_models`, which duplicates
+    `coverage.unpriced_models`; the run manifest surfaces it in `notes`
+    instead. Shared with `one_shot_apply`'s sibling manifest so both files'
+    cost blocks stay one shape with one reader.
+    """
+    return RunManifestCost(
+        amount_usd=summary.amount_usd,
+        priced_token_share=summary.priced_token_share,
+        source=summary.source,
+        rate_note=summary.rate_note,
+        coverage=summary.coverage,
+        by_model=list(summary.by_model),
+    )
+
+
 class RunManifestTiming(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -184,26 +202,8 @@ def build_run_manifest(
         models_requested=models_requested or RunManifestModelsRequested(),
         models_used=aggregate_models_used(records),
         total_tokens=sum(record.total_tokens for record in records),
-        cost=RunManifestCost(
-            amount_usd=cost.amount_usd,
-            priced_token_share=cost.priced_token_share,
-            source=cost.source,
-            rate_note=cost.rate_note,
-            coverage=cost.coverage,
-            by_model=list(cost.by_model),
-        ),
-        external_cost=(
-            RunManifestCost(
-                amount_usd=external_cost.amount_usd,
-                priced_token_share=external_cost.priced_token_share,
-                source=external_cost.source,
-                rate_note=external_cost.rate_note,
-                coverage=external_cost.coverage,
-                by_model=list(external_cost.by_model),
-            )
-            if external_cost is not None
-            else None
-        ),
+        cost=cost_block(cost),
+        external_cost=(cost_block(external_cost) if external_cost is not None else None),
         timing=RunManifestTiming(
             wall_clock_s=wall_clock_s,
             accumulated_duration_s=accumulated_duration_s,
@@ -225,4 +225,5 @@ __all__ = [
     "RunManifestModelsRequested",
     "aggregate_models_used",
     "build_run_manifest",
+    "cost_block",
 ]
