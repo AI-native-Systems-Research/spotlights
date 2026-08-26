@@ -107,14 +107,17 @@ def _load_rates_from(
     """Load a rate table keyed by `"provider:model"`.
 
     Precedence: explicit `path` > `env_var` env var > the `bundled` default
-    table. Keys starting with `_` are comments.
+    table. Keys starting with `_` are comments. Model portions are
+    canonicalized (context tag + LiteLLM route prefix stripped) so a table
+    keyed `anthropic:aws/claude-opus-5` and one keyed `anthropic:claude-opus-5`
+    are equivalent — pricing is per model, not per route.
     """
     if path is None:
         env_path = os.environ.get(env_var)
         path = Path(env_path) if env_path else bundled
     payload = json.loads(path.read_text(encoding="utf-8"))
     return {
-        key: ModelRate.model_validate(value)
+        _canonical_rate_key(key): ModelRate.model_validate(value)
         for key, value in payload.items()
         if not key.startswith("_")
     }
@@ -145,12 +148,46 @@ def load_external_rates(path: Path | None = None) -> dict[str, ModelRate]:
 # strip it before the rate lookup — all context variants share one rate row.
 _CONTEXT_TAG_RE = re.compile(r"\[[^\]]*\]$")
 
+# LiteLLM route prefix at the start of a model id, e.g. the "aws/" in
+# "aws/claude-opus-5" or the "azure/" in "azure/gpt-5.5". Pricing is per model,
+# not per route (the same Opus row prices both a bedrock and a direct-API call),
+# so we strip it before the rate lookup — a CLI reporting plain "claude-opus-5"
+# and one reporting "aws/claude-opus-5" hit the same row. The set is a small
+# allowlist of LiteLLM's own custom_llm_provider labels rather than a generic
+# "strip anything before /" — some legitimate model ids contain a slash
+# (e.g. HuggingFace org/model paths) and we don't want to eat those.
+_ROUTE_PREFIX_RE = re.compile(
+    r"^(?:aws|bedrock|azure|azure_ai|vertex|vertex_ai|"
+    r"openrouter|anthropic|openai|gemini)/"
+)
+
+
+def _canonical_model_id(model: str) -> str:
+    """Strip the context-window tag and LiteLLM route prefix from a model id.
+
+    Both variants map to the same rate row: pricing is per model, not per
+    context window or route. Called on both sides of the lookup (record model
+    id + rate-table key) so `aws/claude-opus-5`, `claude-opus-5`, and
+    `aws/claude-opus-5[1m]` all resolve to the same key.
+    """
+    return _ROUTE_PREFIX_RE.sub("", _CONTEXT_TAG_RE.sub("", model))
+
+
+def _canonical_rate_key(key: str) -> str:
+    """Canonicalize a rate-table key `"provider:model"` — provider left alone,
+    model canonicalized. A key with no colon (malformed) is returned as-is so
+    Pydantic validation surfaces the error at the value level.
+    """
+    provider, sep, model = key.partition(":")
+    if not sep:
+        return key
+    return f"{provider}:{_canonical_model_id(model)}"
+
 
 def _rate_key(record: UsageRecord) -> tuple[str, bool]:
     """`(provider:model, resolved)`; unresolved models fall back to the CLI family."""
     if record.model:
-        model = _CONTEXT_TAG_RE.sub("", record.model)
-        return f"{record.provider}:{model}", True
+        return f"{record.provider}:{_canonical_model_id(record.model)}", True
     return f"{record.provider}:{record.cli}", False
 
 
@@ -158,10 +195,10 @@ def _group_key(record: UsageRecord) -> tuple[str, str, str]:
     """`(provider, model_or_cli, role)` — same grouping as `aggregate_models_used`.
 
     Kept in lockstep so `cost.by_model` lines up 1:1 with `models_used`; the
-    context-tag stripping matches `_rate_key` so the group's `rate_key` is the
+    model canonicalization matches `_rate_key` so the group's `rate_key` is the
     exact string we look up in the rate table.
     """
-    model = _CONTEXT_TAG_RE.sub("", record.model) if record.model else record.cli
+    model = _canonical_model_id(record.model) if record.model else record.cli
     return (record.provider, model, record.role)
 
 
@@ -172,6 +209,13 @@ def compute_cost(
         "contracted-rate-table", "litellm-proxy-log", "public-api-rate-table"
     ] = "contracted-rate-table",
 ) -> CostSummary:
+    # Canonicalize table keys on entry so a caller-supplied dict keyed with a
+    # LiteLLM route prefix (e.g. `anthropic:aws/claude-opus-5`) still matches
+    # records whose model id the CLI reported without the prefix. Dicts coming
+    # from `load_rates`/`load_external_rates` are already canonical, so this
+    # is a no-op there; the rebuild is cheap and shields internal API callers.
+    rates = {_canonical_rate_key(k): v for k, v in rates.items()}
+
     # Materialize once so we can iterate twice (grouping + coverage) without
     # forcing the caller to hand us a list.
     record_list = list(records)

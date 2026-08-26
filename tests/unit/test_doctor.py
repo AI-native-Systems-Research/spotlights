@@ -1,10 +1,11 @@
 from spotlights_engine import doctor
 from spotlights_engine.doctor import ProbeOutcome
 
-# A rate table with both real key shapes: a model-keyed Claude row and the
-# codex CLI-family fallback row (codex reports no resolvable model id).
+# A rate table with both real key shapes: a model-keyed Claude row (canonical,
+# no LiteLLM route prefix) and the codex CLI-family fallback row (codex reports
+# no resolvable model id).
 RATES = {
-    "anthropic:aws/claude-opus-4-8": object(),
+    "anthropic:claude-opus-4-8": object(),
     "openai:codex": object(),
 }
 
@@ -37,7 +38,7 @@ def test_probe_cli_priced_model_ok(monkeypatch):
     )
     res = doctor.probe_cli("claude", rates=RATES)
     assert res.ok is True
-    assert "anthropic:aws/claude-opus-4-8" in res.detail
+    assert "anthropic:claude-opus-4-8" in res.detail
 
 
 def test_probe_cli_unpriced_model_fails(monkeypatch):
