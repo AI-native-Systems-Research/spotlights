@@ -122,7 +122,7 @@ def test_compute_cost_strips_context_window_tag_from_model_id() -> None:
     """A "[1m]" context-variant id prices off its base model's rate row."""
     records = [
         UsageRecord.from_usage(
-            AgentUsage(input=100, output=10, model="aws/claude-opus-4-8[1m]"),
+            AgentUsage(input=100, output=10, model="claude-opus-4-8[1m]"),
             step="module_deep_research",
             module_qualified_name="pkg/a",
             session_index=1,
@@ -136,7 +136,7 @@ def test_compute_cost_strips_context_window_tag_from_model_id() -> None:
     summary = compute_cost(
         records,
         {
-            "anthropic:aws/claude-opus-4-8": ModelRate(
+            "anthropic:claude-opus-4-8": ModelRate(
                 input=0.01,
                 output=0.02,
                 cache_read=0.001,
@@ -149,6 +149,61 @@ def test_compute_cost_strips_context_window_tag_from_model_id() -> None:
     assert summary.amount_usd == pytest.approx(100 * 0.01 + 10 * 0.02)
     assert summary.unpriced_models == []
     assert "PARTIAL cost" not in summary.rate_note
+
+
+def test_compute_cost_strips_litellm_route_prefix_from_model_id() -> None:
+    """A CLI reporting a plain model id prices against a table keyed with the
+    LiteLLM route prefix — and vice versa. Pricing is per model, not per route
+    (bedrock vs direct-API), so `aws/claude-opus-5` and `claude-opus-5` must
+    hit the same row from either direction."""
+
+    def _record(model: str, idx: int) -> UsageRecord:
+        return UsageRecord.from_usage(
+            AgentUsage(input=100, output=10, model=model),
+            step="module_deep_research",
+            module_qualified_name="pkg/a",
+            session_index=1,
+            invocation_index=idx,
+            invocation_id=f"i{idx}",
+            cli="claude",
+            role="deep_research",
+        )
+
+    rate = ModelRate(input=0.01, output=0.02, cache_read=0.0, cache_create=0.0)
+
+    # CLI reports the unprefixed form (the user's DAM-image bug); table has the
+    # route-prefixed key. Both sides canonicalize on lookup, so it hits.
+    unprefixed_hit = compute_cost(
+        [_record("claude-opus-5", 0)],
+        {"anthropic:aws/claude-opus-5": rate},
+    )
+    assert unprefixed_hit.amount_usd == pytest.approx(100 * 0.01 + 10 * 0.02)
+    assert unprefixed_hit.unpriced_models == []
+
+    # Reverse: CLI reports the prefixed form, table has the unprefixed key
+    # (what the loader normalizes to). Also hits.
+    prefixed_hit = compute_cost(
+        [_record("aws/claude-opus-5", 0)],
+        {"anthropic:claude-opus-5": rate},
+    )
+    assert prefixed_hit.amount_usd == pytest.approx(100 * 0.01 + 10 * 0.02)
+    assert prefixed_hit.unpriced_models == []
+
+    # Context tag + route prefix together also collapse to the canonical row.
+    both_tags = compute_cost(
+        [_record("aws/claude-opus-5[1m]", 0)],
+        {"anthropic:claude-opus-5": rate},
+    )
+    assert both_tags.amount_usd == pytest.approx(100 * 0.01 + 10 * 0.02)
+
+    # An unknown-prefixed model id (not in the allowlist) is left alone — the
+    # loader canonicalizes both sides, so a table keyed `hf-org/model-x` and a
+    # CLI reporting `hf-org/model-x` still match without eating the slash.
+    hf = compute_cost(
+        [_record("hf-org/model-x", 0)],
+        {"anthropic:hf-org/model-x": rate},
+    )
+    assert hf.amount_usd == pytest.approx(100 * 0.01 + 10 * 0.02)
 
 
 def test_run_manifest_groups_models_and_totals_tokens() -> None:
@@ -217,7 +272,9 @@ def test_run_manifest_groups_models_and_totals_tokens() -> None:
 
 
 def _opus_record() -> UsageRecord:
-    """One Opus 4.8 record priced by both bundled tables."""
+    """One Opus 4.8 record priced by both bundled tables. The bedrock `aws/`
+    prefix here exercises the loader's route-prefix canonicalization — the
+    bundled tables key their rows without the prefix."""
     return UsageRecord.from_usage(
         AgentUsage(
             input=1000,
@@ -238,10 +295,12 @@ def _opus_record() -> UsageRecord:
 
 def test_load_external_rates_returns_bundled_table() -> None:
     external = load_external_rates()
-    assert "anthropic:aws/claude-opus-4-8" in external
+    # Bundled keys are canonical (no LiteLLM route prefix); the loader would
+    # strip a prefix if one were present.
+    assert "anthropic:claude-opus-4-8" in external
     assert "openai:codex" in external
     # Public Opus list price ($5/MTok input) exceeds the contracted rate.
-    assert external["anthropic:aws/claude-opus-4-8"].input == pytest.approx(
+    assert external["anthropic:claude-opus-4-8"].input == pytest.approx(
         0.000005
     )
 
@@ -249,6 +308,10 @@ def test_load_external_rates_returns_bundled_table() -> None:
 def test_load_external_rates_env_var_and_explicit_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # A user-supplied table keyed with the LiteLLM `aws/` prefix must still be
+    # reachable — the loader normalizes both sides of the lookup, so writing
+    # `anthropic:aws/claude-opus-4-8` in the file works even though runtime
+    # lookups produce `anthropic:claude-opus-4-8`.
     custom = tmp_path / "ext.json"
     custom.write_text(
         json.dumps(
@@ -263,17 +326,16 @@ def test_load_external_rates_env_var_and_explicit_path(
         ),
         encoding="utf-8",
     )
-    # Env-var precedence over the bundled default.
     monkeypatch.setenv(EXTERNAL_RATES_ENV_VAR, str(custom))
     from_env = load_external_rates()
-    assert from_env["anthropic:aws/claude-opus-4-8"].input == pytest.approx(0.1)
+    assert from_env["anthropic:claude-opus-4-8"].input == pytest.approx(0.1)
 
-    # Explicit path wins over the env var.
+    # Explicit path wins over the env var; canonical key also works directly.
     other = tmp_path / "other.json"
     other.write_text(
         json.dumps(
             {
-                "anthropic:aws/claude-opus-4-8": {
+                "anthropic:claude-opus-4-8": {
                     "input": 0.9,
                     "output": 0.2,
                     "cache_read": 0.0,
@@ -284,7 +346,7 @@ def test_load_external_rates_env_var_and_explicit_path(
         encoding="utf-8",
     )
     from_path = load_external_rates(other)
-    assert from_path["anthropic:aws/claude-opus-4-8"].input == pytest.approx(0.9)
+    assert from_path["anthropic:claude-opus-4-8"].input == pytest.approx(0.9)
 
 
 def test_compute_cost_source_label_and_table_divergence() -> None:

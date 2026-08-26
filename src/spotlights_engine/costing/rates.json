@@ -1,20 +1,20 @@
 {
-  "_note": "Default contracted LiteLLM-proxy per-token rates for the in-scope Claude/Codex models. Override the whole table via SPOTLIGHTS_RATES_FILE for a different private contract. Never substitute CLI-reported total_cost_usd.",
-  "anthropic:aws/claude-opus-4-8": {
+  "_note": "Default contracted LiteLLM-proxy per-token rates for the in-scope Claude/Codex models. Keys are canonical `provider:model` — the loader strips any LiteLLM route prefix (aws/, bedrock/, azure/, vertex/, …) and context-window tag before lookup, so a CLI reporting `claude-opus-5`, `aws/claude-opus-5`, or `aws/claude-opus-5[1m]` all hit the same row. Override the whole table via SPOTLIGHTS_RATES_FILE for a different private contract. Never substitute CLI-reported total_cost_usd.",
+  "anthropic:claude-opus-4-8": {
     "input": 0.0000038,
     "output": 0.000019,
     "cache_read": 0.00000038,
     "cache_create": 0.00000475,
     "unit": "per_token",
-    "note": "LiteLLM (bedrock) rate as of 2026-07-07: Claude Opus 4.8 $3.80/MTok input, $19/MTok output, $0.38/MTok cache read, $4.75/MTok cache write. Keyed by the CLI-reported model id (bedrock 'aws/' prefix). Override for a different contract or 1h cache writes ($10/MTok)."
+    "note": "LiteLLM (bedrock) rate as of 2026-07-07: Claude Opus 4.8 $3.80/MTok input, $19/MTok output, $0.38/MTok cache read, $4.75/MTok cache write. Override for a different contract or 1h cache writes ($10/MTok)."
   },
-  "anthropic:aws/claude-opus-5": {
+  "anthropic:claude-opus-5": {
     "input": 0.0000038,
     "output": 0.000019,
     "cache_read": 0.00000038,
     "cache_create": 0.00000475,
     "unit": "per_token",
-    "note": "LiteLLM (bedrock) rate: Claude Opus 5 $3.80/MTok input, $19/MTok output, $0.38/MTok cache read, $4.75/MTok cache write. Keyed by the CLI-reported model id (bedrock 'aws/' prefix). Override for a different contract or 1h cache writes."
+    "note": "LiteLLM (bedrock) rate: Claude Opus 5 $3.80/MTok input, $19/MTok output, $0.38/MTok cache read, $4.75/MTok cache write. Override for a different contract or 1h cache writes."
   },
   "openai:codex": {
     "input": 0.0000025,

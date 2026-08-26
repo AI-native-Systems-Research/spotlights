@@ -29,9 +29,9 @@ from pathlib import Path
 
 from spotlights_engine.costing.rates import (
     _BUNDLED_RATES_PATH,
-    _CONTEXT_TAG_RE,
     RATES_ENV_VAR,
     ModelRate,
+    _canonical_model_id,
     load_rates,
 )
 from spotlights_engine.costing.records import PROVIDER_FOR_CLI
@@ -144,10 +144,11 @@ def _probe_model(
 
 def _rate_key_for(name: str, model: str | None) -> str:
     """Mirror `costing.rates._rate_key`: model → `provider:model` (context tag
-    stripped), else the `provider:cli` family fallback."""
+    and LiteLLM route prefix stripped), else the `provider:cli` family fallback.
+    """
     provider = PROVIDER_FOR_CLI[name]
     if model:
-        return f"{provider}:{_CONTEXT_TAG_RE.sub('', model)}"
+        return f"{provider}:{_canonical_model_id(model)}"
     return f"{provider}:{name}"
 
 
