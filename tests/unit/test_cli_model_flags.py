@@ -337,3 +337,24 @@ def test_a_runner_predating_the_model_argument_still_works():
     # And the production call site uses exactly this conditional shape.
     src = inspect.getsource(ap_api)
     assert '{"claude_model": config.claude_model} if config.claude_model else {}' in src
+
+
+def test_a_stale_models_file_is_ignored_when_both_flags_are_given(
+    tmp_path, monkeypatch
+):
+    """The file is not consulted when nothing needs it.
+
+    A stale `SPOTLIGHTS_MODELS_FILE` is an error, but it should not abort a run
+    that named both models on the command line and would never have read it.
+    """
+    monkeypatch.setenv(MODELS_ENV_VAR, str(tmp_path / "deleted.yaml"))
+
+    cfg = _config(["--claude-model", CLAUDE, "--codex-model", CODEX])
+    assert (cfg.models.claude, cfg.models.codex) == (CLAUDE, CODEX)
+
+
+def test_a_stale_models_file_still_errors_when_it_is_needed(tmp_path, monkeypatch):
+    monkeypatch.setenv(MODELS_ENV_VAR, str(tmp_path / "deleted.yaml"))
+
+    with pytest.raises(ValueError, match="does not point to a readable file"):
+        _config(["--claude-model", CLAUDE])  # codex still needs the file

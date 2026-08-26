@@ -476,7 +476,11 @@ def _resolve_models(args: argparse.Namespace) -> tuple[str | None, str | None]:
     would leave no way to ask for the CLI's own default from the command line.
     An omitted flag is `None` and falls through to the file.
     """
-    file_cfg = load_model_config()
+    # Only read the file when a flag has not already answered. A stale
+    # SPOTLIGHTS_MODELS_FILE is an error, and it should not abort a run that
+    # specified both models on the command line and would have ignored the file.
+    needs_file = args.claude_model is None or args.codex_model is None
+    file_cfg = load_model_config() if needs_file else ModelConfig()
 
     if args.claude_model is None:
         claude = file_cfg.claude

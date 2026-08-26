@@ -107,7 +107,9 @@ Two things worth knowing:
 
 `spotlights-engine doctor` prints the effective model for each CLI, which file it
 came from, and probes that model live — so a green check means the model a run
-will use actually works and is priced. Each run's `run_manifest.json` records
+will use actually works and is priced. With `codex` blank you will see two Codex
+checks, because step 2 and steps 3+5 are then on different models and both get
+probed. Each run's `run_manifest.json` records
 both `models_requested` (what the engine asked for, step 2's built-in default
 included) and `models_used` (what the CLIs reported back) — they can differ when
 the request is blank.

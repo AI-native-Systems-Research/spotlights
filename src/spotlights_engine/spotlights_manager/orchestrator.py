@@ -232,6 +232,28 @@ def _build_discovery_config(
     )
 
 
+def _effective_claude_model(cfg: SpotlightsManagerConfig) -> str | None:
+    """The Claude model this run uses, wherever the caller happened to set it.
+
+    Step 3 has no config object of its own, so it used to read `cfg.models`
+    alone — which meant a library caller pinning `claude_model` on the per-step
+    configs (documented as supported) ran step 3 on the CLI default while the
+    manifest reported the pinned id. Both now derive from this one function so
+    they cannot disagree.
+    """
+    discovery = cfg.discovery if cfg.discovery is not None else DiscoveryConfig()
+    return (
+        _first_set(
+            cfg.models.claude if cfg.models else None,
+            _explicit(cfg.extractor, "claude_model"),
+            _explicit(discovery, "claude_model"),
+            _explicit(cfg.proposal_from_finding, "claude_model"),
+            _explicit(cfg.agent_proposals, "claude_model"),
+        )
+        or None
+    )
+
+
 def _models_requested(cfg: SpotlightsManagerConfig) -> RunManifestModelsRequested:
     """What the engine actually asked each CLI for, for the run manifest.
 
@@ -249,13 +271,7 @@ def _models_requested(cfg: SpotlightsManagerConfig) -> RunManifestModelsRequeste
     # model" — the opposite of the truth. The CLI stamps the same value into
     # every step, so any of them is representative; check the ones that always
     # exist first.
-    claude = _first_set(
-        cfg.models.claude if cfg.models else None,
-        _explicit(cfg.extractor, "claude_model"),
-        _explicit(cfg.discovery, "claude_model"),
-        _explicit(cfg.proposal_from_finding, "claude_model"),
-        _explicit(cfg.agent_proposals, "claude_model"),
-    )
+    claude = _effective_claude_model(cfg) or ""
     codex = _first_set(
         cfg.models.codex if cfg.models else None,
         _explicit(cfg.discovery, "codex_model"),
@@ -836,7 +852,7 @@ async def _do_step3(
             research_input,
             options,
             segment=segment,
-            claude_model=cfg.models.claude if cfg.models else None,
+            claude_model=_effective_claude_model(cfg),
         )
     )
     duration = time.monotonic() - start

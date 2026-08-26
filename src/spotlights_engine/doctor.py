@@ -288,9 +288,40 @@ def run_checks() -> list[CheckResult]:
         models = ModelConfig()
     return [
         probe_cli("claude", rates=rates, model=models.claude),
-        probe_cli("codex", rates=rates, model=_effective_codex_model(models.codex)),
+        *_codex_probes(rates=rates, configured=models.codex),
         rates_check,
         check_models(),
+    ]
+
+
+def _codex_probes(
+    *, rates: dict[str, ModelRate], configured: str | None
+) -> list[CheckResult]:
+    """One codex probe, or two when the pipeline is not using a single model.
+
+    With nothing configured, step 2 pins its built-in default while steps 3 and 5
+    inherit `~/.codex/config.toml` — two different models. Probing only one of
+    them means a green doctor can still be followed by unpriced usage or a 403 in
+    whichever step went unchecked, which is exactly what this check exists to
+    prevent. So probe both and label them.
+    """
+    if configured:
+        return [probe_cli("codex", rates=rates, model=configured)]
+
+    step2 = _effective_codex_model(None)
+    inherited = probe_cli("codex", rates=rates, model=None)
+    if not step2:
+        return [inherited]
+    pinned = probe_cli("codex", rates=rates, model=step2)
+    return [
+        CheckResult(
+            name="codex (steps 3+5, inherited)",
+            ok=inherited.ok,
+            detail=inherited.detail,
+        ),
+        CheckResult(
+            name=f"codex (step 2, {step2})", ok=pinned.ok, detail=pinned.detail
+        ),
     ]
 
 

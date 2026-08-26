@@ -87,7 +87,11 @@ def test_run_checks_returns_all(monkeypatch):
     )
     results = doctor.run_checks()
     names = {r.name for r in results}
-    assert {"claude", "codex", "rates"} <= names
+    assert {"claude", "rates"} <= names
+    # Codex may appear as one check or as two: with nothing configured, step 2's
+    # pinned model and the model steps 3+5 inherit are different and both get
+    # probed, so the check is named per-scope.
+    assert any(n.startswith("codex") for n in names)
 
 
 def test_main_exit_code_fail(monkeypatch, capsys):
@@ -235,3 +239,51 @@ def test_configured_codex_model_wins_over_step_2s_default(monkeypatch, tmp_path)
     )
     doctor.run_checks()
     assert seen["codex"] == "my-alias"
+
+
+def test_both_codex_models_are_probed_when_the_pipeline_splits(monkeypatch, tmp_path):
+    """With nothing configured, step 2 pins gpt-5.5 while steps 3+5 inherit.
+
+    Probing only one leaves the other unchecked, so a green doctor can still be
+    followed by unpriced usage or a 403 in whichever step went unprobed.
+    """
+    empty = tmp_path / "empty.yaml"
+    empty.write_text("", encoding="utf-8")
+    monkeypatch.setenv("SPOTLIGHTS_MODELS_FILE", str(empty))
+    monkeypatch.setattr(doctor.shutil, "which", lambda _n: "/bin/" + _n)
+
+    probed: list[str | None] = []
+
+    def fake_probe(name, *, cwd=None, model=None):
+        if name == "codex":
+            probed.append(model)
+        return ProbeOutcome(ok=True, model=None, error="")
+
+    monkeypatch.setattr(doctor, "_probe_model", fake_probe)
+    results = doctor.run_checks()
+
+    assert probed == [None, "gpt-5.5"]
+    names = [r.name for r in results]
+    assert "codex (steps 3+5, inherited)" in names
+    assert "codex (step 2, gpt-5.5)" in names
+
+
+def test_a_configured_codex_model_needs_only_one_probe(monkeypatch, tmp_path):
+    """Once set, every step uses the same model — no split to check."""
+    models = tmp_path / "m.yaml"
+    models.write_text("codex: one-model\n", encoding="utf-8")
+    monkeypatch.setenv("SPOTLIGHTS_MODELS_FILE", str(models))
+    monkeypatch.setattr(doctor.shutil, "which", lambda _n: "/bin/" + _n)
+
+    probed: list[str | None] = []
+
+    def fake_probe(name, *, cwd=None, model=None):
+        if name == "codex":
+            probed.append(model)
+        return ProbeOutcome(ok=True, model=None, error="")
+
+    monkeypatch.setattr(doctor, "_probe_model", fake_probe)
+    names = [r.name for r in doctor.run_checks()]
+
+    assert probed == ["one-model"]
+    assert "codex" in names
