@@ -36,7 +36,7 @@ def _build_argparser() -> argparse.ArgumentParser:
         description=(
             "Implement one candidate with a single Claude Code session in a "
             "throwaway git worktree, and write apply.patch + apply.prompt.txt "
-            "+ APPLY-NOTES.md. "
+            "+ APPLY-NOTES.md + manifest.json (that session's tokens and cost). "
             "Runs no tests and no benchmarks; the target repo is never modified."
         ),
     )

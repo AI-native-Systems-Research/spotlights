@@ -63,7 +63,8 @@ worktree needs a commit, and a patch without a recorded base is not applicable.
 <base>/apply/<module>/<candidate-id>/
 ├── apply.patch        # git diff against the base commit, SHA in a header comment
 ├── apply.prompt.txt   # the prompt the agent was given, verbatim
-└── APPLY-NOTES.md     # the travelling documentation
+├── APPLY-NOTES.md     # the travelling documentation
+└── manifest.json      # this session's tokens, cost, provenance, timing
 ```
 
 `apply.patch` is a `git diff`, not `format-patch`: the latter needs a commit, and
@@ -137,6 +138,46 @@ the directory it actually lives in. Always pass the absolute `"$PWD/apply.patch"
 If the patch does not apply cleanly, `git -C <repo> apply -3 "$PWD/apply.patch"`
 falls back to a three-way merge (same directory, same rule); `patch -p1 <
 apply.patch` works without git, run from the repo root instead.
+
+### `manifest.json`
+
+What this candidate's apply cost. One `claude -p` session runs per candidate,
+so this file accounts for 100% of the model spend behind the directory.
+
+- `models_used` / `total_tokens` — the four disjoint token buckets (input,
+  output, cache read, cache create).
+- `cost` — priced through the contracted rate table. `external_cost` — the
+  same tokens at public list price, which is the figure to quote externally.
+  When `priced_token_share` is below 1.0 the dollar amount is partial and
+  `coverage.unpriced_models` names what was left out.
+- `target` / `spotlights` — the repo, commit, and objective this patch was
+  produced against, plus the engine commit that produced it. Note that
+  `target.commit_sha` is the repo's HEAD *when apply ran*, which may differ
+  from the commit the originating run analyzed.
+- `timing.wall_clock_s` / `api_time_s` — when the two are exactly equal, the
+  stream reported no API duration and the wall clock stood in.
+- `notes` — why anything above is incomplete.
+
+Same field names and same blocks as `run_manifest.json` wherever the two
+describe the same thing, so one reader parses both. Apply's spend is
+deliberately **not** in `run_manifest.json`: apply runs after the run, against
+a repo state the run never analyzed, and can run many times over one run's
+candidates.
+
+A session killed by `--wallclock` loses its usage totals — the timeout severs
+the CLI's exit handshake after the work is already done — so the file is
+written with `models_used: []`, zeroed costs, a real `wall_clock_s`, and the
+reason in `notes`. Nothing changes name or disappears.
+
+Summing a sweep:
+
+````bash
+jq -s 'map(.cost.amount_usd) | add' apply/*/*/manifest.json
+````
+
+The interactive `/spotlights-apply-candidate` path writes three files, not
+four: the agent *is* the session there, so there is no `claude -p` stream to
+parse and no usage totals to report.
 
 ## The interactive front door: `/spotlights-apply-candidate`
 
