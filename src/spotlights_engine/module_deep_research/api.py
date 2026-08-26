@@ -65,6 +65,7 @@ def research_module_with_telemetry(
     runner: ModuleResearchRunner | None = None,
     runners: Sequence[ModuleResearchRunner] | None = None,
     segment: str | None = None,
+    claude_model: str | None = None,
 ) -> ModuleDeepResearchResult:
     """Runtime-rich variant used by the manager for usage/cost accounting."""
     seg = segment if segment is not None else slug_for(request.module_qualified_name)
@@ -89,6 +90,7 @@ def research_module_with_telemetry(
         runner=runner,
         runners=runners,
         enable_claude_search=request.enable_claude_search,
+        claude_model=claude_model,
     )
     outcomes = run_runners(
         prompt=prompt,

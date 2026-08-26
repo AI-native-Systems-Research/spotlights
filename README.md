@@ -106,7 +106,7 @@ Browse the full rendered run under [`examples/vllm_subset/`](examples/vllm_subse
 > [!TIP]
 > Tested and recommended models: **Opus 4.7** for Claude Code and **GPT-5.5** for Codex.
 
-For LiteLLM gateway config and a quick response check, see [docs/agent-cli-setup.md](docs/agent-cli-setup.md).
+For LiteLLM gateway config, picking which model each CLI runs on, and a quick response check, see [docs/agent-cli-setup.md](docs/agent-cli-setup.md).
 
 ## Commands
 

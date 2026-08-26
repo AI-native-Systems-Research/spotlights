@@ -31,10 +31,21 @@ from spotlights_engine.defaults import (
 from spotlights_engine.defaults import (
     DEFAULT_REPO as _DEFAULT_REPO,
 )
+from spotlights_engine.model_config import (
+    MODELS_ENV_VAR,
+    ModelConfig,
+    load_model_config,
+)
+from spotlights_engine.module_deep_research import (
+    CodexExecOptions,
+)
 from spotlights_engine.module_knowledge import (
     KnowledgeBase,
     KnowledgeRecord,
     RetrieveRequest,
+)
+from spotlights_engine.modules_extractor import (
+    ExtractorConfig,
 )
 from spotlights_engine.proposal_from_finding_creator import (
     ProposalFromFindingConfig,
@@ -170,6 +181,26 @@ def _build_argparser() -> argparse.ArgumentParser:
         action="store_const",
         const=0,
         help="Disable the candidate-discovery review session (alias for --review-iterations 0).",
+    )
+
+    p.add_argument(
+        "--claude-model",
+        default=None,
+        metavar="ID",
+        help=(
+            "Model id passed to `claude --model` for every step. Overrides "
+            f"models.yaml (or ${MODELS_ENV_VAR}) for this run. Omit to use the "
+            "file; leave the file blank to inherit ~/.claude/settings.json."
+        ),
+    )
+    p.add_argument(
+        "--codex-model",
+        default=None,
+        metavar="ID",
+        help=(
+            "Model id passed to Codex for every step. Overrides models.yaml "
+            f"(or ${MODELS_ENV_VAR}) for this run. Omit to use the file."
+        ),
     )
 
     p.add_argument(
@@ -393,31 +424,61 @@ def _build_input(args: argparse.Namespace) -> SpotlightsManagerInput:
     return SpotlightsManagerInput(**input_kwargs)
 
 
+def _resolve_models(args: argparse.Namespace) -> tuple[str | None, str | None]:
+    """The run's `(claude, codex)` model ids, or `None` to inherit the CLI default.
+
+    Precedence: `--claude-model` / `--codex-model` > `SPOTLIGHTS_MODELS_FILE` >
+    the bundled `models.yaml` > the agent CLI's own config. Resolved once, here,
+    so every step config carries an explicit value and nothing deeper in the
+    stack reads a config file.
+    """
+    file_cfg = load_model_config()
+    claude = args.claude_model if args.claude_model else file_cfg.claude
+    codex = args.codex_model if args.codex_model else file_cfg.codex
+    return claude, codex
+
+
 def _build_config(args: argparse.Namespace) -> SpotlightsManagerConfig:
-    proposal_cfg: ProposalFromFindingConfig | None = None
-    if args.max_parallel_pairs is not None or args.debug_first_n_pairs is not None:
-        kwargs: dict = {}
-        if args.max_parallel_pairs is not None:
-            kwargs["max_parallel_pairs"] = args.max_parallel_pairs
-        if args.debug_first_n_pairs is not None:
-            kwargs["debug_first_n_pairs"] = args.debug_first_n_pairs
-        proposal_cfg = ProposalFromFindingConfig(**kwargs)
+    claude_model, codex_model = _resolve_models(args)
 
-    agent_cfg: AgentProposalsConfig | None = None
-    if (
-        args.max_parallel_candidates is not None
-        or args.debug_first_n_candidates is not None
-    ):
-        kwargs = {}
-        if args.max_parallel_candidates is not None:
-            kwargs["max_parallel_candidates"] = args.max_parallel_candidates
-        if args.debug_first_n_candidates is not None:
-            kwargs["debug_first_n_candidates"] = args.debug_first_n_candidates
-        agent_cfg = AgentProposalsConfig(**kwargs)
+    proposal_kwargs: dict = {}
+    if args.max_parallel_pairs is not None:
+        proposal_kwargs["max_parallel_pairs"] = args.max_parallel_pairs
+    if args.debug_first_n_pairs is not None:
+        proposal_kwargs["debug_first_n_pairs"] = args.debug_first_n_pairs
+    if claude_model:
+        proposal_kwargs["claude_model"] = claude_model
+    proposal_cfg = (
+        ProposalFromFindingConfig(**proposal_kwargs) if proposal_kwargs else None
+    )
 
-    discovery_cfg: DiscoveryConfig | None = None
+    agent_kwargs: dict = {}
+    if args.max_parallel_candidates is not None:
+        agent_kwargs["max_parallel_candidates"] = args.max_parallel_candidates
+    if args.debug_first_n_candidates is not None:
+        agent_kwargs["debug_first_n_candidates"] = args.debug_first_n_candidates
+    if claude_model:
+        agent_kwargs["claude_model"] = claude_model
+    if codex_model:
+        agent_kwargs["codex_model"] = codex_model
+    agent_cfg = AgentProposalsConfig(**agent_kwargs) if agent_kwargs else None
+
+    discovery_kwargs: dict = {}
     if args.review_iterations is not None:
-        discovery_cfg = DiscoveryConfig(num_review_iterations=args.review_iterations)
+        discovery_kwargs["num_review_iterations"] = args.review_iterations
+    if claude_model:
+        discovery_kwargs["claude_model"] = claude_model
+    if codex_model:
+        discovery_kwargs["codex_model"] = codex_model
+    discovery_cfg = DiscoveryConfig(**discovery_kwargs) if discovery_kwargs else None
+
+    # Step 1 always has a config object, so stamp the model straight onto it.
+    extractor_cfg = ExtractorConfig(claude_model=claude_model)
+
+    # Step 3 has no config object of its own: its Codex model rides on the
+    # `CodexExecOptions` the manager copies per module, the Claude model on a
+    # dedicated manager field.
+    deep_research_cfg = CodexExecOptions(model=codex_model) if codex_model else None
 
     include = _flatten_include(args.include)
     return SpotlightsManagerConfig(
@@ -425,7 +486,10 @@ def _build_config(args: argparse.Namespace) -> SpotlightsManagerConfig:
         output_folder=args.output_folder,
         max_parallel_sessions=args.max_parallel,
         module_filter=ModuleFilter(include=include) if include else None,
+        extractor=extractor_cfg,
         discovery=discovery_cfg,
+        deep_research=deep_research_cfg,
+        models=ModelConfig(claude=claude_model, codex=codex_model),
         proposal_from_finding=proposal_cfg,
         agent_proposals=agent_cfg,
         resume=args.resume,

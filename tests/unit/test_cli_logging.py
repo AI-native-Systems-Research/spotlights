@@ -10,6 +10,7 @@ import pytest
 from pydantic import ValidationError
 
 from spotlights_engine import cli
+from spotlights_engine.candidate_discovery import DiscoveryConfig
 
 
 def _args(
@@ -91,9 +92,16 @@ def test_quiet_and_verbose_are_mutually_exclusive() -> None:
 def test_review_iterations_defaults_to_manager_default() -> None:
     args = cli._build_argparser().parse_args(["--repo", "."])
 
-    # No flag => leave DiscoveryConfig unset so the manager default (3) holds.
+    # No flag => the DiscoveryConfig default (3) holds.
+    #
+    # This used to assert `discovery is None`. It no longer can: the bundled
+    # models.yaml pins the Codex model, so `_build_config` always constructs a
+    # DiscoveryConfig to carry it. Assert the effective value instead of the
+    # object's absence — that is what the flag actually promises.
     assert args.review_iterations is None
-    assert cli._build_config(args).discovery is None
+    discovery = cli._build_config(args).discovery
+    assert discovery is not None
+    assert discovery.num_review_iterations == DiscoveryConfig().num_review_iterations
 
 
 def test_no_review_disables_review_session() -> None:

@@ -194,6 +194,11 @@ class ClaudeRunner(AgentRunner):
             "plan",
             "--max-turns",
             str(self._config.claude_max_turns),
+            *(
+                ["--model", self._config.claude_model]
+                if self._config.claude_model
+                else []
+            ),
         ]
 
     def _parse_invocation_metadata(

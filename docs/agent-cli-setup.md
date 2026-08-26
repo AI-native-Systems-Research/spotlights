@@ -48,6 +48,54 @@ wire_api = "chat"              # use "responses" only if the gateway is set up f
 requires_openai_auth = false  # gateway key, not an OpenAI sk- key
 ```
 
+## Choosing models
+
+By default the engine passes no model to either CLI, so each one uses its own
+configuration — `~/.claude/settings.json` for Claude, `~/.codex/config.toml` for
+Codex. That makes a run's model depend on whoever's machine it ran on, which is
+no good for reproducing a result.
+
+Two ways to pin it. Both are global: one Claude model and one Codex model for
+every step of the pipeline.
+
+**Per run** — a flag:
+
+```bash
+spotlights-engine --claude-model aws/claude-opus-4-8 --codex-model gpt-5.5 ...
+```
+
+**Durably** — edit `models.yaml` inside the installed package, or keep your own
+copy anywhere and point `SPOTLIGHTS_MODELS_FILE` at it (the sane option when the
+engine is installed as a tool):
+
+```yaml
+claude: aws/claude-opus-4-8
+codex: gpt-5.5
+```
+
+Leave a value blank to inherit that CLI's own default. The whole file is
+optional — a missing file, a missing key, and a blank value all mean "inherit".
+
+Precedence, highest first:
+
+1. `--claude-model` / `--codex-model`
+2. `SPOTLIGHTS_MODELS_FILE`
+3. the bundled `models.yaml`
+4. the agent CLI's own config
+
+Two things worth knowing:
+
+- **A resolved model beats `ANTHROPIC_MODEL`.** Once the engine passes `--model`,
+  that env var no longer has any effect. It works only while the resolved value
+  is blank.
+- **Model ids are gateway-specific.** `aws/claude-opus-4-8` is a LiteLLM alias,
+  not a portable name. Check what your gateway exposes.
+
+`spotlights-engine doctor` prints the effective model for each CLI and which file
+it came from. Each run's `run_manifest.json` records both `models_requested`
+(what you asked for) and `models_used` (what the CLIs reported back) — they can
+differ when the request is blank.
+
 ## Verify
 
 ```bash

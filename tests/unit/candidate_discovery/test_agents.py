@@ -120,6 +120,36 @@ def test_claude_argv_includes_required_flags(tmp_path, monkeypatch):
     assert argv[argv.index("--max-turns") + 1] == "12"
 
 
+def test_claude_argv_includes_model_when_configured(tmp_path, monkeypatch):
+    _force_present(monkeypatch)
+    cfg = _config(tmp_path, claude_model="aws/claude-opus-4-8")
+    runner = ClaudeRunner(cfg)
+    schema_path = tmp_path / "schema.json"
+    schema_path.write_text("{}")
+    iter_dir = tmp_path / "iter"
+    iter_dir.mkdir()
+    argv = runner._build_argv(schema_path=schema_path, iter_dir=iter_dir)
+    assert argv[argv.index("--model") + 1] == "aws/claude-opus-4-8"
+
+
+def test_claude_argv_omits_model_when_unset(tmp_path, monkeypatch):
+    """No configured model means no flag at all — not `--model ""`.
+
+    An empty value must leave the CLI free to use its own default, which is the
+    behaviour every run had before the model config existed.
+    """
+    _force_present(monkeypatch)
+    cfg = _config(tmp_path)
+    assert cfg.claude_model is None
+    runner = ClaudeRunner(cfg)
+    schema_path = tmp_path / "schema.json"
+    schema_path.write_text("{}")
+    iter_dir = tmp_path / "iter"
+    iter_dir.mkdir()
+    argv = runner._build_argv(schema_path=schema_path, iter_dir=iter_dir)
+    assert "--model" not in argv
+
+
 def test_codex_argv_includes_required_flags(tmp_path, monkeypatch):
     _force_present(monkeypatch)
     cfg = _config(tmp_path, codex_model="gpt-5.5", codex_reasoning_effort="high")

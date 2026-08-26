@@ -32,7 +32,10 @@ from spotlights_engine.candidate_discovery import (
     DiscoveryValidationError,
     discover,
 )
-from spotlights_engine.costing.manifest import build_run_manifest
+from spotlights_engine.costing.manifest import (
+    RunManifestModelsRequested,
+    build_run_manifest,
+)
 from spotlights_engine.costing.rates import (
     compute_cost,
     load_external_rates,
@@ -763,7 +766,12 @@ async def _do_step3(
     )
     start = time.monotonic()
     result = await asyncio.to_thread(
-        lambda: research_module(research_input, options, segment=segment)
+        lambda: research_module(
+            research_input,
+            options,
+            segment=segment,
+            claude_model=cfg.models.claude if cfg.models else None,
+        )
     )
     duration = time.monotonic() - start
     if hasattr(result, "output") and hasattr(result, "usages"):
@@ -1927,6 +1935,10 @@ async def _run_async(
         num_candidates=num_candidates,
         module_status=counts,
         notes=usage_notes,
+        models_requested=RunManifestModelsRequested(
+            claude=(config.models.claude or "") if config.models else "",
+            codex=(config.models.codex or "") if config.models else "",
+        ),
     )
     P.write_run_manifest(paths, public_manifest)
 

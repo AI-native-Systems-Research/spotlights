@@ -3,7 +3,10 @@ from pathlib import Path
 
 import pytest
 
-from spotlights_engine.costing.manifest import build_run_manifest
+from spotlights_engine.costing.manifest import (
+    RunManifestModelsRequested,
+    build_run_manifest,
+)
 from spotlights_engine.costing.rates import (
     EXTERNAL_RATES_ENV_VAR,
     ModelRate,
@@ -601,3 +604,75 @@ def test_bundled_rates_price_gpt5_and_codex_at_identical_rates() -> None:
         assert gpt.output == codex.output
         assert gpt.cache_read == codex.cache_read
         assert gpt.cache_create == codex.cache_create
+
+
+def test_run_manifest_records_requested_models_separately_from_used() -> None:
+    """`models_requested` is intent; `models_used` is what the CLIs reported.
+
+    They differ on purpose: a blank request means the engine passed no `--model`
+    and the CLI chose, so the manifest has to record both to be reproducible.
+    """
+    records = [
+        UsageRecord.from_usage(
+            AgentUsage(input=10, output=5, model="claude-opus-5[1m]"),
+            step="candidate_discovery",
+            module_qualified_name="pkg/a",
+            session_index=1,
+            invocation_index=0,
+            invocation_id="i0",
+            cli="claude",
+            role="candidate_discovery",
+        ),
+    ]
+    summary = compute_cost(records, {})
+
+    manifest = build_run_manifest(
+        run_id="run-1",
+        date="2026-08-26T00:00:00Z",
+        objective="find spots",
+        provenance={
+            "repo_url": "https://example.test/repo.git",
+            "target_commit_sha": "abc",
+            "spotlights_commit_sha": "def",
+        },
+        config_fingerprint={},
+        records=records,
+        cost=summary,
+        wall_clock_s=1.0,
+        candidates_path="/tmp/out/index.md",
+        num_candidates=1,
+        module_status={"SUCCEEDED": 1},
+        notes=[],
+        models_requested=RunManifestModelsRequested(claude="aws/claude-opus-4-8"),
+    )
+
+    assert manifest.models_requested.claude == "aws/claude-opus-4-8"
+    # Codex was never asked for one — empty, not None, so the JSON stays flat.
+    assert manifest.models_requested.codex == ""
+    # What actually ran is unchanged and still recorded independently.
+    assert [m.model for m in manifest.models_used] == ["claude-opus-5[1m]"]
+
+
+def test_run_manifest_requested_models_default_to_blank() -> None:
+    """Omitting the argument must not break older callers or the schema."""
+    summary = compute_cost([], {})
+    manifest = build_run_manifest(
+        run_id="run-2",
+        date="2026-08-26T00:00:00Z",
+        objective="o",
+        provenance={
+            "repo_url": "u",
+            "target_commit_sha": "a",
+            "spotlights_commit_sha": "b",
+        },
+        config_fingerprint={},
+        records=[],
+        cost=summary,
+        wall_clock_s=1.0,
+        candidates_path="p",
+        num_candidates=0,
+        module_status={},
+        notes=[],
+    )
+    assert manifest.models_requested.claude == ""
+    assert manifest.models_requested.codex == ""

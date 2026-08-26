@@ -72,6 +72,9 @@ class ProposalFromFindingConfig(BaseModel):
     max_parallel_pairs: int = Field(default=5, ge=1)
 
     claude_max_turns: int = Field(default=30, ge=1)
+    # Global model id passed to `claude --model`. None means "inherit the CLI's
+    # own default"; see `spotlights_engine.model_config`.
+    claude_model: str | None = None
     per_pair_wallclock_s: int = Field(default=600, ge=1)
 
     debug_first_n_pairs: int | None = Field(default=None, ge=1)
@@ -106,6 +109,7 @@ class _PairRunner(Protocol):
         repo_path: Path,
         max_turns: int,
         wallclock_s: int,
+        claude_model: str | None = None,
     ) -> PairRunResult: ...
 
 
@@ -256,6 +260,7 @@ async def _run_one_pair(
                 repo_path=config.repo_path,
                 max_turns=config.claude_max_turns,
                 wallclock_s=config.per_pair_wallclock_s,
+                claude_model=config.claude_model,
             )
         except Exception as exc:
             duration = time.monotonic() - run_start

@@ -46,6 +46,9 @@ class ExtractorConfig(BaseModel):
 
     artifacts_dir: Path | None = None
     claude_bin: str = "claude"
+    # Global model id passed to `claude --model`. None means "inherit the CLI's
+    # own default"; see `spotlights_engine.model_config`.
+    claude_model: str | None = None
     max_turns: int = Field(default=60, ge=1)
     # Per-Claude-stage subprocess deadline. The two-phase Stage-3 enrichment is a
     # single repo-wide call that must explore and emit the full module tree; on a

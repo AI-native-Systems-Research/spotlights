@@ -53,6 +53,9 @@ class DiscoveryConfig(BaseModel):
     num_review_iterations: int = Field(default=3, ge=0)
     per_iteration_wallclock_s: int = Field(default=900, ge=1)
     claude_max_turns: int = Field(default=30, ge=1)
+    # Global model id passed to `claude --model`. None means "inherit the CLI's
+    # own default"; see `spotlights_engine.model_config`.
+    claude_model: str | None = None
     codex_model: str = Field(default="gpt-5.5", pattern=r"^[\w.\-/]+$")
     codex_reasoning_effort: Literal["minimal", "low", "medium", "high", "xhigh"] = "high"
 

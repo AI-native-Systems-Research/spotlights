@@ -105,6 +105,7 @@ def fake_claude_runner_factory(
         repo_path: Path,
         max_turns: int,
         wallclock_s: int,
+        claude_model: str | None = None,
     ) -> CandidateAgentRunResult:
         if candidate_id in errors:
             return CandidateAgentRunResult(

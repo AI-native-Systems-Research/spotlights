@@ -101,6 +101,9 @@ class OneShotApplyInput(BaseModel):
     print_prompt: bool = False
     max_turns: int = Field(default=40, ge=1)
     wallclock_s: int = Field(default=1800, ge=1)
+    # Model id passed to `claude --model`. None means "inherit the CLI's own
+    # default"; see `spotlights_engine.model_config`.
+    claude_model: str | None = None
 
 
 class OneShotApplyConfig(BaseModel):
@@ -458,6 +461,7 @@ def _process_candidate(
             worktree=worktree.path,
             max_turns=input.max_turns,
             wallclock_s=input.wallclock_s,
+            claude_model=input.claude_model,
         )
         collection = collect_patch(worktree)
     finally:
