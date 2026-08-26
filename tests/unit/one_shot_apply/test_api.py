@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from spotlights_engine.costing.usage import AgentUsage
 from spotlights_engine.one_shot_apply import worktree as worktree_mod
 from spotlights_engine.one_shot_apply.api import (
     OneShotApplyInput,
@@ -24,6 +25,7 @@ from spotlights_engine.one_shot_apply.errors import (
     OneShotApplyError,
     WorktreeError,
 )
+from spotlights_engine.one_shot_apply.usage_manifest import ApplyUsageManifest
 from spotlights_engine.prep_evolve.errors import SelectionError, StalenessError
 from tests.unit.prep_evolve._fixtures import (
     CAND_FILE,
@@ -60,7 +62,8 @@ def _worktrees(repo: Path) -> list[str]:
 
 
 def _runner(*, edit: str | None = "# agent edit\n", summary: str | None = "did the thing",
-            error: str | None = None, new_file: str | None = None):
+            error: str | None = None, new_file: str | None = None,
+            usage: AgentUsage | None = None, duration_s: float = 0.01):
     """A fake claude_runner that edits the worktree it is handed."""
 
     def _run(*, candidate_id: str, prompt: str, worktree: Path, max_turns: int,
@@ -72,7 +75,9 @@ def _runner(*, edit: str | None = "# agent edit\n", summary: str | None = "did t
             (worktree / new_file).write_text("NEW = 1\n", encoding="utf-8")
         if summary is not None:
             (worktree / "CHANGE-SUMMARY.md").write_text(summary, encoding="utf-8")
-        return ApplyRunResult(candidate_id=candidate_id, duration_s=0.01, error=error)
+        return ApplyRunResult(
+            candidate_id=candidate_id, duration_s=duration_s, error=error, usage=usage
+        )
 
     return _run
 
@@ -104,6 +109,7 @@ def test_single_candidate_writes_patch_and_notes(run) -> None:
         "APPLY-NOTES.md",
         "apply.patch",
         "apply.prompt.txt",
+        "manifest.json",
     ]
     patch_text = (out_dir / "apply.patch").read_text(encoding="utf-8")
     assert "# agent edit" in patch_text
@@ -401,7 +407,7 @@ def test_no_edit_produces_notes_but_no_patch(run) -> None:
     )
     artifact = result.patches[0]
     assert artifact.patch_produced is False
-    assert artifact.files == ["APPLY-NOTES.md", "apply.prompt.txt"]
+    assert artifact.files == ["APPLY-NOTES.md", "apply.prompt.txt", "manifest.json"]
     assert not (Path(artifact.path) / "apply.patch").exists()
 
 
@@ -421,7 +427,7 @@ def test_a_rerun_that_produces_no_patch_removes_the_stale_patch(run) -> None:
     )
     artifact = second.patches[0]
     assert artifact.patch_produced is False
-    assert artifact.files == ["APPLY-NOTES.md", "apply.prompt.txt"]
+    assert artifact.files == ["APPLY-NOTES.md", "apply.prompt.txt", "manifest.json"]
     assert not (out_dir / "apply.patch").exists()
 
 
@@ -709,6 +715,10 @@ def test_a_notes_write_that_fails_partway_leaves_neither_artifact_behind(
     # own it documents an apply that left nothing else behind.
     assert not (out_dir / "apply.patch").exists()
     assert not (out_dir / "apply.prompt.txt").exists()
+    # The notes write fails *before* the manifest write, so this file was never
+    # created — the assertion pins that the cleanup's `missing_ok=True` unlink
+    # stays harmless rather than that a file was removed.
+    assert not (out_dir / "manifest.json").exists()
 
 
 def test_a_keyboard_interrupt_during_the_agent_session_leaks_no_worktree(run) -> None:
@@ -786,7 +796,7 @@ def test_a_failed_diff_still_writes_notes_and_does_not_claim_no_patch(
     assert artifact.collection_error is not None
     assert "timed out" in artifact.collection_error
     assert artifact.patch_produced is False
-    assert artifact.files == ["APPLY-NOTES.md", "apply.prompt.txt"]
+    assert artifact.files == ["APPLY-NOTES.md", "apply.prompt.txt", "manifest.json"]
 
     notes = (Path(artifact.path) / "APPLY-NOTES.md").read_text(encoding="utf-8")
     assert "No patch could be collected" in notes
@@ -928,3 +938,105 @@ def test_an_unexpected_exception_still_raises_for_an_explicit_candidate(run) -> 
             OneShotApplyInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
             claude_runner=_boom,
         )
+
+
+def test_the_manifest_lands_beside_the_patch_and_agrees_with_the_artifact(run) -> None:
+    """The session's tokens were previously parsed, copied onto ApplyArtifact, and
+    dropped. This is the surface that ends that: a clean apply and a timed-out
+    apply used to report the same thing about cost, which was nothing."""
+    run_dir, repo = run
+    usage = AgentUsage(
+        input=100, output=200, cache_read=300, cache_create=400,
+        model="aws/claude-opus-5", api_time_s=12.5,
+    )
+    result = one_shot_apply(
+        OneShotApplyInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+        claude_runner=_runner(usage=usage, duration_s=33.0),
+    )
+
+    artifact = result.patches[0]
+    assert "manifest.json" in artifact.files
+    out_dir = Path(artifact.path)
+
+    m = ApplyUsageManifest.model_validate_json(
+        (out_dir / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert m.candidate_id == artifact.candidate_id
+    assert m.module_qualified_name == artifact.module_qualified_name
+    assert m.target.commit_sha == artifact.base_sha
+    assert m.total_tokens == 1000
+    assert m.models_used[0].role == "one_shot_apply"
+    assert m.timing.wall_clock_s == 33.0
+    assert m.timing.api_time_s == 12.5
+    # Priced by the bundled contracted table, so a real dollar figure — the
+    # amount is the bundled table's business, not this test's.
+    assert m.cost.amount_usd > 0.0
+    assert m.external_cost is not None
+    assert m.external_cost.amount_usd > m.cost.amount_usd
+
+
+def test_the_manifest_keys_are_sorted_on_disk_like_the_run_manifest(run) -> None:
+    """`json.dumps(..., indent=2, sort_keys=True)`, matching persistence.py:89.
+    Stable key order is what keeps a re-run's diff to the values that changed."""
+    run_dir, repo = run
+    result = one_shot_apply(
+        OneShotApplyInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+        claude_runner=_runner(usage=AgentUsage(input=1, output=2, model="aws/claude-opus-5")),
+    )
+    text = (Path(result.patches[0].path) / "manifest.json").read_text(encoding="utf-8")
+    keys = list(json.loads(text).keys())
+    assert keys == sorted(keys)
+    assert text.endswith("\n")
+
+
+def test_a_session_that_produced_no_patch_still_gets_a_manifest(run) -> None:
+    """Written unconditionally, like the notes and the prompt and unlike the
+    patch. A session that errored or chose not to edit still spent tokens, and
+    that is precisely when someone asks what it cost."""
+    run_dir, repo = run
+    # The fixture repo has no `origin`, and the builder appends a second note for
+    # that gap. Give it one, so `notes` below is exactly the degraded-usage
+    # sentence and nothing else — and so the resolved `repo_url` is asserted to
+    # have actually reached the file, which is the only check on that wiring.
+    origin = "https://example.invalid/attn.git"
+    subprocess.run(["git", "remote", "add", "origin", origin], cwd=repo, check=True)
+
+    result = one_shot_apply(
+        OneShotApplyInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+        claude_runner=_runner(edit=None, summary=None, error="model unavailable"),
+    )
+
+    artifact = result.patches[0]
+    assert artifact.patch_produced is False
+    out_dir = Path(artifact.path)
+    assert not (out_dir / "apply.patch").exists()
+
+    m = ApplyUsageManifest.model_validate_json(
+        (out_dir / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert m.models_used == []
+    assert m.target.repo_url == origin
+    assert m.notes == "no usage records found: model unavailable"
+
+
+def test_print_prompt_writes_no_manifest(run) -> None:
+    """`--print-prompt` returns before the runner, so there is no session and
+    nothing to account for."""
+    run_dir, repo = run
+    result = one_shot_apply(
+        OneShotApplyInput(
+            result=run_dir, repo=str(repo), candidate=CAND_ID, print_prompt=True
+        ),
+        claude_runner=_runner(),
+    )
+    assert result.patches == []
+    assert not (run_dir / "apply" / "v1_attention" / CAND_ID / "manifest.json").exists()
+
+    # --print-prompt leaves the worktree for its caller; clean it up here, or the
+    # test leaks an empty spotlights-apply-XXXXXXXX/ under the system temp dir.
+    subprocess.run(
+        ["git", "worktree", "remove", "--force", result.prompts[0].worktree],
+        cwd=repo,
+        check=True,
+    )
+    shutil.rmtree(result.prompts[0].worktree_parent, ignore_errors=True)

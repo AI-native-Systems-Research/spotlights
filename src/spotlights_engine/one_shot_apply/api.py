@@ -29,6 +29,7 @@ can afford the narrow handler because re-running it is free.
 from __future__ import annotations
 
 import contextlib
+import json
 import shlex
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -51,6 +52,11 @@ from spotlights_engine.one_shot_apply.errors import (
 from spotlights_engine.one_shot_apply.notes import render_apply_notes
 from spotlights_engine.one_shot_apply.prompts import build_apply_prompt
 from spotlights_engine.one_shot_apply.scope import out_of_scope_files
+from spotlights_engine.one_shot_apply.usage_manifest import (
+    MANIFEST_NAME,
+    ApplyUsageManifest,
+    build_apply_usage_manifest,
+)
 from spotlights_engine.one_shot_apply.worktree import (
     FileChange,
     Worktree,
@@ -77,6 +83,10 @@ from spotlights_engine.prep_evolve.spec import EvolveSpec, SourceRevision
 from spotlights_engine.prep_evolve.validate_target import (
     ensure_repo_dir,
     validate_candidate_target,
+)
+from spotlights_engine.spotlights_manager.provenance import (
+    resolve_repo_url,
+    spotlights_commit_sha,
 )
 from spotlights_engine.utils.id_helpers import slug_for
 
@@ -294,6 +304,7 @@ def _write_artifacts(
     agent_error: str | None,
     preview: PromptPreview,
     collect_error: str | None = None,
+    usage_manifest: ApplyUsageManifest,
 ) -> tuple[list[str], bool, list[str]]:
     """Write `apply.patch` (when non-empty), `apply.prompt.txt`, and `APPLY-NOTES.md`.
 
@@ -311,6 +322,14 @@ def _write_artifacts(
     what the agent was *told*, which is exactly what a reviewer needs when the
     outcome is "no edit" or "the diff failed" and the notes alone cannot say
     whether the instruction or the agent was at fault.
+
+    `manifest.json` is written last and unconditionally. Last because a SIGKILL
+    between writes must land on a state a reader reads correctly, and "patch +
+    notes + prompt, no manifest" is exactly what every apply directory looked
+    like before this file existed. Manifest-first would create the one state
+    that is not readable: accounting for a patch that is not there.
+    Unconditionally because a session that errored, produced no edit, or whose
+    diff failed still spent tokens, and that is when someone asks what it cost.
 
     Every filesystem write is wrapped: an `OSError` becomes an
     `ArtifactWriteError`, which the batch loop already knows how to record as
@@ -373,6 +392,18 @@ def _write_artifacts(
 
         (out_dir / PROMPT_NAME).write_text(render_prompt_block(preview), encoding="utf-8")
         files.append(PROMPT_NAME)
+
+        # `sort_keys=True`, matching how `run_manifest.json` is written
+        # (`persistence.py:89`): stable key order keeps a re-run's diff to the
+        # values that actually changed. Plain `write_text`, not the atomic
+        # helper, so this file behaves like the three beside it and is covered
+        # by the same cleanup below.
+        (out_dir / MANIFEST_NAME).write_text(
+            json.dumps(usage_manifest.model_dump(mode="json"), indent=2, sort_keys=True)
+            + "\n",
+            encoding="utf-8",
+        )
+        files.append(MANIFEST_NAME)
     except OSError as exc:
         # Neither `write_bytes` nor `write_text` is atomic: an `ENOSPC` partway
         # through a multi-MB patch leaves a truncated `apply.patch` on disk, and
@@ -388,7 +419,7 @@ def _write_artifacts(
         # there. Remove all three, so the failure reads as "nothing here" — the
         # same invariant the empty-patch branch above maintains. `apply.prompt.txt`
         # goes too: on its own it would document an apply that produced nothing.
-        for name in (PATCH_NAME, PROMPT_NAME, NOTES_NAME):
+        for name in (PATCH_NAME, PROMPT_NAME, NOTES_NAME, MANIFEST_NAME):
             with contextlib.suppress(OSError):
                 (out_dir / name).unlink(missing_ok=True)
         raise ArtifactWriteError(
@@ -405,6 +436,8 @@ def _process_candidate(
     repo_path: Path,
     base: Path,
     base_sha: str,
+    repo_url: str,
+    spotlights_sha: str,
     input: OneShotApplyInput,
     captured_at: str,
     direction: Direction,
@@ -473,6 +506,23 @@ def _process_candidate(
         if worktree is not None and not keep_worktree:
             remove_worktree(worktree)
 
+    # After the `finally`, so a leaked worktree can never be traded for an
+    # accounting failure — and after the runner, since `run.usage` and
+    # `run.duration_s` are the inputs. `--print-prompt` returned above, inside
+    # the `try`, so it never reaches this.
+    usage_manifest = build_apply_usage_manifest(
+        candidate_id=sel.candidate.id,
+        module_qualified_name=sel.qn,
+        date=captured_at,
+        objective=spec.objective.goal,
+        target_commit_sha=base_sha,
+        repo_url=repo_url,
+        spotlights_commit_sha=spotlights_sha,
+        usage=run.usage,
+        duration_s=run.duration_s,
+        agent_error=run.error,
+    )
+
     out_dir = _apply_dir(base, sel.qn, sel.candidate.id)
     files, patch_produced, out_of_scope = _write_artifacts(
         out_dir=out_dir,
@@ -486,6 +536,7 @@ def _process_candidate(
         preview=preview,
         agent_error=run.error,
         collect_error=collection.collect_error,
+        usage_manifest=usage_manifest,
     )
     result.patches.append(
         ApplyArtifact(
@@ -530,6 +581,13 @@ def one_shot_apply(
     ensure_repo_dir(repo_path)
     base_sha = require_git_repo(repo_path)
 
+    # Resolved once per invocation, not per candidate: a 20-candidate sweep must
+    # not shell out to git 40 extra times for two values that cannot change
+    # mid-sweep. Both degrade to "" rather than raising — a repo may have no
+    # origin remote, and a wheel install has no engine checkout.
+    repo_url = resolve_repo_url(repo_path)
+    spotlights_sha = spotlights_commit_sha()
+
     # Setup-time check, mirroring agent_proposals/proposal_from_finding_creator.
     # Skipped for injected runners (every test) and --print-prompt (runs no
     # agent) — neither needs the `claude` binary on PATH. Runs after the
@@ -561,6 +619,8 @@ def one_shot_apply(
                 repo_path=repo_path,
                 base=base,
                 base_sha=base_sha,
+                repo_url=repo_url,
+                spotlights_sha=spotlights_sha,
                 input=input,
                 captured_at=captured_at,
                 direction=direction,
