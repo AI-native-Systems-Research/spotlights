@@ -48,6 +48,7 @@ If the user is unsure how to frame their objective, offer the `/spotlights-objec
 - Rank candidates by estimated impact: `/spotlights-sort-candidates`, pointed at `./spotlights-out/result.json`. Writes `sorted/sorted_candidates.md` and `.json`.
 - Share the top-N as a self-contained ZIP: `/spotlights-share-candidates`, pointed at `./spotlights-out/sorted/`.
 - Turn one candidate into a launchable evolve bundle for skydiscover / coral / nous: `spotlights-engine prep-evolve`.
+- Implement one candidate as a reviewable patch, in-session, in a throwaway git worktree : `spotlights-apply-candidate`
 
 ## Operating rules
 
