@@ -279,6 +279,6 @@ sandboxes launched from a rebuilt image.
 ## References
 
 - Repo-level [README](../README.md) and [INSTALL](../docs/INSTALL.md) — Spotlights itself.
-- [Building a Custom Image - DAM.html](Building%20a%20Custom%20Image%20-%20DAM.html) — DAM platform's own docs for the custom-image flow, saved locally.
+- [Building a Custom Image - DAM](https://pages.github.ibm.com/dam-agents/docs/guides/custom-image/?h=custom) — DAM platform's own docs for the custom-image flow.
 - [spotlights-agent/Dockerfile](spotlights-agent/Dockerfile) — annotated stage-by-stage.
 - [spotlights-agent/workspace/CLAUDE.md](spotlights-agent/workspace/CLAUDE.md) — the agent prompt that runs in the chat tab.
