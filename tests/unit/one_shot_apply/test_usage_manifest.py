@@ -285,17 +285,20 @@ def test_notes_join_every_applicable_reason_like_the_run_manifest_does() -> None
     )
 
 
-def test_the_committed_example_manifests_still_validate_against_the_model() -> None:
-    """The examples are documentation a reader trusts, and nothing else parses them.
+def test_the_committed_fixture_manifests_still_validate_against_the_model() -> None:
+    """Whole-file instances catch drift that field-level tests cannot see.
 
     `extra="forbid"` makes one `model_validate_json` catch both halves of the
-    drift: a field renamed in the model and a key left behind in the example.
-    The count is a floor, not an equality — more examples are welcome. Resolved
+    drift: a field renamed in the model and a key left behind in the fixture.
+    The count is a floor, not an equality — more fixtures are welcome. Resolved
     from `__file__` rather than the cwd, which pytest does not pin.
-    """
-    repo_root = Path(__file__).resolve().parents[3]
-    examples = sorted(repo_root.glob("examples/*/apply/*/*/manifest.json"))
 
-    assert len(examples) >= 2, f"no example manifests found under {repo_root}/examples"
-    for path in examples:
+    Their token counts are synthetic; see `fixtures/README.md`. That is why
+    they live here and not under `examples/`, where a reader would take them
+    for a record of what an apply run cost.
+    """
+    fixtures = sorted((Path(__file__).parent / "fixtures").glob("apply_manifest_*.json"))
+
+    assert len(fixtures) >= 2, "no apply manifest fixtures found"
+    for path in fixtures:
         ApplyUsageManifest.model_validate_json(path.read_text(encoding="utf-8"))

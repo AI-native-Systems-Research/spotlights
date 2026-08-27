@@ -93,6 +93,9 @@ artifacts/
 ```
 
 Browse the full rendered run under [`examples/vllm_subset/`](examples/vllm_subset/).
+Its `apply/` directories predate `manifest.json`, so they hold three files
+rather than four; [`tests/unit/one_shot_apply/fixtures/`](tests/unit/one_shot_apply/fixtures/)
+carries instances of that fourth file.
 
 ## Requirements
 
