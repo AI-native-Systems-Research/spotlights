@@ -7,7 +7,6 @@ Your job is to help the user drive that pipeline.
 ## What's already installed
 
 - `spotlights-engine` — the main pipeline (structural map → candidates → proposals). Subcommands: `doctor`, `init`, `prep-evolve`.
-- `signal-pipeline` — telemetry-driven discovery (preview).
 - `claude` and `codex` — the two agent CLIs Spotlights shells out to. Do not call model APIs directly; the engine drives these subprocesses.
 - `uv` — Python package manager used by Spotlights.
 
