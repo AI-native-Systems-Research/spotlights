@@ -17,7 +17,7 @@ Your job is to help the user drive that pipeline.
    ```
    spotlights-engine init
    ```
-   That gives you `/spotlights-objective-setting`, `/spotlights-sort-candidates`, and `/spotlights-share-candidates`.
+   That gives you `/spotlights-objective-setting`, `/spotlights-sort-candidates`, and `/spotlights-share-candidates`, `/spotlights-apply-candidate`.
 3. Make sure a target repo is present. Nothing is bundled by default — clone what you need under `~/work`, e.g.
    ```
    git clone https://github.com/vllm-project/vllm ~/work/vllm
