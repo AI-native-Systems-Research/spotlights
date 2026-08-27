@@ -49,9 +49,12 @@ the Spotlights custom image. The wizard's three steps map onto:
    That's the current published tag; see
    [Rebuilding the image](#rebuilding-the-image) if you're rolling your own.
 2. **Setup your sandbox → Name, Size, Provider, Network.** Give the sandbox
-   a name and size, then for **Provider** pick **IBM LiteLLM ETE Proxy** —
-   the image ships with a `~/.claude/settings.json` and `~/.codex/config.toml`
-   that route `claude` and `codex` through IBM's LiteLLM endpoint.
+   a name and pick the **largest CPU / memory tier** the wizard offers —
+   Spotlights orchestrates `claude` and `codex` subprocesses in parallel and
+   the extractor is CPU-hungry, so a small tier throttles the whole pipeline.
+   Then for **Provider** pick **IBM LiteLLM ETE Proxy** — the image ships with
+   a `~/.claude/settings.json` and `~/.codex/config.toml` that route `claude`
+   and `codex` through IBM's LiteLLM endpoint.
 3. **Grant connections → credentials.** Attach at minimum `ANTHROPIC_API_KEY`
    and `OPENAI_API_KEY` — these are wire-injected into the sandbox and are
    what the `claude` and `codex` CLIs read at run time. If you already know
