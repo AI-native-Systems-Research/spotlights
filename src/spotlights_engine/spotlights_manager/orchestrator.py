@@ -846,13 +846,22 @@ async def _do_step3(
     options = _build_deep_research_options(
         cfg, mgr_input.repo_path, module_paths.deep_research_last_message_path
     )
+    # Passed only when set: `research_module` is a documented monkeypatch seam
+    # (see its rebinding above), so a runner written before this argument
+    # existed would raise TypeError on an unexpected keyword — and the caller
+    # wraps this in a broad `except Exception`, which would record that
+    # signature mismatch as a retryable step-3 failure on every module rather
+    # than a visible error. Same reasoning as steps 4, 5 and apply.
+    model_kwargs: dict[str, Any] = (
+        {"claude_model": model} if (model := _effective_claude_model(cfg)) else {}
+    )
     start = time.monotonic()
     result = await asyncio.to_thread(
         lambda: research_module(
             research_input,
             options,
             segment=segment,
-            claude_model=_effective_claude_model(cfg),
+            **model_kwargs,
         )
     )
     duration = time.monotonic() - start
