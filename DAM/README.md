@@ -216,6 +216,17 @@ From the terminal:
   native config + evaluator scaffold with the perf oracle left as a marked
   `# TODO`; does not run the evolve itself.
 
+### Downloading the results
+
+To pull results off the sandbox, ask the chat agent to package the output
+folder — a prompt that reliably works:
+
+> Zip spotlights-out and publish it to the artifact library as a private
+> artifact so I can download it from the Files view.
+
+Then, in the DAM UI's **Files** tab, click the ⋯ (three-dot) menu next to the
+resulting `.zip` and select **Download**.
+
 ## Operating notes
 
 - **A vague objective wastes money.** Runs are expensive; a fuzzy goal gives
