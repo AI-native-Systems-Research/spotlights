@@ -15,23 +15,38 @@ _BOLD = re.compile(r"\*\*([^*]+)\*\*")
 _AUTOLINK = re.compile(r"<(https?://[^>\s]+)>")
 _MDLINK = re.compile(r"\[([^\]]+)\]\(([^)]+)\)")
 _TOKEN = re.compile(r"\x00(\d+)\x00")
+# A bare URL run: no whitespace, no markup delimiters, no sentinel. `*` and the
+# backtick are excluded so a URL can never swallow the bold/code markers that are
+# applied around it; quotes are excluded so `"https://x"` links without them.
+_BARE_URL = re.compile(r"https?://[^\s<>\"'`*\x00-\x04]+")
+_CODE_SPAN = re.compile(r"(\x01[^\x02]*\x02)")   # capturing: split keeps the spans
+_URL_MARK = re.compile(r"\x03([^\x04]*)\x04")
 _HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
 _OBJECTIVE = re.compile(r"\*\*Objective:\*\*\s*(.+?)\s*$", re.MULTILINE)
 _TABLE_ROW = re.compile(r"^\|(.+)\|\s*$")
 _CAND_CELL = re.compile(r"\[`?([^`\]]+)`?\]\(([^)]+)\)")
+_PATCH_FIELD = re.compile(r"^#\s(candidate|module|repo|base):\s*(.+?)\s*$")
+_DIFF_GIT = re.compile(r"^diff --git a/(?:.+?) b/(.+)$")
 
 
 def _is_external(href: str) -> bool:
     return href.startswith("http://") or href.startswith("https://")
 
 
+def _ext_anchor(esc_href: str, inner_html: str) -> str:
+    """The one shape an external link takes in this bundle. Both arguments are
+    already escaped/rendered — this adds no escaping of its own."""
+    return f'<a href="{esc_href}" target="_blank" rel="noopener">{inner_html}</a>'
+
+
 def render_inline(text: str) -> str:
     """Render inline markdown to HTML with the project's link rules.
 
-    External URLs (autolinks and http(s) markdown links) become clickable
-    anchors that open in a new tab. Every other link is stripped and its
-    visible text is rendered as inline <code>. Bold and inline code are
-    supported. All literal text is HTML-escaped.
+    External URLs (autolinks, http(s) markdown links, and bare http(s) URLs in
+    prose) become clickable anchors that open in a new tab. Every other link is
+    stripped and its visible text is rendered as inline <code>. Bold and inline
+    code are supported, and a URL inside a code span stays literal. All literal
+    text is HTML-escaped, exactly once.
     """
     tokens: list[str] = []
 
@@ -41,26 +56,27 @@ def render_inline(text: str) -> str:
 
     # 1. Autolinks: <https://...>
     def _auto(m: re.Match) -> str:
-        url = m.group(1)
-        esc = html.escape(url)
-        return stash(f'<a href="{esc}" target="_blank" rel="noopener">{esc}</a>')
+        esc = html.escape(m.group(1))
+        return stash(_ext_anchor(esc, esc))
 
     text = _AUTOLINK.sub(_auto, text)
 
     # 2. Markdown links: [text](href)
     def _link(m: re.Match) -> str:
         label, href = m.group(1), m.group(2)
+        # linkify_bare stays off: a link's visible text is never rewritten.
         label_html = _inline_no_links(label)
         if _is_external(href):
-            esc = html.escape(href)
-            return stash(f'<a href="{esc}" target="_blank" rel="noopener">{label_html}</a>')
+            return stash(_ext_anchor(html.escape(href), label_html))
         # internal target not in the bundle -> plain code, not clickable
         return stash(f"<code>{_strip_code_ticks(label_html)}</code>")
 
     text = _MDLINK.sub(_link, text)
 
-    # 3. Remaining inline (bold, code) on the non-token text, then restore tokens.
-    text = _inline_no_links(text)
+    # 3. Remaining inline (bold, code, bare URLs) on the non-token text, then
+    #    restore tokens. Steps 1-2 already replaced every autolink and markdown
+    #    link with a \x00 token, so no URL here can be linkified twice.
+    text = _inline_no_links(text, linkify_bare=True)
 
     def _restore(m: re.Match) -> str:
         return tokens[int(m.group(1))]
@@ -73,25 +89,67 @@ def _strip_code_ticks(s: str) -> str:
     return s.replace("<code>", "").replace("</code>", "")
 
 
-def _inline_no_links(text: str) -> str:
-    """Escape HTML, then apply bold + inline code (no link processing)."""
-    def _code(m: re.Match) -> str:
-        return "\x01" + html.escape(m.group(1)) + "\x02"
+def _mark_bare_urls(text: str) -> str:
+    """Mark bare http(s) URLs outside code spans with \\x03..\\x04 sentinels.
 
-    # Protect code spans from escaping their own content twice.
+    Runs on pre-escape text whose code spans are already \\x01/\\x02-delimited,
+    and marks only the segments between them — so a URL in backticks stays
+    literal text. Trailing sentence punctuation (and an unbalanced closing
+    paren) is left outside the mark.
+    """
+    def _mark(m: re.Match) -> str:
+        url, trail = m.group(0), ""
+        while url:
+            c = url[-1]
+            if c in ".,;:!?" or (c == ")" and url.count(")") > url.count("(")):
+                url, trail = url[:-1], c + trail
+            else:
+                break
+        if url.endswith("//"):        # nothing but a scheme left: not a URL
+            return m.group(0)
+        return f"\x03{url}\x04{trail}"
+
+    # Capturing split -> odd indices are the code spans, left untouched.
+    return "".join(seg if i % 2 else _BARE_URL.sub(_mark, seg)
+                   for i, seg in enumerate(_CODE_SPAN.split(text)))
+
+
+def _inline_no_links(text: str, linkify_bare: bool = False) -> str:
+    """Escape HTML, then apply bold + inline code (no link processing).
+
+    With `linkify_bare`, bare http(s) URLs outside code spans also become
+    anchors. It is off by default because markdown link labels come through
+    here and their visible text must never be rewritten.
+    """
+    def _code(m: re.Match) -> str:
+        return "\x01" + m.group(1) + "\x02"
+
+    # The sentinels \x01/\x02 survive html.escape, so the single outer call
+    # escapes the code span's content exactly once. \x03/\x04 ride along on the
+    # same trick: the URL they wrap is escaped by that one call and no other.
     text = _CODE.sub(_code, text)
+    if linkify_bare:
+        text = _mark_bare_urls(text)
     text = html.escape(text)
     text = text.replace("\x01", "<code>").replace("\x02", "</code>")
+    if linkify_bare:
+        text = _URL_MARK.sub(lambda m: _ext_anchor(m.group(1), m.group(1)), text)
     text = _BOLD.sub(r"<strong>\1</strong>", text)
     return text
+
+
+def _is_quote(s: str) -> bool:
+    """True for a blockquote line: `> text`, or a bare `>` separating its paragraphs."""
+    return s.startswith("> ") or s == ">"
 
 
 def md_to_html_body(md_text: str) -> str:
     """Render a block-level markdown subset to an HTML fragment.
 
     Supported blocks: ATX headings (# .. ######), bullet lists (- ...),
-    horizontal rules (---), and paragraphs. Inline formatting within each
-    block is delegated to render_inline.
+    fenced code, horizontal rules (---), blockquotes (> ...), GFM pipe tables,
+    and paragraphs. Inline formatting within each block is delegated to
+    render_inline.
     """
     lines = md_text.replace("\r\n", "\n").split("\n")
     out: list[str] = []
@@ -140,11 +198,47 @@ def md_to_html_body(md_text: str) -> str:
             out.append("</ul>")
             continue
 
+        if _is_quote(stripped):
+            # One <blockquote>, not one `&gt;`-prefixed paragraph per line: the
+            # unverified warning in APPLY-NOTES.md is a wrapped multi-line quote.
+            quote: list[list[str]] = [[]]
+            while i < n and _is_quote(lines[i].strip()):
+                q = lines[i].strip()[1:].strip()
+                if q:
+                    quote[-1].append(q)
+                elif quote[-1]:
+                    quote.append([])      # a bare `>` starts a new paragraph
+                i += 1
+            inner = "".join(f"<p>{render_inline(' '.join(p))}</p>" for p in quote if p)
+            out.append(f"<blockquote>{inner}</blockquote>")
+            continue
+
+        # GFM table: a pipe row, a |---| separator under it, then body rows. The
+        # separator is required — see the paragraph break below.
+        if _TABLE_ROW.match(stripped) and i + 1 < n and _is_table_sep(lines[i + 1]):
+            rows_html = ["<tr>" + "".join(
+                f"<th>{render_inline(c)}</th>" for c in _split_row(stripped)) + "</tr>"]
+            i += 2                                     # header + separator
+            while i < n and _TABLE_ROW.match(lines[i].strip()):
+                row = lines[i].strip()
+                i += 1
+                if _is_table_sep(row):
+                    continue                           # a stray second separator
+                rows_html.append("<tr>" + "".join(
+                    f"<td>{render_inline(c)}</td>" for c in _split_row(row)) + "</tr>")
+            out.append(f'<div class="tw"><table>{"".join(rows_html)}</table></div>')
+            continue
+
         # paragraph: gather consecutive non-blank, non-special lines
         para: list[str] = []
         while i < n:
             s = lines[i].strip()
-            if not s or s == "---" or _HEADING.match(s) or s.startswith("- "):
+            # A pipe row breaks the paragraph only when a separator follows it:
+            # gating on the lookahead is what keeps this loop advancing, since a
+            # lone `| a | b |` is not consumed by the table branch above.
+            starts_table = bool(_TABLE_ROW.match(s)) and i + 1 < n and _is_table_sep(lines[i + 1])
+            if (not s or s == "---" or _HEADING.match(s) or s.startswith("- ")
+                    or _is_quote(s) or starts_table):
                 break
             para.append(s)
             i += 1
@@ -171,6 +265,18 @@ def _split_row(line: str) -> list[str]:
     return [c.strip() for c in inner.split("|")]
 
 
+def _is_table_sep(line: str) -> bool:
+    """True for a GFM separator row like `| --- | :-: |`.
+
+    The one definition of this rule: `parse_ranking_table` uses it to skip the
+    separator, and `md_to_html_body` uses it as the lookahead that decides
+    whether a pipe row actually opens a table.
+    """
+    if not _TABLE_ROW.match(line):
+        return False
+    return all(set(c) <= set("-: ") for c in _split_row(line))
+
+
 def parse_ranking_table(md_text: str, top_n: int) -> list[dict]:
     """Parse the '## Ranking summary' table; return up to top_n data rows.
 
@@ -182,10 +288,10 @@ def parse_ranking_table(md_text: str, top_n: int) -> list[dict]:
     for line in md_text.splitlines():
         if not _TABLE_ROW.match(line):
             continue
-        cells = _split_row(line)
         # separator row like |---|---|
-        if all(set(c) <= set("-: ") for c in cells):
+        if _is_table_sep(line):
             continue
+        cells = _split_row(line)
         if not seen_header:
             seen_header = True  # first table row is the column header
             continue
@@ -227,6 +333,14 @@ li { margin: .2rem 0; }
 code { background: #eef0f3; border-radius: 4px; padding: .1em .35em;
   font: .9em/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 hr { border: 0; border-top: 1px solid #e2e5e9; margin: 1.6rem 0; }
+blockquote { margin: .8rem 0; padding: .5em .9em; background: #f6f7f9;
+  border-left: 3px solid #e2e5e9; border-radius: 0 6px 6px 0; color: #3a4149; }
+blockquote p { margin: .3rem 0; }
+.tw { overflow-x: auto; margin: .7rem 0 1rem; }
+table { border-collapse: collapse; font-size: .92rem; }
+th, td { border: 1px solid #e2e5e9; padding: .35em .6em; text-align: left;
+  vertical-align: top; }
+th { background: #f6f7f9; color: #3a4149; font-weight: 600; }
 .back { display: inline-block; margin-bottom: 1.2rem; font-size: .95rem; }
 .subtitle { color: #5a6169; margin: 0 0 1.6rem; }
 .card { display: block; background: #fff; border: 1px solid #e2e5e9; border-radius: 10px;
@@ -237,8 +351,15 @@ hr { border: 0; border-top: 1px solid #e2e5e9; margin: 1.6rem 0; }
 .rank { font-weight: 700; color: #2b6cb0; }
 .sym { font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
 .mod { color: #5a6169; font-size: .9rem; }
-.badges { margin-left: auto; display: flex; gap: 8px; }
-.badge { font-size: .78rem; padding: .12em .6em; border-radius: 999px; background: #eef0f3; color: #3a4149; }
+/* align-items:center, not the flex default of stretch: a stretched .badge keeps
+   its border-radius:999px, so a badge shorter than a taller sibling renders as a
+   circle rather than a pill. flex-shrink:0 and .badge's nowrap keep any badge
+   from being squeezed until its text wraps and becomes that taller sibling;
+   .row1 wraps, so an overflowing row moves .badges to its own line instead. */
+.badges { margin-left: auto; display: flex; align-items: center; gap: 8px;
+  flex-wrap: wrap; flex-shrink: 0; }
+.badge { font-size: .78rem; padding: .12em .6em; border-radius: 999px; background: #eef0f3;
+  color: #3a4149; white-space: nowrap; }
 .badge.impact-high { background: #fde8e8; color: #9b1c1c; }
 .badge.score { background: #e6f4ea; color: #1e6b33; }
 .rationale { margin: .5rem 0 0; color: #3a4149; font-size: .95rem; }
@@ -246,8 +367,14 @@ hr { border: 0; border-top: 1px solid #e2e5e9; margin: 1.6rem 0; }
 /* --- evolve bundles --- */
 .badge.evolve { background: #e8e3fd; color: #4c2a9b; }
 .card-main { display:block; text-decoration:none; color:inherit; }
-.card-foot { margin-top:.7rem; padding-top:.6rem; border-top:1px dashed #e2e5e9; }
-.evolve-link { display:inline-flex; align-items:center; gap:.45em;
+.card-foot { margin-top:.7rem; padding-top:.6rem; border-top:1px dashed #e2e5e9;
+  display:flex; gap:8px; flex-wrap:wrap; }
+/* margin-left:auto, not justify-content:space-between on .card-foot: the two
+   arms are independently optional, and space-between would leave a lone evolve
+   pill sitting left. An auto margin pins evolve right whether or not an apply
+   pill shares the row — so a column of cards has apply flush left and evolve
+   flush right on every one of them. */
+.evolve-link { display:inline-flex; align-items:center; gap:.45em; margin-left:auto;
   font-size:.85rem; font-weight:600; color:#4c2a9b; background:#f1edfd;
   border:1px solid #d9cffb; border-radius:999px; padding:.32em .85em;
   text-decoration:none; }
@@ -293,6 +420,49 @@ hr { border: 0; border-top: 1px solid #e2e5e9; margin: 1.6rem 0; }
 .about dd .ask { margin:.3rem 0 0; padding:.6em .8em; background:#eef6ff;
   border-left:3px solid #2b6cb0; border-radius:0 6px 6px 0; color:#1a1d21;
   font-style:italic; font-size:.88rem; }
+/* --- one-shot apply --- */
+.badge.apply { background:#fdf0d5; color:#8a5a00; }
+/* No auto margin here, deliberately: apply is emitted first, so it is already
+   flush left, and .evolve-link's margin-left:auto is what pushes evolve right. */
+.apply-link { display:inline-flex; align-items:center; gap:.45em;
+  font-size:.85rem; font-weight:600; color:#8a5a00; background:#fdf6e7;
+  border:1px solid #f0dfb8; border-radius:999px; padding:.32em .85em;
+  text-decoration:none; }
+.apply-link:hover { background:#fbeed2; border-color:#e6cf9c; }
+.apply-section { margin-top: 1.8rem; }
+.apply-strip { background:#fbfbfc; border:1px solid #eef0f3; border-radius:8px;
+  padding:10px 14px; margin:.2rem 0 1.2rem; }
+.apply-strip h2 { margin:.1rem 0 .5rem; border:0; padding:0; font-size:1.05rem; }
+.apply-strip pre { background:#1a1d21; color:#e6e6e6; border:0; border-radius:6px;
+  padding:.5em .7em; margin:.3rem 0; overflow-x:auto;
+  font:.85em/1.5 ui-monospace,Menlo,Consolas,monospace; }
+.apply-strip .note { font-size:.85rem; color:#5a6169; margin:.5rem 0 .1rem; }
+.apply-strip .sha { font:.85em/1.4 ui-monospace,Menlo,Consolas,monospace;
+  background:#eef0f3; border-radius:4px; padding:.1em .35em; }
+.apply-strip .dl { margin:.7rem 0 .2rem; font-size:.85rem; color:#8a5a00;
+  background:#fdf6e7; border:1px solid #f0dfb8; }
+.apply-strip .dl:hover { background:#fbeed2; border-color:#e6cf9c; }
+.diff { border:1px solid #e2e5e9; border-radius:8px; overflow:hidden;
+  margin:.6rem 0 1.2rem; }
+.diff .file { background:#f6f7f9; border-bottom:1px solid #e2e5e9;
+  padding:.4em .7em; display:flex; gap:.8em; align-items:baseline;
+  font:.85rem/1.4 ui-monospace,Menlo,Consolas,monospace; }
+.diff .file .p { font-weight:600; word-break:break-all; }
+.diff .file .st { margin-left:auto; white-space:nowrap; }
+.diff .file .st .a { color:#1e6b33; }
+.diff .file .st .r { color:#9b1c1c; }
+.diff pre { margin:0; padding:0; background:#fff; overflow-x:auto;
+  font:.82em/1.5 ui-monospace,Menlo,Consolas,monospace; }
+.diff .l { display:block; padding:0 .7em; white-space:pre; }
+.diff .d-add { background:#e6f4ea; color:#1e6b33; }
+.diff .d-del { background:#fde8e8; color:#9b1c1c; }
+.diff .d-hunk { background:#eef0f3; color:#5a6169; }
+/* the patch <details> is not inside .engine, so it needs its own summary rules
+   — these mirror `.engine summary` / `.engine summary .sz` above */
+.patch { margin:.5rem 0 1.2rem; }
+.patch summary { cursor:pointer; padding:.25em 0; color:#3a4149;
+  font:.9rem/1.4 ui-monospace,Menlo,Consolas,monospace; }
+.patch summary .sz { color:#8a9099; }
 """
 
 
@@ -308,9 +478,17 @@ def _doc(title: str, body: str) -> str:
 
 
 def render_candidate_page(md_text: str, title: str, back_href: str,
-                          evolve_section: str = "") -> str:
+                          evolve_section: str = "", apply_section: str = "") -> str:
+    """Render one candidate page.
+
+    `apply_section` is last so the pre-existing 4-positional-argument calls keep
+    working, but it is *emitted* before `evolve_section`: apply is the cheap arm,
+    evolve the expensive one.
+    """
     back = f'<a class="back" href="{html.escape(back_href)}">← Back to index</a>'
     body = back + "\n" + md_to_html_body(md_text)
+    if apply_section:
+        body += "\n" + apply_section
     if evolve_section:
         body += "\n" + evolve_section
     return _doc(title, body)
@@ -322,30 +500,39 @@ def render_index(header: dict, rows: list[dict]) -> str:
         parts.append(f'<p class="subtitle">{render_inline(header["objective"])}</p>')
     for r in rows:
         impact_cls = "impact-high" if r["impact"].lower() == "high" else ""
+        apply_stat = r.get("apply_stat", "")
+        # The badge carries the short form, the footer pill the full prose stat.
+        apply_badge_stat = r.get("apply_badge_stat", "")
+        apply_badge = (f'<span class="badge apply">apply · {html.escape(apply_badge_stat)}</span>'
+                       if apply_badge_stat else "")
         evolve_count = r.get("evolve_count", 0)
         evolve_badge = (f'<span class="badge evolve">evolve · {evolve_count}</span>'
                         if evolve_count else "")
-        # The whole card is one anchor to the candidate page; the evolve link
-        # lives in a separate footer anchor so we never nest <a> in <a>.
+        # The whole card is one anchor to the candidate page; the follow-on arm
+        # links live in a separate footer so we never nest <a> in <a>.
         card_main = (
             f'<a class="card-main" href="{html.escape(r["html_href"])}">'
             f'<div class="row1">'
             f'<span class="rank">#{html.escape(r["rank"])}</span>'
             f'<span class="sym">{html.escape(r["symbol"])}</span>'
             f'<span class="mod">{html.escape(r["module"])}</span>'
-            f'<span class="badges">{evolve_badge}'
+            f'<span class="badges">{apply_badge}{evolve_badge}'
             f'<span class="badge {impact_cls}">{html.escape(r["impact"])}</span>'
             f'<span class="badge score">score {html.escape(r["score"])}</span>'
             f'</span></div>'
             f'<p class="rationale">{render_inline(r["rationale"])}</p>'
             f'</a>'
         )
-        foot = ""
+        # Apply first: it is the cheap arm, evolve the expensive one.
+        pills = []
+        if apply_stat:
+            pills.append(f'<a class="apply-link" href="{html.escape(r["apply_href"])}">'
+                         f'🔧 One-shot apply: {html.escape(apply_stat)} →</a>')
         if evolve_count:
             engines = " · ".join(r.get("evolve_engines", []))
-            foot = (f'<div class="card-foot"><a class="evolve-link" '
-                    f'href="{html.escape(r["evolve_href"])}">⚙ Evolve bundles: '
-                    f'{html.escape(engines)} →</a></div>')
+            pills.append(f'<a class="evolve-link" href="{html.escape(r["evolve_href"])}">'
+                         f'⚙ Evolve bundles: {html.escape(engines)} →</a>')
+        foot = f'<div class="card-foot">{"".join(pills)}</div>' if pills else ""
         parts.append(f'<div class="card">{card_main}{foot}</div>')
     return _doc(header.get("title", "Candidates"), "\n".join(parts))
 
@@ -419,8 +606,10 @@ ENGINES: dict[str, dict] = {
                    "(alias: agentic-strategy-evolution).",
         "scope": "Multi-file: experiment arms with code_changes[].",
         "config": "campaign.yaml",
-        # nothing to hand-author: the agents discover metrics and evaluate on their own
-        "writes": None,
+        # No evaluator code — the agents discover metrics and evaluate on their own.
+        # The one gap is the rule deciding whether a measured number is a win.
+        "writes_html": ("<code>ground_truth.pass_condition</code> in "
+                        "<code>campaign.yaml</code> — a concrete pass/fail rule."),
         "install": [{"label": None,
                      "cmd": 'pip install "git+https://github.com/AI-native-Systems-Research/'
                             'agentic-strategy-evolution.git@reflective"'}],
@@ -436,8 +625,12 @@ _EVOLVE_PREREQ = (
     "(e.g. a GPU) to build and measure the target.")
 
 
-def _evolve_module_slug(cand_id: str) -> str:
-    """cand-<module_slug>-NNNN -> <module_slug> (the trailing -NNNN is dropped)."""
+def _cand_module_slug(cand_id: str) -> str:
+    """cand-<module_slug>-NNNN -> <module_slug> (the trailing -NNNN is dropped).
+
+    Shared by both follow-on arms: `evolve/` and `apply/` are both keyed by
+    <module_slug>/<cand_id>/ on disk.
+    """
     return cand_id.removeprefix("cand-").rsplit("-", 1)[0]
 
 
@@ -447,7 +640,7 @@ def find_evolve(cand_id: str, evolve_root: Path) -> dict | None:
     Looks under <evolve_root>/<module_slug>/<cand_id>/<engine>/ and keeps only
     the engines known to ENGINES that actually have files on disk.
     """
-    d = evolve_root / _evolve_module_slug(cand_id) / cand_id
+    d = evolve_root / _cand_module_slug(cand_id) / cand_id
     if not d.is_dir():
         return None
     engines: dict[str, list[Path]] = {}
@@ -582,12 +775,382 @@ def render_evolve_section(engines: dict, evolve_page_name: str) -> str:
         f'<p><a href="{html.escape(evolve_page_name)}">View evolve bundles →</a></p></div>')
 
 
+# --- one-shot apply ---------------------------------------------------------
+#
+# When `spotlights-engine apply` has run, a sibling `apply/` tree lives beside
+# `sorted/`:
+#   <run>/apply/<module_slug>/<cand_id>/{apply.patch,APPLY-NOTES.md}
+# For each exported candidate with a patch we copy those files into the bundle,
+# add a `…__apply.html` page, and surface a link on the candidate page and index
+# card. If no `apply/` tree exists the build behaves exactly as before.
+
+
+def _diff_git_path(line: str) -> str | None:
+    """The post-image path of a `diff --git` header line, or None if not one.
+
+    The single source of truth for recognising a file boundary — `diffstat` and
+    `render_patch` both start a new file by it, and both reset `in_hunk` by it.
+
+    It never returns None for a line starting with `diff --git`, and that is the
+    point: recognising the boundary is what resets the caller's `in_hunk` state.
+    Coupling the reset to a successful *path* capture is a live bug — git quotes
+    any path holding a non-ASCII byte, a quote, a backslash, or a control
+    character (`core.quotePath` defaults to true, and `apply.patch` comes from a
+    plain `git diff`), so a real patch contains both forms:
+
+        diff --git a/vllm/v1/worker/utils.py b/vllm/v1/worker/utils.py
+        diff --git "a/caf\\303\\251.py" "b/caf\\303\\251.py"
+
+    Miss the second and `in_hunk` stays True across the boundary, so that file's
+    own `--- a/…` and `+++ b/…` markers are counted as a removal and an addition.
+    Git's escapes are left in the returned path rather than decoded: an unusual
+    filename displayed verbatim is better than a file missing from the table.
+    """
+    if not line.startswith("diff --git "):
+        return None
+    m = _DIFF_GIT.match(line)
+    if m:
+        return m.group(1)
+    rest = line[len("diff --git "):]
+    # Git quotes each side independently, so a rename can quote only its source:
+    # `diff --git "a/caf\303\251.py" b/ascii.py`. Try the quoted post-image first,
+    # then the bare one, so the label is the destination path and not the whole
+    # header remainder (which would carry the pre-image side along with it).
+    _, sep, post = rest.rpartition(' "b/')
+    if sep and post.endswith('"'):
+        return post[:-1]
+    _, sep, post = rest.rpartition(' b/')
+    return post if sep else rest
+
+
+def parse_patch_header(patch_text: str) -> dict:
+    """Read the `# candidate/module/repo/base` block above the first diff.
+
+    Both `spotlights-engine apply` and the /spotlights-apply-candidate skill write
+    this header field-for-field, which is what makes it parseable. Absent
+    fields are absent keys — callers use .get(). Scanning stops at the first
+    `diff --git` so a `#` line inside a diff body can never be read as a field.
+    """
+    out: dict = {}
+    for line in patch_text.splitlines():
+        if line.startswith("diff --git"):
+            break
+        m = _PATCH_FIELD.match(line)
+        if m:
+            out[m.group(1)] = m.group(2)
+    return out
+
+
+def _diff_line_kind(line: str, in_hunk: bool = False) -> str:
+    """Classify one patch line: marker | hunk | add | del | context.
+
+    The single source of truth for this rule — `diffstat` counts by it and
+    `render_patch` colours by it, so the two can never disagree.
+
+    The `+++ b/…` and `--- a/…` file markers are tested *first*: they start
+    with `+`/`-` but are not changed lines, and checking them second inflates
+    every count by one. A bare `+` or `-` is a real added/removed blank line.
+
+    `in_hunk` is what keeps that first test from swallowing real content. File
+    markers only ever appear in a file's header block, before its first `@@`.
+    Inside a hunk, `---`/`+++` is a changed line whose *content* begins with
+    `--`/`++` — deleting a markdown `---` rule emits `----`, and deleting a
+    `-- flag` doc line emits `--- flag`. Treating those as markers drops them
+    from the count, under-reporting removals on the one page that exists to
+    inform an apply/don't-apply decision. Callers iterate in order, so they
+    set `in_hunk=True` on a `@@` line and back to False on `diff --git`.
+    """
+    if not in_hunk and (line.startswith("+++") or line.startswith("---")):
+        return "marker"
+    if line.startswith("@@"):
+        return "hunk"
+    if line.startswith("+"):
+        return "add"
+    if line.startswith("-"):
+        return "del"
+    return "context"
+
+
+def diffstat(patch_text: str) -> dict:
+    """Per-file and total +added/-removed, computed from the patch itself.
+
+    Deliberately not read from APPLY-NOTES.md's "Files changed" table: those
+    notes say the table is derived from the patch, and the patch is what
+    ships. One source of truth, and it is the one the recipient applies.
+    """
+    files: list[dict] = []
+    cur: dict | None = None
+    in_hunk = False
+    for line in patch_text.splitlines():
+        path = _diff_git_path(line)           # never None for a `diff --git` line,
+        if path is not None:                  # so the reset cannot be skipped
+            cur = {"path": path, "added": 0, "removed": 0}
+            files.append(cur)
+            in_hunk = False                   # back in a file header block
+            continue
+        if cur is None:                       # still in the `#` header block
+            continue
+        kind = _diff_line_kind(line, in_hunk)
+        if kind == "hunk":
+            in_hunk = True
+        elif kind == "add":
+            cur["added"] += 1
+        elif kind == "del":
+            cur["removed"] += 1
+    return {
+        "files": files,
+        "added": sum(f["added"] for f in files),
+        "removed": sum(f["removed"] for f in files),
+    }
+
+
+def format_diffstat(stat: dict) -> str:
+    """'1 file changed, +69/−26' — U+2212 MINUS SIGN, not a hyphen."""
+    n = len(stat["files"])
+    noun = "file" if n == 1 else "files"
+    return f"{n} {noun} changed, +{stat['added']}/−{stat['removed']}"
+
+
+def format_diffstat_short(stat: dict) -> str:
+    """'+69/−26' — the badge form; `format_diffstat` is the prose form."""
+    return f"+{stat['added']}/−{stat['removed']}"
+
+
+def find_apply(cand_id: str, apply_root: Path) -> dict | None:
+    """Return a candidate's apply artifacts, or None.
+
+    Looks under <apply_root>/<module_slug>/<cand_id>/. `apply.patch` is required:
+    a directory holding only APPLY-NOTES.md is the legitimate "the change could
+    not be made" outcome, and a share bundle skips it entirely — no page, no
+    badge, no copies. APPLY-NOTES.md and apply.prompt.txt are optional.
+
+    Returns the paths (`patch`, `notes`, `prompt`), the parsed contents
+    (`header`, `stat`), and the decoded text plus patch size (`patch_text`,
+    `notes_text`, `patch_kb`). `notes` and `notes_text` are None together when
+    the notes are absent; `header` may be `{}` and `stat["files"]` may be `[]`,
+    so callers use `.get()` on `header` rather than indexing it.
+
+    `prompt` is a path only — apply.prompt.txt ships in the copies and the zip so
+    the recipient can see the instruction the patch came from, but nothing
+    renders its text, so it is never read here.
+
+    The text is read here and nowhere else. `build()` must not re-read either
+    file: this is the only place that knows how to decode `apply.patch` safely
+    (see the comment on the read below), and a second strict read elsewhere
+    would reintroduce a crash that takes the whole bundle with it.
+    """
+    d = apply_root / _cand_module_slug(cand_id) / cand_id
+    patch = d / "apply.patch"
+    if not patch.is_file():
+        return None
+    notes = d / "APPLY-NOTES.md"
+    # `errors="replace"`, not strict: `apply.patch` is the one file here that is
+    # deliberately NOT guaranteed to be UTF-8. The engine collects the diff as
+    # raw bytes and writes it with `write_bytes`, because decoding and re-encoding
+    # it would corrupt a patch that `git apply` has to accept byte-for-byte — so a
+    # single non-UTF-8 context byte from the target repo lands in this file. Strict
+    # decoding would raise UnicodeDecodeError here, and `build()` reaches this
+    # point only after it has already removed the previous `share-bundle/`, so one
+    # such candidate would abort the run and leave no bundle at all.
+    #
+    # Lossy decoding is safe *because it is only ever used for reading*: the
+    # copied artifact is the raw file (`shutil.copy2`), never this text. What a
+    # replacement character costs is one unreadable glyph in the rendered diff,
+    # against a build that otherwise does not happen.
+    patch_text = patch.read_text(encoding="utf-8", errors="replace")
+    # The notes are written through Python's text layer, so they are UTF-8 by
+    # construction — but they sit on disk next to the patch and are as easy to
+    # hand-edit, so they get the same lossy read. No artifact this build merely
+    # *displays* is worth aborting the whole bundle over.
+    has_notes = notes.is_file()
+    notes_text = notes.read_text(encoding="utf-8", errors="replace") if has_notes else None
+    prompt = d / "apply.prompt.txt"
+    return {
+        "patch": patch,
+        "notes": notes if has_notes else None,
+        "prompt": prompt if prompt.is_file() else None,
+        "header": parse_patch_header(patch_text),
+        "stat": diffstat(patch_text),
+        "patch_text": patch_text,
+        "notes_text": notes_text,
+        "patch_kb": patch.stat().st_size / 1024,
+    }
+
+
+_DIFF_CLASS = {"add": "d-add", "del": "d-del", "hunk": "d-hunk", "context": ""}
+
+# The warning is the whole reason this page is careful: a colorized diff in a
+# browser is the most authoritative-looking artifact Spotlights emits, and none
+# of it was tested, benchmarked, or built.
+_APPLY_UNVERIFIED = (
+    "Nothing here was verified. No test was run, no benchmark was measured, no "
+    "build was attempted. The patch was produced in a fresh detached worktree "
+    "with no virtualenv and no compiled extensions, on a machine that may lack "
+    "the hardware the performance oracle needs. Treat it as a proposal "
+    "faithfully implemented — not as a measured win.")
+
+
+def _repo_placeholder(repo: str | None) -> str:
+    """'/Users/…/vllm' -> '<YOUR_VLLM_CHECKOUT>'; falsy -> '<YOUR_REPO_CHECKOUT>'."""
+    name = Path(repo.rstrip("/")).name if repo else ""
+    slug = re.sub(r"[^A-Za-z0-9]+", "_", name).strip("_").upper()
+    return f"<YOUR_{slug or 'REPO'}_CHECKOUT>"
+
+
+def render_patch(patch_text: str, patch_href: str, size_kb: float) -> str:
+    """The patch as a collapsed colorized diff, one block per changed file.
+
+    Closed by default: APPLY-NOTES.md is the orientation, the diff is the detail —
+    the same split that collapses evolve's non-README files.
+    """
+    stat = diffstat(patch_text)
+    per_file = {f["path"]: f for f in stat["files"]}
+    blocks: list[str] = []
+    lines: list[str] = []
+
+    def flush() -> None:
+        if lines:
+            blocks.append(f'<pre>{"".join(lines)}</pre>')
+            lines.clear()
+
+    in_hunk = False
+    for line in patch_text.splitlines():
+        # Same boundary helper diffstat uses (Task 3), so the file rows here and
+        # the rows in `per_file` are keyed by identical paths and the `in_hunk`
+        # reset happens at exactly the same lines in both.
+        path = _diff_git_path(line)
+        if path is not None:
+            flush()
+            in_hunk = False                   # back in a file header block
+            f = per_file.get(path, {"added": 0, "removed": 0})
+            blocks.append(
+                f'<div class="file"><span class="p">{html.escape(path)}</span>'
+                f'<span class="st"><span class="a">+{f["added"]}</span> '
+                f'<span class="r">−{f["removed"]}</span></span></div>')
+            continue
+        if not blocks:
+            continue                          # the `#` header block
+        # One classifier, shared with diffstat (Task 3) — the counts and the
+        # colours can never disagree about what a line is, including on the
+        # `in_hunk` rule that keeps a deleted `---` from reading as a marker.
+        kind = _diff_line_kind(line, in_hunk)
+        if kind == "hunk":
+            in_hunk = True
+        if kind == "marker":
+            continue                          # shown in the file header row instead
+        cls = f"l {_DIFF_CLASS[kind]}".rstrip()
+        lines.append(f'<span class="{cls}">{html.escape(line)}\n</span>')
+    flush()
+
+    return (
+        f'<details class="patch"><summary>apply.patch '
+        f'<span class="sz">— {size_kb:.0f} KB · '
+        f'<a href="{html.escape(patch_href)}">open raw ↗</a></span></summary>'
+        f'<div class="diff">{"".join(blocks)}</div></details>')
+
+
+def render_apply_page(cand_id: str, symbol: str, fx: dict,
+                      raw_reldir: str, back_href: str) -> str:
+    """The `…__apply.html` page: orientation, apply recipe, notes, then the diff."""
+    hdr = fx.get("header") or {}
+    base = hdr.get("base", "")
+    ph = _repo_placeholder(hdr.get("repo"))
+    stat_line = format_diffstat(fx["stat"])
+    body = [
+        f'<a class="back" href="{html.escape(back_href)}">← Back to candidate</a>',
+        f"<h1>One-shot apply — {html.escape(symbol)}</h1>",
+        f'<p class="subtitle">{html.escape(cand_id)} · {html.escape(stat_line)}</p>',
+        '<div class="orient">'
+        '<p><strong>What is this?</strong> One attempt at implementing this '
+        'candidate\'s proposal, as a reviewable patch — not an evolutionary '
+        'search. Spotlights read the candidate and the research behind it, made '
+        'the change in a throwaway worktree, and handed back the diff plus its '
+        'notes. Nothing has been applied to any repository.</p>'
+        f'<p class="warn">⚠️ {html.escape(_APPLY_UNVERIFIED)}</p></div>',
+    ]
+
+    apply_cmds = (
+        f"REPO={ph}\n"
+        f"git -C \"$REPO\" checkout {base or '<BASE_COMMIT>'}\n"
+        f"git -C \"$REPO\" apply --check \"$PWD/{raw_reldir}/apply.patch\" \\\n"
+        f"  && git -C \"$REPO\" apply \"$PWD/{raw_reldir}/apply.patch\"")
+    apply_parts = ['<div class="apply-strip"><h2>Apply this patch</h2>']
+    if base:
+        apply_parts.append(
+            f'<p class="note">Base commit <span class="sha">{html.escape(base)}</span>'
+            ' — the patch assumes this exact commit.</p>')
+    apply_parts.append(
+        f'<p class="note">Run these from the folder this page sits in — '
+        f'<code>$PWD</code> must be the directory holding <code>{html.escape(raw_reldir)}/</code>.</p>')
+    apply_parts.append(f'<pre>{html.escape(apply_cmds)}</pre>')
+    apply_parts.append(
+        '<p class="note">If it does not apply cleanly, '
+        f'<code>git -C "$REPO" apply -3 "$PWD/{html.escape(raw_reldir)}/apply.patch"</code> '
+        'falls back to a three-way merge. Without git, <code>patch -p1 &lt; '
+        'apply.patch</code> works from the repo root.</p>')
+    apply_parts.append(
+        '<p class="note">The paths written inside <code>apply.patch</code> and '
+        '<code>APPLY-NOTES.md</code> name the machine that produced them — '
+        'substitute your own checkout, as above. The files are copied here '
+        'byte-for-byte and were not rewritten.</p>')
+    if fx.get("prompt"):
+        apply_parts.append(
+            '<p class="note">The zip also carries <code>apply.prompt.txt</code> — '
+            'the verbatim instruction this patch was produced from. It records '
+            'the attempt (and the throwaway worktree it ran in); applying the '
+            'patch does not need it.</p>')
+    apply_parts.append(
+        f'<a class="dl" href="{html.escape(raw_reldir)}/apply.zip" download>'
+        '⬇ Download patch (.zip)</a>')
+    apply_parts.append("</div>")
+    body.append("".join(apply_parts))
+
+    if fx.get("notes_text"):
+        body.append(md_to_html_body(fx["notes_text"]))
+    body.append("<h2>The patch</h2>")
+    body.append(render_patch(fx["patch_text"],
+                             f"{raw_reldir}/apply.patch", fx.get("patch_kb", 0.0)))
+    return _doc(f"One-shot apply — {symbol}", "\n".join(body))
+
+
+def render_apply_section(fx: dict, apply_page_name: str) -> str:
+    """The "One-shot apply" block appended to a candidate page."""
+    return (
+        '<div class="apply-section"><h2>One-shot apply</h2>'
+        f'<p>A reviewable patch for this candidate: '
+        f'<strong>{html.escape(format_diffstat(fx["stat"]))}</strong>. '
+        'Nothing about it was verified — no test, no benchmark, no build.</p>'
+        f'<p><a href="{html.escape(apply_page_name)}">View the patch →</a></p></div>')
+
+
+def _copy_apply_files(fx: dict, apply_dir: Path) -> None:
+    """Copy the apply artifacts verbatim and write an apply.zip rooted at apply/.
+
+    Byte-for-byte is deliberate: scrubbing the producer's repo path out of
+    apply.patch would ship a patch that differs from what the engine wrote. The
+    page carries a portable apply recipe instead.
+
+    The raw folder and the zip carry the same members, in the same order —
+    apply.patch, then whichever of APPLY-NOTES.md and apply.prompt.txt exist.
+    Only the patch is guaranteed present.
+    """
+    apply_dir.mkdir(parents=True, exist_ok=True)
+    members = [fx["patch"]]
+    members += [fx[k] for k in ("notes", "prompt") if fx.get(k)]
+    for f in members:
+        shutil.copy2(f, apply_dir / f.name)
+    with zipfile.ZipFile(apply_dir / "apply.zip", "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in members:
+            zf.write(f, f"apply/{f.name}")
+
+
 def build(source_dir: str, top_n: int = 5) -> dict:
     """Parse sorted_candidates.md and build share-bundle/ + share-candidates.zip.
 
-    Returns {title, count, bundle_dir, zip_path, skipped}. Candidates whose
-    linked .md file cannot be found are skipped (recorded in 'skipped'), not
-    fatal.
+    Returns {title, count, bundle_dir, zip_path, skipped, evolve_bundles,
+    apply_bundles} — the last two being how many candidates got a folded-in
+    sibling tree. Candidates whose linked .md file cannot be found are skipped
+    (recorded in 'skipped'), not fatal.
     """
     src = Path(source_dir).resolve()
     sorted_md = src / "sorted_candidates.md"
@@ -603,13 +1166,15 @@ def build(source_dir: str, top_n: int = 5) -> dict:
         shutil.rmtree(bundle)
     (bundle / "candidates").mkdir(parents=True)
 
-    # `prep-evolve` writes its output to a sibling `evolve/` tree; fold it in
+    # Both follow-on arms write to a sibling tree beside `sorted/`; fold each in
     # when present, otherwise the build proceeds exactly as before.
     evolve_root = src.parent / "evolve"
+    apply_root = src.parent / "apply"
 
     kept: list[dict] = []
     skipped: list[str] = []
     evolve_bundles = 0
+    apply_bundles = 0
     for r in rows:
         cand_path = (src / r["rel_link"]).resolve()
         if not cand_path.is_file():
@@ -626,6 +1191,33 @@ def build(source_dir: str, top_n: int = 5) -> dict:
 
         r = dict(r)
         r["html_href"] = str(Path("candidates") / Path(mod_rel).with_suffix(".html"))
+        stem = Path(mod_rel).with_suffix("")                   # modules/pkg/file
+        cand_page_name = Path(stem).name + ".html"             # sibling back-link
+
+        # Fold in the one-shot apply for this candidate, if a patch exists on disk.
+        fx = find_apply(r["cand_id"], apply_root)
+        r["apply_stat"] = ""
+        r["apply_badge_stat"] = ""
+        r["apply_href"] = ""
+        apply_section = ""
+        if fx:
+            apply_bundles += 1
+            apply_stem = str(stem) + "__apply"
+            apply_reldir = Path(apply_stem).name                # relative to the page
+            apply_page_name = apply_reldir + ".html"
+            r["apply_stat"] = format_diffstat(fx["stat"])
+            r["apply_badge_stat"] = format_diffstat_short(fx["stat"])
+            r["apply_href"] = str(Path("candidates") / (apply_stem + ".html"))
+            _copy_apply_files(fx, bundle / "candidates" / apply_stem)
+            # No re-read here: `find_apply` already returned `patch_text`,
+            # `notes_text`, and `patch_kb`, and it is the only place that knows
+            # `apply.patch` may not be valid UTF-8 (Task 4). Re-reading it strictly
+            # would abort the whole build on one odd byte.
+            (bundle / "candidates" / (apply_stem + ".html")).write_text(
+                render_apply_page(r["cand_id"], r["symbol"] or r["cand_id"],
+                                  fx, apply_reldir, cand_page_name),
+                encoding="utf-8")
+            apply_section = render_apply_section(fx, apply_page_name)
 
         # Fold in evolve bundles for this candidate, if any exist on disk.
         engines = find_evolve(r["cand_id"], evolve_root)
@@ -635,7 +1227,6 @@ def build(source_dir: str, top_n: int = 5) -> dict:
         evolve_section = ""
         if engines:
             evolve_bundles += 1
-            stem = Path(mod_rel).with_suffix("")               # modules/pkg/file
             evolve_stem = str(stem) + "__evolve"
             raw_reldir = Path(evolve_stem).name                # relative to the page
             evolve_page_name = raw_reldir + ".html"
@@ -644,13 +1235,13 @@ def build(source_dir: str, top_n: int = 5) -> dict:
             _copy_evolve_files(engines, evolve_dir)
             (bundle / "candidates" / (evolve_stem + ".html")).write_text(
                 render_evolve_page(r["cand_id"], r["symbol"] or r["cand_id"],
-                                   engines, raw_reldir, Path(stem).name + ".html"),
+                                   engines, raw_reldir, cand_page_name),
                 encoding="utf-8")
             evolve_section = render_evolve_section(engines, evolve_page_name)
 
         out_html.write_text(
             render_candidate_page(cand_md, r["symbol"] or r["cand_id"], back_href,
-                                  evolve_section),
+                                  evolve_section, apply_section),
             encoding="utf-8",
         )
         kept.append(r)
@@ -672,6 +1263,7 @@ def build(source_dir: str, top_n: int = 5) -> dict:
         "zip_path": str(zip_path),
         "skipped": skipped,
         "evolve_bundles": evolve_bundles,
+        "apply_bundles": apply_bundles,
     }
 
 
@@ -685,6 +1277,8 @@ def main() -> None:
     print(f"Candidates: {result['count']}")
     print(f"Bundle:     {result['bundle_dir']}")
     print(f"Zip:        {result['zip_path']}")
+    if result.get("apply_bundles"):
+        print(f"Apply:      {result['apply_bundles']} candidate(s) with one-shot patches")
     if result.get("evolve_bundles"):
         print(f"Evolve:     {result['evolve_bundles']} candidate(s) with evolve bundles")
     if result["skipped"]:

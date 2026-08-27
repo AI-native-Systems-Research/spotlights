@@ -22,6 +22,7 @@ The core philosophy behind the project: execution tooling — coding agents, evo
   <a href="#quickstart">Quickstart</a> ·
   <a href="docs/cost-and-manifest.md">Cost</a> ·
   <a href="docs/prep-evolve.md">prep-evolve</a> ·
+  <a href="docs/one-shot-apply.md">one-shot apply</a> ·
   <a href="docs/telemetry-preview.md">Telemetry (preview)</a> ·
   <a href="docs/spotlight-report.md">SpotlightReport</a> ·
   <a href="#signal-sources--roadmap">Roadmap</a>
@@ -68,9 +69,23 @@ spotlights-out/
     vllm_v1_kv_offload.md           # module page: candidates table
     vllm_v1_kv_offload/
       <symbol-slug>__cand-<module>-NNNN.md   # per-candidate write-up + proposals
+  evolve/
+    vllm_v1_kv_offload/
+      cand-<module>-NNNN/           # per-candidate 'prep-evolve'
+        coral/
+        nous/
+        skydiscover/
+  apply/
+    vllm_v1_kv_offload/
+      cand-<module>-NNNN/           # per-candidate 'apply'
+        APPLY-NOTES.md
+        apply.patch
+        apply.prompt.txt
   sorted/                           # written by /spotlights-sort-candidates
     sorted_candidates.md            # ranked table linking each candidate
     sorted_candidates.json          # machine-readable ranking
+    share-bundle/                   # written by /spotlights-share-candidates
+    share-candidates.zip            # written by /spotlights-share-candidates
 artifacts/
   spotlights_manager/               # checkpoints, raw transcripts (resumable)
     run_manifest.json               # provenance, token usage, and rate-table cost
@@ -97,7 +112,7 @@ For LiteLLM gateway config and a quick response check, see [docs/agent-cli-setup
 
 | Command | Purpose |
 |---|---|
-| `spotlights-engine` | Main engine: structural map → candidates → proposals. Subcommands: `doctor`, `init`, `prep-evolve`. |
+| `spotlights-engine` | Main engine: structural map → candidates → proposals. Subcommands: `doctor`, `init`, `prep-evolve`, `apply`. |
 | `signal-pipeline` | Telemetry-driven discovery (**preview**) — a separate entry point. |
 
 ## Skills
@@ -107,13 +122,14 @@ For LiteLLM gateway config and a quick response check, see [docs/agent-cli-setup
 | `/spotlights-objective-setting` | Optional interview that helps you frame a sharp optimization objective and prints ready-to-paste `--objective`/`--hint` flags. You can also write those flags by hand. |
 | `/spotlights-sort-candidates` | Ranks a finished run's candidates by estimated impact, writing `sorted_candidates.md` (a summary table linking each candidate) and `sorted_candidates.json` under `<output-folder>/sorted/`. |
 | `/spotlights-share-candidates` | Packages the top-N candidates from `sorted_candidates.md` into a self-contained ZIP an external teammate can unzip and open by double-clicking `index.html` — no server, works offline. |
+| `/spotlights-apply-candidate` | Implements one candidate as a reviewable patch, in-session, in a throwaway git worktree. Produces `apply.patch` + `apply.prompt.txt` + `APPLY-NOTES.md`. Runs no tests and no benchmarks; your checkout is never modified. |
 
 <a id="quickstart"></a>
-## Quickstart on a vLLM subset
+## Quickstart (Example on a vLLM subset)
 
 **Prerequisites:** Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/).
 
-**1. Install the engine**
+**1. Install the engine** ([Quick install](docs/INSTALL.md#quick-install-recommended))
 
 Quick install — puts `spotlights-engine` on your PATH (in `~/.local/bin`) via [uv](https://docs.astral.sh/uv/):
 
@@ -129,7 +145,7 @@ Pin a version by replacing `main` with any git tag, branch, or commit. No shell 
 > curl -fsSL https://raw.githubusercontent.com/AI-native-Systems-Research/spotlights/main/install.sh | sh
 > ```
 
-Or install from source for development (editable):
+Or install from source for development ([Development install](docs/INSTALL.md#from-source-development)):
 
 ```bash
 git clone https://github.com/AI-native-Systems-Research/spotlights.git
@@ -150,7 +166,7 @@ spotlights-engine init      # installs the /spotlights-* Claude Code slash comma
 spotlights-engine doctor
 ```
 
-**4. Run the engine on one module.** Clone [vLLM](https://github.com/vllm-project/vllm) next to this repo, decide your objective, then run the engine:
+**4. Run the engine on one module.** For Example: Clone [vLLM](https://github.com/vllm-project/vllm) next to this repo, decide your objective, then run the engine:
 
 > [!TIP]
 > **Framing the objective (optional).** The run needs an `--objective` and, optionally, one or more `--hint`s. You can write them by hand, as below. Or, in Claude Code, run the optional [`/spotlights-objective-setting`](#skills) interview — it walks you through your goal and prints a ready-to-paste flag line (`--objective "…" --hint "…"`). Either path produces the same flags; the skill is just a convenience, never a required step.
@@ -165,7 +181,7 @@ spotlights-engine \
   --artifacts-dir ./artifacts
 ```
 
-A single-module run like this takes roughly **30–45 minutes** and a **few dollars** in API cost against the paid `claude`/`codex` CLIs. Cost scales with the number of included modules — the full 8-module example run checked in under `examples/vllm_subset/` cost about **$26** at default rates. Exact cost depends on your model pricing; see [docs/cost-and-manifest.md](docs/cost-and-manifest.md).
+A single-module run like this takes roughly **30–45 minutes** and a **few dollars** in API cost against the paid `claude`/`codex` CLIs. Cost scales with the number of included modules — the full 8-module example run checked in under [`examples/vllm_subset/`](examples/vllm_subset) cost about **$26** at default rates. Exact cost depends on your model pricing; see [docs/cost-and-manifest.md](docs/cost-and-manifest.md).
 
 `--include` accepts one or more slash-form leaf qualified names (repeat the flag or pass several values):
 
@@ -173,7 +189,7 @@ A single-module run like this takes roughly **30–45 minutes** and a **few doll
 spotlights-engine --include vllm/v1/kv_offload vllm/v1/attention/paged_kv ...
 ```
 
-**5. Rank the candidates by impact.** A finished run can surface ~100 candidates; the bundled `/spotlights-sort-candidates` slash command ranks them for your objective. In Claude Code, from the same directory:
+**5. Rank the candidates by impact (optional).** A finished run can surface ~100 candidates; the bundled `/spotlights-sort-candidates` slash command ranks them for your objective. In Claude Code, from the same directory:
 
 ```
 /spotlights-sort-candidates
@@ -187,7 +203,7 @@ Point it at `./spotlights-out/result.json` and it writes a ranked `./spotlights-
 /spotlights-share-candidates
 ```
 
-It asks for the folder containing `sorted_candidates.md` (e.g. `./spotlights-out/sorted/`) and a top-N (default `5`), then writes a `share-bundle/` folder and a `share-candidates.zip` next to it. The bundle contains rendered HTML for each candidate plus the original markdown, with external references (arxiv, doi, docs) kept clickable and module breadcrumbs left as plain text.
+It asks for the folder containing `sorted_candidates.md` (e.g. `./spotlights-out/sorted/`) and a top-N (default `5`), then writes a `share-bundle/` folder and a `share-candidates.zip` next to it. The bundle contains rendered HTML for each candidate plus the original markdown, with external references (arxiv, doi, docs) kept clickable and module breadcrumbs left as plain text. If `prep-evolve` or `apply` has run, their bundles are folded in automatically: each candidate gains its evolve engines and its one-shot patch — the latter as a colorized diff with an apply recipe — with nothing verified and the page saying so.
 
 ## Signal sources & roadmap
 
@@ -207,6 +223,7 @@ Contributions to any of these are welcome — see [Contributing](#contributing).
 ## More
 
 - **[Evolve bundles (`prep-evolve`)](docs/prep-evolve.md)** — turn a chosen candidate into a ready-to-run bundle for an external evolver (skydiscover, coral, nous).
+- **[One-shot apply (`apply`)](docs/one-shot-apply.md)** — one Claude Code session turns a candidate into a reviewable patch plus its verification recipe. No fitness loop, no evaluator to write.
 - **[Telemetry-driven discovery (preview)](docs/telemetry-preview.md)** — the `signal-pipeline` path: OpenTelemetry traces → candidates anchored to captured anomalies.
 - **[Cost and the run manifest](docs/cost-and-manifest.md)** — how runs are priced, the rate-table format, and overriding it for your LiteLLM contract.
 - **[The `SpotlightReport` format](docs/spotlight-report.md)** — the machine-readable `result.json` schema: candidates, proposals, findings, and how they join.

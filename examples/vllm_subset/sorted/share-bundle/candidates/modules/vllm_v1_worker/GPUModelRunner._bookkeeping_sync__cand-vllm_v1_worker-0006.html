@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GPUModelRunner._bookkeeping_sync</title>
+<style>
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #f6f7f9; color: #1a1d21;
+  font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+.wrap { max-width: 860px; margin: 0 auto; padding: 32px 24px 80px; }
+a { color: #2b6cb0; }
+h1 { font-size: 1.7rem; line-height: 1.25; margin: 0 0 .5rem; }
+h2 { font-size: 1.25rem; margin: 1.8rem 0 .6rem; border-bottom: 1px solid #e2e5e9; padding-bottom: .25rem; }
+h3 { font-size: 1.05rem; margin: 1.3rem 0 .4rem; }
+p { margin: .6rem 0; }
+ul { margin: .5rem 0 .8rem; padding-left: 1.4rem; }
+li { margin: .2rem 0; }
+code { background: #eef0f3; border-radius: 4px; padding: .1em .35em;
+  font: .9em/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+hr { border: 0; border-top: 1px solid #e2e5e9; margin: 1.6rem 0; }
+blockquote { margin: .8rem 0; padding: .5em .9em; background: #f6f7f9;
+  border-left: 3px solid #e2e5e9; border-radius: 0 6px 6px 0; color: #3a4149; }
+blockquote p { margin: .3rem 0; }
+.tw { overflow-x: auto; margin: .7rem 0 1rem; }
+table { border-collapse: collapse; font-size: .92rem; }
+th, td { border: 1px solid #e2e5e9; padding: .35em .6em; text-align: left;
+  vertical-align: top; }
+th { background: #f6f7f9; color: #3a4149; font-weight: 600; }
+.back { display: inline-block; margin-bottom: 1.2rem; font-size: .95rem; }
+.subtitle { color: #5a6169; margin: 0 0 1.6rem; }
+.card { display: block; background: #fff; border: 1px solid #e2e5e9; border-radius: 10px;
+  padding: 16px 18px; margin: 12px 0; text-decoration: none; color: inherit;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04); transition: box-shadow .12s, border-color .12s; }
+.card:hover { box-shadow: 0 3px 10px rgba(0,0,0,.08); border-color: #c7cdd4; }
+.card .row1 { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.rank { font-weight: 700; color: #2b6cb0; }
+.sym { font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.mod { color: #5a6169; font-size: .9rem; }
+/* align-items:center, not the flex default of stretch: a stretched .badge keeps
+   its border-radius:999px, so a badge shorter than a taller sibling renders as a
+   circle rather than a pill. flex-shrink:0 and .badge's nowrap keep any badge
+   from being squeezed until its text wraps and becomes that taller sibling;
+   .row1 wraps, so an overflowing row moves .badges to its own line instead. */
+.badges { margin-left: auto; display: flex; align-items: center; gap: 8px;
+  flex-wrap: wrap; flex-shrink: 0; }
+.badge { font-size: .78rem; padding: .12em .6em; border-radius: 999px; background: #eef0f3;
+  color: #3a4149; white-space: nowrap; }
+.badge.impact-high { background: #fde8e8; color: #9b1c1c; }
+.badge.score { background: #e6f4ea; color: #1e6b33; }
+.rationale { margin: .5rem 0 0; color: #3a4149; font-size: .95rem; }
+
+/* --- evolve bundles --- */
+.badge.evolve { background: #e8e3fd; color: #4c2a9b; }
+.card-main { display:block; text-decoration:none; color:inherit; }
+.card-foot { margin-top:.7rem; padding-top:.6rem; border-top:1px dashed #e2e5e9;
+  display:flex; gap:8px; flex-wrap:wrap; }
+/* margin-left:auto, not justify-content:space-between on .card-foot: the two
+   arms are independently optional, and space-between would leave a lone evolve
+   pill sitting left. An auto margin pins evolve right whether or not an apply
+   pill shares the row — so a column of cards has apply flush left and evolve
+   flush right on every one of them. */
+.evolve-link { display:inline-flex; align-items:center; gap:.45em; margin-left:auto;
+  font-size:.85rem; font-weight:600; color:#4c2a9b; background:#f1edfd;
+  border:1px solid #d9cffb; border-radius:999px; padding:.32em .85em;
+  text-decoration:none; }
+.evolve-link:hover { background:#e6ddfc; border-color:#c3b1f7; }
+.evolve-section { margin-top: 1.8rem; }
+.engine { background:#fff; border:1px solid #e2e5e9; border-radius:10px;
+  padding:14px 16px; margin:12px 0; }
+.engine h3 { margin:.1rem 0 .5rem; }
+.engine .cmd { background:#1a1d21; color:#e6e6e6; border-radius:6px;
+  padding:.5em .7em; font:.85em/1.4 ui-monospace,Menlo,Consolas,monospace;
+  overflow-x:auto; }
+.engine pre { background:#f6f7f9; border:1px solid #e2e5e9; border-radius:6px;
+  max-height:360px; overflow:auto; padding:.6em .8em; }
+.engine details { margin:.5rem 0; }
+.engine summary { cursor:pointer; font:.9rem/1.4 ui-monospace,Menlo,Consolas,monospace;
+  color:#3a4149; padding:.25em 0; }
+.engine summary .sz { color:#8a9099; }
+.dl { display:inline-flex; align-items:center; gap:.5em; margin:.2rem 0 1.4rem;
+  font-size:.95rem; font-weight:600; color:#fff; background:#4c2a9b;
+  border-radius:8px; padding:.5em 1em; text-decoration:none; }
+.dl:hover { background:#3d2080; }
+.engine .dl { margin:1rem 0 .1rem; font-size:.85rem; font-weight:600;
+  color:#4c2a9b; background:#f1edfd; border:1px solid #d9cffb; padding:.4em .85em; }
+.engine .dl:hover { background:#e6ddfc; border-color:#c3b1f7; }
+.orient { background:#f1edfd; border:1px solid #d9cffb; border-radius:10px;
+  padding:14px 16px; margin:.2rem 0 1.2rem; }
+.orient p { margin:.4rem 0; }
+.orient .warn { color:#8a5a00; }
+.about { background:#fbfbfc; border:1px solid #eef0f3; border-radius:8px;
+  padding:10px 14px; margin:.2rem 0 .8rem; }
+.about .tagline { margin:.1rem 0 .6rem; font-weight:600; }
+.about dl { display:grid; grid-template-columns:max-content minmax(0,1fr);
+  gap:.3em 1em; margin:0; }
+.about dt { color:#5a6169; font-size:.82rem; padding-top:.05em; }
+.about dd { margin:0; font-size:.9rem; min-width:0; }
+.about dd .warn { color:#9b1c1c; display:block; margin-top:.3rem; }
+.inst-label { font-size:.78rem; color:#5a6169; margin:.5rem 0 .15rem; }
+.inst-label:first-child { margin-top:.1rem; }
+.engine pre.inst { background:#1a1d21; color:#e6e6e6; border:0; border-radius:6px;
+  padding:.5em .7em; margin:.1rem 0; max-height:none; overflow-x:auto;
+  font:.85em/1.5 ui-monospace,Menlo,Consolas,monospace; }
+.about dd p { margin:.1rem 0 .3rem; }
+.about dd .ask { margin:.3rem 0 0; padding:.6em .8em; background:#eef6ff;
+  border-left:3px solid #2b6cb0; border-radius:0 6px 6px 0; color:#1a1d21;
+  font-style:italic; font-size:.88rem; }
+/* --- one-shot apply --- */
+.badge.apply { background:#fdf0d5; color:#8a5a00; }
+/* No auto margin here, deliberately: apply is emitted first, so it is already
+   flush left, and .evolve-link's margin-left:auto is what pushes evolve right. */
+.apply-link { display:inline-flex; align-items:center; gap:.45em;
+  font-size:.85rem; font-weight:600; color:#8a5a00; background:#fdf6e7;
+  border:1px solid #f0dfb8; border-radius:999px; padding:.32em .85em;
+  text-decoration:none; }
+.apply-link:hover { background:#fbeed2; border-color:#e6cf9c; }
+.apply-section { margin-top: 1.8rem; }
+.apply-strip { background:#fbfbfc; border:1px solid #eef0f3; border-radius:8px;
+  padding:10px 14px; margin:.2rem 0 1.2rem; }
+.apply-strip h2 { margin:.1rem 0 .5rem; border:0; padding:0; font-size:1.05rem; }
+.apply-strip pre { background:#1a1d21; color:#e6e6e6; border:0; border-radius:6px;
+  padding:.5em .7em; margin:.3rem 0; overflow-x:auto;
+  font:.85em/1.5 ui-monospace,Menlo,Consolas,monospace; }
+.apply-strip .note { font-size:.85rem; color:#5a6169; margin:.5rem 0 .1rem; }
+.apply-strip .sha { font:.85em/1.4 ui-monospace,Menlo,Consolas,monospace;
+  background:#eef0f3; border-radius:4px; padding:.1em .35em; }
+.apply-strip .dl { margin:.7rem 0 .2rem; font-size:.85rem; color:#8a5a00;
+  background:#fdf6e7; border:1px solid #f0dfb8; }
+.apply-strip .dl:hover { background:#fbeed2; border-color:#e6cf9c; }
+.diff { border:1px solid #e2e5e9; border-radius:8px; overflow:hidden;
+  margin:.6rem 0 1.2rem; }
+.diff .file { background:#f6f7f9; border-bottom:1px solid #e2e5e9;
+  padding:.4em .7em; display:flex; gap:.8em; align-items:baseline;
+  font:.85rem/1.4 ui-monospace,Menlo,Consolas,monospace; }
+.diff .file .p { font-weight:600; word-break:break-all; }
+.diff .file .st { margin-left:auto; white-space:nowrap; }
+.diff .file .st .a { color:#1e6b33; }
+.diff .file .st .r { color:#9b1c1c; }
+.diff pre { margin:0; padding:0; background:#fff; overflow-x:auto;
+  font:.82em/1.5 ui-monospace,Menlo,Consolas,monospace; }
+.diff .l { display:block; padding:0 .7em; white-space:pre; }
+.diff .d-add { background:#e6f4ea; color:#1e6b33; }
+.diff .d-del { background:#fde8e8; color:#9b1c1c; }
+.diff .d-hunk { background:#eef0f3; color:#5a6169; }
+/* the patch <details> is not inside .engine, so it needs its own summary rules
+   — these mirror `.engine summary` / `.engine summary .sz` above */
+.patch { margin:.5rem 0 1.2rem; }
+.patch summary { cursor:pointer; padding:.25em 0; color:#3a4149;
+  font:.9rem/1.4 ui-monospace,Menlo,Consolas,monospace; }
+.patch summary .sz { color:#8a9099; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<a class="back" href="../../../index.html">← Back to index</a>
+<h1>GPUModelRunner._bookkeeping_sync</h1>
+<p><code>← vllm/v1/worker</code></p>
+<ul>
+<li><strong>File:</strong> <code>vllm/v1/worker/gpu_model_runner.py</code> (lines 3763–3910)</li>
+<li><strong>Symbol:</strong> <code>GPUModelRunner._bookkeeping_sync</code></li>
+<li><strong>Kind:</strong> method</li>
+<li><strong>Estimated impact:</strong> high</li>
+<li><strong>Id:</strong> <code>cand-vllm_v1_worker-0006</code></li>
+</ul>
+<h2>Description</h2>
+<p>Synchronous legacy post-sampling bookkeeping that consumes sampled token IDs, discards invalid rows, updates token_ids_cpu/is_token_ids/num_tokens_no_spec, and extends request output tokens.</p>
+<h2>Current approach</h2>
+<p>Converts sampled_token_ids to Python lists, then loops over sampled requests to perform CPU tensor slices, dict lookups, and list extensions.</p>
+<h2>Estimated impact explanation</h2>
+<p>This is the largest post-sample host roundtrip in synchronous legacy scheduling; deferring or coalescing CPU conversion reduces median TPOT and improves overlap after decode.</p>
+<h2>Evolve rationale</h2>
+<p>The self._to_list(sampled_token_ids) call and per-sampled-request update loop are concrete sync and Python-work targets. Async output staging or vectorized CPU scatter can preserve observable output semantics covered by tests/v1/worker/test_gpu_model_runner.py::test_get_nans_in_logits, test_sample_tokens_*, and tests/v1/streaming_input/test_gpu_model_runner_streaming.py.</p>
+<h2>Deep research proposals</h2>
+<h3>1. Batch multiple decode steps before running _bookkeeping_sync to amortize its host work</h3>
+<ul>
+<li><strong>Finding:</strong> <code>find-vllm_v1_worker-0001</code> — *[RFC]: Multi-Step Scheduling*</li>
+<li><strong>Source URL:</strong> <a href="https://github.com/vllm-project/vllm/issues/6854" target="_blank" rel="noopener">https://github.com/vllm-project/vllm/issues/6854</a></li>
+<li><strong>Created by:</strong> proposal_from_finding_creator</li>
+</ul>
+<p><strong>Detailed description.</strong></p>
+<p>Wrap the sync bookkeeping in a worker-local multi-step decode loop as described in the RFC. Instead of calling _bookkeeping_sync (vllm/v1/worker/gpu_model_runner.py:3763-3910) after every sampled token, run N consecutive decode iterations in which: (1) sampled_token_ids stay on GPU and are appended to a per-step GPU-side ring buffer, (2) the per-step input metadata (positions, slot mappings, num_tokens_no_spec) is advanced by dedicated CUDA kernels rather than the current Python loop over range(num_sampled_tokens) that does token_ids_cpu / is_token_ids / num_tokens_no_spec scatter and req_state.output_token_ids.extend, and (3) the self._to_list(sampled_token_ids) D2H sync at line 3829 plus the invalid-row masking are deferred to the end of the N-step window. When the lookahead window exhausts (or a request finishes / a stop condition trips on GPU), a single _bookkeeping_sync-equivalent finalizer performs one coalesced D2H copy of the accumulated GPU-side token buffer, one vectorized CPU scatter into token_ids_cpu/is_token_ids/num_tokens_no_spec, and one batched extend of req_state.output_token_ids, and only then hands control back to the scheduler. Prompt-logprobs computation stays in the finalizer path; discard_sampled_tokens masking is applied to the accumulated buffer before the scatter.</p>
+<p><strong>Proposal rationale.</strong></p>
+<p>The candidate&#x27;s hottest costs are exactly the two the RFC calls out: a synchronous D2H list conversion (_to_list at 3829) and per-decode-step Python bookkeeping that must run once per generated token. The existing async-scheduling branch already keeps sampled_token_ids on GPU for a single step, which shows the mechanism is viable here; the finding extends that idea by amortizing the same host work across N steps, directly cutting median TPOT for the multi-turn agentic workload named in the caller context, where decode dominates and per-token host overhead is repeatedly paid. The RFC&#x27;s specific recommendation to use CUDA kernels for next-step input updates maps cleanly onto replacing the per-request scatter loop at 3868-3893.</p>
+<hr>
+<h3>2. Adopt MRV2 persistent-state/per-step decoupling to eliminate _bookkeeping_sync host roundtrip</h3>
+<ul>
+<li><strong>Finding:</strong> <code>find-vllm_v1_worker-0003</code> — *Model Runner V2 Design Document*</li>
+<li><strong>Source URL:</strong> <a href="https://docs.vllm.ai/en/v0.17.0/design/model_runner_v2/" target="_blank" rel="noopener">https://docs.vllm.ai/en/v0.17.0/design/model_runner_v2/</a></li>
+<li><strong>Created by:</strong> proposal_from_finding_creator</li>
+</ul>
+<p><strong>Detailed description.</strong></p>
+<p>Refactor GPUModelRunner._bookkeeping_sync (vllm/v1/worker/gpu_model_runner.py:3763-3910) so that the post-sampling bookkeeping no longer needs to materialize sampled_token_ids on the host via self._to_list(...) and then loop per-sampled-request over token_ids_cpu/is_token_ids/num_tokens_no_spec/output_token_ids. Following the MRV2 design, treat token_ids_cpu, is_token_ids, and num_tokens_no_spec as persistent GPU-resident state tensors keyed by stable per-request row indices, and perform the append of newly sampled tokens as a vectorized GPU scatter into those persistent tensors using the already-known (row, position) indices computed from num_tokens_no_spec. The Python-side output_token_ids extension for request objects is then reduced to a lazy, asynchronous host copy of only the sampled column (or deferred until a scheduler/detokenizer boundary actually needs it), rather than being on the critical path of the decode step. Invalid-row discard is expressed as a mask applied to the same scatter (or a follow-up masked write) instead of a Python for-loop over valid_sampled_token_ids. Observable output semantics covered by tests/v1/worker/test_gpu_model_runner.py::test_get_nans_in_logits, test_sample_tokens_*, and tests/v1/streaming_input/test_gpu_model_runner_streaming.py must be preserved: the same token IDs must eventually appear in the same request output slots, only the timing/location of the host-visible copy changes.</p>
+<p><strong>Proposal rationale.</strong></p>
+<p>The candidate explicitly calls out self._to_list(sampled_token_ids) and the per-sampled-request update loop as the concrete sync/Python-work targets that hurt median TPOT under multi-turn agentic workloads. The MRV2 finding contributes exactly the transferable idea needed to attack that: keep large per-request state tensors GPU-resident and gather/scatter per-step inputs and outputs on the GPU rather than reordering or copying them back to host every step. That directly addresses the gap in _bookkeeping_sync where a full device-&gt;host sync plus a Python loop is used to maintain what is fundamentally row-indexed persistent state, and it plausibly reduces the post-sample host stall that dominates TPOT after decode in the legacy synchronous path.</p>
+<hr>
+<h3>3. Pipeline sync bookkeeping behind the next step to eliminate the _to_list D2H stall</h3>
+<ul>
+<li><strong>Finding:</strong> <code>find-vllm_v1_worker-0004</code> — *vLLM v0.6.0: 2.7x Throughput Improvement and 5x Latency Reduction*</li>
+<li><strong>Source URL:</strong> <a href="https://vllm-project.github.io/2024/09/05/perf-update.html" target="_blank" rel="noopener">https://vllm-project.github.io/2024/09/05/perf-update.html</a></li>
+<li><strong>Created by:</strong> proposal_from_finding_creator</li>
+</ul>
+<p><strong>Detailed description.</strong></p>
+<p>Refactor <code>GPUModelRunner._bookkeeping_sync</code> (vllm/v1/worker/gpu_model_runner.py:3763-3910) so the sync-scheduling branch no longer blocks the current step on <code>self._to_list(sampled_token_ids)</code> and the subsequent per-request CPU updates. Specifically, when <code>not self.use_async_scheduling</code>: (1) enqueue the D2H copy of <code>sampled_token_ids</code> (and logprobs tensors, <code>num_nans</code> counts, routed-experts buffers already staged at lines 3816-3823) into a pinned CPU buffer plus a CUDA event, and return a lightweight <code>DeferredBookkeeping</code> handle instead of the materialized <code>valid_sampled_token_ids</code> / <code>logprobs_lists</code>; (2) move the loop at lines 3868-3893 that writes <code>token_ids_cpu</code>, <code>is_token_ids</code>, <code>num_tokens_no_spec</code>, and <code>req_state.output_token_ids</code> into a follow-up <code>finalize_bookkeeping()</code> method that the model runner invokes after launching the next step&#x27;s forward, mirroring the pattern the v0.6.0 blog attributes to <code>_process_model_outputs</code> in v0. Keep the existing async-scheduling branch unchanged; the new deferred path becomes the sync-mode analogue. Update the single-token fast-path (<code>max_gen_len == 1</code>) and the spec-decode <code>RejectionSampler.parse_output</code> path to both produce deferred handles, and preserve the discard-mask semantics by capturing <code>discard_sampled_tokens_req_indices</code> at issue time so <code>finalize_bookkeeping</code> can still clear invalid rows. Semantics observable by <code>test_get_nans_in_logits</code>, <code>test_sample_tokens_*</code>, and <code>test_gpu_model_runner_streaming</code> must remain identical because finalization runs before outputs are returned to the engine.</p>
+<p><strong>Proposal rationale.</strong></p>
+<p>The finding describes the exact optimization vLLM v0.6.0 applied at the engine level — overlap output processing (GPU→CPU token materialization, stop-criteria checks) with the next step&#x27;s model execution — and this candidate is the surviving synchronous instance of that pattern inside the v1 worker. Today <code>_to_list</code> forces an <code>event.synchronize()</code> on the async copy stream (per the comment at lines 3812-3815) inside the current step&#x27;s critical path, and the CPU-side loop at 3868-3893 runs before the runner can launch the next forward. Both are pure host work that could be scheduled after the next <code>execute_model</code> launches, directly attacking median TPOT on the multi-turn agentic workload described in the caller context. The async-scheduling branch already demonstrates that the per-step CPU tensor updates are not required for the *next* step&#x27;s input preparation (it caches <code>prev_sampled_token_ids</code> on GPU instead), which is precisely the invariant the async-output-processing technique relies on — strong evidence the transfer of the idea is feasible for the sync path rather than merely topical.</p>
+<hr>
+<h2>Agent proposals</h2>
+<h3>1. Issue sampled_token_ids D2H immediately after sampling and vectorize the per-request CPU scatter with NumPy fancy indexing</h3>
+<ul>
+<li><strong>Agent:</strong> claude</li>
+</ul>
+<p><strong>Detailed description.</strong></p>
+<p>Two orthogonal changes to _bookkeeping_sync (vllm/v1/worker/gpu_model_runner.py:3763-3910) plus a small hoist in its caller (execute_model at ~4740-4817):</p>
+<p>(A) Pull the D2H issue earlier in the step. Immediately after sampler_output is produced upstream — before the spec-decode drafting block that runs prepare_next_token_ids_padded / update_token_ids_ngram / _copy_valid_sampled_token_count / _copy_draft_token_ids_to_cpu at lines ~4740-4799 — enqueue the existing pinned-buffer non-blocking copy currently hidden inside _to_list: pinned = self.sampled_token_ids_pinned_cpu[:N]; pinned.copy_(sampled_token_ids, non_blocking=True); self.transfer_event.record(). Then have _to_list (vllm/v1/worker/gpu_model_runner.py:7878-7891) skip the copy/record when the caller has already issued them for this step and just do transfer_event.synchronize() + tolist(). The routed-experts D2H already enqueued at 3816-3823 stays as-is; both copies now overlap the drafter block instead of stalling inside _bookkeeping_sync. By the time transfer_event.synchronize() is reached, the copy is typically already complete, converting the current fixed sync stall into near-zero on the critical path.</p>
+<p>(B) Vectorize the per-request scatter loop at lines 3868-3893 (fast path max_gen_len == 1) with NumPy fancy indexing on the existing pinned CPU tensors — token_ids_cpu, is_token_ids, and num_tokens_no_spec are already NumPy views over pinned torch tensors per gpu_input_batch.py:140/147/158. Replace the Python for-loop with: (1) build a boolean row mask from valid_sampled_token_ids that filters out discarded and empty rows (discarded rows already cleared to [] by the existing loop at 3831-3832); (2) rows = np.nonzero(mask)[0]; (3) tokens = np.fromiter((valid_sampled_token_ids[r][0] for r in rows), dtype=token_ids_cpu.dtype, count=rows.size) — a single tight Python pass rather than a per-row scatter; (4) starts = self.input_batch.num_tokens_no_spec[rows]; (5) self.input_batch.token_ids_cpu[rows, starts] = tokens; self.input_batch.is_token_ids[rows, starts] = True; self.input_batch.num_tokens_no_spec[rows] = starts + 1; (6) a small trailing Python loop only over rows to call self.requests[req_ids[r]].output_token_ids.append(int(tokens[k])) — unavoidable because output_token_ids is a plain Python list on the request object, but this pass touches only surviving rows and does no NumPy slice arithmetic per row. Keep the assertion end_idx &lt;= self.max_model_len as a single vectorized (starts + 1).max() &lt;= self.max_model_len check. The spec-decode path (max_gen_len &gt; 1) continues to use RejectionSampler.parse_output at 3838-3843 and its variable-length-per-row scatter, but still benefits from (A). Async-scheduling branch (3844-3860) is untouched — its Python loop at 3868-3893 only sets sampled_ids=[-1] and can stay per-row or be similarly vectorized in a follow-up.</p>
+<p>Observable semantics: token_ids_cpu, is_token_ids, num_tokens_no_spec, output_token_ids, discard-mask behavior, and generator offset rewinds at 3794-3797 are unchanged. Tests named in evolve_rationale (tests/v1/worker/test_gpu_model_runner.py::test_get_nans_in_logits, test_sample_tokens_*, tests/v1/streaming_input/test_gpu_model_runner_streaming.py) observe identical results. Only the wall-clock schedule of the D2H and the Python-vs-NumPy nature of the scatter change.</p>
+<p><strong>Novelty rationale.</strong></p>
+<p>None of the three listed deep_research_proposals contain either half of this proposal. (1) The RFC multi-step batching proposal (find-vllm_v1_worker-0001) explicitly amortizes bookkeeping across N steps and replaces per-step Python bookkeeping with CUDA kernels — a scheduler/RFC-level rewrite; this proposal preserves single-step semantics and does not touch the scheduler. (2) The MRV2 proposal (find-vllm_v1_worker-0003) migrates token_ids_cpu / is_token_ids / num_tokens_no_spec off host to persistent GPU tensors and does the scatter as a GPU kernel; this proposal keeps them as pinned CPU NumPy views and instead uses NumPy fancy indexing, which is far less invasive and does not require reworking every other consumer of those CPU views (gpu_input_batch.py:376-390, 526-527, 631-637, 765) that assume they are host-side arrays. (3) The v0.6.0-style async-output-processing proposal (find-vllm_v1_worker-0004) pushes the D2H wait and the per-request loop to AFTER the next execute_model launches, requiring a DeferredBookkeeping handle API and coordination with KV-connector finalize / EPLB / draft-after-bookkeeping consumers that today expect finalized state before execute_model returns. This proposal is orthogonal: it pulls the D2H ISSUE earlier within the current step (overlapping only with the drafter block that already runs before bookkeeping) rather than pushing the WAIT later across the step boundary, so downstream consumers still see finalized bookkeeping when execute_model returns. Additionally, the NumPy vectorization of the 3868-3893 loop attacks the pure Python per-request overhead that persists under proposals #1, #3, and #4 (and under #2 only if the full GPU-state migration ships), giving a meaningful TPOT win with a much smaller blast radius than any of the three existing proposals.</p>
+<hr>
+<h3>2. Fast-path bookkeeping for empty or fully discarded sampled rows</h3>
+<ul>
+<li><strong>Agent:</strong> codex</li>
+</ul>
+<p><strong>Detailed description.</strong></p>
+<p>Add an early-return/skip path in <code>GPUModelRunner._bookkeeping_sync</code> for steps where <code>num_sampled_tokens == 0</code> or where <code>discard_sampled_tokens_req_indices</code> covers every sampled request row before any sampled IDs are materialized into Python lists. In the current method, the discard mask is only applied after <code>sampled_token_ids = self._to_list(sampled_token_ids)</code>, so fully discarded rows still pay the synchronous D2H conversion, optional logprobs parsing, and the per-row bookkeeping setup even though they produce no request-visible token extensions. Concretely, compute a compact sampled-row count and, when all sampled rows are known invalid, return the same shape of empty <code>valid_sampled_token_ids</code>/logprob outputs expected downstream while still preserving the existing generator-offset rewinds at lines 3794-3797 and any NaN/error metadata that must be reported. For partial discard cases, build the valid-row indices first and copy/gather only those rows to host for the legacy path rather than converting the full sampled batch and then clearing invalid entries to <code>[]</code>. This keeps the observable behavior of discarded rows unchanged but avoids unnecessary host synchronization and Python list construction during preemptions, aborts, or requests whose sampled output is intentionally dropped.</p>
+<p><strong>Novelty rationale.</strong></p>
+<p>The listed deep-research proposals target broad scheduling or state-placement changes: multi-step batching, persistent GPU-resident state, or deferring bookkeeping behind the next step. Agent A targets earlier D2H issue and NumPy vectorization of the normal single-token scatter. None of them propose changing the discard handling order so invalid rows are filtered before <code>_to_list</code>, nor an early exit for fully discarded sampled batches. This is a narrower guard/compaction optimization around the existing discard semantics rather than an async pipeline, GPU-state migration, multi-step decode rewrite, or CPU scatter vectorization.</p>
+<hr>
+<div class="evolve-section"><h2>Evolve bundles</h2><p>3 ready-to-launch evolve bundle(s) for this candidate: <strong>coral, skydiscover, nous</strong>.</p><p><a href="GPUModelRunner._bookkeeping_sync__cand-vllm_v1_worker-0006__evolve.html">View evolve bundles →</a></p></div>
+</div>
+</body>
+</html>

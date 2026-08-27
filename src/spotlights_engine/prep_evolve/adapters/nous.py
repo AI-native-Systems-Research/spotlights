@@ -6,9 +6,10 @@ into patches. `campaign.yaml` must respect `additionalProperties: false`, so we
 emit only schema-allowed keys; URLs/evidence stay in the digest /
 `target_system.description`.
 
-The bundle is deliberately just `campaign.yaml` — no `bundle.yaml`, no vendored
-methodology prompts, and no shared README. Everything the run needs is inlined
-into the campaign.
+The adapter's own output is deliberately just `campaign.yaml` — no `bundle.yaml`
+and no vendored methodology prompts. Everything the run needs is inlined into the
+campaign. `api.py` adds the shared `README.md` on top, which is where the
+`ground_truth.pass_condition` gap is explained.
 """
 
 from __future__ import annotations
@@ -35,10 +36,6 @@ def _slug(text: str) -> str:
 
 class NousAdapter:
     name = "nous"
-
-    # Nous bundles are a single self-contained campaign.yaml; api.py keys off
-    # this to skip the shared README.
-    minimal_bundle = True
 
     def __init__(self, model: str | None = None) -> None:
         self._model = model

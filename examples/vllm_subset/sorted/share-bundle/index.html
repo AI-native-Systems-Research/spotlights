@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sorted candidates — run-4b5859bcc6cc3ad1 (spotlights-out)</title>
+<style>
+:root { color-scheme: light; }
+* { box-sizing: border-box; }
+body { margin: 0; background: #f6f7f9; color: #1a1d21;
+  font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+.wrap { max-width: 860px; margin: 0 auto; padding: 32px 24px 80px; }
+a { color: #2b6cb0; }
+h1 { font-size: 1.7rem; line-height: 1.25; margin: 0 0 .5rem; }
+h2 { font-size: 1.25rem; margin: 1.8rem 0 .6rem; border-bottom: 1px solid #e2e5e9; padding-bottom: .25rem; }
+h3 { font-size: 1.05rem; margin: 1.3rem 0 .4rem; }
+p { margin: .6rem 0; }
+ul { margin: .5rem 0 .8rem; padding-left: 1.4rem; }
+li { margin: .2rem 0; }
+code { background: #eef0f3; border-radius: 4px; padding: .1em .35em;
+  font: .9em/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+hr { border: 0; border-top: 1px solid #e2e5e9; margin: 1.6rem 0; }
+blockquote { margin: .8rem 0; padding: .5em .9em; background: #f6f7f9;
+  border-left: 3px solid #e2e5e9; border-radius: 0 6px 6px 0; color: #3a4149; }
+blockquote p { margin: .3rem 0; }
+.tw { overflow-x: auto; margin: .7rem 0 1rem; }
+table { border-collapse: collapse; font-size: .92rem; }
+th, td { border: 1px solid #e2e5e9; padding: .35em .6em; text-align: left;
+  vertical-align: top; }
+th { background: #f6f7f9; color: #3a4149; font-weight: 600; }
+.back { display: inline-block; margin-bottom: 1.2rem; font-size: .95rem; }
+.subtitle { color: #5a6169; margin: 0 0 1.6rem; }
+.card { display: block; background: #fff; border: 1px solid #e2e5e9; border-radius: 10px;
+  padding: 16px 18px; margin: 12px 0; text-decoration: none; color: inherit;
+  box-shadow: 0 1px 2px rgba(0,0,0,.04); transition: box-shadow .12s, border-color .12s; }
+.card:hover { box-shadow: 0 3px 10px rgba(0,0,0,.08); border-color: #c7cdd4; }
+.card .row1 { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.rank { font-weight: 700; color: #2b6cb0; }
+.sym { font-weight: 600; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.mod { color: #5a6169; font-size: .9rem; }
+/* align-items:center, not the flex default of stretch: a stretched .badge keeps
+   its border-radius:999px, so a badge shorter than a taller sibling renders as a
+   circle rather than a pill. flex-shrink:0 and .badge's nowrap keep any badge
+   from being squeezed until its text wraps and becomes that taller sibling;
+   .row1 wraps, so an overflowing row moves .badges to its own line instead. */
+.badges { margin-left: auto; display: flex; align-items: center; gap: 8px;
+  flex-wrap: wrap; flex-shrink: 0; }
+.badge { font-size: .78rem; padding: .12em .6em; border-radius: 999px; background: #eef0f3;
+  color: #3a4149; white-space: nowrap; }
+.badge.impact-high { background: #fde8e8; color: #9b1c1c; }
+.badge.score { background: #e6f4ea; color: #1e6b33; }
+.rationale { margin: .5rem 0 0; color: #3a4149; font-size: .95rem; }
+
+/* --- evolve bundles --- */
+.badge.evolve { background: #e8e3fd; color: #4c2a9b; }
+.card-main { display:block; text-decoration:none; color:inherit; }
+.card-foot { margin-top:.7rem; padding-top:.6rem; border-top:1px dashed #e2e5e9;
+  display:flex; gap:8px; flex-wrap:wrap; }
+/* margin-left:auto, not justify-content:space-between on .card-foot: the two
+   arms are independently optional, and space-between would leave a lone evolve
+   pill sitting left. An auto margin pins evolve right whether or not an apply
+   pill shares the row — so a column of cards has apply flush left and evolve
+   flush right on every one of them. */
+.evolve-link { display:inline-flex; align-items:center; gap:.45em; margin-left:auto;
+  font-size:.85rem; font-weight:600; color:#4c2a9b; background:#f1edfd;
+  border:1px solid #d9cffb; border-radius:999px; padding:.32em .85em;
+  text-decoration:none; }
+.evolve-link:hover { background:#e6ddfc; border-color:#c3b1f7; }
+.evolve-section { margin-top: 1.8rem; }
+.engine { background:#fff; border:1px solid #e2e5e9; border-radius:10px;
+  padding:14px 16px; margin:12px 0; }
+.engine h3 { margin:.1rem 0 .5rem; }
+.engine .cmd { background:#1a1d21; color:#e6e6e6; border-radius:6px;
+  padding:.5em .7em; font:.85em/1.4 ui-monospace,Menlo,Consolas,monospace;
+  overflow-x:auto; }
+.engine pre { background:#f6f7f9; border:1px solid #e2e5e9; border-radius:6px;
+  max-height:360px; overflow:auto; padding:.6em .8em; }
+.engine details { margin:.5rem 0; }
+.engine summary { cursor:pointer; font:.9rem/1.4 ui-monospace,Menlo,Consolas,monospace;
+  color:#3a4149; padding:.25em 0; }
+.engine summary .sz { color:#8a9099; }
+.dl { display:inline-flex; align-items:center; gap:.5em; margin:.2rem 0 1.4rem;
+  font-size:.95rem; font-weight:600; color:#fff; background:#4c2a9b;
+  border-radius:8px; padding:.5em 1em; text-decoration:none; }
+.dl:hover { background:#3d2080; }
+.engine .dl { margin:1rem 0 .1rem; font-size:.85rem; font-weight:600;
+  color:#4c2a9b; background:#f1edfd; border:1px solid #d9cffb; padding:.4em .85em; }
+.engine .dl:hover { background:#e6ddfc; border-color:#c3b1f7; }
+.orient { background:#f1edfd; border:1px solid #d9cffb; border-radius:10px;
+  padding:14px 16px; margin:.2rem 0 1.2rem; }
+.orient p { margin:.4rem 0; }
+.orient .warn { color:#8a5a00; }
+.about { background:#fbfbfc; border:1px solid #eef0f3; border-radius:8px;
+  padding:10px 14px; margin:.2rem 0 .8rem; }
+.about .tagline { margin:.1rem 0 .6rem; font-weight:600; }
+.about dl { display:grid; grid-template-columns:max-content minmax(0,1fr);
+  gap:.3em 1em; margin:0; }
+.about dt { color:#5a6169; font-size:.82rem; padding-top:.05em; }
+.about dd { margin:0; font-size:.9rem; min-width:0; }
+.about dd .warn { color:#9b1c1c; display:block; margin-top:.3rem; }
+.inst-label { font-size:.78rem; color:#5a6169; margin:.5rem 0 .15rem; }
+.inst-label:first-child { margin-top:.1rem; }
+.engine pre.inst { background:#1a1d21; color:#e6e6e6; border:0; border-radius:6px;
+  padding:.5em .7em; margin:.1rem 0; max-height:none; overflow-x:auto;
+  font:.85em/1.5 ui-monospace,Menlo,Consolas,monospace; }
+.about dd p { margin:.1rem 0 .3rem; }
+.about dd .ask { margin:.3rem 0 0; padding:.6em .8em; background:#eef6ff;
+  border-left:3px solid #2b6cb0; border-radius:0 6px 6px 0; color:#1a1d21;
+  font-style:italic; font-size:.88rem; }
+/* --- one-shot apply --- */
+.badge.apply { background:#fdf0d5; color:#8a5a00; }
+/* No auto margin here, deliberately: apply is emitted first, so it is already
+   flush left, and .evolve-link's margin-left:auto is what pushes evolve right. */
+.apply-link { display:inline-flex; align-items:center; gap:.45em;
+  font-size:.85rem; font-weight:600; color:#8a5a00; background:#fdf6e7;
+  border:1px solid #f0dfb8; border-radius:999px; padding:.32em .85em;
+  text-decoration:none; }
+.apply-link:hover { background:#fbeed2; border-color:#e6cf9c; }
+.apply-section { margin-top: 1.8rem; }
+.apply-strip { background:#fbfbfc; border:1px solid #eef0f3; border-radius:8px;
+  padding:10px 14px; margin:.2rem 0 1.2rem; }
+.apply-strip h2 { margin:.1rem 0 .5rem; border:0; padding:0; font-size:1.05rem; }
+.apply-strip pre { background:#1a1d21; color:#e6e6e6; border:0; border-radius:6px;
+  padding:.5em .7em; margin:.3rem 0; overflow-x:auto;
+  font:.85em/1.5 ui-monospace,Menlo,Consolas,monospace; }
+.apply-strip .note { font-size:.85rem; color:#5a6169; margin:.5rem 0 .1rem; }
+.apply-strip .sha { font:.85em/1.4 ui-monospace,Menlo,Consolas,monospace;
+  background:#eef0f3; border-radius:4px; padding:.1em .35em; }
+.apply-strip .dl { margin:.7rem 0 .2rem; font-size:.85rem; color:#8a5a00;
+  background:#fdf6e7; border:1px solid #f0dfb8; }
+.apply-strip .dl:hover { background:#fbeed2; border-color:#e6cf9c; }
+.diff { border:1px solid #e2e5e9; border-radius:8px; overflow:hidden;
+  margin:.6rem 0 1.2rem; }
+.diff .file { background:#f6f7f9; border-bottom:1px solid #e2e5e9;
+  padding:.4em .7em; display:flex; gap:.8em; align-items:baseline;
+  font:.85rem/1.4 ui-monospace,Menlo,Consolas,monospace; }
+.diff .file .p { font-weight:600; word-break:break-all; }
+.diff .file .st { margin-left:auto; white-space:nowrap; }
+.diff .file .st .a { color:#1e6b33; }
+.diff .file .st .r { color:#9b1c1c; }
+.diff pre { margin:0; padding:0; background:#fff; overflow-x:auto;
+  font:.82em/1.5 ui-monospace,Menlo,Consolas,monospace; }
+.diff .l { display:block; padding:0 .7em; white-space:pre; }
+.diff .d-add { background:#e6f4ea; color:#1e6b33; }
+.diff .d-del { background:#fde8e8; color:#9b1c1c; }
+.diff .d-hunk { background:#eef0f3; color:#5a6169; }
+/* the patch <details> is not inside .engine, so it needs its own summary rules
+   — these mirror `.engine summary` / `.engine summary .sz` above */
+.patch { margin:.5rem 0 1.2rem; }
+.patch summary { cursor:pointer; padding:.25em 0; color:#3a4149;
+  font:.9rem/1.4 ui-monospace,Menlo,Consolas,monospace; }
+.patch summary .sz { color:#8a9099; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Sorted candidates — run-4b5859bcc6cc3ad1 (spotlights-out)</h1>
+<p class="subtitle">reduce the median TTFT and median TPOT (Time Per Output Token)</p>
+<div class="card"><a class="card-main" href="candidates/modules/vllm_v1_attention/FlashAttentionMetadataBuilder.build__cand-vllm_v1_attention-0002.html"><div class="row1"><span class="rank">#1</span><span class="sym">FlashAttentionMetadataBuilder.build</span><span class="mod">vllm/v1/attention</span><span class="badges"><span class="badge apply">apply · +42/−6</span><span class="badge evolve">evolve · 3</span><span class="badge impact-high">high</span><span class="badge score">score 95</span></span></div><p class="rationale">FlashAttentionMetadataBuilder.build sits on the per-step metadata path for every decode token and every prefill; cascade-plan caching, coalesced H2D staging, and pipelined AOT scheduler-metadata compound directly into b…</p></a><div class="card-foot"><a class="apply-link" href="candidates/modules/vllm_v1_attention/FlashAttentionMetadataBuilder.build__cand-vllm_v1_attention-0002__apply.html">🔧 One-shot apply: 1 file changed, +42/−6 →</a><a class="evolve-link" href="candidates/modules/vllm_v1_attention/FlashAttentionMetadataBuilder.build__cand-vllm_v1_attention-0002__evolve.html">⚙ Evolve bundles: coral · skydiscover · nous →</a></div></div>
+<div class="card"><a class="card-main" href="candidates/modules/vllm_v1_worker/GPUModelRunner._prepare_inputs__cand-vllm_v1_worker-0001.html"><div class="row1"><span class="rank">#2</span><span class="sym">GPUModelRunner._prepare_inputs</span><span class="mod">vllm/v1/worker</span><span class="badges"><span class="badge apply">apply · +77/−42</span><span class="badge evolve">evolve · 3</span><span class="badge impact-high">high</span><span class="badge score">score 94</span></span></div><p class="rationale">GPUModelRunner._prepare_inputs is the largest steady per-step host cost on the legacy runner; the pure-decode fast path (skip np.repeat/cumsum/index_select when every request has one token) and H2D coalescing directly r…</p></a><div class="card-foot"><a class="apply-link" href="candidates/modules/vllm_v1_worker/GPUModelRunner._prepare_inputs__cand-vllm_v1_worker-0001__apply.html">🔧 One-shot apply: 1 file changed, +77/−42 →</a><a class="evolve-link" href="candidates/modules/vllm_v1_worker/GPUModelRunner._prepare_inputs__cand-vllm_v1_worker-0001__evolve.html">⚙ Evolve bundles: coral · skydiscover · nous →</a></div></div>
+<div class="card"><a class="card-main" href="candidates/modules/vllm_v1_worker/GPUModelRunner._bookkeeping_sync__cand-vllm_v1_worker-0006.html"><div class="row1"><span class="rank">#3</span><span class="sym">GPUModelRunner._bookkeeping_sync</span><span class="mod">vllm/v1/worker</span><span class="badges"><span class="badge evolve">evolve · 3</span><span class="badge impact-high">high</span><span class="badge score">score 93</span></span></div><p class="rationale">_bookkeeping_sync&#x27;s _to_list(sampled_token_ids) D2H is the largest post-sample host roundtrip on every decode step; pipelining the sync behind the next step or landing sampled tokens in pinned host buffers is a direct T…</p></a><div class="card-foot"><a class="evolve-link" href="candidates/modules/vllm_v1_worker/GPUModelRunner._bookkeeping_sync__cand-vllm_v1_worker-0006__evolve.html">⚙ Evolve bundles: coral · skydiscover · nous →</a></div></div>
+<div class="card"><a class="card-main" href="candidates/modules/vllm_v1_worker/AsyncOutput.get_output__cand-vllm_v1_worker-0027.html"><div class="row1"><span class="rank">#4</span><span class="sym">AsyncOutput.get_output</span><span class="mod">vllm/v1/worker</span><span class="badges"><span class="badge impact-high">high</span><span class="badge score">score 92</span></span></div><p class="rationale">AsyncOutput.get_output holds copy_event.synchronize plus tolist/per-row Python work that blocks every async decode step; eliminating the D2H stall lowers median TPOT and the fixes are unusually concrete (pinned/UVA land…</p></a></div>
+<div class="card"><a class="card-main" href="candidates/modules/vllm_v1_attention/FlashInferMetadataBuilder.build__cand-vllm_v1_attention-0004.html"><div class="row1"><span class="rank">#5</span><span class="sym">FlashInferMetadataBuilder.build</span><span class="mod">vllm/v1/attention</span><span class="badges"><span class="badge impact-high">high</span><span class="badge score">score 91</span></span></div><p class="rationale">FlashInferMetadataBuilder.build is the per-step planning gate for FlashInfer users; plan caching keyed by CUDA-graph batch descriptor, coalesced H2D, and Triton-fused metadata prep are all directly on the TPOT critical …</p></a></div>
+</div>
+</body>
+</html>

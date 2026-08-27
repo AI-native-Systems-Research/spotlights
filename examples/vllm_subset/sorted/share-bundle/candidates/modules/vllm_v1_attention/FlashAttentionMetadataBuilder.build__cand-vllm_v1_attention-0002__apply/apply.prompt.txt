@@ -1,0 +1,75 @@
+CANDIDATE: cand-vllm_v1_attention-0002
+MODULE:    vllm/v1/attention
+BASE:      83ad767eed3be3ee7f2df63be693bfaca5c7c922
+REPO:      /Users/iklamer/ai-native-systems/VSCodeProjects/vllm
+WORKTREE:  /var/folders/kz/y8lkg03s2sz6nx38ls4rlqxh0000gn/T/spotlights-apply-vuzmdwkd/worktree
+WORKTREE_PARENT:  /var/folders/kz/y8lkg03s2sz6nx38ls4rlqxh0000gn/T/spotlights-apply-vuzmdwkd
+NOTE: WORKTREE and WORKTREE_PARENT are throwaway paths, deleted when the
+      run finishes — and the prompt below names WORKTREE as its working
+      directory. In a saved copy of this file both are a historical record,
+      not a directory you can enter. To run this prompt again, make an
+      equivalent checkout and use that as the working directory instead:
+        git -C /Users/iklamer/ai-native-systems/VSCodeProjects/vllm worktree add --detach <dir> 83ad767eed3be3ee7f2df63be693bfaca5c7c922
+PROMPT:
+You are implementing ONE proposed optimization in an isolated git worktree.
+
+Working directory: /var/folders/kz/y8lkg03s2sz6nx38ls4rlqxh0000gn/T/spotlights-apply-vuzmdwkd/worktree
+This is a detached worktree of /Users/iklamer/ai-native-systems/VSCodeProjects/vllm at commit 83ad767eed3be3ee7f2df63be693bfaca5c7c922.
+It is throwaway. It has no build artifacts, no virtualenv, and no compiled
+extensions — nothing in it is runnable.
+
+## Optimization goal
+reduce the median TTFT and median TPOT (Time Per Output Token) — workload: Multi-turn agentic workload (direction: minimize)
+
+## Target
+- `FlashAttentionMetadataBuilder.build` in vllm/v1/attention/backends/flash_attn.py:479–762 (impact: high)
+
+Current approach: Runs a sequential Python-side build each step. The nested schedule() closure can recompute scheduler_metadata for repeated shapes; cascade paths allocate cu_prefix_query_lens and prefix_kv_lens tensors; multimodal and R-SWA paths perform staging-buffer copies into device buffers.
+Why it's worth evolving: This method is on the per-token metadata path. Concrete tunables include caching schedule() results by repeated shape, reusing cascade prefix tensors, batching H2D staging copies, and skipping inactive subpaths earlier. Correctness oracle is existing FlashAttention metadata tests and end-to-end token/output equality against the current implementation.
+Performance oracle: TTFT, TPOT
+
+## Research findings (4)
+1. Cascade Inference: Memory Bandwidth Efficient Shared Prefix Batch Decoding — blog — https://flashinfer.ai/2024/02/02/cascade-inference.html
+   Technique: Use recursive attention state merging to split shared-prefix attention from per-request suffix attention, then dispatch each part to the kernel best suited for its reuse pattern. For multi-turn agentic workloads with repeated system/tool/document prefixes, the module could make cascade selection more shape-aware and extend it toward multi-level shared prefixes rather than relying on coarse gates. | Evidence: "Quote: "Use multi-query (prefill/append) attention kernel" and "Use batch decode attention kernel". Pointer: Cascade Inference: The Algorithm, steps 1-2."
+2. flashinfer.cascade — docs — https://docs.flashinfer.ai/api/cascade.html
+   Technique: Cache cascade planning auxiliary structures and reuse them across multiple layer calls for the same decode step. The module could mirror this at metadata-build time by keying stable shape/page/cascade plans and reusing preallocated CUDA-graph buffers to lower per-step planning overhead and median TPOT. | Evidence: "Quote: "auxiliary data structures can be reused across multiple batch decode attention calls". Pointer: MultiLevelCascadeAttentionWrapper example note."
+3. CUDA C++ Best Practices Guide — docs — https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/index.html
+   Technique: Minimize host-device transfers, batch many small transfers into one contiguous transfer, and use pinned memory for asynchronous copies. The module could apply this to attention metadata construction by packing indptr, last-page lengths, multimodal ranges, and split metadata into fewer staged H2D copies or moving cheap prefix computations onto device. | Evidence: "Quote: "batching many small transfers into one larger transfer performs significantly better". Pointer: Data Transfer Between Host and Device, section 10.1."
+4. CUDA Graphs — docs — https://docs.vllm.ai/en/v0.21.0/design/cuda_graphs/
+   Technique: Use a batch-descriptor-driven CUDA graph dispatcher that separately handles uniform decode and mixed/prefill batches, with backend capability fallbacks. The attention module could tighten its fast-plan and metadata decisions around stable batch descriptors so CUDA-graph-compatible decode routes avoid redundant planning while mixed batches safely fall back. | Evidence: "Quote: "dispatch between full and piecewise cudagraph at runtime". Pointer: Motivation, lines 2736-2742."
+
+## Existing proposals (5)
+← seeds/inspiration, the evolver may extend or discard
+- [proposal_from_finding_creator] Make cascade dispatch shape-aware and cache prefix scheduler metadata in FlashAttentionMetadataBuilder.build — The candidate's evolve_rationale explicitly calls out `schedule()` recomputation for repeated shapes and cascade prefix-tensor allocation as concrete tunables, and its cascade branch (lines 638-662) is precisely the code path the finding describes: a two-pass split into shared-prefix multi-query attention and per-request suffix decode attention, followed by state merging. The finding's specific contribution — that cascade selection should be more shape-aware and could be extended toward multi-level shared prefixes — targets a gap in this build: cascade currently activates on any positive `common_prefix_len` regardless of whether the two-pass path is actually cheaper, and there is no reuse of the prefix-side scheduler metadata or prefix cu_seqlens/kv_lens tensors across steps even though multi-turn agentic workloads (the caller's stated workload) hit the identical shared-prefix shape on every decode step. Together these changes reduce Python-side work and per-step allocation on the metadata path each generated token traverses, which directly maps to the candidate's stated median TPOT / TTFT objective without touching the kernel-selection contract used downstream in forward(). (from finding #1: Cascade Inference: Memory Bandwidth Efficient Shared Prefix Batch Decoding)
+- [proposal_from_finding_creator] Cache cascade planning artifacts across steps in FlashAttentionMetadataBuilder.build — The finding documents that FlashInfer's cascade wrappers explicitly reuse auxiliary planning data structures across multiple decode attention calls, which is directly analogous to the per-step planning work FlashAttentionMetadataBuilder.build performs on the cascade path and inside schedule(). The candidate's evolve_rationale already calls out caching schedule() results by repeated shape and reusing cascade prefix tensors as concrete tunables, and in a multi-turn agentic decode workload the cascade shape key is typically stable across steps, so a shape-keyed reuse strategy targets exactly the median TPOT hot path this method sits on without changing numerical behavior (correctness is guarded by existing FlashAttention metadata tests and end-to-end token equality). (from finding #2: flashinfer.cascade)
+- [proposal_from_finding_creator] Coalesce per-step H2D metadata copies and eliminate cascade tiny-tensor allocations in FlashAttentionMetadataBuilder.build — The finding directly addresses two concrete inefficiencies in build's per-step path that the candidate's evolve_rationale explicitly flags: (a) cascade paths allocate cu_prefix_query_lens and prefix_kv_lens tensors via torch.tensor with device=self.device, which triggers an implicit H2D transfer plus a fresh device allocation on every step cascade is active; and (b) mm_prefix and R-SWA both perform independent H2D staging copies. The CUDA Best Practices Guide's "batch many small transfers" and "use pinned memory for asynchronous copies" recommendations map 1:1 onto these sites. For a multi-turn agentic workload where build runs every decode step, cutting even a handful of small H2D launches per step reduces per-token host overhead and improves median TPOT; on prefill steps (where cascade and mm_prefix are more likely active) it also reduces TTFT. The change is transferable, scoped to build, and correctness is checkable via the existing metadata tests and end-to-end equality oracle called out in the candidate. (from finding #3: CUDA C++ Best Practices Guide)
+- [proposal_from_finding_creator] Cache CUDA-graph-compatible plans keyed by stable batch descriptors in FlashAttentionMetadataBuilder.build — The candidate's evolve_rationale explicitly names caching schedule() by repeated shape and reusing cascade prefix tensors as concrete tunables, and its hot path is exactly the per-step decode metadata build that the CUDA-graph design targets. The finding contributes the specific structuring idea of a batch-descriptor-driven dispatcher with a graph-compatible fast path and a safe fallback, which maps directly onto separating uniform-decode replays (dominant in multi-turn agentic TPOT) from mixed/prefill builds (TTFT). This addresses the gap that the current build recomputes scheduler_metadata and reallocates cascade tensors even when successive decode steps share the same shape, which is the common case under CUDA graphs. (from finding #4: CUDA Graphs)
+- [claude] Pipeline AOT scheduler_metadata across steps via a helper-thread build so build() returns before get_scheduler_metadata finishes — None of the four listed deep_research_proposals move `get_scheduler_metadata` off the critical path via cross-step pipelining. Findings 0001 and 0004 propose *shape-keyed caching* of the cascade branch's `prefix_scheduler_metadata` and cascade prefix tensors — they only hit when the same shape recurs, and they still execute synchronously inside the current step on the first occurrence and after any invalidation. Finding 0009 introduces a batch-descriptor cache for CUDA-graph-compatible replay but likewise operates synchronously within one step and targets the descriptor-keyed cache lookup, not asynchronous overlap with the model forward. Finding 0006 targets H2D transfer batching and pinned buffers, not compute latency of the scheduler planner itself. This proposal is orthogonal: it addresses the *latency of the planner call*, not its allocation cost or its cacheability, by exploiting that in a uniform-decode multi-turn agentic workload the next step's shape is deterministically derivable one step in advance, so the planner call can execute concurrently with the current step's model forward on a helper stream and be awaited (as a cheap stream wait) at the next build() entry. This composes cleanly with all four listed cache-based proposals — a cache hit short-circuits before the speculation is consumed — and directly attacks median TPOT beyond what cache reuse alone can achieve, since it removes wall-clock time from the per-token critical path even on cache misses within the class of uniform-decode transitions. (agent proposal, no source finding)
+
+
+## In-scope files — do not edit anything else
+- vllm/v1/attention/backends/flash_attn.py:479-762 — FlashAttentionMetadataBuilder.build
+
+## Oracles
+Correctness oracle: (none recorded)
+Performance oracle (recorded, NOT measured here): TTFT, TPOT
+
+## What to do
+1. Read the in-scope code, and any other file you need for context.
+2. Implement the change described above, editing ONLY the in-scope files.
+   Prefer the smallest faithful implementation of the proposal over a rewrite.
+3. Write `CHANGE-SUMMARY.md` in the working-directory root: what you
+   changed, why, which findings/proposals you drew on, and anything a reviewer
+   should check by hand.
+
+## Hard rules
+- Do not run tests. Do not run benchmarks. Do not try to build or install
+  anything. This worktree cannot execute them, and a fabricated result is
+  worse than none. The oracles above are recorded for whoever has the
+  hardware — they are not your task.
+- Do not commit, branch, stash, or otherwise run git write commands. The patch
+  is collected from your uncommitted working-tree changes.
+- Do not edit files outside the in-scope list.
+- If the change cannot be made faithfully within scope, make no edit and say
+  so in `CHANGE-SUMMARY.md`, with the reason. A missing patch is a fine
+  outcome; a patch that cannot be trusted is not.

@@ -9,6 +9,7 @@ making the staleness gate explicit (plan §4).
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import re
 import subprocess
@@ -112,6 +113,29 @@ def _container_tokens(symbol: str) -> list[str]:
     return [p for p in parts[:-1] if _IDENTIFIER.fullmatch(p)]
 
 
+def _python_symbol_contains_range(
+    source: str, symbol: str, start: int, end: int, kind: str
+) -> bool:
+    """Recognize a selected range inside its enclosing Python definition."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+    names = {
+        node.name
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.lineno <= end
+        and getattr(node, "end_lineno", node.lineno) >= start
+    }
+    components = [part for part in _SYMBOL_SEPARATORS.split(symbol) if _IDENTIFIER.fullmatch(part)]
+    if kind == "region" and len(components) > 1:
+        # A region label may end with a descriptive name rather than a Python
+        # definition, while all preceding qualified definitions remain real.
+        return all(component in names for component in components[:-1])
+    return bool(components) and all(component in names for component in components)
+
+
 @dataclass
 class ValidatedCandidate:
     """The validated, live-repo-confirmed view of the candidate target."""
@@ -201,7 +225,10 @@ def validate_candidate_target(
                 f"container component(s) {', '.join(missing)} no longer "
                 f"appear anywhere in the file"
             )
-    if problems:
+    structural_match = resolved.suffix == ".py" and _python_symbol_contains_range(
+        file_text, span.symbol or "", start, end, span.kind
+    )
+    if problems and not structural_match:
         raise StalenessError(
             f"recorded symbol {span.symbol!r} not found near lines "
             f"[{start}, {end}] of {cand_file} ({'; '.join(problems)}). "

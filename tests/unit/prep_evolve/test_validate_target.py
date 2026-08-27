@@ -14,6 +14,7 @@ from spotlights_engine.prep_evolve.resolve import (
     resolve_module_run,
 )
 from spotlights_engine.prep_evolve.validate_target import (
+    _python_symbol_contains_range,
     capture_revision,
     validate_candidate_target,
     validate_scope_file,
@@ -87,6 +88,16 @@ def test_staleness_symbol_missing(tmp_path: Path) -> None:
     with pytest.raises(StalenessError) as exc:
         validate_candidate_target(repo, cand)
     assert "stale" in str(exc.value)
+
+
+def test_python_method_range_can_be_inside_definition_body() -> None:
+    source = "class Owner:\n" + "\n" * 8 + "    def target(self):\n        return 1\n"
+    assert _python_symbol_contains_range(source, "Owner.target", 11, 11, "method")
+
+
+def test_python_region_can_have_descriptive_suffix() -> None:
+    source = "class Owner:\n    def first(self):\n        pass\n    def second(self):\n        pass\n"
+    assert _python_symbol_contains_range(source, "Owner.first/second.operation", 2, 5, "region")
 
 
 def test_qualified_symbol_class_far_from_method(tmp_path: Path) -> None:
