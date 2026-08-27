@@ -19,8 +19,7 @@ tabs and a persistent workspace:
 - **Terminal tab** — a login shell with the CLIs on `$PATH` for when you'd
   rather drive things yourself:
   - `spotlights-engine` — the main pipeline. Subcommands: `doctor`, `init`,
-    `prep-evolve`, `knowledge`.
-  - `signal-pipeline` — telemetry-driven discovery (preview).
+    `prep-evolve`, `apply`.
   - `spotlights-objectives` — objective-setting helper.
   - `claude`, `codex` — the agent CLIs Spotlights orchestrates as subprocesses.
     Don't call model APIs directly; the engine drives these.
@@ -82,7 +81,7 @@ spotlights-engine init
 ```
 
 `init` gives you `/spotlights-objective-setting`,
-`/spotlights-sort-candidates`, and `/spotlights-share-candidates` inside the
+`/spotlights-sort-candidates`, `/spotlights-apply-candidate`, and `/spotlights-share-candidates` inside the
 chat tab — they're the main way to interact with results.
 
 Then bring the target repo. Nothing is bundled by default, and how you get it
@@ -211,6 +210,7 @@ From the chat tab:
   `./spotlights-out/sorted/sorted_candidates.{md,json}`.
 - **`/spotlights-share-candidates`** — pointed at `./spotlights-out/sorted/`,
   packages the top-N candidates as a self-contained ZIP to share.
+- **`/spotlights-apply-candidate`** — Implements one candidate as a reviewable patch, in-session, in a throwaway git worktree
 
 From the terminal:
 
@@ -253,7 +253,7 @@ resulting `.zip` and select **Download**.
 *Only relevant if you're maintaining the DAM image itself — regular sandbox
 users can skip this section.*
 
-The image lives at `quay.io/oritp/spotlights-agent:0.1.3` and is built from
+The image lives at `quay.io/oritp/spotlights-agent:0.1.4` and is built from
 [`spotlights-agent/Dockerfile`](spotlights-agent/Dockerfile). Because the
 Spotlights repo is private, the Dockerfile installs from the **local working
 tree** (`docker build` context = repo root) rather than a `git+https://…` URL.
