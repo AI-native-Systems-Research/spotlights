@@ -43,7 +43,7 @@ the Spotlights custom image. The wizard's three steps map onto:
    *Advanced*), and paste the image reference into *Image address*:
 
    ```
-   quay.io/oritp/spotlights-agent:0.1.3
+   quay.io/oritp/spotlights-agent:0.1.4
    ```
 
    That's the current published tag; see
