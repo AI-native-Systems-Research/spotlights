@@ -136,11 +136,17 @@ module. Sharpen the goal first; run once.
 ## Running the engine
 
 Minimum viable invocation, using the `--objective` and `--hint` you just
-generated.
-Open a terminal session, and run
+generated. **Launch it as a background daemon** with `nohup … &` so a terminal
+disconnect (closed tab, dropped SSH, Chrome refresh) can't SIGHUP the engine
+mid-run — a single-module run is long enough that this happens in practice, and
+the engine dies with `manifest.json` still reading `"status": "RUNNING"`.
+
+Open a terminal session, and run:
+
 ```bash
 cd /home/agent/work
-spotlights-engine \
+mkdir -p ./spotlights-out
+nohup spotlights-engine \
   --repo ~/work/<target-repo> \
   --include <target-repo>/<path/to/module> \
   --objective "<paste from /spotlights-objective-setting>" \
@@ -148,9 +154,28 @@ spotlights-engine \
   --output-folder ./spotlights-out \
   --artifacts-dir ./artifacts \
   --max-parallel <your choice> \
+  --max-parallel-candidates <your choice> \
   --max-cost <your choice> \
-  --log-file ./spotlights-out/run.log
+  --log-file ./spotlights-out/run.log \
+  > ./spotlights-out/nohup.out 2>&1 &
 ```
+
+Watch every line end in `\` (except the last) — a missing backslash silently
+truncates the command at that line, and any flag below it (including
+`--max-cost` and `--log-file`) is dropped without warning.
+
+Then:
+
+```bash
+tail -f ./spotlights-out/run.log   # follow progress
+pgrep -af spotlights-engine        # confirm it's still alive
+kill $(pgrep -f spotlights-engine) # stop it (checkpoint is preserved)
+```
+
+Or just ask the **chat tab** to monitor it for you — e.g. *"watch the spotlights
+run and tell me when it's done or if anything breaks"* — the agent has the same
+terminal access and will tail the log, report progress, and flag failures
+without you having to keep the terminal open.
 
 - `--include` takes slash-form leaf qualified names — repeat the flag or pass
   multiple values to widen scope. Without `--include` the engine covers the
@@ -159,7 +184,8 @@ spotlights-engine \
   cost. The full 8-module vLLM example runs around **$26** at default rates.
 - Runs are **resumable** — the on-disk checkpoint tree under `--artifacts-dir`
   is the source of truth. Rerunning the same command picks up where you left
-  off; pass `--no-resume` to force a cold run.
+  off; pass `--no-resume` to force a cold run. If a run *was* interrupted, the
+  stale `"status": "RUNNING"` in `manifest.json` is expected — resume anyway.
 
 ## After a run
 
