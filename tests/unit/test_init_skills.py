@@ -20,6 +20,9 @@ def sandboxed_home(monkeypatch, tmp_path):
     home = tmp_path / "sandbox-home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
+    # A developer's own CLAUDE_CONFIG_DIR would otherwise redirect user-scope
+    # installs mid-test; tests that exercise it set it explicitly.
+    monkeypatch.delenv("CLAUDE_CONFIG_DIR", raising=False)
     return home
 
 
@@ -190,6 +193,84 @@ class TestInstallSkills:
 
         assert (home / ".claude" / "commands" / "spotlights-objective-setting.md").is_file()
         assert not (cwd / ".claude").exists()
+
+    def test_user_scope_honours_claude_config_dir(
+        self, fake_bundle, monkeypatch, tmp_path
+    ):
+        """CLAUDE_CONFIG_DIR moves Claude Code's whole ~/.claude, so install there.
+
+        Writing to $HOME/.claude with that variable set put the skills where
+        Claude Code never looks, while still reporting success.
+        """
+        home = tmp_path / "home"
+        home.mkdir()
+        relocated = tmp_path / "relocated-config"
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(relocated))
+
+        body = "body\n"
+        (fake_bundle / "objective-setting.md").write_text(body, encoding="utf-8")
+        assert init_skills.install_skills(scope="user") == 0
+
+        # Commands sit directly under the config dir, not under a nested .claude/.
+        assert (relocated / "commands" / "spotlights-objective-setting.md").is_file()
+        assert not (home / ".claude").exists()
+
+        # The manifest lives beside what it describes, keyed relative to that root.
+        manifest = json.loads(
+            (relocated / ".spotlights" / "manifest.json").read_text(encoding="utf-8")
+        )
+        assert manifest["files"] == {
+            "commands/spotlights-objective-setting.md": _sha256_text(body)
+        }
+
+    def test_claude_config_dir_ignored_for_project_scope(
+        self, fake_bundle, project_root, monkeypatch, tmp_path
+    ):
+        """A project's own .claude/commands/ is read from the project regardless."""
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "relocated"))
+        (fake_bundle / "objective-setting.md").write_text("body\n", encoding="utf-8")
+
+        assert init_skills.install_skills(scope="project") == 0
+        assert (
+            project_root / ".claude" / "commands" / "spotlights-objective-setting.md"
+        ).is_file()
+
+    def test_blank_claude_config_dir_falls_back_to_home(
+        self, fake_bundle, monkeypatch, tmp_path
+    ):
+        """An empty/whitespace value is not a path; treat it as unset."""
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", "   ")
+
+        (fake_bundle / "objective-setting.md").write_text("body\n", encoding="utf-8")
+        assert init_skills.install_skills(scope="user") == 0
+        assert (home / ".claude" / "commands" / "spotlights-objective-setting.md").is_file()
+
+    @pytest.mark.parametrize(
+        "payload",
+        ['{"files": null}', '["not", "a", "dict"]', '{"files": {"a": 3}}', "null"],
+    )
+    def test_malformed_manifest_does_not_crash(
+        self, fake_bundle, project_root, capsys, payload
+    ):
+        """A wrong-shaped manifest degrades to "no manifest", never a traceback.
+
+        `_read_manifest` runs on every install now, so a payload that parses as
+        JSON but isn't the expected shape used to crash a plain `init`.
+        """
+        manifest_dir = project_root / ".spotlights"
+        manifest_dir.mkdir()
+        (manifest_dir / "manifest.json").write_text(payload, encoding="utf-8")
+        (fake_bundle / "objective-setting.md").write_text("body\n", encoding="utf-8")
+
+        assert init_skills.install_skills(scope="project") == 0
+        assert (
+            project_root / ".claude" / "commands" / "spotlights-objective-setting.md"
+        ).is_file()
+        assert "unusable manifest" in capsys.readouterr().err
 
     def test_empty_bundle_returns_error(self, fake_bundle, project_root):
         # Bundle directory exists but contains no .md files.

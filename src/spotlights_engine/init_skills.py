@@ -7,7 +7,8 @@ on install).
 
 Manifest at `<scope-root>/.spotlights/manifest.json` records `path -> sha256`
 for each managed file, so a future `init --force` can safely overwrite only
-files the user hasn't edited.
+files the user hasn't edited. Paths are relative to the scope root, which
+`CLAUDE_CONFIG_DIR` can move for user scope — see `_scope_layout`.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import sys
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -107,22 +109,66 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
-def _scope_root(scope: str) -> Path:
+def _scope_layout(scope: str) -> tuple[Path, Path]:
+    """Return `(scope_root, commands_rel)` for a scope.
+
+    Everything the installer writes lives under `scope_root`: skills at
+    `scope_root / commands_rel`, the manifest at `scope_root/.spotlights/`.
+    Manifest keys are POSIX paths relative to `scope_root`, so a manifest is
+    only meaningful next to the root it was written for.
+
+    `CLAUDE_CONFIG_DIR` relocates Claude Code's whole `~/.claude` directory, so
+    under user scope it becomes the root and commands sit directly beneath it.
+    Project scope is unaffected by that variable — a project's own
+    `.claude/commands/` is read from the project either way.
+    """
     if scope == "user":
-        return Path.home()
+        config_dir = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
+        if config_dir:
+            return Path(config_dir).expanduser(), Path("commands")
+        return Path.home(), _CLAUDE_COMMANDS_REL
     if scope == "project":
-        return Path.cwd()
+        return Path.cwd(), _CLAUDE_COMMANDS_REL
     raise ValueError(f"unknown scope: {scope!r}")
 
 
+def _warn_unusable_manifest(manifest_path: Path, reason: str) -> None:
+    print(
+        f"spotlights-engine init: ignoring unusable manifest {manifest_path} "
+        f"({reason}); previously installed files will be treated as unmanaged.",
+        file=sys.stderr,
+    )
+
+
 def _read_manifest(scope_root: Path) -> dict | None:
+    """Read the manifest, or None when it is missing, unreadable or malformed.
+
+    A manifest of the wrong shape is as useless to us as corrupt JSON, and
+    reaching into it would crash the install, so both degrade to "no manifest".
+    Losing the ownership record is worth a warning, so it is not silent.
+    """
     manifest_path = scope_root / _MANIFEST_DIR / _MANIFEST_NAME
     if not manifest_path.is_file():
         return None
     try:
-        return json.loads(manifest_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        _warn_unusable_manifest(manifest_path, str(exc))
         return None
+    if not isinstance(payload, dict):
+        _warn_unusable_manifest(
+            manifest_path, f"expected a JSON object, got {type(payload).__name__}"
+        )
+        return None
+    files = payload.get("files")
+    if not isinstance(files, dict) or not all(
+        isinstance(k, str) and isinstance(v, str) for k, v in files.items()
+    ):
+        _warn_unusable_manifest(
+            manifest_path, "'files' is not an object of path -> sha256 strings"
+        )
+        return None
+    return payload
 
 
 def _write_manifest(scope_root: Path, files: dict[str, str]) -> Path:
@@ -141,11 +187,15 @@ def _write_manifest(scope_root: Path, files: dict[str, str]) -> Path:
     return manifest_path
 
 
-def _plan_install_items() -> list[_InstallItem]:
+def _plan_install_items(
+    commands_rel: Path = _CLAUDE_COMMANDS_REL,
+) -> list[_InstallItem]:
     """Resolve every bundled file to an _InstallItem.
 
     Top-level `<slug>.md` files become prefixed slash commands. Directory
     skills (subdirs with SKILL.md) have every file installed with structure preserved.
+    `commands_rel` is the commands directory relative to the scope root, which
+    `CLAUDE_CONFIG_DIR` can change — see `_scope_layout`.
     """
     root = _bundled_templates()
     if not root.is_dir():
@@ -155,28 +205,28 @@ def _plan_install_items() -> list[_InstallItem]:
         if entry.is_file() and entry.name.endswith(".md"):
             slug = entry.name[:-3]
             target_name = f"{_SKILL_PREFIX}{slug}.md"
-            rel_path = (_CLAUDE_COMMANDS_REL / target_name).as_posix()
+            rel_path = (commands_rel / target_name).as_posix()
             items.append(_InstallItem(rel_path, entry, target_name))
         elif entry.is_dir():
             if not (entry / _SKILL_MANIFEST_NAME).is_file():
                 continue  # not a directory skill
             prefixed = f"{_SKILL_PREFIX}{entry.name}"
             for parts, file_node in _walk_skill_dir(entry, [prefixed]):
-                rel_path = _CLAUDE_COMMANDS_REL.joinpath(*parts).as_posix()
+                rel_path = commands_rel.joinpath(*parts).as_posix()
                 items.append(_InstallItem(rel_path, file_node, "/".join(parts)))
     return sorted(items, key=lambda it: it.rel_path)
 
 
 def install_skills(scope: str = "user", force: bool = False) -> int:
-    """Install bundled skills into `<scope-root>/.claude/commands/`.
+    """Install bundled skills into the scope's Claude Code commands directory.
 
     Returns process exit code (0 success, non-zero error).
     """
-    scope_root = _scope_root(scope)
-    dest_dir = scope_root / _CLAUDE_COMMANDS_REL
+    scope_root, commands_rel = _scope_layout(scope)
+    dest_dir = scope_root / commands_rel
     dest_dir.mkdir(parents=True, exist_ok=True)
 
-    items = _plan_install_items()
+    items = _plan_install_items(commands_rel)
     if not items:
         print(
             "spotlights-engine init: no bundled skills found "
@@ -268,8 +318,8 @@ def build_argparser() -> argparse.ArgumentParser:
         default="user",
         help=(
             "Where to install. 'user' (default): ~/.claude/commands/, available "
-            "in every directory. 'project': <cwd>/.claude/commands/, this "
-            "checkout only."
+            "in every directory (or $CLAUDE_CONFIG_DIR/commands/ when that is "
+            "set). 'project': <cwd>/.claude/commands/, this checkout only."
         ),
     )
     p.add_argument(
