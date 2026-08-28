@@ -191,18 +191,13 @@ A single-module run like this takes roughly **30–45 minutes** and a **few doll
 **Limiting the scope with `--include`.** `--include` narrows the run to one or more slash-form qualified names — a package, a whole subtree, or a single leaf module:
 
 ```bash
-# a single leaf module
+# one module
 spotlights-engine --include vllm/v1/kv_offload ...
-
-# a package and everything beneath it — vllm/v1/worker, vllm/v1/worker/gpu, …
-spotlights-engine --include vllm/v1/worker ...
 
 # several scopes at once: repeat the flag, or pass multiple values after one flag
 spotlights-engine --include vllm/v1/kv_offload vllm/v1/attention/paged_kv ...
 spotlights-engine --include vllm/v1/kv_offload --include vllm/v1/worker ...
 ```
-
-A parent name selects itself plus every module beneath it, so start broad to survey a subsystem and narrow to leaf names once you know where the interesting code is. Cost and runtime scale with the number of modules the scope resolves to.
 
 **5. Rank the candidates by impact (optional).** A finished run can surface ~100 candidates; the bundled `/spotlights-sort-candidates` slash command ranks them for your objective. In Claude Code, from the same directory:
 
