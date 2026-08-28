@@ -93,8 +93,8 @@ spotlights-engine init [--scope project|user] [--force]
 Behavior:
 - Locate bundled templates via `importlib.resources.files("spotlights_engine") / "_templates" / "commands"`.
 - Resolve destination:
-  - `--scope project` (default): `<cwd>/.claude/commands/`
-  - `--scope user`: `~/.claude/commands/`
+  - `--scope user` (default): `~/.claude/commands/`
+  - `--scope project`: `<cwd>/.claude/commands/`
 - For each `<name>.md` in the bundle, write `<dest>/spotlights-<name>.md` (apply prefix at install time, like spec-kit).
 - After writing each file, compute its sha256 and record it in the manifest.
 - Write `<scope-root>/.spotlights/manifest.json` with the shape below.
@@ -147,7 +147,7 @@ In [tests/](../../tests/):
 ## Decisions
 
 1. **Templates location**: repo-root `templates/commands/` (mirrors spec-kit). Wheel builds bundle them into the package via `[tool.hatch.build.targets.wheel.force-include]`. The installer's `_bundled_templates()` checks the package-data path first, then falls back to a `__file__`-relative walk up to `<repo>/templates/commands/` for editable installs. Both flows tested end-to-end.
-2. **`init` scope default**: `project` (`./.claude/`). The package install (`pip install spotlights-engine`) is the same regardless; `--scope user` is documented as the "I want this skill everywhere" shortcut.
+2. **`init` scope default**: `user` (`~/.claude/`) — the skills are engine-versioned, not project-specific, so installing them once per machine matches how people actually use them. (This originally shipped as `project`; the default was flipped later.) The package install (`pip install spotlights-engine`) is the same regardless; `--scope project` pins the commands to a single checkout.
 3. **Manifest format**: spec-kit shape — `{integration, version, installed_at, files: {path: sha256}}`. The hash enables safe `--force` upgrades (only overwrite files the user hasn't edited) and clean future `uninstall-skills`. Worth the few extra lines now to avoid a painful migration later.
 
 ## Out of scope (explicit non-goals)

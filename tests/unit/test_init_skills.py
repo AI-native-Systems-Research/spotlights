@@ -10,6 +10,19 @@ import pytest
 from spotlights_engine import init_skills
 
 
+@pytest.fixture(autouse=True)
+def sandboxed_home(monkeypatch, tmp_path):
+    """Keep user-scope installs off the real home.
+
+    `install_skills` defaults to `scope="user"`, so a test that forgets to pass
+    a scope would otherwise write into the developer's own ~/.claude/commands/.
+    """
+    home = tmp_path / "sandbox-home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    return home
+
+
 @pytest.fixture
 def fake_bundle(monkeypatch, tmp_path):
     """Stub the bundled-templates lookup with a temp directory we control.
@@ -129,6 +142,21 @@ class TestInstallSkills:
 
         assert (home / ".claude" / "commands" / "spotlights-objective-setting.md").is_file()
         assert (home / ".spotlights" / "manifest.json").is_file()
+
+    def test_default_scope_is_user(self, fake_bundle, monkeypatch, tmp_path):
+        home = tmp_path / "home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        cwd = tmp_path / "somewhere-else"
+        cwd.mkdir()
+        monkeypatch.chdir(cwd)
+
+        (fake_bundle / "objective-setting.md").write_text("body\n", encoding="utf-8")
+        assert init_skills.install_skills() == 0
+        assert init_skills.build_argparser().parse_args([]).scope == "user"
+
+        assert (home / ".claude" / "commands" / "spotlights-objective-setting.md").is_file()
+        assert not (cwd / ".claude").exists()
 
     def test_empty_bundle_returns_error(self, fake_bundle, project_root):
         # Bundle directory exists but contains no .md files.
@@ -335,7 +363,7 @@ class TestCliEntryPoint:
         from spotlights_engine.cli import main as engine_main
 
         (fake_bundle / "objective-setting.md").write_text("body\n", encoding="utf-8")
-        rc = engine_main(["init"])
+        rc = engine_main(["init", "--scope", "project"])
         assert rc == 0
         assert (
             project_root / ".claude" / "commands" / "spotlights-objective-setting.md"
@@ -345,4 +373,4 @@ class TestCliEntryPoint:
         from spotlights_engine.init_skills import main as init_main
 
         (fake_bundle / "objective-setting.md").write_text("body\n", encoding="utf-8")
-        assert init_main(["--force"]) == 0
+        assert init_main(["--scope", "project", "--force"]) == 0

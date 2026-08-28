@@ -167,7 +167,7 @@ def _plan_install_items() -> list[_InstallItem]:
     return sorted(items, key=lambda it: it.rel_path)
 
 
-def install_skills(scope: str = "project", force: bool = False) -> int:
+def install_skills(scope: str = "user", force: bool = False) -> int:
     """Install bundled skills into `<scope-root>/.claude/commands/`.
 
     Returns process exit code (0 success, non-zero error).
@@ -261,10 +261,11 @@ def build_argparser() -> argparse.ArgumentParser:
     p.add_argument(
         "--scope",
         choices=("project", "user"),
-        default="project",
+        default="user",
         help=(
-            "Where to install. 'project' (default): <cwd>/.claude/commands/. "
-            "'user': ~/.claude/commands/."
+            "Where to install. 'user' (default): ~/.claude/commands/, available "
+            "in every directory. 'project': <cwd>/.claude/commands/, this "
+            "checkout only."
         ),
     )
     p.add_argument(

@@ -46,21 +46,21 @@ source .venv/bin/activate
 
 ## Install the Spotlights skill
 
-The engine ships Claude Code slash commands (currently `/spotlights-objective-setting`, `/spotlights-sort-candidates`, `/spotlights-share-candidates`, and `/spotlights-apply-candidate`) as bundled markdown templates. They are not active until you install them into a Claude Code commands directory. Locally In the project:
+The engine ships Claude Code slash commands (currently `/spotlights-objective-setting`, `/spotlights-sort-candidates`, `/spotlights-share-candidates`, and `/spotlights-apply-candidate`) as bundled markdown templates. They are not active until you install them into a Claude Code commands directory. By default `init` installs them once, system-wide, so they are available from every directory:
 
 ```bash
-spotlights-engine init           # writes .claude/commands/spotlights-*.md
+spotlights-engine init           # writes ~/.claude/commands/spotlights-*.md
 ```
 
-Or install once, system-wide:
+Or scope them to a single checkout — useful when you want the commands pinned to one project's version, or committed alongside it:
 
 ```bash
-spotlights-engine init --scope user   # writes ~/.claude/commands/spotlights-*.md
+spotlights-engine init --scope project   # writes ./.claude/commands/spotlights-*.md
 ```
 
 `init` records what it installed in `<scope-root>/.spotlights/manifest.json` (sha256 per file). Re-running `spotlights-engine init` is a no-op for existing files. To pick up new bundled versions after a package upgrade, use `--force` — files the user has edited (hash differs from the manifest) are preserved.
 
-Open Claude Code in the same directory and the slash commands appear:
+Open Claude Code (in any directory for a user-scope install, or in the project directory for `--scope project`) and the slash commands appear:
 
 ```
 /spotlights-objective-setting

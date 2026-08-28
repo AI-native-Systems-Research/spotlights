@@ -160,13 +160,15 @@ source .venv/bin/activate
 spotlights-engine init      # installs the /spotlights-* Claude Code slash commands
 ```
 
+Installs system-wide into `~/.claude/commands/` by default, so the commands work from any directory. Pass `--scope project` to install into `./.claude/commands/` for this checkout only.
+
 **3. Verify the environment end-to-end** ([Preflight with `doctor`](docs/INSTALL.md#preflight-with-doctor))
 
 ```bash
 spotlights-engine doctor
 ```
 
-**4. Run the engine on one module.** For Example: Clone [vLLM](https://github.com/vllm-project/vllm) next to this repo, decide your objective, then run the engine:
+**4. Run the engine.** For Example: Clone [vLLM](https://github.com/vllm-project/vllm), decide your objective, then run the engine:
 
 > [!TIP]
 > **Framing the objective (optional).** The run needs an `--objective` and, optionally, one or more `--hint`s. You can write them by hand, as below. Or, in Claude Code, run the optional [`/spotlights-objective-setting`](#skills) interview — it walks you through your goal and prints a ready-to-paste flag line (`--objective "…" --hint "…"`). Either path produces the same flags; the skill is just a convenience, never a required step.
@@ -181,13 +183,26 @@ spotlights-engine \
   --artifacts-dir ./artifacts
 ```
 
+> [!IMPORTANT]
+> Keep `--output-folder` and `--artifacts-dir` **outside** the `--repo` folder being scanned (as above: the repo is `../vllm`, the outputs land in the current directory). Pointing them inside the scanned repo mixes run output into the target's working tree and lets the engine pick up its own artifacts as source to analyze.
+
 A single-module run like this takes roughly **30–45 minutes** and a **few dollars** in API cost against the paid `claude`/`codex` CLIs. Cost scales with the number of included modules — the full 8-module example run checked in under [`examples/vllm_subset/`](examples/vllm_subset) cost about **$26** at default rates. Exact cost depends on your model pricing; see [docs/cost-and-manifest.md](docs/cost-and-manifest.md).
 
-`--include` accepts one or more slash-form leaf qualified names (repeat the flag or pass several values):
+**Limiting the scope with `--include`.** Without it the engine analyzes every module in the repo, which is slow and expensive. `--include` narrows the run to one or more slash-form qualified names — a package, a whole subtree, or a single leaf module:
 
 ```bash
+# a single leaf module
+spotlights-engine --include vllm/v1/kv_offload ...
+
+# a package and everything beneath it — vllm/v1/worker, vllm/v1/worker/gpu, …
+spotlights-engine --include vllm/v1/worker ...
+
+# several scopes at once: repeat the flag, or pass multiple values after one flag
 spotlights-engine --include vllm/v1/kv_offload vllm/v1/attention/paged_kv ...
+spotlights-engine --include vllm/v1/kv_offload --include vllm/v1/worker ...
 ```
+
+A parent name selects itself plus every module beneath it, so start broad to survey a subsystem and narrow to leaf names once you know where the interesting code is. Cost and runtime scale with the number of modules the scope resolves to.
 
 **5. Rank the candidates by impact (optional).** A finished run can surface ~100 candidates; the bundled `/spotlights-sort-candidates` slash command ranks them for your objective. In Claude Code, from the same directory:
 
