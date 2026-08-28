@@ -188,7 +188,7 @@ spotlights-engine \
 
 A single-module run like this takes roughly **30–45 minutes** and a **few dollars** in API cost against the paid `claude`/`codex` CLIs. Cost scales with the number of included modules — the full 8-module example run checked in under [`examples/vllm_subset/`](examples/vllm_subset) cost about **$26** at default rates. Exact cost depends on your model pricing; see [docs/cost-and-manifest.md](docs/cost-and-manifest.md).
 
-**Limiting the scope with `--include`.** Without it the engine analyzes every module in the repo, which is slow and expensive. `--include` narrows the run to one or more slash-form qualified names — a package, a whole subtree, or a single leaf module:
+**Limiting the scope with `--include`.** `--include` narrows the run to one or more slash-form qualified names — a package, a whole subtree, or a single leaf module:
 
 ```bash
 # a single leaf module
