@@ -24,11 +24,21 @@ your responsibility to run the ranking step first.
    `sorted_candidates.md` (e.g. `.../spotlights-out/sorted/`). Do not
    guess; ask the user for the absolute path.
 2. **Ask for top-N** — default is 5 if the user doesn't specify.
-3. **Run the build script** from the repo root:
+3. **Run the build script.** `build_bundle.py` sits in this skill's own
+   directory, so use whichever copy exists — `spotlights-engine init` installs
+   user-wide by default (`~/.claude/`) and only writes into the project
+   (`./.claude/`) when given `--scope project`:
 
    ```bash
+   # user-scope install (the init default)
+   python3 ~/.claude/commands/spotlights-share-candidates/build_bundle.py --source "<folder>" --top-n 5
+
+   # project-scope install (init --scope project)
    python3 .claude/commands/spotlights-share-candidates/build_bundle.py --source "<folder>" --top-n 5
    ```
+
+   The script resolves all of its paths from `--source`, so it does not matter
+   which directory you run it from.
 
 4. **Report** the printed summary: bundle title, number of candidates exported,
    the `share-bundle/` path, the `share-candidates.zip` path, how many candidates

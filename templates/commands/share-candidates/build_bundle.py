@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Build a browsable, offline ZIP of the top-N Spotlights candidates.
 
-Stdlib only. See .claude/commands/spotlights-share-candidates/SKILL.md.
+Stdlib only. See SKILL.md, alongside this file in the installed skill directory.
 """
 import argparse
 import html
