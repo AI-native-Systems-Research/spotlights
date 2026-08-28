@@ -185,7 +185,11 @@ def install_skills(scope: str = "user", force: bool = False) -> int:
         )
         return 1
 
-    existing_manifest = _read_manifest(scope_root) if force else None
+    # Always read the prior manifest: --force needs it to tell our files from the
+    # user's, and a plain re-run needs it to carry ownership forward. Reading it
+    # only under --force silently rewrote `files` as {} on every no-op run, which
+    # then made a later --force treat everything as unmanaged and refuse to upgrade.
+    existing_manifest = _read_manifest(scope_root)
     existing_files: dict[str, str] = (
         existing_manifest.get("files", {}) if existing_manifest else {}
     )

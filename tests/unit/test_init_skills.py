@@ -78,6 +78,39 @@ class TestInstallSkills:
         assert rc == 0
         assert target.read_text(encoding="utf-8") == "user wrote this\n"
 
+    def test_plain_rerun_preserves_manifest_ownership(self, fake_bundle, project_root):
+        """A no-op re-run must not forget what it owns.
+
+        The manifest is the only record distinguishing our files from the user's.
+        Wiping it on a plain re-run left a later --force unable to upgrade anything.
+        """
+        body = "v1 body\n"
+        (fake_bundle / "objective-setting.md").write_text(body, encoding="utf-8")
+        assert init_skills.install_skills(scope="project") == 0
+
+        manifest_path = project_root / ".spotlights" / "manifest.json"
+        rel = ".claude/commands/spotlights-objective-setting.md"
+        first = json.loads(manifest_path.read_text(encoding="utf-8"))["files"]
+        assert first == {rel: _sha256_text(body)}
+
+        # Plain re-run: every file already exists, so nothing is written...
+        assert init_skills.install_skills(scope="project") == 0
+        # ...and the ownership record survives unchanged.
+        assert json.loads(manifest_path.read_text(encoding="utf-8"))["files"] == first
+
+    def test_force_upgrades_after_a_plain_rerun(self, fake_bundle, project_root):
+        """--force must still upgrade when a no-op re-run happened in between."""
+        (fake_bundle / "objective-setting.md").write_text("v1 body\n", encoding="utf-8")
+        assert init_skills.install_skills(scope="project") == 0
+        assert init_skills.install_skills(scope="project") == 0  # the no-op re-run
+
+        v2 = "v2 body — upgraded\n"
+        (fake_bundle / "objective-setting.md").write_text(v2, encoding="utf-8")
+        assert init_skills.install_skills(scope="project", force=True) == 0
+
+        target = project_root / ".claude" / "commands" / "spotlights-objective-setting.md"
+        assert target.read_text(encoding="utf-8") == v2
+
     def test_force_overwrites_unchanged_managed_file(self, fake_bundle, project_root):
         v1 = "v1 body\n"
         (fake_bundle / "objective-setting.md").write_text(v1, encoding="utf-8")
