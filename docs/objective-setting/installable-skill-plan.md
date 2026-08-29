@@ -98,10 +98,14 @@ Behavior:
 - For each `<name>.md` in the bundle, write `<dest>/spotlights-<name>.md` (apply prefix at install time, like spec-kit).
 - After writing each file, compute its sha256 and record it in the manifest.
 - Write `<scope-root>/.spotlights/manifest.json` with the shape below.
-- Default first-run behavior: skip files that already exist (don't overwrite).
-- `--force` behavior: read existing manifest, hash each managed file currently on disk, compare to manifest:
-  - if hash matches → file is unchanged since install → safe to overwrite with bundled version,
-  - if hash differs → user has edited it → skip and warn (still rewrite manifest entry only after the user re-runs without `--force` or accepts overwrite).
+- Default behavior: skip files that already exist (don't overwrite).
+- `--force` behavior: overwrite every file the bundle ships, discarding local edits
+  to those files. This is spec-kit's `force=True` mode, and the manifest is not
+  consulted — "force install this version" means exactly that. (Spec-kit's
+  hash-compare-and-preserve behavior lives on a *separate* `refresh_managed` mode
+  used by its migration paths, not on `--force`. Conflating the two is what made an
+  early version of our installer treat `--force` as a no-op on any edited file.)
+- Files the bundle does not ship are never written, at any force level.
 - Print a one-line summary: `installed: spotlights-objective-setting`.
 
 **Manifest shape** (`.spotlights/manifest.json`, modeled on spec-kit's `speckit.manifest.json`):

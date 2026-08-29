@@ -25,16 +25,14 @@ your responsibility to run the ranking step first.
    guess; ask the user for the absolute path.
 2. **Ask for top-N** — default is 5 if the user doesn't specify.
 3. **Run the build script.** `build_bundle.py` sits in this skill's own
-   directory, so use whichever copy exists — `spotlights-engine init` installs
-   user-wide by default (`~/.claude/`) and only writes into the project
-   (`./.claude/`) when given `--scope project`:
+   directory — the same directory as the `SKILL.md` you are reading. Resolve it
+   from that path rather than guessing a location: `spotlights-engine init`
+   installs user-wide by default (`~/.claude/commands/`), into the project
+   (`./.claude/commands/`) with `--scope project`, and into
+   `$CLAUDE_CONFIG_DIR/commands/` when that variable is set.
 
    ```bash
-   # user-scope install (the init default)
-   python3 ~/.claude/commands/spotlights-share-candidates/build_bundle.py --source "<folder>" --top-n 5
-
-   # project-scope install (init --scope project)
-   python3 .claude/commands/spotlights-share-candidates/build_bundle.py --source "<folder>" --top-n 5
+   python3 "<this skill's directory>/build_bundle.py" --source "<folder>" --top-n 5
    ```
 
    The script resolves all of its paths from `--source`, so it does not matter

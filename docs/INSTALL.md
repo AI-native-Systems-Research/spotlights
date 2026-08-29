@@ -58,7 +58,9 @@ Or scope them to a single checkout — useful when you want the commands pinned 
 spotlights-engine init --scope project   # writes ./.claude/commands/spotlights-*.md
 ```
 
-`init` records what it installed in `<scope-root>/.spotlights/manifest.json` (sha256 per file). Re-running `spotlights-engine init` is a no-op for existing files. To pick up new bundled versions after a package upgrade, use `--force` — files the user has edited (hash differs from the manifest) are preserved.
+Re-running `spotlights-engine init` only adds files that are missing; anything already on disk is left alone. To pick up new bundled versions after a package upgrade, use `--force`, which rewrites every file the bundle ships — so any edits you made to those files are discarded. Files Spotlights does not ship (your own notes inside a skill directory, for instance) are never touched either way. `init` records what it installed in `<scope-root>/.spotlights/manifest.json` (sha256 per file); that is a record of the install, not an input to the overwrite decision.
+
+If you set `CLAUDE_CONFIG_DIR` to move Claude Code's config directory, a user-scope `init` follows it and writes to `$CLAUDE_CONFIG_DIR/commands/` instead.
 
 Open Claude Code (in any directory for a user-scope install, or in the project directory for `--scope project`) and the slash commands appear:
 

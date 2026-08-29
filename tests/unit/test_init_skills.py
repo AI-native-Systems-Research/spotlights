@@ -81,11 +81,11 @@ class TestInstallSkills:
         assert rc == 0
         assert target.read_text(encoding="utf-8") == "user wrote this\n"
 
-    def test_plain_rerun_preserves_manifest_ownership(self, fake_bundle, project_root):
-        """A no-op re-run must not forget what it owns.
+    def test_plain_rerun_keeps_files_in_the_manifest(self, fake_bundle, project_root):
+        """A no-op re-run must not forget what it recorded.
 
-        The manifest is the only record distinguishing our files from the user's.
-        Wiping it on a plain re-run left a later --force unable to upgrade anything.
+        The files it skipped are still installed, so they belong in the record an
+        uninstall would read. An earlier version emptied `files` on every re-run.
         """
         body = "v1 body\n"
         (fake_bundle / "objective-setting.md").write_text(body, encoding="utf-8")
@@ -98,7 +98,7 @@ class TestInstallSkills:
 
         # Plain re-run: every file already exists, so nothing is written...
         assert init_skills.install_skills(scope="project") == 0
-        # ...and the ownership record survives unchanged.
+        # ...and the record survives unchanged.
         assert json.loads(manifest_path.read_text(encoding="utf-8"))["files"] == first
 
     def test_force_upgrades_after_a_plain_rerun(self, fake_bundle, project_root):
@@ -114,7 +114,7 @@ class TestInstallSkills:
         target = project_root / ".claude" / "commands" / "spotlights-objective-setting.md"
         assert target.read_text(encoding="utf-8") == v2
 
-    def test_force_overwrites_unchanged_managed_file(self, fake_bundle, project_root):
+    def test_force_overwrites_unchanged_file(self, fake_bundle, project_root):
         v1 = "v1 body\n"
         (fake_bundle / "objective-setting.md").write_text(v1, encoding="utf-8")
         assert init_skills.install_skills(scope="project") == 0
@@ -132,39 +132,79 @@ class TestInstallSkills:
         rel = ".claude/commands/spotlights-objective-setting.md"
         assert manifest["files"][rel] == _sha256_text(v2)
 
-    def test_force_preserves_user_edited_managed_file(self, fake_bundle, project_root):
-        v1 = "v1 body\n"
-        (fake_bundle / "objective-setting.md").write_text(v1, encoding="utf-8")
+    def test_force_overwrites_an_edited_file(self, fake_bundle, project_root):
+        """`--force` means force: an edited copy of a file we ship is replaced.
+
+        Preserving edits is what the plain re-run is for.
+        """
+        (fake_bundle / "objective-setting.md").write_text("v1 body\n", encoding="utf-8")
         assert init_skills.install_skills(scope="project") == 0
 
         target = project_root / ".claude" / "commands" / "spotlights-objective-setting.md"
-        edited = "user edited this\n"
-        target.write_text(edited, encoding="utf-8")
+        target.write_text("user edited this\n", encoding="utf-8")
 
         v2 = "v2 body\n"
         (fake_bundle / "objective-setting.md").write_text(v2, encoding="utf-8")
         assert init_skills.install_skills(scope="project", force=True) == 0
 
-        # User's edit must survive.
-        assert target.read_text(encoding="utf-8") == edited
-        # Manifest still records the original (pre-edit) hash so a future
-        # `--force` after the user reverts will once again be safe to overwrite.
+        assert target.read_text(encoding="utf-8") == v2
         manifest = json.loads(
             (project_root / ".spotlights" / "manifest.json").read_text(encoding="utf-8")
         )
         rel = ".claude/commands/spotlights-objective-setting.md"
-        assert manifest["files"][rel] == _sha256_text(v1)
+        assert manifest["files"][rel] == _sha256_text(v2)
 
-    def test_force_does_not_touch_unmanaged_existing_file(self, fake_bundle, project_root):
-        # File pre-exists with no manifest entry. Even with --force, install_skills
-        # must not touch it (it's not ours to overwrite).
-        (fake_bundle / "objective-setting.md").write_text("bundled\n", encoding="utf-8")
+    def test_force_overwrites_a_file_it_never_installed(self, fake_bundle, project_root):
+        """No manifest entry, no prior install — `--force` still writes our version.
+
+        The decision is "does the bundle ship this path", never "did we install
+        this copy": a first `init --force` on a machine with hand-placed skills is
+        exactly the case where the user wants the bundled version to win.
+        """
+        bundled = "bundled\n"
+        (fake_bundle / "objective-setting.md").write_text(bundled, encoding="utf-8")
         target = project_root / ".claude" / "commands" / "spotlights-objective-setting.md"
         target.parent.mkdir(parents=True)
-        target.write_text("user's own\n", encoding="utf-8")
+        target.write_text("hand-placed\n", encoding="utf-8")
 
         assert init_skills.install_skills(scope="project", force=True) == 0
-        assert target.read_text(encoding="utf-8") == "user's own\n"
+        assert target.read_text(encoding="utf-8") == bundled
+
+    def test_force_refuses_to_write_through_a_symlink(self, fake_bundle, project_root, capsys):
+        """A symlink under the commands directory must not redirect the write.
+
+        Following one would let a link planted there send bundled content to any
+        path on disk, so the install skips it and says so on stderr.
+        """
+        (fake_bundle / "objective-setting.md").write_text("bundled\n", encoding="utf-8")
+        commands = project_root / ".claude" / "commands"
+        commands.mkdir(parents=True)
+        outside = project_root / "outside.md"
+        outside.write_text("do not clobber me\n", encoding="utf-8")
+        (commands / "spotlights-objective-setting.md").symlink_to(outside)
+
+        assert init_skills.install_skills(scope="project", force=True) == 0
+        assert outside.read_text(encoding="utf-8") == "do not clobber me\n"
+        assert "symlink" in capsys.readouterr().err
+
+    def test_force_refuses_to_write_through_a_symlinked_parent(self, fake_bundle, project_root):
+        """The guard walks the whole path, not just the leaf.
+
+        A symlinked skill *directory* redirects every file inside it, so it has to
+        be caught too.
+        """
+        skill = fake_bundle / "share-candidates"
+        skill.mkdir()
+        (skill / "SKILL.md").write_text("bundled skill\n", encoding="utf-8")
+
+        commands = project_root / ".claude" / "commands"
+        commands.mkdir(parents=True)
+        outside = project_root / "outside-dir"
+        outside.mkdir()
+        (commands / "spotlights-share-candidates").symlink_to(outside)
+
+        assert init_skills.install_skills(scope="project", force=True) == 0
+        assert list(outside.iterdir()) == []
 
     def test_user_scope_writes_to_home(self, fake_bundle, monkeypatch, tmp_path):
         home = tmp_path / "home"
@@ -311,96 +351,45 @@ class TestInstallSkills:
             ".claude/commands/spotlights-objective-setting.md": _sha256_text(body)
         }
 
-    def test_plain_rerun_readopts_files_matching_the_bundle(self, fake_bundle, project_root):
-        """A lost manifest must not permanently disable --force.
+    def test_a_lost_manifest_does_not_block_an_upgrade(self, fake_bundle, project_root):
+        """`--force` never reads the manifest, so losing it changes nothing.
 
-        The manifest is the only ownership record, and a plain re-run rewrites it.
-        With no re-adoption, one lost manifest turned every subsequent run into
-        "skipped (user-edited or not managed by spotlights)" forever — about files
-        byte-identical to the ones we ship.
+        Ownership used to gate overwriting, which made one lost or unreadable
+        manifest permanently downgrade `--force` to a no-op. It is a record now.
         """
-        v1 = "v1 body\n"
-        (fake_bundle / "objective-setting.md").write_text(v1, encoding="utf-8")
+        (fake_bundle / "objective-setting.md").write_text("v1 body\n", encoding="utf-8")
         assert init_skills.install_skills(scope="project") == 0
 
         manifest_path = project_root / ".spotlights" / "manifest.json"
         rel = ".claude/commands/spotlights-objective-setting.md"
-
-        # The record is lost (deleted here; malformed JSON and a relocated root
-        # reach the same state).
         manifest_path.unlink()
 
-        # A plain re-run rebuilds ownership from the bytes on disk...
-        assert init_skills.install_skills(scope="project") == 0
-        assert json.loads(manifest_path.read_text(encoding="utf-8"))["files"] == {
-            rel: _sha256_text(v1)
-        }
-
-        # ...so a later upgrade still works.
         v2 = "v2 body — upgraded\n"
         (fake_bundle / "objective-setting.md").write_text(v2, encoding="utf-8")
         assert init_skills.install_skills(scope="project", force=True) == 0
+
         assert (project_root / rel).read_text(encoding="utf-8") == v2
-
-    def test_force_readopts_files_matching_the_bundle(self, fake_bundle, project_root):
-        """--force re-adopts directly, without needing a plain re-run first."""
-        (fake_bundle / "objective-setting.md").write_text("v1\n", encoding="utf-8")
-        assert init_skills.install_skills(scope="project") == 0
-        (project_root / ".spotlights" / "manifest.json").unlink()
-
-        assert init_skills.install_skills(scope="project", force=True) == 0
-
-        rel = ".claude/commands/spotlights-objective-setting.md"
-        assert (project_root / rel).read_text(encoding="utf-8") == "v1\n"
-        manifest = json.loads(
-            (project_root / ".spotlights" / "manifest.json").read_text(encoding="utf-8")
-        )
-        assert manifest["files"] == {rel: _sha256_text("v1\n")}
-
-    def test_readoption_after_malformed_manifest(self, fake_bundle, project_root, capsys):
-        """The validator discards a bad manifest; re-adoption must rebuild it.
-
-        Otherwise the round-2 malformed-manifest guard traded a crash for a
-        silently unupgradeable install.
-        """
-        (fake_bundle / "objective-setting.md").write_text("v1\n", encoding="utf-8")
-        assert init_skills.install_skills(scope="project") == 0
-
-        manifest_path = project_root / ".spotlights" / "manifest.json"
-        manifest_path.write_text('{"files": null}', encoding="utf-8")
-
-        assert init_skills.install_skills(scope="project") == 0
-        assert "unusable manifest" in capsys.readouterr().err
-
-        rel = ".claude/commands/spotlights-objective-setting.md"
         assert json.loads(manifest_path.read_text(encoding="utf-8"))["files"] == {
-            rel: _sha256_text("v1\n")
+            rel: _sha256_text(v2)
         }
 
-    def test_readoption_does_not_claim_user_edited_files(self, fake_bundle, project_root):
-        """Re-adoption keys on bundled bytes, so it never swallows a user's file.
+    def test_manifest_keeps_records_for_files_no_longer_bundled(self, fake_bundle, project_root):
+        """A dropped skill stays in the record, so an uninstall can still find it.
 
-        The guard rail on the fix above: a file that differs from what we ship
-        stays unmanaged and untouched even after the manifest is gone.
+        The record is the only trace of what older versions wrote; rebuilding it
+        from just this bundle would strand those files on disk forever.
         """
-        (fake_bundle / "objective-setting.md").write_text("v1\n", encoding="utf-8")
+        (fake_bundle / "objective-setting.md").write_text("body\n", encoding="utf-8")
+        (fake_bundle / "retired.md").write_text("retired body\n", encoding="utf-8")
         assert init_skills.install_skills(scope="project") == 0
 
-        rel = ".claude/commands/spotlights-objective-setting.md"
-        edited = "user edited this\n"
-        (project_root / rel).write_text(edited, encoding="utf-8")
-        (project_root / ".spotlights" / "manifest.json").unlink()
+        (fake_bundle / "retired.md").unlink()
+        assert init_skills.install_skills(scope="project", force=True) == 0
 
-        assert init_skills.install_skills(scope="project") == 0
         manifest = json.loads(
             (project_root / ".spotlights" / "manifest.json").read_text(encoding="utf-8")
         )
-        assert rel not in manifest["files"]
-
-        # And --force still refuses to clobber it.
-        (fake_bundle / "objective-setting.md").write_text("v2\n", encoding="utf-8")
-        assert init_skills.install_skills(scope="project", force=True) == 0
-        assert (project_root / rel).read_text(encoding="utf-8") == edited
+        assert ".claude/commands/spotlights-retired.md" in manifest["files"]
 
     @pytest.mark.parametrize(
         "payload",
@@ -507,74 +496,50 @@ class TestInstallSkills:
             assert not rel.endswith(".pyc")
             assert not rel.endswith(".DS_Store")
 
-    def test_force_directory_skill_per_file_independence(
-        self, fake_bundle, project_root
-    ):
+    def test_force_upgrades_every_file_of_a_directory_skill(self, fake_bundle, project_root):
+        """A partly-edited skill directory upgrades whole, not half.
+
+        Per-file edit detection used to leave one file at v1 next to another at
+        v2 — a skill in a state no release ever shipped.
+        """
         skill = fake_bundle / "share-candidates"
         skill.mkdir()
         (skill / "SKILL.md").write_text("v1 skill\n", encoding="utf-8")
         (skill / "build_bundle.py").write_text("v1 script\n", encoding="utf-8")
         assert init_skills.install_skills(scope="project") == 0
 
-        base = (
-            project_root
-            / ".claude"
-            / "commands"
-            / "spotlights-share-candidates"
-        )
-        # User edits the script but not the manifest.
-        (base / "build_bundle.py").write_text(
-            "user edited script\n", encoding="utf-8"
-        )
+        base = project_root / ".claude" / "commands" / "spotlights-share-candidates"
+        (base / "build_bundle.py").write_text("user edited script\n", encoding="utf-8")
 
-        # Bundle upgrades both files.
         (skill / "SKILL.md").write_text("v2 skill\n", encoding="utf-8")
         (skill / "build_bundle.py").write_text("v2 script\n", encoding="utf-8")
         assert init_skills.install_skills(scope="project", force=True) == 0
 
-        # Unedited file upgraded; edited file preserved.
         assert (base / "SKILL.md").read_text(encoding="utf-8") == "v2 skill\n"
-        assert (base / "build_bundle.py").read_text(
-            encoding="utf-8"
-        ) == "user edited script\n"
+        assert (base / "build_bundle.py").read_text(encoding="utf-8") == "v2 script\n"
 
-        manifest = json.loads(
-            (
-                project_root / ".spotlights" / "manifest.json"
-            ).read_text(encoding="utf-8")
+        files = json.loads(
+            (project_root / ".spotlights" / "manifest.json").read_text(encoding="utf-8")
+        )["files"]
+        assert files[".claude/commands/spotlights-share-candidates/SKILL.md"] == (
+            _sha256_text("v2 skill\n")
         )
-        files = manifest["files"]
-        assert (
-            files[
-                ".claude/commands/spotlights-share-candidates/SKILL.md"
-            ]
-            == _sha256_text("v2 skill\n")
-        )
-        # Preserved file keeps its ORIGINAL (v1) recorded hash so a future
-        # revert is upgradeable.
-        assert (
-            files[
-                ".claude/commands/spotlights-share-candidates/build_bundle.py"
-            ]
-            == _sha256_text("v1 script\n")
+        assert files[".claude/commands/spotlights-share-candidates/build_bundle.py"] == (
+            _sha256_text("v2 script\n")
         )
 
-    def test_force_ignores_unmanaged_file_in_skill_dir(
-        self, fake_bundle, project_root
-    ):
+    def test_force_leaves_files_the_bundle_does_not_ship(self, fake_bundle, project_root):
+        """`--force` overwrites our files, not everything in the directory.
+
+        The user's own notes sitting beside an installed skill are not ours to
+        replace at any force level.
+        """
         skill = fake_bundle / "share-candidates"
         skill.mkdir()
         (skill / "SKILL.md").write_text("v1\n", encoding="utf-8")
         assert init_skills.install_skills(scope="project") == 0
 
-        base = (
-            project_root
-            / ".claude"
-            / "commands"
-            / "spotlights-share-candidates"
-        )
-        # User drops their own file into the installed skill dir
-        # (no manifest entry).
+        base = project_root / ".claude" / "commands" / "spotlights-share-candidates"
         (base / "notes.md").write_text("my notes\n", encoding="utf-8")
 
         (skill / "SKILL.md").write_text("v2\n", encoding="utf-8")

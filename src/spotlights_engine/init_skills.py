@@ -5,14 +5,19 @@ applying the `spotlights-` prefix at install time (mirrors spec-kit's pattern
 of keeping unprefixed names in `templates/commands/` and prefixing per-agent
 on install).
 
-Manifest at `<scope-root>/.spotlights/manifest.json` records `path -> sha256`
-for each managed file, so a future `init --force` can safely overwrite only
-files the user hasn't edited. Paths are relative to the scope root, which
-`CLAUDE_CONFIG_DIR` can move for user scope — see `_scope_layout`.
+Overwrite policy, following spec-kit's installer:
 
-The manifest is a cache, never the sole source of truth: if it goes missing or
-unreadable, an install re-adopts any file that still matches the bundled bytes,
-so a lost record cannot permanently lock `--force` out of upgrading.
+- default: write only the files that are not there yet; leave anything that
+  already exists alone.
+- `--force`: write every file the bundle ships, overwriting what is on disk.
+  Local edits to those files are lost, which is what "force install this
+  version" means.
+
+Manifest at `<scope-root>/.spotlights/manifest.json` records `path -> sha256`
+for each file we installed. It is a *record* — of provenance, version, and what
+an eventual uninstall would remove — and is never consulted to decide whether to
+write. Paths are relative to the scope root, which `CLAUDE_CONFIG_DIR` can move
+for user scope; see `_scope_layout`.
 """
 
 from __future__ import annotations
@@ -106,18 +111,39 @@ def _bundled_templates() -> Traversable:
     return packaged
 
 
-def _sha256(path: Path) -> str:
-    h = hashlib.sha256()
-    with path.open("rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
+def _first_symlink(scope_root: Path, target: Path) -> Path | None:
+    """First symlink at or below `scope_root` on the way to `target`, else None.
+
+    Writing through a symlink would let a link planted inside the commands
+    directory redirect the write anywhere on disk, so the installer refuses
+    instead of following it (spec-kit's installer does the same).
+
+    `scope_root` itself is deliberately not checked: a symlinked `$HOME` or
+    `CLAUDE_CONFIG_DIR` is legitimate, and Claude Code reads through it too.
+    """
+    current = target
+    while current != scope_root and current.parent != current:
+        if current.is_symlink():
+            return current
+        current = current.parent
+    return None
+
+
+def _nfc(path: Path) -> str:
+    return unicodedata.normalize("NFC", str(path))
 
 
 def _same_dir(a: Path, b: Path) -> bool:
-    """True when two paths name the same directory (trailing slashes, symlinks…)."""
+    """True when two paths name the same directory (trailing slashes, symlinks…).
+
+    Both sides are NFC-normalized before comparing: we normalize
+    `CLAUDE_CONFIG_DIR` to match Claude Code, but `Path.home()` comes from the
+    OS, which on macOS hands back decomposed (NFD) names. Comparing one against
+    the other made the "names the default location" guard miss on any home
+    directory with non-ASCII characters.
+    """
     try:
-        return a.resolve() == b.resolve()
+        return _nfc(a.resolve()) == _nfc(b.resolve())
     except OSError:
         return False
 
@@ -170,8 +196,8 @@ def _scope_layout(scope: str) -> tuple[Path, Path]:
     default_root = Path.home()
     # `CLAUDE_CONFIG_DIR=~/.claude` names exactly where the default layout already
     # installs. Honouring it literally would put the files in the right place but
-    # move the manifest to ~/.claude/.spotlights/, orphaning ~/.spotlights/ — and
-    # an install whose manifest cannot be found is one `--force` can never upgrade.
+    # move the manifest to ~/.claude/.spotlights/, leaving a stale ~/.spotlights/
+    # behind claiming to be the record of the same install.
     if config_dir is None or _same_dir(config_dir, default_root / ".claude"):
         return default_root, _CLAUDE_COMMANDS_REL
     return config_dir, Path("commands")
@@ -180,7 +206,8 @@ def _scope_layout(scope: str) -> tuple[Path, Path]:
 def _warn_unusable_manifest(manifest_path: Path, reason: str) -> None:
     print(
         f"spotlights-engine init: ignoring unusable manifest {manifest_path} "
-        f"({reason}); previously installed files will be treated as unmanaged.",
+        f"({reason}); it will be rewritten from this install, so records of "
+        "files older versions installed are lost.",
         file=sys.stderr,
     )
 
@@ -190,7 +217,8 @@ def _read_manifest(scope_root: Path) -> dict | None:
 
     A manifest of the wrong shape is as useless to us as corrupt JSON, and
     reaching into it would crash the install, so both degrade to "no manifest".
-    Losing the ownership record is worth a warning, so it is not silent.
+    That never blocks an install — it only loses the record of files older
+    versions put on disk, which is worth a warning rather than silence.
     """
     manifest_path = scope_root / _MANIFEST_DIR / _MANIFEST_NAME
     if not manifest_path.is_file():
@@ -280,60 +308,43 @@ def install_skills(scope: str = "user", force: bool = False) -> int:
         )
         return 1
 
-    # Always read the prior manifest: --force needs it to tell our files from the
-    # user's, and a plain re-run needs it to carry ownership forward. Reading it
-    # only under --force silently rewrote `files` as {} on every no-op run, which
-    # then made a later --force treat everything as unmanaged and refuse to upgrade.
+    # Read the prior manifest so files we installed before but skip this time stay
+    # in the record. It informs the record only — never the overwrite decision.
     existing_manifest = _read_manifest(scope_root)
-    existing_files: dict[str, str] = (
-        existing_manifest.get("files", {}) if existing_manifest else {}
-    )
+    existing_files: dict[str, str] = existing_manifest.get("files", {}) if existing_manifest else {}
 
     new_files: dict[str, str] = {}
     installed: list[str] = []
-    skipped_user_edited: list[str] = []
     skipped_existing: list[str] = []
+    skipped_symlink: list[str] = []
 
     for item in items:
         target_path = scope_root / Path(item.rel_path)
         bundled_text = item.source.read_text(encoding="utf-8")
         bundled_hash = hashlib.sha256(bundled_text.encode("utf-8")).hexdigest()
 
-        if target_path.exists():
-            on_disk_hash = _sha256(target_path)
-            recorded_hash = existing_files.get(item.rel_path)
-            if recorded_hash is None and on_disk_hash == bundled_hash:
-                # No manifest entry, but the file on disk is byte-for-byte the one
-                # we ship — it is ours whatever became of the manifest (deleted,
-                # malformed, emptied by the pre-fix wipe bug, or left behind when
-                # CLAUDE_CONFIG_DIR moved the root). Re-adopt it: without this the
-                # record can never be rebuilt, and `--force` refuses every file
-                # forever, blaming the user for edits they never made.
-                recorded_hash = bundled_hash
+        # Refuse to write through a symlink, with or without --force: a link
+        # planted inside the commands directory would redirect the write to an
+        # arbitrary path outside the scope root.
+        link = _first_symlink(scope_root, target_path)
+        if link is not None:
+            skipped_symlink.append(f"{item.label} (via {link})")
+            continue
 
-            if not force:
-                skipped_existing.append(item.label)
-                # Carry ownership forward so we don't lie about what we manage.
-                if recorded_hash is not None:
-                    new_files[item.rel_path] = recorded_hash
-                continue
-            # --force: only overwrite files we own and the user hasn't edited.
-            if recorded_hash is None:
-                # Not in manifest and not identical to ours -> not ours. Don't touch.
-                skipped_user_edited.append(item.label)
-                continue
-            if on_disk_hash != recorded_hash:
-                # User edited a file we installed previously. Don't clobber.
-                skipped_user_edited.append(item.label)
-                new_files[item.rel_path] = recorded_hash
-                continue
+        if target_path.exists() and not force:
+            skipped_existing.append(item.label)
+            # Keep it in the record if we installed it earlier — it is still installed.
+            if item.rel_path in existing_files:
+                new_files[item.rel_path] = existing_files[item.rel_path]
+            continue
 
         target_path.parent.mkdir(parents=True, exist_ok=True)
         target_path.write_text(bundled_text, encoding="utf-8")
         new_files[item.rel_path] = bundled_hash
         installed.append(item.label)
 
-    # Carry over manifest entries for files we don't manage in this bundle anymore.
+    # Carry over records for files this bundle no longer ships, so an eventual
+    # uninstall can still find what older versions put on disk.
     bundled_rel_paths = {item.rel_path for item in items}
     for rel_path, recorded_hash in existing_files.items():
         if rel_path not in bundled_rel_paths and rel_path not in new_files:
@@ -348,10 +359,11 @@ def install_skills(scope: str = "user", force: bool = False) -> int:
             "skipped (already exists, re-run with --force to overwrite): "
             f"{', '.join(skipped_existing)}"
         )
-    if skipped_user_edited:
+    if skipped_symlink:
         print(
-            "skipped (user-edited or not managed by spotlights, left untouched): "
-            f"{', '.join(skipped_user_edited)}"
+            "skipped (symlinked destination, never written through): "
+            f"{', '.join(skipped_symlink)}",
+            file=sys.stderr,
         )
     print(f"manifest: {manifest_path}")
     print(f"destination: {dest_dir}")
@@ -380,9 +392,10 @@ def build_argparser() -> argparse.ArgumentParser:
         "--force",
         action="store_true",
         help=(
-            "Overwrite skills previously installed by spotlights. "
-            "User-edited files are still preserved (detected via the "
-            "manifest's sha256)."
+            "Overwrite every bundled skill file with this version, discarding "
+            "local edits to those files. Without it, files that already exist "
+            "are left untouched. Files spotlights does not ship are never "
+            "written either way."
         ),
     )
     return p
