@@ -93,8 +93,19 @@ spotlights-engine init [--scope project|user] [--force]
 Behavior:
 - Locate bundled templates via `importlib.resources.files("spotlights_engine") / "_templates" / "commands"`.
 - Resolve destination:
-  - `--scope user` (default): `~/.claude/commands/`
-  - `--scope project`: `<cwd>/.claude/commands/`
+  - `--scope user` (default): `~/.claude/commands/`, or `$CLAUDE_CONFIG_DIR/commands/`
+    when that variable is *set* — resolved exactly as Claude Code resolves it, since
+    writing anywhere else installs skills that silently never appear: nullish rather
+    than falsy (set-but-empty is used *as* the root, giving a cwd-relative
+    `commands/`), no tilde expansion, NFC-normalized. A value that merely spells the
+    default location is treated as the default, so the manifest does not migrate.
+  - `--scope project`: `<cwd>/.claude/commands/` (unaffected by `CLAUDE_CONFIG_DIR`)
+- Follow symlinks wherever they appear on the destination path, including at the
+  installed file itself, and create the directories a dangling link's target needs.
+  Managing any of `~/.claude`, `commands/`, one skill directory, one skill file, or
+  `.spotlights/` through a dotfiles repo is a supported layout.
+- Never raise on an unwritable destination: report it and exit non-zero, writing the
+  manifest for whatever did land first.
 - For each `<name>.md` in the bundle, write `<dest>/spotlights-<name>.md` (apply prefix at install time, like spec-kit).
 - After writing each file, compute its sha256 and record it in the manifest.
 - Write `<scope-root>/.spotlights/manifest.json` with the shape below.
@@ -106,7 +117,10 @@ Behavior:
   used by its migration paths, not on `--force`. Conflating the two is what made an
   early version of our installer treat `--force` as a no-op on any edited file.)
 - Files the bundle does not ship are never written, at any force level.
-- Print a one-line summary: `installed: spotlights-objective-setting`.
+- `version`/`installed_at` describe the files on disk, not the run, so they only
+  advance when *every* bundled file was written — and are carried forward from the
+  prior manifest as a pair or not at all.
+- Print a one-line summary: `installed: spotlights-objective-setting.md`.
 
 **Manifest shape** (`.spotlights/manifest.json`, modeled on spec-kit's `speckit.manifest.json`):
 

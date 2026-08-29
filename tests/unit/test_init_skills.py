@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from pathlib import Path
 
 import pytest
 
@@ -188,6 +189,10 @@ class TestInstallSkills:
         commands.mkdir(parents=True)
         real = project_root / "dotfiles-skill"
         real.mkdir()
+        # Pre-seeded, so only an actual overwrite through the link passes: without
+        # this the plain install path writes the missing file and the test says
+        # nothing about `force` at all.
+        (real / "SKILL.md").write_text("stale\n", encoding="utf-8")
         (commands / "spotlights-share-candidates").symlink_to(real)
 
         assert init_skills.install_skills(scope="project", force=True) == 0
@@ -214,6 +219,131 @@ class TestInstallSkills:
         installed = project_root / ".claude" / "commands" / "spotlights-objective-setting.md"
         assert installed.read_text(encoding="utf-8") == "body\n"
         assert (project_root / ".spotlights" / "manifest.json").is_file()
+
+    @pytest.mark.parametrize("relative", [False, True])
+    def test_a_dangling_link_at_the_file_itself_is_written_through(
+        self, fake_bundle, project_root, relative
+    ):
+        """Per-file links are how stow manages individual files, and they dangle too.
+
+        `_ensure_dir` is given the *link's* parent, which already exists and says
+        nothing about whether the write can land — so the write followed the link
+        into a directory nobody had created. It crashed a plain `init`, not just
+        `--force`: a dangling link's `exists()` is False, so it is never skipped as
+        already-present. Five of six files landed, then a traceback, then no
+        manifest — the state the record exists to prevent.
+        """
+        (fake_bundle / "objective-setting.md").write_text("body\n", encoding="utf-8")
+        commands = project_root / ".claude" / "commands"
+        commands.mkdir(parents=True)
+        link = commands / "spotlights-objective-setting.md"
+        real = project_root / "dotfiles" / "objective-setting.md"
+        link.symlink_to(Path("../../dotfiles/objective-setting.md") if relative else real)
+        assert not link.exists()  # dangling
+
+        assert init_skills.install_skills(scope="project") == 0
+        assert real.read_text(encoding="utf-8") == "body\n"
+
+    def test_a_dangling_link_at_the_manifest_itself_is_written_through(
+        self, fake_bundle, project_root
+    ):
+        """Same bug one level up, and there it fires after every file is written."""
+        (fake_bundle / "objective-setting.md").write_text("body\n", encoding="utf-8")
+        (project_root / ".spotlights").mkdir()
+        real = project_root / "dotfiles" / "spotlights" / "manifest.json"
+        (project_root / ".spotlights" / "manifest.json").symlink_to(real)
+
+        assert init_skills.install_skills(scope="project") == 0
+        assert json.loads(real.read_text(encoding="utf-8"))["integration"] == "spotlights"
+
+    @pytest.mark.parametrize("cycle", ["self", "pair"])
+    def test_a_symlink_loop_is_reported_not_raised(self, fake_bundle, project_root, capsys, cycle):
+        """A mistyped `ln -s` must not produce a 1000-frame traceback.
+
+        Non-strict `resolve()` *stops* at a loop and hands back the still-looping
+        path, so recursing on it alone never terminates — `_ensure_dir` raised
+        `RecursionError`, which is not an `OSError` and so escaped the one handler
+        that exists.
+        """
+        (fake_bundle / "objective-setting.md").write_text("body\n", encoding="utf-8")
+        claude = project_root / ".claude"
+        if cycle == "self":
+            claude.symlink_to(claude)
+        else:
+            claude.symlink_to(project_root / "b")
+            (project_root / "b").symlink_to(claude)
+
+        assert init_skills.install_skills(scope="project") == 1
+        assert "cannot create" in capsys.readouterr().err
+
+    def test_a_blocked_file_still_leaves_a_record_of_what_landed(
+        self, fake_bundle, project_root, capsys
+    ):
+        """A mid-loop failure reports itself and records the files that did land.
+
+        Only the `dest_dir` call used to be guarded, so any obstruction below it
+        was a traceback plus an install nothing had a record of.
+        """
+        for name in ("a", "b"):
+            (fake_bundle / f"{name}.md").write_text(f"{name}\n", encoding="utf-8")
+        skill = fake_bundle / "share-candidates"
+        skill.mkdir()
+        (skill / "SKILL.md").write_text("skill\n", encoding="utf-8")
+
+        commands = project_root / ".claude" / "commands"
+        commands.mkdir(parents=True)
+        # A regular file where the skill's directory has to go.
+        (commands / "spotlights-share-candidates").write_text("blocked\n", encoding="utf-8")
+
+        assert init_skills.install_skills(scope="project") == 1
+        err = capsys.readouterr().err
+        assert "could not install" in err
+
+        files = json.loads(
+            (project_root / ".spotlights" / "manifest.json").read_text(encoding="utf-8")
+        )["files"]
+        # `a` sorts before the skill directory and was installed; the record says so.
+        assert ".claude/commands/spotlights-a.md" in files
+
+    def test_an_unwritable_destination_is_reported_not_raised(
+        self, fake_bundle, project_root, capsys
+    ):
+        """The `return 1` branch for an unusable `dest_dir` had no test."""
+        (fake_bundle / "objective-setting.md").write_text("body\n", encoding="utf-8")
+        # A regular file where `.claude/` has to go blocks the whole destination.
+        (project_root / ".claude").write_text("not a directory\n", encoding="utf-8")
+
+        assert init_skills.install_skills(scope="project") == 1
+        assert "cannot create" in capsys.readouterr().err
+
+    def test_a_binary_asset_is_installed_byte_for_byte(self, fake_bundle, project_root):
+        """The walker installs every file a skill directory holds, text or not.
+
+        Reading each through `read_text(encoding="utf-8")` made one future PNG a
+        `UnicodeDecodeError` mid-install. Hashing the bytes we wrote also keeps the
+        manifest honest where text mode would translate newlines.
+        """
+        skill = fake_bundle / "share-candidates"
+        skill.mkdir()
+        (skill / "SKILL.md").write_text("skill\n", encoding="utf-8")
+        blob = b"\x89PNG\r\n\x1a\n\xff\xfe\x00"
+        (skill / "logo.png").write_bytes(blob)
+
+        assert init_skills.install_skills(scope="project") == 0
+        installed = project_root / ".claude" / "commands" / "spotlights-share-candidates"
+        assert (installed / "logo.png").read_bytes() == blob
+        files = json.loads(
+            (project_root / ".spotlights" / "manifest.json").read_text(encoding="utf-8")
+        )["files"]
+        assert files[".claude/commands/spotlights-share-candidates/logo.png"] == (
+            hashlib.sha256(blob).hexdigest()
+        )
+
+    def test_an_empty_bundle_creates_nothing(self, fake_bundle, project_root, capsys):
+        """A mispackaged wheel must not leave an empty commands/ behind."""
+        assert init_skills.install_skills(scope="project") == 1
+        assert "no bundled skills found" in capsys.readouterr().err
+        assert list(project_root.iterdir()) == []
 
     @pytest.mark.parametrize("linked", [".claude", ".claude/commands"])
     def test_a_symlinked_claude_dir_is_written_through(
@@ -347,6 +477,62 @@ class TestInstallSkills:
         after = json.loads(manifest_path.read_text(encoding="utf-8"))
         assert after["version"] == "0.2.0"
         assert isinstance(after["installed_at"], str)
+
+    def test_provenance_is_carried_forward_as_a_pair(self, fake_bundle, project_root, monkeypatch):
+        """`version` and `installed_at` state one fact, so they move together.
+
+        Carrying them independently paired an old `version` with a fresh
+        `installed_at`, reporting an ancient install as seconds old — and the
+        timestamp then re-advanced on every partial run while the version stayed
+        pinned.
+        """
+        for name in ("a", "b"):
+            (fake_bundle / f"{name}.md").write_text(f"{name}\n", encoding="utf-8")
+        monkeypatch.setattr(init_skills, "_package_version", lambda: "0.9.9")
+        commands = project_root / ".claude" / "commands"
+        commands.mkdir(parents=True)
+        (commands / "spotlights-a.md").write_text("a\n", encoding="utf-8")
+        manifest_path = project_root / ".spotlights" / "manifest.json"
+        manifest_path.parent.mkdir(parents=True)
+        # A usable `version` with no `installed_at` at all.
+        manifest_path.write_text(
+            json.dumps({"integration": "spotlights", "version": "0.1.0", "files": {}}),
+            encoding="utf-8",
+        )
+
+        assert init_skills.install_skills(scope="project") == 0
+        after = json.loads(manifest_path.read_text(encoding="utf-8"))
+        # Neither half of an incomplete pair is trusted: both come from this run.
+        assert after["version"] == "0.9.9"
+
+    def test_a_partial_run_keeps_a_complete_prior_pair(
+        self, fake_bundle, project_root, monkeypatch
+    ):
+        """The converse: both fields usable, so both survive a partial run."""
+        for name in ("a", "b"):
+            (fake_bundle / f"{name}.md").write_text(f"{name}\n", encoding="utf-8")
+        monkeypatch.setattr(init_skills, "_package_version", lambda: "0.9.9")
+        commands = project_root / ".claude" / "commands"
+        commands.mkdir(parents=True)
+        (commands / "spotlights-a.md").write_text("a\n", encoding="utf-8")
+        manifest_path = project_root / ".spotlights" / "manifest.json"
+        manifest_path.parent.mkdir(parents=True)
+        manifest_path.write_text(
+            json.dumps(
+                {
+                    "integration": "spotlights",
+                    "version": "0.1.0",
+                    "installed_at": "2020-01-01T00:00:00+00:00",
+                    "files": {},
+                }
+            ),
+            encoding="utf-8",
+        )
+
+        assert init_skills.install_skills(scope="project") == 0
+        after = json.loads(manifest_path.read_text(encoding="utf-8"))
+        assert after["version"] == "0.1.0"
+        assert after["installed_at"] == "2020-01-01T00:00:00+00:00"
 
     def test_user_scope_writes_to_home(self, fake_bundle, monkeypatch, tmp_path):
         home = tmp_path / "home"

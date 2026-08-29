@@ -13,10 +13,16 @@ Overwrite policy, following spec-kit's installer:
   Local edits to those files are lost, which is what "force install this
   version" means.
 
-Symlinks anywhere on the destination path are followed, and a dangling one has
-its target created — see `_ensure_dir`. Symlinking `~/.claude`, `commands/`, an
-individual skill directory, or `.spotlights/` into a dotfiles repo (stow,
-chezmoi, plain `ln -s`) is routine, and Claude Code reads through those links.
+Symlinks anywhere on the destination path are followed, including at the file
+itself, and a dangling one has the directories its target needs created — see
+`_ensure_dir` and `_write_target`. Symlinking `~/.claude`, `commands/`, an
+individual skill directory, an individual skill *file*, or `.spotlights/` into a
+dotfiles repo (stow, chezmoi, plain `ln -s`) is routine, and Claude Code reads
+through those links.
+
+A destination we cannot write is reported and exits non-zero; it never raises.
+The manifest is still written first, so the files that did land are recorded —
+a half-done install nothing has a record of is the worst outcome available.
 
 Manifest at `<scope-root>/.spotlights/manifest.json` records `path -> sha256`
 for each file we installed. It is a *record* — of provenance, version, and what
@@ -29,6 +35,7 @@ root, which `CLAUDE_CONFIG_DIR` can move for user scope; see `_scope_layout`.
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import json
 import os
@@ -117,7 +124,18 @@ def _bundled_templates() -> Traversable:
     return packaged
 
 
-def _ensure_dir(path: Path) -> None:
+def _write_target(path: Path) -> Path:
+    """Where a write to `path` actually lands.
+
+    Writing through a symlink hits its target, so the target's parent is what has
+    to exist — `path.parent` is the *link's* directory, which says nothing about
+    whether the write can succeed. For a dangling link they differ, and creating
+    the wrong one leaves `write_text` raising `FileNotFoundError`.
+    """
+    return path.resolve() if path.is_symlink() else path
+
+
+def _ensure_dir(path: Path, _seen: frozenset[Path] = frozenset()) -> None:
     """`mkdir -p` that tolerates a symlinked directory, dangling or not.
 
     A freshly-cloned dotfiles repo leaves its links dangling until something
@@ -125,16 +143,22 @@ def _ensure_dir(path: Path) -> None:
     on a dangling link — it only forgives a path that is already a *directory*.
     `parents=True` re-raises it for a link partway up too, so walk the path
     ourselves and create what each dangling link points at.
+
+    Raises `OSError`, never `RecursionError`: non-strict `resolve()` *stops* at a
+    symlink loop and hands back the still-looping path, so recursing on it alone
+    would never terminate. `_seen` catches that and reports it as the `ELOOP` it is,
+    which the caller already handles as an unusable destination.
     """
     if path.is_dir():  # follows links, so a live symlinked directory ends here
         return
     if path.is_symlink():
-        # Dangling. `resolve()` is non-strict and strips every link, so the
-        # recursion lands on real directories and terminates.
-        _ensure_dir(path.resolve())
+        target = path.resolve()  # dangling; non-strict, so this is the real target
+        if target in _seen or target == path:
+            raise OSError(errno.ELOOP, "Too many levels of symbolic links", str(path))
+        _ensure_dir(target, _seen | {target})
         return
     if path.parent != path:
-        _ensure_dir(path.parent)
+        _ensure_dir(path.parent, _seen)
     path.mkdir(exist_ok=True)
 
 
@@ -253,17 +277,17 @@ def _read_manifest(scope_root: Path) -> dict | None:
     return payload
 
 
-def _prior_str(prior: dict | None, key: str, fallback: str) -> str:
-    """A string field from the prior manifest, or `fallback`.
+def _prior_str(prior: dict | None, key: str) -> str | None:
+    """A non-empty string field from the prior manifest, or None.
 
     `_read_manifest` only shape-checks `files`, so `version` may be absent, null,
     or a number. Anything that is not a string is dropped rather than copied into
     every manifest we rewrite from then on.
     """
     if prior is None:
-        return fallback
+        return None
     value = prior.get(key)
-    return value if isinstance(value, str) and value else fallback
+    return value if isinstance(value, str) and value else None
 
 
 def _write_manifest(
@@ -277,16 +301,23 @@ def _write_manifest(
     the ordinary upgrade path — leaves mixed content on disk, and stamping the new
     version onto it would claim an upgrade that did not happen. `--force` brings
     everything up to date and so always advances them.
+
+    The two are carried forward as a pair or not at all: they state one fact
+    together, and taking the old `version` beside a fresh `installed_at` would
+    report an ancient install as seconds old.
     """
     manifest_dir = scope_root / _MANIFEST_DIR
     _ensure_dir(manifest_dir)
     manifest_path = manifest_dir / _MANIFEST_NAME
+    _ensure_dir(_write_target(manifest_path).parent)
 
     installed_version = _package_version()
     installed_at = datetime.now(UTC).isoformat(timespec="seconds")
     if not fully_installed:
-        installed_version = _prior_str(prior, "version", installed_version)
-        installed_at = _prior_str(prior, "installed_at", installed_at)
+        prior_version = _prior_str(prior, "version")
+        prior_at = _prior_str(prior, "installed_at")
+        if prior_version and prior_at:
+            installed_version, installed_at = prior_version, prior_at
 
     payload = {
         "integration": "spotlights",
@@ -337,20 +368,23 @@ def install_skills(scope: str = "user", force: bool = False) -> int:
     """
     scope_root, commands_rel = _scope_layout(scope)
     dest_dir = scope_root / commands_rel
-    try:
-        _ensure_dir(dest_dir)
-    except OSError as exc:
-        print(
-            f"spotlights-engine init: cannot create {dest_dir} ({exc}).",
-            file=sys.stderr,
-        )
-        return 1
 
+    # Resolve the bundle before creating anything: a mispackaged wheel should not
+    # leave an empty commands/ directory behind on a run that installs nothing.
     items = _plan_install_items(commands_rel)
     if not items:
         print(
             "spotlights-engine init: no bundled skills found "
             f"(looked in {_PACKAGE}/{_TEMPLATES_SUBDIR}).",
+            file=sys.stderr,
+        )
+        return 1
+
+    try:
+        _ensure_dir(dest_dir)
+    except OSError as exc:
+        print(
+            f"spotlights-engine init: cannot create {dest_dir} ({exc}).",
             file=sys.stderr,
         )
         return 1
@@ -363,11 +397,10 @@ def install_skills(scope: str = "user", force: bool = False) -> int:
     new_files: dict[str, str] = {}
     installed: list[str] = []
     skipped_existing: list[str] = []
+    failure: str | None = None
 
     for item in items:
         target_path = scope_root / Path(item.rel_path)
-        bundled_text = item.source.read_text(encoding="utf-8")
-        bundled_hash = hashlib.sha256(bundled_text.encode("utf-8")).hexdigest()
 
         if target_path.exists() and not force:
             skipped_existing.append(item.label)
@@ -377,24 +410,41 @@ def install_skills(scope: str = "user", force: bool = False) -> int:
                 new_files[item.rel_path] = existing_files[item.rel_path]
             continue
 
-        _ensure_dir(target_path.parent)
-        target_path.write_text(bundled_text, encoding="utf-8")
-        new_files[item.rel_path] = bundled_hash
+        # Bytes, not text: the walker installs every file a skill directory holds,
+        # so a future binary asset must not abort the install, and a hash of the
+        # bytes we wrote stays correct where text mode would translate newlines.
+        try:
+            bundled_bytes = item.source.read_bytes()
+            _ensure_dir(_write_target(target_path).parent)
+            target_path.write_bytes(bundled_bytes)
+        except OSError as exc:
+            # Stop at the first failure but still record what landed, below: a
+            # half-done install nothing knows about is the worst outcome here.
+            failure = f"{item.label} ({exc})"
+            break
+        new_files[item.rel_path] = hashlib.sha256(bundled_bytes).hexdigest()
         installed.append(item.label)
 
-    # Carry over records for files this bundle no longer ships, so an eventual
-    # uninstall can still find what older versions put on disk.
-    bundled_rel_paths = {item.rel_path for item in items}
+    # Everything the record already held that this run did not rewrite stays in it:
+    # files this bundle no longer ships, and — when the loop stopped early — files
+    # it never reached. Both are still on disk, so an uninstall still needs them.
     for rel_path, recorded_hash in existing_files.items():
-        if rel_path not in bundled_rel_paths and rel_path not in new_files:
-            new_files[rel_path] = recorded_hash
+        new_files.setdefault(rel_path, recorded_hash)
 
-    manifest_path = _write_manifest(
-        scope_root,
-        new_files,
-        existing_manifest,
-        fully_installed=len(installed) == len(items),
-    )
+    try:
+        manifest_path = _write_manifest(
+            scope_root,
+            new_files,
+            existing_manifest,
+            fully_installed=len(installed) == len(items),
+        )
+    except OSError as exc:
+        print(
+            f"spotlights-engine init: installed {len(installed)} file(s) but could "
+            f"not write the manifest in {scope_root / _MANIFEST_DIR} ({exc}).",
+            file=sys.stderr,
+        )
+        return 1
 
     if installed:
         print(f"installed: {', '.join(installed)}")
@@ -405,6 +455,13 @@ def install_skills(scope: str = "user", force: bool = False) -> int:
         )
     print(f"manifest: {manifest_path}")
     print(f"destination: {dest_dir}")
+    if failure is not None:
+        print(
+            f"spotlights-engine init: could not install {failure}. "
+            "The manifest records the files that were installed.",
+            file=sys.stderr,
+        )
+        return 1
     return 0
 
 
