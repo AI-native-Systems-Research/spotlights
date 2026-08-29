@@ -183,9 +183,30 @@ class TestInstallSkills:
         outside.write_text("do not clobber me\n", encoding="utf-8")
         (commands / "spotlights-objective-setting.md").symlink_to(outside)
 
-        assert init_skills.install_skills(scope="project", force=True) == 0
+        # A refused file is a file the user asked for and did not get.
+        assert init_skills.install_skills(scope="project", force=True) == 1
         assert outside.read_text(encoding="utf-8") == "do not clobber me\n"
         assert "symlink" in capsys.readouterr().err
+
+    def test_a_refused_symlink_keeps_its_prior_record(self, fake_bundle, project_root):
+        """Refusing to write does not uninstall the file that is already there.
+
+        Dropping it from `files` would make an uninstall miss a file we put on
+        disk, and contradicts the record's whole purpose.
+        """
+        (fake_bundle / "objective-setting.md").write_text("v1\n", encoding="utf-8")
+        assert init_skills.install_skills(scope="project") == 0
+
+        rel = ".claude/commands/spotlights-objective-setting.md"
+        target = project_root / rel
+        target.unlink()
+        target.symlink_to(project_root / "outside.md")
+
+        assert init_skills.install_skills(scope="project", force=True) == 1
+        files = json.loads(
+            (project_root / ".spotlights" / "manifest.json").read_text(encoding="utf-8")
+        )["files"]
+        assert files[rel] == _sha256_text("v1\n")
 
     def test_force_refuses_to_write_through_a_symlinked_parent(self, fake_bundle, project_root):
         """The guard walks the whole path, not just the leaf.
@@ -203,8 +224,86 @@ class TestInstallSkills:
         outside.mkdir()
         (commands / "spotlights-share-candidates").symlink_to(outside)
 
-        assert init_skills.install_skills(scope="project", force=True) == 0
+        assert init_skills.install_skills(scope="project", force=True) == 1
         assert list(outside.iterdir()) == []
+
+    @pytest.mark.parametrize("linked", [".claude", ".claude/commands"])
+    def test_a_symlinked_claude_dir_is_written_through(
+        self, fake_bundle, monkeypatch, tmp_path, linked
+    ):
+        """Dotfiles setups symlink ~/.claude (or commands/) into a managed repo.
+
+        Claude Code reads through those links, so the installer writes through
+        them. An earlier version drew the symlink boundary at the scope root,
+        which refused every file of such an install and reported success.
+        """
+        home = tmp_path / "linked-home"
+        home.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        real = tmp_path / "dotfiles" / "claude"
+        real.mkdir(parents=True)
+
+        link = home / linked
+        if linked != ".claude":
+            (home / ".claude").mkdir()
+        link.symlink_to(real)
+
+        body = "body\n"
+        (fake_bundle / "objective-setting.md").write_text(body, encoding="utf-8")
+        assert init_skills.install_skills(scope="user") == 0
+
+        installed = home / ".claude" / "commands" / "spotlights-objective-setting.md"
+        assert installed.read_text(encoding="utf-8") == body
+        files = json.loads((home / ".spotlights" / "manifest.json").read_text(encoding="utf-8"))[
+            "files"
+        ]
+        assert files == {".claude/commands/spotlights-objective-setting.md": _sha256_text(body)}
+
+    def test_a_symlinked_spotlights_dir_is_written_through(self, fake_bundle, project_root):
+        """`.spotlights/` gets the same treatment as `.claude/`: user infrastructure.
+
+        Deliberate, not an oversight. It sits directly under the scope root, at the
+        same level as `.claude`, and symlinking it into a dotfiles repo is the same
+        legitimate setup. Guarding it would refuse to record an install for exactly
+        the users the symlink boundary above exists to support, and there is no
+        escalation to prevent: planting that link needs write access to the scope
+        root, which already allows writing the skill files directly, and the only
+        content we send through it is our own manifest JSON.
+        """
+        (fake_bundle / "objective-setting.md").write_text("body\n", encoding="utf-8")
+        real = project_root / "dotfiles-spotlights"
+        real.mkdir()
+        (project_root / ".spotlights").symlink_to(real)
+
+        assert init_skills.install_skills(scope="project") == 0
+        assert (real / "manifest.json").is_file()
+
+    def test_noop_rerun_keeps_prior_version_and_timestamp(
+        self, fake_bundle, project_root, monkeypatch
+    ):
+        """`version`/`installed_at` describe the files on disk, not the run.
+
+        A re-run after a package upgrade that writes nothing must not claim the
+        new version for content the old one put there.
+        """
+        (fake_bundle / "objective-setting.md").write_text("v1\n", encoding="utf-8")
+        monkeypatch.setattr(init_skills, "_package_version", lambda: "0.1.0")
+        assert init_skills.install_skills(scope="project") == 0
+
+        manifest_path = project_root / ".spotlights" / "manifest.json"
+        first = json.loads(manifest_path.read_text(encoding="utf-8"))
+
+        # Package upgraded, but the bundle is already fully installed.
+        monkeypatch.setattr(init_skills, "_package_version", lambda: "0.2.0")
+        assert init_skills.install_skills(scope="project") == 0
+
+        after = json.loads(manifest_path.read_text(encoding="utf-8"))
+        assert after["version"] == "0.1.0"
+        assert after["installed_at"] == first["installed_at"]
+
+        # ...and --force, which does write, brings both up to date.
+        assert init_skills.install_skills(scope="project", force=True) == 0
+        assert json.loads(manifest_path.read_text(encoding="utf-8"))["version"] == "0.2.0"
 
     def test_user_scope_writes_to_home(self, fake_bundle, monkeypatch, tmp_path):
         home = tmp_path / "home"

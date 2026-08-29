@@ -24,16 +24,24 @@ your responsibility to run the ranking step first.
    `sorted_candidates.md` (e.g. `.../spotlights-out/sorted/`). Do not
    guess; ask the user for the absolute path.
 2. **Ask for top-N** — default is 5 if the user doesn't specify.
-3. **Run the build script.** `build_bundle.py` sits in this skill's own
-   directory — the same directory as the `SKILL.md` you are reading. Resolve it
-   from that path rather than guessing a location: `spotlights-engine init`
-   installs user-wide by default (`~/.claude/commands/`), into the project
-   (`./.claude/commands/`) with `--scope project`, and into
-   `$CLAUDE_CONFIG_DIR/commands/` when that variable is set.
+3. **Run the build script.** `build_bundle.py` is installed into this skill's own
+   directory, alongside the `SKILL.md` you are reading. Where that is depends on
+   how `spotlights-engine init` was run, so locate it with the snippet below
+   rather than assuming a path — it takes the first location that exists:
 
    ```bash
-   python3 "<this skill's directory>/build_bundle.py" --source "<folder>" --top-n 5
+   for d in "${CLAUDE_CONFIG_DIR:+$CLAUDE_CONFIG_DIR/commands}" \
+            "$HOME/.claude/commands" \
+            ".claude/commands"; do
+     script="$d/spotlights-share-candidates/build_bundle.py"
+     [ -f "$script" ] && break
+   done
+   python3 "$script" --source "<folder>" --top-n 5
    ```
+
+   `$CLAUDE_CONFIG_DIR/commands/` is where a user-scope install lands when that
+   variable is set, `~/.claude/commands/` is the `init` default, and
+   `./.claude/commands/` is an `init --scope project` install.
 
    The script resolves all of its paths from `--source`, so it does not matter
    which directory you run it from.

@@ -13,11 +13,15 @@ Overwrite policy, following spec-kit's installer:
   Local edits to those files are lost, which is what "force install this
   version" means.
 
+Either way, a symlink *inside* the commands directory is refused rather than
+followed, and a refusal makes the whole run exit non-zero — see `_first_symlink`.
+
 Manifest at `<scope-root>/.spotlights/manifest.json` records `path -> sha256`
 for each file we installed. It is a *record* — of provenance, version, and what
 an eventual uninstall would remove — and is never consulted to decide whether to
-write. Paths are relative to the scope root, which `CLAUDE_CONFIG_DIR` can move
-for user scope; see `_scope_layout`.
+write. `version`/`installed_at` describe the files on disk, so a run that writes
+nothing leaves them alone. Paths are relative to the scope root, which
+`CLAUDE_CONFIG_DIR` can move for user scope; see `_scope_layout`.
 """
 
 from __future__ import annotations
@@ -111,18 +115,22 @@ def _bundled_templates() -> Traversable:
     return packaged
 
 
-def _first_symlink(scope_root: Path, target: Path) -> Path | None:
-    """First symlink at or below `scope_root` on the way to `target`, else None.
+def _first_symlink(dest_dir: Path, target: Path) -> Path | None:
+    """First symlink strictly below `dest_dir` on the way to `target`, else None.
 
-    Writing through a symlink would let a link planted inside the commands
-    directory redirect the write anywhere on disk, so the installer refuses
-    instead of following it (spec-kit's installer does the same).
+    Writing through a symlink would let a link planted among the files we install
+    redirect the write anywhere on disk, so the installer refuses instead of
+    following it (spec-kit's installer does the same).
 
-    `scope_root` itself is deliberately not checked: a symlinked `$HOME` or
-    `CLAUDE_CONFIG_DIR` is legitimate, and Claude Code reads through it too.
+    The boundary is the commands directory, and `dest_dir` itself is never
+    checked. Everything at or above it — `$HOME`, `~/.claude`, `commands/`,
+    `CLAUDE_CONFIG_DIR` — is the user's own layout, and symlinking it into a
+    dotfiles repo (stow, chezmoi, plain `ln -s`) is routine. Claude Code reads
+    through those links, so we write through them. Only links *inside* the
+    directory we populate are the planted-link threat this guards against.
     """
     current = target
-    while current != scope_root and current.parent != current:
+    while current != dest_dir and current.parent != current:
         if current.is_symlink():
             return current
         current = current.parent
@@ -244,20 +252,48 @@ def _read_manifest(scope_root: Path) -> dict | None:
     return payload
 
 
-def _write_manifest(scope_root: Path, files: dict[str, str]) -> Path:
+def _write_manifest(
+    scope_root: Path, files: dict[str, str], prior: dict | None, wrote_anything: bool
+) -> Path:
+    """Write the manifest, keeping prior provenance when nothing was installed.
+
+    `version` and `installed_at` describe the files on disk, not the run. A
+    re-run that writes nothing — every file already present — must not claim the
+    newly installed package's version for content an older one put there.
+    """
     manifest_dir = scope_root / _MANIFEST_DIR
     manifest_dir.mkdir(parents=True, exist_ok=True)
     manifest_path = manifest_dir / _MANIFEST_NAME
+
+    installed_version = _package_version()
+    installed_at = datetime.now(UTC).isoformat(timespec="seconds")
+    if not wrote_anything and prior is not None:
+        installed_version = prior.get("version", installed_version)
+        installed_at = prior.get("installed_at", installed_at)
+
     payload = {
         "integration": "spotlights",
-        "version": _package_version(),
-        "installed_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "version": installed_version,
+        "installed_at": installed_at,
         "files": files,
     }
     manifest_path.write_text(
         json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     return manifest_path
+
+
+def _carry_forward(
+    new_files: dict[str, str], existing_files: dict[str, str], rel_path: str
+) -> None:
+    """Keep a skipped file's prior record — skipping does not uninstall it.
+
+    Whatever the reason we did not write (already there, or a symlink we refuse
+    to follow), a file an earlier `init` put on disk is still on disk, so it
+    belongs in the record an uninstall would read.
+    """
+    if rel_path in existing_files:
+        new_files[rel_path] = existing_files[rel_path]
 
 
 def _plan_install_items(
@@ -324,18 +360,17 @@ def install_skills(scope: str = "user", force: bool = False) -> int:
         bundled_hash = hashlib.sha256(bundled_text.encode("utf-8")).hexdigest()
 
         # Refuse to write through a symlink, with or without --force: a link
-        # planted inside the commands directory would redirect the write to an
+        # planted among the files we install would redirect the write to an
         # arbitrary path outside the scope root.
-        link = _first_symlink(scope_root, target_path)
+        link = _first_symlink(dest_dir, target_path)
         if link is not None:
             skipped_symlink.append(f"{item.label} (via {link})")
+            _carry_forward(new_files, existing_files, item.rel_path)
             continue
 
         if target_path.exists() and not force:
             skipped_existing.append(item.label)
-            # Keep it in the record if we installed it earlier — it is still installed.
-            if item.rel_path in existing_files:
-                new_files[item.rel_path] = existing_files[item.rel_path]
+            _carry_forward(new_files, existing_files, item.rel_path)
             continue
 
         target_path.parent.mkdir(parents=True, exist_ok=True)
@@ -350,7 +385,9 @@ def install_skills(scope: str = "user", force: bool = False) -> int:
         if rel_path not in bundled_rel_paths and rel_path not in new_files:
             new_files[rel_path] = recorded_hash
 
-    manifest_path = _write_manifest(scope_root, new_files)
+    manifest_path = _write_manifest(
+        scope_root, new_files, existing_manifest, wrote_anything=bool(installed)
+    )
 
     if installed:
         print(f"installed: {', '.join(installed)}")
@@ -367,7 +404,10 @@ def install_skills(scope: str = "user", force: bool = False) -> int:
         )
     print(f"manifest: {manifest_path}")
     print(f"destination: {dest_dir}")
-    return 0
+    # A refused symlink means a file the user asked for is not installed. Say so
+    # in the exit code too, or a scripted `init && <use the skills>` proceeds
+    # against skills that were never written.
+    return 1 if skipped_symlink else 0
 
 
 def build_argparser() -> argparse.ArgumentParser:
