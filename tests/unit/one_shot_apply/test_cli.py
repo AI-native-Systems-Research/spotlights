@@ -92,9 +92,16 @@ def test_non_git_repo_exits_2(tmp_path: Path, capsys: pytest.CaptureFixture) -> 
     assert "git" in capsys.readouterr().err
 
 
-def test_print_prompt_writes_the_prompt_and_worktree_to_stdout(
+def test_print_prompt_prints_the_file_path_and_not_the_prompt(
     run, capsys: pytest.CaptureFixture
 ) -> None:
+    """stdout is one path line; the prompt itself lives only in the file.
+
+    The prompt is no longer dumped to stdout, so a caller cannot `tee` it — it
+    reads `apply.prompt.txt` at the printed path instead. stdout stays
+    machine-readable (one line per candidate, same shape as the run path), which
+    a multi-KB prompt block interleaved with it would destroy.
+    """
     run_dir, repo = run
     code = apply_main(
         [
@@ -110,26 +117,33 @@ def test_print_prompt_writes_the_prompt_and_worktree_to_stdout(
     captured = capsys.readouterr()
     out = captured.out
     assert code == 0
-    assert "WORKTREE:" in out
-    assert CAND_FILE in out
-    # `--print-prompt` writes nothing and skips nothing, so there is no tally to
-    # print: "0 candidate(s) written" under a prompt dump would read as failure.
+
+    out_dir = run_dir / "apply" / "v1_attention" / CAND_ID
+    assert out.strip() == f"{CAND_ID}: {out_dir} (1 file, prompt only)"
+    # The dump is gone: neither the block's headers nor its body reach stdout.
+    assert "PROMPT:" not in out
+    assert "WORKTREE:" not in out
+    assert CAND_FILE not in out
+    # `--print-prompt` writes no patch and skips nothing, so there is no tally:
+    # "0 candidate(s) written" under a prompt handoff would read as failure.
     assert "candidate(s) written" not in captured.err
 
-    # The worktree is left in place for the caller; clean it up, including the
-    # temp-dir parent that WORKTREE_PARENT points at (create_worktree allocates
-    # it via tempfile.mkdtemp; only this cleanup removes it).
+    # The worktree is left in place for the caller, which now finds it by reading
+    # the file — the only place those two paths are still published. Clean up
+    # both it and the temp-dir parent WORKTREE_PARENT names (create_worktree
+    # allocates it via tempfile.mkdtemp; only this cleanup removes it).
     import shutil
     import subprocess
 
+    written = (out_dir / "apply.prompt.txt").read_text(encoding="utf-8")
     worktree = next(
         ln.split("WORKTREE:", 1)[1].strip()
-        for ln in out.splitlines()
+        for ln in written.splitlines()
         if ln.startswith("WORKTREE:")
     )
     worktree_parent = next(
         ln.split("WORKTREE_PARENT:", 1)[1].strip()
-        for ln in out.splitlines()
+        for ln in written.splitlines()
         if ln.startswith("WORKTREE_PARENT:")
     )
     assert Path(worktree).is_dir()

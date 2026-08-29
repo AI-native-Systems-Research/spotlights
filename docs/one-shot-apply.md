@@ -55,7 +55,7 @@ worktree needs a commit, and a patch without a recorded base is not applicable.
 | `--top-n` | With a sorted `--result`: only the top N ranked candidates. Default `all`. |
 | `--max-turns` | Agent turn cap per candidate. Default `40`. Must be `>= 1` (exit 2 otherwise). |
 | `--wallclock` | Wall-clock cap in seconds per candidate. Default `1800`. Must be `>= 1` (exit 2 otherwise). |
-| `--print-prompt` | Create and validate the worktree, print it and the prompt, exit. **Requires `--candidate`.** |
+| `--print-prompt` | Create and validate the worktree, clear the candidate's apply dir, write `apply.prompt.txt` as its only file, print its directory, exit. **Requires `--candidate`.** |
 
 ## Artifacts
 
@@ -67,6 +67,12 @@ worktree needs a commit, and a patch without a recorded base is not applicable.
 └── manifest.json      # this session's tokens, cost, provenance, timing
 ```
 
+`--print-prompt` writes into the same directory but leaves **only**
+`apply.prompt.txt` there: no agent ran, so there is no patch, nothing to document,
+and nothing to account for — and any of the other three left by an earlier apply
+of that candidate is deleted, so the directory describes the handoff in progress
+rather than the session it replaces.
+
 `apply.patch` is a `git diff`, not `format-patch`: the latter needs a commit, and
 the repo stays untouched.
 
@@ -75,22 +81,26 @@ absent but `APPLY-NOTES.md` and `apply.prompt.txt` are still written, and a stal
 patch left over from an earlier run of the same candidate is deleted, so the
 directory can never hold a patch that the notes go on to deny exists.
 
-`apply.prompt.txt` is the exact block `--print-prompt` emits — candidate, module,
-base commit, repo, worktree paths, then the prompt body — written on every path,
-patch or no patch. It is meant to be reusable on its own: take the file, and the
-prompt is what a fresh agent needs to attempt the same change. It also answers
-the question the notes cannot: whether a disappointing outcome came from the agent
-or from what the agent was *told*. "No in-scope edit was possible" and "the target
-the prompt named was the wrong one" read the same in the notes and differently
-here. Both `--print-prompt` and the run path render it from the same function, so
-the file the `/spotlights-apply-candidate` skill saves by teeing that stdout is
-byte-identical to the one the CLI writes itself.
+`apply.prompt.txt` records candidate, module, base commit, repo, worktree paths,
+then the prompt body — written on every path, patch or no patch. It is meant to be
+reusable on its own: take the file, and the prompt is what a fresh agent needs to
+attempt the same change. It also answers the question the notes cannot: whether a
+disappointing outcome came from the agent or from what the agent was *told*. "No
+in-scope edit was possible" and "the target the prompt named was the wrong one"
+read the same in the notes and differently here. `--print-prompt` and the run path
+render it from the same function, so the same candidate cannot produce different
+bytes depending on which path wrote the file.
 
-The two worktree paths in it are **dead by the time you read it** — the run
-deletes the worktree before writing the artifact, and the skill deletes it at its
-own last step. They are kept as a record that correlates the artifact with the
-run, and the file's `NOTE:` block says so, along with the one command that turns
-it back into something runnable:
+Under `--print-prompt` it is the **only** file written, and it is the handoff
+itself rather than a record of one — see [Inspecting the prompt](#inspecting-the-prompt).
+
+The two worktree paths in it are **dead by the time you read it** on the run path
+— the run deletes the worktree before writing the artifact, and the skill deletes
+it at its own last step. (Under `--print-prompt` they are still live; that is the
+point of the flag, and the `NOTE:` block distinguishes the two cases.) They are
+kept as a record that correlates the artifact with the run, and the `NOTE:` block
+says so, along with the one command that turns a dead copy back into something
+runnable:
 
 ```bash
 git -C <repo> worktree add --detach <dir> <base-sha>
@@ -194,10 +204,12 @@ use the bundled skill instead (install it with `spotlights-engine init`):
 ```
 
 It picks a candidate, calls `spotlights-engine apply --print-prompt` to get the
-prompt *and* a created, validated worktree in one call, does the work
-in-session, then collects the same three artifacts and removes both the
-worktree and its `WORKTREE_PARENT` scaffolding directory. The prompt is shared
-between the two paths, so they cannot drift on the part that matters.
+prompt *and* a created, validated worktree in one call, reads the written
+`apply.prompt.txt` for the prompt and the worktree path, does the work in-session,
+then collects the remaining artifacts and removes both the worktree and its
+`WORKTREE_PARENT` scaffolding directory. The prompt is shared between the two
+paths, so they cannot drift on the part that matters — and the skill no longer
+has to save a copy of it, because the engine already wrote the file.
 
 ### Naming the candidate up front
 
@@ -238,6 +250,54 @@ move a candidate between the two paths without translating anything.
 > same prompt unattended. Use `--print-prompt` if you want to inspect the prompt
 > and the validated worktree before deciding which way to go — it leaves the
 > worktree in place for you.
+
+## Inspecting the prompt
+
+`--print-prompt` does the whole setup — resolve the run, resolve the repo, create
+a worktree at the base commit, validate the candidate's target against it, render
+the prompt — and then stops, without running an agent. It requires `--candidate`:
+a sweep would leave one worktree per candidate registered in the target repo with
+nothing to clean them up.
+
+It writes exactly one file and prints where it went:
+
+```console
+$ spotlights-engine apply --print-prompt \
+    --result ./spotlights-out --repo ../vllm --candidate cand-vllm_v1_kv_offload-0002
+cand-vllm_v1_kv_offload-0002: spotlights-out/apply/vllm_v1_kv_offload/cand-vllm_v1_kv_offload-0002 (1 file, prompt only)
+```
+
+The prompt is **not** printed to stdout — it is in `apply.prompt.txt` in that
+directory, and stdout stays one machine-readable line per candidate. Read the
+prompt, and the worktree to work in, out of the file:
+
+```bash
+cat "<dir>/apply.prompt.txt"                     # the whole block
+grep '^WORKTREE:' "<dir>/apply.prompt.txt"       # where to work
+grep '^WORKTREE_PARENT:' "<dir>/apply.prompt.txt"  # what to delete afterwards
+```
+
+Two consequences worth knowing:
+
+- **The worktree is yours to remove.** Nothing else will. `git worktree remove
+  --force <WORKTREE>` and then `rm -rf <WORKTREE_PARENT>` — the parent is a
+  `tempfile.mkdtemp()` directory that outlives the worktree itself.
+- **A directory holding only `apply.prompt.txt` is a prompt handoff, not a
+  failed apply.** On the run path the artifacts are written together, so a lone
+  prompt file used to mean a half-finished write; `--print-prompt` now produces
+  that state deliberately.
+- **It clears the candidate's apply directory.** See below.
+
+> [!WARNING]
+> `--print-prompt` **deletes** any `apply.patch`, `APPLY-NOTES.md` and
+> `manifest.json` an earlier apply of the same candidate left in that directory,
+> so that only the new `apply.prompt.txt` remains. It is how a candidate gets
+> restarted: those files describe a session the handoff supersedes, and a patch
+> sitting next to a prompt that did not produce it is worse than no patch. The
+> deleted patch is **not recoverable** — the worktree that produced it is long
+> gone. Copy the directory elsewhere first if you want to keep it, or read the
+> prompt straight out of the existing `apply.prompt.txt` instead, which the run
+> path already wrote.
 
 ## Sharing the patch
 

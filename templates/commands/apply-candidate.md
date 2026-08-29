@@ -1,5 +1,5 @@
 ---
-description: Use when implementing ONE Spotlights candidate as a reviewable patch in-session — "apply this candidate", "fix this candidate", "implement candidate cand-...", "one-shot apply". Runs `spotlights-engine apply --print-prompt` to get a validated throwaway worktree plus the apply prompt, does the work interactively, and collects apply.patch + apply.prompt.txt + APPLY-NOTES.md. Runs no tests and no benchmarks, and never modifies the target repo.
+description: Use when implementing ONE Spotlights candidate as a reviewable patch in-session — "apply this candidate", "fix this candidate", "implement candidate cand-...", "one-shot apply". Runs `spotlights-engine apply --print-prompt` to get a validated throwaway worktree plus the apply prompt written to apply.prompt.txt, does the work interactively, and collects apply.patch + APPLY-NOTES.md beside it. Runs no tests and no benchmarks, and never modifies the target repo.
 ---
 
 # Apply Candidate
@@ -46,19 +46,36 @@ prevent.
 
    ```bash
    spotlights-engine apply --print-prompt \
-     --result "<run-dir>" --repo "<repo>" --candidate "<cand-id>" \
-     | tee "/tmp/spotlights-apply-prompt-<cand-id>.txt"
+     --result "<run-dir>" --repo "<repo>" --candidate "<cand-id>"
    ```
 
-   The `tee` is not optional: that file becomes `apply.prompt.txt` in step 4,
-   and this is the only moment the prompt exists as text you can copy. Do not
-   reconstruct it later from what you remember reading — a paraphrase of the
-   prompt is worse than no prompt, because it reads as the real one. `tee`
-   captures stdout only, which is exactly the block; warnings go to stderr and
-   stay out of the file, so it matches byte-for-byte what
-   `spotlights-engine apply` writes on its own path.
+   This **clears the candidate's apply directory**: any `apply.patch`,
+   `APPLY-NOTES.md` and `manifest.json` a previous apply of the same candidate
+   left there is deleted, and the deleted patch cannot be recovered. If the user
+   asked to see the prompt for a candidate that has already been applied, say so
+   and let them decide before you run it — reading the existing
+   `apply.prompt.txt` answers that question without destroying anything.
 
-   It prints a block of the form:
+   It leaves `apply.prompt.txt` as the directory's only file and prints one line
+   naming the directory:
+
+   ```
+   <cand-id>: <run-dir>/apply/<module-slug>/<cand-id> (1 file, prompt only)
+   ```
+
+   The prompt is **not** on stdout. Read it from the file:
+
+   ```bash
+   cat "<run-dir>/apply/<module-slug>/<cand-id>/apply.prompt.txt"
+   ```
+
+   Do not pipe this command through `tee` and do not save a copy of your own: the
+   engine already wrote the file, in the exact form step 4 needs, and a
+   second hand-made copy can only disagree with it. Equally, do not reconstruct
+   the prompt later from what you remember reading — a paraphrase of the prompt is
+   worse than no prompt, because it reads as the real one.
+
+   The file holds a block of the form:
 
    ```
    CANDIDATE: <id>
@@ -67,13 +84,16 @@ prevent.
    REPO:      <repo>
    WORKTREE:  <path>
    WORKTREE_PARENT:  <path>
-   NOTE: <the worktree paths are throwaway; how to recreate an equivalent one>
+   NOTE: <whether the worktree paths are live; how to recreate an equivalent one>
    PROMPT:
    <the prompt body>
    ```
 
    Read `WORKTREE` and `WORKTREE_PARENT` off their own lines — the `NOTE:` block
-   mentions both by name, so match on the line prefix, not on the substring.
+   mentions both by name, so match on the line prefix, not on the substring. The
+   `NOTE:` block covers both callers of this renderer and says the paths are dead
+   in a *completed* apply's copy; yours came from `--print-prompt`, so they are
+   live and they are yours to clean up in step 5.
 
    `WORKTREE` is a detached checkout at `BASE`, already validated against the
    candidate's recorded symbol and line range, and is **left in place for you**.
@@ -85,7 +105,7 @@ prevent.
    in the run's `run_manifest.json` under `target.commit_sha`. Do not work around
    the gate; with no tests being run it is the only correctness check there is.
 
-3. **Implement the change in the worktree**, following the printed prompt.
+3. **Implement the change in the worktree**, following the prompt you just read.
    Edit only the in-scope files it lists — nothing outside that list, even if it
    looks like an obvious improvement. `cd` into `WORKTREE` and do all editing
    there; never touch the user's own checkout of the repo, which may be dirty
@@ -136,19 +156,20 @@ prevent.
    character outside `[A-Za-z0-9._-]` (including `/`) replaced by `_` (e.g.
    `v1/attention` → `v1_attention`).
 
-   Then save the prompt you teed in step 2 beside the patch, unchanged:
+   `apply.prompt.txt` needs nothing from you: step 2 already wrote it, in this
+   same directory, and the `mkdir -p` above is a no-op on a directory that
+   therefore already exists. Leave it exactly as it is — do not edit, trim,
+   re-wrap, or regenerate it. It is the record of what the agent was *told*, and
+   it is what separates "the proposal was declined" from "the instruction was
+   wrong" when the notes alone cannot say which. That also means it survives the
+   case where you produce no patch, which is where it matters most.
+
+   Do check it is there before you finish — if step 2's directory and this one
+   disagree, you have written the patch somewhere the prompt is not:
 
    ```bash
-   cp "/tmp/spotlights-apply-prompt-<cand-id>.txt" \
-      "<run-dir>/apply/<module-slug>/<cand-id>/apply.prompt.txt"
+   ls "<run-dir>/apply/<module-slug>/<cand-id>/apply.prompt.txt"
    ```
-
-   Copy it verbatim — do not edit, trim, or re-wrap it. It is the record of what
-   the agent was *told*, and it is what separates "the proposal was declined" from
-   "the instruction was wrong" when the notes alone cannot say which. Save it even
-   when you produced no patch: that is the case where it matters most.
-   `spotlights-engine apply` writes this same file, from the same renderer, so
-   the two paths agree.
 
    Then write `APPLY-NOTES.md` beside the patch containing:
 

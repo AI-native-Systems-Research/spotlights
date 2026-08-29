@@ -480,6 +480,160 @@ def test_print_prompt_leaves_the_worktree_and_runs_no_agent(run) -> None:
     shutil.rmtree(preview.worktree_parent, ignore_errors=True)
 
 
+def test_print_prompt_writes_only_the_prompt_file(run) -> None:
+    """`--print-prompt` writes `apply.prompt.txt` and nothing besides it.
+
+    The file *is* the handoff — the caller reads `WORKTREE:` out of it — so it
+    has to exist on disk rather than only on stdout. Exactly one file, though:
+    no patch and no `CHANGE-SUMMARY.md` because no agent ran, no
+    `APPLY-NOTES.md` because there is no outcome to document yet, and no
+    `manifest.json` because nothing was spent. Asserted as an exact directory
+    listing, not a set of `.exists()` checks: the point is what is *absent*.
+    """
+    run_dir, repo = run
+    result = one_shot_apply(
+        OneShotApplyInput(
+            result=run_dir, repo=str(repo), candidate=CAND_ID, print_prompt=True
+        ),
+        claude_runner=_runner(),
+    )
+
+    preview = result.prompts[0]
+    out_dir = Path(preview.path)
+    assert out_dir == run_dir / "apply" / "v1_attention" / CAND_ID
+    assert sorted(p.name for p in out_dir.iterdir()) == ["apply.prompt.txt"]
+    # Same renderer, same bytes as the run path writes — the two must not drift.
+    assert (out_dir / "apply.prompt.txt").read_text(encoding="utf-8") == render_prompt_block(
+        preview
+    )
+
+    subprocess.run(
+        ["git", "worktree", "remove", "--force", preview.worktree], cwd=repo, check=True
+    )
+    shutil.rmtree(preview.worktree_parent, ignore_errors=True)
+
+
+def test_the_handoff_prompt_says_its_worktree_is_still_live(run) -> None:
+    """The mirror of `test_the_saved_prompt_admits_its_worktree_paths_are_dead`.
+
+    One renderer serves both paths, and the worktree's status differs between
+    them: dead in a completed apply's artifact, alive here — this is the whole
+    point of `--print-prompt`, and the prompt body names it as the working
+    directory. A file that told this caller the directory was gone would be
+    telling it to abandon the handoff it just received.
+    """
+    run_dir, repo = run
+    result = one_shot_apply(
+        OneShotApplyInput(
+            result=run_dir, repo=str(repo), candidate=CAND_ID, print_prompt=True
+        ),
+        claude_runner=_runner(),
+    )
+
+    preview = result.prompts[0]
+    assert Path(preview.worktree).is_dir()
+    written = (Path(preview.path) / "apply.prompt.txt").read_text(encoding="utf-8")
+    assert "still live" in written
+
+    subprocess.run(
+        ["git", "worktree", "remove", "--force", preview.worktree], cwd=repo, check=True
+    )
+    shutil.rmtree(preview.worktree_parent, ignore_errors=True)
+
+
+def test_a_failed_prompt_write_gives_the_worktree_back(run, tmp_path: Path) -> None:
+    """A handoff whose prompt never reached disk is not a handoff.
+
+    `--print-prompt` keeps the worktree precisely because the caller is going to
+    work in it, and it learns where it is from the file. If the write fails there
+    is no caller and no path to it, so the worktree must be reclaimed rather than
+    left registered in the target repo with nothing pointing at it — the same
+    leak the no-`--candidate` guard refuses to risk in a sweep.
+    """
+    run_dir, repo = run
+    blocked = tmp_path / "blocked"
+    blocked.write_text("not a directory\n", encoding="utf-8")
+
+    with pytest.raises(ArtifactWriteError) as excinfo:
+        one_shot_apply(
+            OneShotApplyInput(
+                result=run_dir,
+                repo=str(repo),
+                candidate=CAND_ID,
+                out=blocked,
+                print_prompt=True,
+            ),
+            claude_runner=_runner(),
+        )
+
+    # The CLI catches `OneShotApplyError` and turns it into `apply: <msg>`/exit 2;
+    # a bare OSError would reach the user as a traceback instead.
+    assert isinstance(excinfo.value, OneShotApplyError)
+    assert len(_worktrees(repo)) == 1  # main tree only — nothing left behind
+
+
+def test_print_prompt_clears_an_earlier_applys_artifacts(run) -> None:
+    """Reruns share the directory, and `--print-prompt` leaves only the prompt in it.
+
+    A patch, notes and manifest from an earlier apply of this candidate describe a
+    session that has been superseded by the handoff starting now. Keeping them
+    would leave the directory documenting an outcome the caller is about to
+    replace — and a patch beside a prompt that produced it is exactly the
+    confusion `apply.patch`'s base-commit header exists to prevent.
+
+    Destructive on purpose: `--print-prompt` is how you *restart* a candidate, so
+    the previous patch is discarded before the new attempt begins.
+    """
+    run_dir, repo = run
+    applied = one_shot_apply(
+        OneShotApplyInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+        claude_runner=_runner(),
+    )
+    out_dir = Path(applied.patches[0].path)
+    assert sorted(p.name for p in out_dir.iterdir()) == [
+        "APPLY-NOTES.md",
+        "apply.patch",
+        "apply.prompt.txt",
+        "manifest.json",
+    ]
+
+    result = one_shot_apply(
+        OneShotApplyInput(
+            result=run_dir, repo=str(repo), candidate=CAND_ID, print_prompt=True
+        ),
+        claude_runner=_runner(),
+    )
+
+    preview = result.prompts[0]
+    assert Path(preview.path) == out_dir
+    assert sorted(p.name for p in out_dir.iterdir()) == ["apply.prompt.txt"]
+
+    subprocess.run(
+        ["git", "worktree", "remove", "--force", preview.worktree], cwd=repo, check=True
+    )
+    shutil.rmtree(preview.worktree_parent, ignore_errors=True)
+
+
+def test_a_full_apply_writes_all_four_artifacts(run) -> None:
+    """The run path's complete output: patch, notes, prompt, manifest — no more, no less.
+
+    Pinned as an exact listing against both the directory and `ApplyArtifact.files`,
+    because the two are read by different consumers (a human opening the folder, and
+    `/spotlights-share-candidates` folding it into a bundle) and a file present in
+    one but unreported by the other is invisible to whichever reads the other.
+    """
+    run_dir, repo = run
+    result = one_shot_apply(
+        OneShotApplyInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+        claude_runner=_runner(),
+    )
+
+    expected = ["APPLY-NOTES.md", "apply.patch", "apply.prompt.txt", "manifest.json"]
+    artifact = result.patches[0]
+    assert sorted(p.name for p in Path(artifact.path).iterdir()) == expected
+    assert sorted(artifact.files) == expected
+
+
 def test_print_prompt_without_a_candidate_raises_and_leaves_no_worktree(run) -> None:
     """A sweep under --print-prompt would leave one worktree per candidate; refuse it."""
     run_dir, repo = run

@@ -150,33 +150,39 @@ class PromptPreview(BaseModel):
     worktree_parent: str
     base_sha: str
     prompt: str
+    # The directory `apply.prompt.txt` was written to. Set only under
+    # `--print-prompt`, where this file is the whole output and the caller needs
+    # to be told where it landed; on the run path the same directory is already
+    # reported as `ApplyArtifact.path`, and it is not known at the point this
+    # model is built (it is computed after the agent session returns).
+    path: str | None = None
 
 
 def render_prompt_block(preview: PromptPreview) -> str:
     """The `--print-prompt` block: header lines, then the prompt body.
 
-    One renderer, two consumers — the CLI prints this to stdout under
-    `--print-prompt`, and `_write_artifacts` writes the same string to
-    `apply.prompt.txt` beside the patch. Sharing it is the point: the skill
-    tees the CLI's stdout into that filename, so the two paths must not be
-    able to drift into producing different bytes for the same candidate.
+    One renderer, two writers — `_write_prompt_only` under `--print-prompt` and
+    `_write_artifacts` on the run path both write this string to
+    `apply.prompt.txt`. Sharing it is the point: the same candidate must not be
+    able to produce different bytes depending on which path wrote the file.
 
-    The `NOTE:` block exists because the two worktree paths are *dead* in every
-    saved copy of this file. On the run path `_write_artifacts` is called after
-    the `finally` that removes the worktree; on the skill path the worktree
-    survives only until its step 5 removes it. So the saved artifact always
-    records a directory that is gone — and the prompt body names that same
-    directory as its working directory, which is the line a reader reusing this
-    prompt would actually act on. The fields stay (they correlate the artifact
-    with the run's logs, and dropping them would leave the misleading body line
-    behind unexplained); what they mean is now stated, with the one command that
-    turns the file back into something runnable.
+    The `NOTE:` block exists because the two worktree paths mean different
+    things on the two paths, and the difference is not visible in the file. On
+    the run path `_write_artifacts` is called after the `finally` that removes
+    the worktree, so the paths are already *dead* — and the prompt body names
+    that same directory as its working directory, which is the line a reader
+    reusing this prompt would actually act on. Under `--print-prompt` they are
+    *live*, and handing them over is the reason the flag exists. The fields stay
+    on both paths (they correlate the artifact with the run's logs, and dropping
+    them would leave the misleading body line behind unexplained); the NOTE says
+    which case the reader is in, and gives the one command that turns a dead
+    copy back into something runnable.
 
     `WORKTREE:` and `WORKTREE_PARENT:` must keep their exact spelling and stay
-    one-per-line: the skill parses them out of stdout to know where to work and
-    what to clean up.
+    one-per-line: the skill parses them out of the written file to know where to
+    work and what to clean up.
 
-    Ends in a newline, so the CLI prints it with `end=""`.
+    Ends in a newline.
     """
     return (
         f"CANDIDATE: {preview.candidate_id}\n"
@@ -186,8 +192,11 @@ def render_prompt_block(preview: PromptPreview) -> str:
         f"WORKTREE:  {preview.worktree}\n"
         f"WORKTREE_PARENT:  {preview.worktree_parent}\n"
         f"NOTE: WORKTREE and WORKTREE_PARENT are throwaway paths, deleted when the\n"
-        f"      run finishes — and the prompt below names WORKTREE as its working\n"
-        f"      directory. In a saved copy of this file both are a historical record,\n"
+        f"      apply finishes — and the prompt below names WORKTREE as its working\n"
+        f"      directory. If this file came from --print-prompt, both are\n"
+        f"      still live: handing them over is the point of that flag, and\n"
+        f"      removing both when you are done is the caller's job. In a\n"
+        f"      completed apply's copy of this file they are a historical record,\n"
         f"      not a directory you can enter. To run this prompt again, make an\n"
         f"      equivalent checkout and use that as the working directory instead:\n"
         f"        git -C {shlex.quote(preview.repo_path)} worktree add --detach"
@@ -454,6 +463,48 @@ def _write_artifacts(
     return sorted(files), patch_produced, out_of_scope
 
 
+def _write_prompt_only(*, out_dir: Path, preview: PromptPreview, candidate_id: str) -> None:
+    """Write `apply.prompt.txt` alone, for the `--print-prompt` handoff.
+
+    Deliberately not routed through `_write_artifacts`: there is no patch, no
+    notes and no manifest to write here, and nothing to be consistent *with*.
+    The lone prompt file is a legitimate state on this path — which is the one
+    thing `_write_artifacts`' `OSError` handler exists to rule out on the run
+    path, where a prompt with no notes beside it means a half-finished write.
+    Same file name and same bytes; different invariant.
+
+    A patch, notes or manifest from an earlier *full* apply of this candidate is
+    deleted. Reruns share the directory, and `--print-prompt` is how a candidate
+    gets restarted — so those files describe a session this handoff supersedes.
+    Leaving them would make the directory document an outcome that is about to be
+    replaced, and put a patch next to a prompt that is not the one that produced
+    it. Destructive by design, and the reason the flag is not a read-only
+    operation despite running no agent.
+
+    Cleared *before* the prompt is written, not after: a SIGKILL between the two
+    steps then leaves an empty directory — "nothing here" — instead of this
+    handoff's fresh prompt beside a superseded patch. Same ordering principle as
+    `_write_artifacts`, for the same reason.
+
+    On failure the partial file is removed and `ArtifactWriteError` raised, so
+    the caller's `finally` still reclaims the worktree: a handoff whose prompt
+    never reached disk is not a handoff, and leaving the worktree registered in
+    the target repo with nothing pointing at it is the leak `--print-prompt`
+    already refuses to risk in a sweep.
+    """
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for name in (PATCH_NAME, NOTES_NAME, MANIFEST_NAME):
+            (out_dir / name).unlink(missing_ok=True)
+        (out_dir / PROMPT_NAME).write_text(render_prompt_block(preview), encoding="utf-8")
+    except OSError as exc:
+        with contextlib.suppress(OSError):
+            (out_dir / PROMPT_NAME).unlink(missing_ok=True)
+        raise ArtifactWriteError(
+            f"could not write the apply prompt for {candidate_id} to {out_dir}: {exc}"
+        ) from exc
+
+
 def _process_candidate(
     *,
     sel: CandidateSelection,
@@ -507,6 +558,14 @@ def _process_candidate(
         )
 
         if input.print_prompt:
+            # The file, not stdout, is the handoff: the caller reads WORKTREE out
+            # of it. Written inside the `try` so a failure here still reaches the
+            # `finally` and gives the worktree back.
+            prompt_dir = _apply_dir(base, sel.qn, sel.candidate.id)
+            preview.path = str(prompt_dir)
+            _write_prompt_only(
+                out_dir=prompt_dir, preview=preview, candidate_id=sel.candidate.id
+            )
             result.prompts.append(preview)
             # Only set once the handoff has actually succeeded, so a leaked
             # worktree can never coexist with a swallowed exception.

@@ -5,9 +5,11 @@ shape deliberately mirrors `prep-evolve` (`--result`, `--repo`, `--index`,
 `--candidate`, `--module`, `--out`, `--top-n`, `--direction`) so the two stages
 are interchangeable at the call site.
 
-`--print-prompt` runs resolution, worktree creation, and validation, then
-prints the worktree path and the prompt and exits — leaving the worktree in
-place for `/spotlights-apply-candidate` to work in.
+`--print-prompt` runs resolution, worktree creation, and validation, leaves
+`apply.prompt.txt` as the only file in the candidate's apply dir (clearing an
+earlier apply's artifacts out of it) and prints that directory, then exits —
+leaving the worktree in place for `/spotlights-apply-candidate` to work in, which
+reads its path out of that file's `WORKTREE:` line.
 """
 
 from __future__ import annotations
@@ -24,7 +26,6 @@ from spotlights_engine.one_shot_apply.api import (
     OneShotApplyConfig,
     OneShotApplyInput,
     one_shot_apply,
-    render_prompt_block,
 )
 from spotlights_engine.one_shot_apply.errors import OneShotApplyError
 from spotlights_engine.prep_evolve.errors import PrepEvolveError
@@ -120,9 +121,12 @@ def _build_argparser() -> argparse.ArgumentParser:
         "--print-prompt",
         action="store_true",
         help=(
-            "Resolve, create and validate the worktree, then print the "
-            "worktree path and the prompt and exit. Runs no agent, writes no "
-            "artifacts, and leaves the worktree in place for the caller."
+            "Resolve, create and validate the worktree, then write "
+            "apply.prompt.txt as the only file in the candidate's apply dir "
+            "(DELETING any apply.patch/APPLY-NOTES.md/manifest.json an earlier "
+            "apply left there), print that directory, and exit. Runs no agent "
+            "and leaves the worktree in place for the caller, which finds it in "
+            "the WORKTREE line of that file. Requires --candidate."
         ),
     )
     return p
@@ -220,10 +224,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"warning: {w}", file=sys.stderr)
 
     for preview in result.prompts:
-        # Same renderer the run path writes to `apply.prompt.txt`, so a skill
-        # that tees this stdout into that filename produces the same bytes the
-        # engine would have written itself.
-        print(render_prompt_block(preview), end="")
+        # The prompt is not printed: it is written to `apply.prompt.txt` in the
+        # directory named here, and the caller reads it from there. stdout stays
+        # one machine-readable line per candidate — the same shape the run path
+        # below prints — which a multi-KB prompt block spliced into it would
+        # destroy. `(1 file, ...)` and not a bare count so the line cannot be
+        # mistaken for a finished apply that happened to write one artifact.
+        print(f"{preview.candidate_id}: {preview.path} (1 file, prompt only)")
 
     for artifact in result.patches:
         # File count first, matching `prep-evolve`'s per-bundle line, so a sweep
