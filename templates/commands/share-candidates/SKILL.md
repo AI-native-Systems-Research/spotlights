@@ -24,11 +24,36 @@ your responsibility to run the ranking step first.
    `sorted_candidates.md` (e.g. `.../spotlights-out/sorted/`). Do not
    guess; ask the user for the absolute path.
 2. **Ask for top-N** — default is 5 if the user doesn't specify.
-3. **Run the build script** from the repo root:
+3. **Run the build script.** `build_bundle.py` is installed into this skill's own
+   directory, alongside the `SKILL.md` you are reading. Where that is depends on
+   how `spotlights-engine init` was run, so locate it with the snippet below
+   rather than assuming a path — it takes the first location that exists:
 
    ```bash
-   python3 .claude/commands/spotlights-share-candidates/build_bundle.py --source "<folder>" --top-n 5
+   script=
+   for d in ${CLAUDE_CONFIG_DIR+"${CLAUDE_CONFIG_DIR:-.}/commands"} \
+            "$HOME/.claude/commands" \
+            ".claude/commands"; do
+     candidate="$d/spotlights-share-candidates/build_bundle.py"
+     if [ -f "$candidate" ]; then script="$candidate"; break; fi
+   done
+   if [ -z "$script" ]; then
+     echo "build_bundle.py not found — run 'spotlights-engine init' first" >&2
+     exit 1
+   fi
+   python3 "$script" --source "<folder>" --top-n 5
    ```
+
+   `$CLAUDE_CONFIG_DIR/commands/` is where a user-scope install lands whenever
+   that variable is *set* — including when it is set to the empty string, which
+   Claude Code and `init` both read as a cwd-relative `commands/`. Hence `+` and
+   not `:+` for the test, and the `:-.` default inside it. `~/.claude/commands/`
+   is the `init` default, and `./.claude/commands/` is an `init --scope project`
+   install. If none of them has the script, say so rather than guessing — do not
+   report the last path tried as the fault.
+
+   The script resolves all of its paths from `--source`, so it does not matter
+   which directory you run it from.
 
 4. **Report** the printed summary: bundle title, number of candidates exported,
    the `share-bundle/` path, the `share-candidates.zip` path, how many candidates

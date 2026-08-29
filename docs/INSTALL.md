@@ -46,21 +46,25 @@ source .venv/bin/activate
 
 ## Install the Spotlights skill
 
-The engine ships Claude Code slash commands (currently `/spotlights-objective-setting`, `/spotlights-sort-candidates`, `/spotlights-share-candidates`, and `/spotlights-apply-candidate`) as bundled markdown templates. They are not active until you install them into a Claude Code commands directory. Locally In the project:
+The engine ships Claude Code slash commands (currently `/spotlights-objective-setting`, `/spotlights-sort-candidates`, `/spotlights-share-candidates`, and `/spotlights-apply-candidate`) as bundled markdown templates. They are not active until you install them into a Claude Code commands directory. By default `init` installs them once, system-wide, so they are available from every directory:
 
 ```bash
-spotlights-engine init           # writes .claude/commands/spotlights-*.md
+spotlights-engine init           # writes ~/.claude/commands/spotlights-*.md
 ```
 
-Or install once, system-wide:
+Or scope them to a single checkout — useful when you want the commands pinned to one project's version, or committed alongside it:
 
 ```bash
-spotlights-engine init --scope user   # writes ~/.claude/commands/spotlights-*.md
+spotlights-engine init --scope project   # writes ./.claude/commands/spotlights-*.md
 ```
 
-`init` records what it installed in `<scope-root>/.spotlights/manifest.json` (sha256 per file). Re-running `spotlights-engine init` is a no-op for existing files. To pick up new bundled versions after a package upgrade, use `--force` — files the user has edited (hash differs from the manifest) are preserved.
+Re-running `spotlights-engine init` only adds files that are missing; anything already on disk is left alone. To pick up new bundled versions after a package upgrade, use `--force`, which rewrites every file the bundle ships — so any edits you made to those files are discarded. Files Spotlights does not ship (your own notes inside a skill directory, for instance) are never touched either way. `init` records what it installed in `<scope-root>/.spotlights/manifest.json` (sha256 per file); that is a record of the install, not an input to the overwrite decision.
 
-Open Claude Code in the same directory and the slash commands appear:
+If you set `CLAUDE_CONFIG_DIR` to move Claude Code's config directory, a user-scope `init` follows it and writes to `$CLAUDE_CONFIG_DIR/commands/` instead. What matters is whether the variable is *set*, not whether it has a value: set to the empty string it names a `commands/` directory relative to your working directory, which is what Claude Code itself reads in that case. The value is used literally — no `~` expansion, so `CLAUDE_CONFIG_DIR=~/.claude` in a config file that does not expand tildes means a directory actually named `~`.
+
+Symlinks are followed wherever they appear, so managing `~/.claude`, `commands/`, a single skill directory or file, or `.spotlights/` through a dotfiles repo (stow, chezmoi, plain `ln -s`) works — including on a fresh clone whose links do not point at anything yet, where `init` creates what they point at.
+
+Open Claude Code (in any directory for a user-scope install, or in the project directory for `--scope project`) and the slash commands appear:
 
 ```
 /spotlights-objective-setting
