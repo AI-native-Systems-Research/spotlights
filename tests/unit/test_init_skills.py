@@ -170,49 +170,15 @@ class TestInstallSkills:
         assert init_skills.install_skills(scope="project", force=True) == 0
         assert target.read_text(encoding="utf-8") == bundled
 
-    def test_force_refuses_to_write_through_a_symlink(self, fake_bundle, project_root, capsys):
-        """A symlink under the commands directory must not redirect the write.
+    def test_force_writes_through_a_symlinked_skill_dir(self, fake_bundle, project_root):
+        """A symlinked skill *directory* is written through, like every other link.
 
-        Following one would let a link planted there send bundled content to any
-        path on disk, so the install skips it and says so on stderr.
-        """
-        (fake_bundle / "objective-setting.md").write_text("bundled\n", encoding="utf-8")
-        commands = project_root / ".claude" / "commands"
-        commands.mkdir(parents=True)
-        outside = project_root / "outside.md"
-        outside.write_text("do not clobber me\n", encoding="utf-8")
-        (commands / "spotlights-objective-setting.md").symlink_to(outside)
-
-        # A refused file is a file the user asked for and did not get.
-        assert init_skills.install_skills(scope="project", force=True) == 1
-        assert outside.read_text(encoding="utf-8") == "do not clobber me\n"
-        assert "symlink" in capsys.readouterr().err
-
-    def test_a_refused_symlink_keeps_its_prior_record(self, fake_bundle, project_root):
-        """Refusing to write does not uninstall the file that is already there.
-
-        Dropping it from `files` would make an uninstall miss a file we put on
-        disk, and contradicts the record's whole purpose.
-        """
-        (fake_bundle / "objective-setting.md").write_text("v1\n", encoding="utf-8")
-        assert init_skills.install_skills(scope="project") == 0
-
-        rel = ".claude/commands/spotlights-objective-setting.md"
-        target = project_root / rel
-        target.unlink()
-        target.symlink_to(project_root / "outside.md")
-
-        assert init_skills.install_skills(scope="project", force=True) == 1
-        files = json.loads(
-            (project_root / ".spotlights" / "manifest.json").read_text(encoding="utf-8")
-        )["files"]
-        assert files[rel] == _sha256_text("v1\n")
-
-    def test_force_refuses_to_write_through_a_symlinked_parent(self, fake_bundle, project_root):
-        """The guard walks the whole path, not just the leaf.
-
-        A symlinked skill *directory* redirects every file inside it, so it has to
-        be caught too.
+        Symlinking one skill's directory into a dotfiles repo is the same technique
+        as symlinking `~/.claude`, one level down. A version of this installer
+        refused it, which bricked `init` for that layout with no way to override.
+        Refusing bought nothing: planting the link needs write access to
+        `commands/`, which already allows writing the files directly, and the only
+        content we send through it is our own bundled markdown.
         """
         skill = fake_bundle / "share-candidates"
         skill.mkdir()
@@ -220,12 +186,34 @@ class TestInstallSkills:
 
         commands = project_root / ".claude" / "commands"
         commands.mkdir(parents=True)
-        outside = project_root / "outside-dir"
-        outside.mkdir()
-        (commands / "spotlights-share-candidates").symlink_to(outside)
+        real = project_root / "dotfiles-skill"
+        real.mkdir()
+        (commands / "spotlights-share-candidates").symlink_to(real)
 
-        assert init_skills.install_skills(scope="project", force=True) == 1
-        assert list(outside.iterdir()) == []
+        assert init_skills.install_skills(scope="project", force=True) == 0
+        assert (real / "SKILL.md").read_text(encoding="utf-8") == "bundled skill\n"
+
+    @pytest.mark.parametrize("linked", [".claude", ".claude/commands", ".spotlights"])
+    def test_a_dangling_symlink_has_its_target_created(self, fake_bundle, project_root, linked):
+        """A freshly-cloned dotfiles repo leaves its links dangling.
+
+        The target directory does not exist until something populates it, and
+        `Path.mkdir(exist_ok=True)` raises `FileExistsError` on a dangling link —
+        it only forgives a path that is already a *directory*. That turned each of
+        these layouts into a traceback: the `.spotlights` one after writing every
+        skill file, leaving a half-done install with no manifest at all.
+        """
+        (fake_bundle / "objective-setting.md").write_text("body\n", encoding="utf-8")
+        link = project_root / linked
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(project_root / "dotfiles" / linked.replace("/", "-"))
+        assert not link.exists()  # dangling
+
+        assert init_skills.install_skills(scope="project") == 0
+
+        installed = project_root / ".claude" / "commands" / "spotlights-objective-setting.md"
+        assert installed.read_text(encoding="utf-8") == "body\n"
+        assert (project_root / ".spotlights" / "manifest.json").is_file()
 
     @pytest.mark.parametrize("linked", [".claude", ".claude/commands"])
     def test_a_symlinked_claude_dir_is_written_through(
@@ -262,13 +250,11 @@ class TestInstallSkills:
     def test_a_symlinked_spotlights_dir_is_written_through(self, fake_bundle, project_root):
         """`.spotlights/` gets the same treatment as `.claude/`: user infrastructure.
 
-        Deliberate, not an oversight. It sits directly under the scope root, at the
-        same level as `.claude`, and symlinking it into a dotfiles repo is the same
-        legitimate setup. Guarding it would refuse to record an install for exactly
-        the users the symlink boundary above exists to support, and there is no
-        escalation to prevent: planting that link needs write access to the scope
-        root, which already allows writing the skill files directly, and the only
-        content we send through it is our own manifest JSON.
+        It sits directly under the scope root, at the same level as `.claude`, and
+        symlinking it into a dotfiles repo is the same legitimate setup. Refusing
+        would decline to record an install for exactly those users, and there is
+        nothing to prevent: planting the link needs write access to the scope root,
+        which already allows writing the skill files directly.
         """
         (fake_bundle / "objective-setting.md").write_text("body\n", encoding="utf-8")
         real = project_root / "dotfiles-spotlights"
@@ -304,6 +290,63 @@ class TestInstallSkills:
         # ...and --force, which does write, brings both up to date.
         assert init_skills.install_skills(scope="project", force=True) == 0
         assert json.loads(manifest_path.read_text(encoding="utf-8"))["version"] == "0.2.0"
+
+    def test_a_partial_install_keeps_the_prior_version(
+        self, fake_bundle, project_root, monkeypatch
+    ):
+        """Writing *some* files does not make the install that version.
+
+        The ordinary upgrade path — a new release adding a skill beside skills an
+        older one installed — leaves mixed content on disk, so stamping the new
+        version would claim an upgrade of the untouched files that did not happen.
+        An earlier fix advanced the version whenever anything at all was written.
+        """
+        (fake_bundle / "a.md").write_text("a v1\n", encoding="utf-8")
+        monkeypatch.setattr(init_skills, "_package_version", lambda: "0.1.0")
+        assert init_skills.install_skills(scope="project") == 0
+
+        # 0.2.0 ships a second skill and a new `a`, but a plain re-run only adds `b`.
+        (fake_bundle / "a.md").write_text("a v2\n", encoding="utf-8")
+        (fake_bundle / "b.md").write_text("b v2\n", encoding="utf-8")
+        monkeypatch.setattr(init_skills, "_package_version", lambda: "0.2.0")
+        assert init_skills.install_skills(scope="project") == 0
+
+        commands = project_root / ".claude" / "commands"
+        assert (commands / "spotlights-a.md").read_text(encoding="utf-8") == "a v1\n"
+        assert (commands / "spotlights-b.md").read_text(encoding="utf-8") == "b v2\n"
+        manifest = json.loads(
+            (project_root / ".spotlights" / "manifest.json").read_text(encoding="utf-8")
+        )
+        assert manifest["version"] == "0.1.0"
+
+    @pytest.mark.parametrize("bad_version", [None, 3, "", ["0.1.0"]])
+    def test_a_non_string_prior_version_is_not_adopted(
+        self, fake_bundle, project_root, monkeypatch, bad_version
+    ):
+        """Only `files` is shape-checked, so `version` can be anything.
+
+        Carrying a non-string forward would copy it into every manifest we rewrite
+        from then on, so the current version wins instead.
+        """
+        (fake_bundle / "a.md").write_text("a\n", encoding="utf-8")
+        (fake_bundle / "b.md").write_text("b\n", encoding="utf-8")
+        monkeypatch.setattr(init_skills, "_package_version", lambda: "0.2.0")
+        # `a` already on disk, `b` not: a partial run, which is the only kind that
+        # reads `version` off the prior manifest at all.
+        commands = project_root / ".claude" / "commands"
+        commands.mkdir(parents=True)
+        (commands / "spotlights-a.md").write_text("a\n", encoding="utf-8")
+        manifest_path = project_root / ".spotlights" / "manifest.json"
+        manifest_path.parent.mkdir(parents=True)
+        manifest_path.write_text(
+            json.dumps({"integration": "spotlights", "version": bad_version, "files": {}}),
+            encoding="utf-8",
+        )
+
+        assert init_skills.install_skills(scope="project") == 0
+        after = json.loads(manifest_path.read_text(encoding="utf-8"))
+        assert after["version"] == "0.2.0"
+        assert isinstance(after["installed_at"], str)
 
     def test_user_scope_writes_to_home(self, fake_bundle, monkeypatch, tmp_path):
         home = tmp_path / "home"

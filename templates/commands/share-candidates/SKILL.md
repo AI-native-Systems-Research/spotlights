@@ -30,18 +30,27 @@ your responsibility to run the ranking step first.
    rather than assuming a path — it takes the first location that exists:
 
    ```bash
-   for d in "${CLAUDE_CONFIG_DIR:+$CLAUDE_CONFIG_DIR/commands}" \
+   script=
+   for d in ${CLAUDE_CONFIG_DIR+"${CLAUDE_CONFIG_DIR:-.}/commands"} \
             "$HOME/.claude/commands" \
             ".claude/commands"; do
-     script="$d/spotlights-share-candidates/build_bundle.py"
-     [ -f "$script" ] && break
+     candidate="$d/spotlights-share-candidates/build_bundle.py"
+     if [ -f "$candidate" ]; then script="$candidate"; break; fi
    done
+   if [ -z "$script" ]; then
+     echo "build_bundle.py not found — run 'spotlights-engine init' first" >&2
+     exit 1
+   fi
    python3 "$script" --source "<folder>" --top-n 5
    ```
 
-   `$CLAUDE_CONFIG_DIR/commands/` is where a user-scope install lands when that
-   variable is set, `~/.claude/commands/` is the `init` default, and
-   `./.claude/commands/` is an `init --scope project` install.
+   `$CLAUDE_CONFIG_DIR/commands/` is where a user-scope install lands whenever
+   that variable is *set* — including when it is set to the empty string, which
+   Claude Code and `init` both read as a cwd-relative `commands/`. Hence `+` and
+   not `:+` for the test, and the `:-.` default inside it. `~/.claude/commands/`
+   is the `init` default, and `./.claude/commands/` is an `init --scope project`
+   install. If none of them has the script, say so rather than guessing — do not
+   report the last path tried as the fault.
 
    The script resolves all of its paths from `--source`, so it does not matter
    which directory you run it from.

@@ -152,7 +152,7 @@ In [tests/](../../tests/):
 
 1. **Templates location**: repo-root `templates/commands/` (mirrors spec-kit). Wheel builds bundle them into the package via `[tool.hatch.build.targets.wheel.force-include]`. The installer's `_bundled_templates()` checks the package-data path first, then falls back to a `__file__`-relative walk up to `<repo>/templates/commands/` for editable installs. Both flows tested end-to-end.
 2. **`init` scope default**: `user` (`~/.claude/`) — the skills are engine-versioned, not project-specific, so installing them once per machine matches how people actually use them. (This originally shipped as `project`; the default was flipped later.) The package install (`pip install spotlights-engine`) is the same regardless; `--scope project` pins the commands to a single checkout.
-3. **Manifest format**: spec-kit shape — `{integration, version, installed_at, files: {path: sha256}}`. The hash enables safe `--force` upgrades (only overwrite files the user hasn't edited) and clean future `uninstall-skills`. Worth the few extra lines now to avoid a painful migration later.
+3. **Manifest format**: spec-kit shape — `{integration, version, installed_at, files: {path: sha256}}`. It is a *record*, never an input to the overwrite decision: it says which files this integration put on disk, at which version, so a future `uninstall-skills` knows what it owns and a `doctor` can tell a pristine install from an edited one. `--force` does not consult it — see Behavior above. (Spec-kit's hash-compare-and-preserve lives on its separate `refresh_managed` mode; reading the hash into `--force` is exactly the conflation that broke an early version of this installer.)
 
 ## Out of scope (explicit non-goals)
 
