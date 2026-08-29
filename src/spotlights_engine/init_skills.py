@@ -9,6 +9,10 @@ Manifest at `<scope-root>/.spotlights/manifest.json` records `path -> sha256`
 for each managed file, so a future `init --force` can safely overwrite only
 files the user hasn't edited. Paths are relative to the scope root, which
 `CLAUDE_CONFIG_DIR` can move for user scope — see `_scope_layout`.
+
+The manifest is a cache, never the sole source of truth: if it goes missing or
+unreadable, an install re-adopts any file that still matches the bundled bytes,
+so a lost record cannot permanently lock `--force` out of upgrading.
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ import hashlib
 import json
 import os
 import sys
+import unicodedata
 from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -109,6 +114,39 @@ def _sha256(path: Path) -> str:
     return h.hexdigest()
 
 
+def _same_dir(a: Path, b: Path) -> bool:
+    """True when two paths name the same directory (trailing slashes, symlinks…)."""
+    try:
+        return a.resolve() == b.resolve()
+    except OSError:
+        return False
+
+
+def _claude_config_dir() -> Path | None:
+    """Resolve `CLAUDE_CONFIG_DIR` the way Claude Code itself does, or None.
+
+    Claude Code resolves its config root as, in JS:
+
+        (process.env.CLAUDE_CONFIG_DIR ?? join(homedir(), ".claude")).normalize("NFC")
+
+    Three details of that expression are load-bearing, because our only job is
+    to write where Claude Code reads — any divergence installs skills that
+    silently never appear:
+
+    - `??` is nullish, not `||`: a set-but-empty value is used *as* the root, so
+      Claude Code reads a cwd-relative `commands/`. It does not fall back to
+      `~/.claude` (verified against the installed CLI: with `CLAUDE_CONFIG_DIR=""`
+      it does not see `~/.claude`'s config at all).
+    - No tilde expansion. A literal `~/foo` is a directory named `~`, not `$HOME/foo`.
+    - NFC normalization, which matters on macOS, where the filesystem hands back
+      decomposed (NFD) names for non-ASCII paths.
+    """
+    raw = os.environ.get("CLAUDE_CONFIG_DIR")
+    if raw is None:
+        return None
+    return Path(unicodedata.normalize("NFC", raw))
+
+
 def _scope_layout(scope: str) -> tuple[Path, Path]:
     """Return `(scope_root, commands_rel)` for a scope.
 
@@ -118,18 +156,25 @@ def _scope_layout(scope: str) -> tuple[Path, Path]:
     only meaningful next to the root it was written for.
 
     `CLAUDE_CONFIG_DIR` relocates Claude Code's whole `~/.claude` directory, so
-    under user scope it becomes the root and commands sit directly beneath it.
-    Project scope is unaffected by that variable — a project's own
-    `.claude/commands/` is read from the project either way.
+    under user scope it becomes the root and commands sit directly beneath it —
+    except when it merely spells the default location, which must not move the
+    manifest away from an existing one. Project scope is unaffected by that
+    variable: a project's own `.claude/commands/` is read from the project either way.
     """
-    if scope == "user":
-        config_dir = os.environ.get("CLAUDE_CONFIG_DIR", "").strip()
-        if config_dir:
-            return Path(config_dir).expanduser(), Path("commands")
-        return Path.home(), _CLAUDE_COMMANDS_REL
     if scope == "project":
         return Path.cwd(), _CLAUDE_COMMANDS_REL
-    raise ValueError(f"unknown scope: {scope!r}")
+    if scope != "user":
+        raise ValueError(f"unknown scope: {scope!r}")
+
+    config_dir = _claude_config_dir()
+    default_root = Path.home()
+    # `CLAUDE_CONFIG_DIR=~/.claude` names exactly where the default layout already
+    # installs. Honouring it literally would put the files in the right place but
+    # move the manifest to ~/.claude/.spotlights/, orphaning ~/.spotlights/ — and
+    # an install whose manifest cannot be found is one `--force` can never upgrade.
+    if config_dir is None or _same_dir(config_dir, default_root / ".claude"):
+        return default_root, _CLAUDE_COMMANDS_REL
+    return config_dir, Path("commands")
 
 
 def _warn_unusable_manifest(manifest_path: Path, reason: str) -> None:
@@ -255,17 +300,26 @@ def install_skills(scope: str = "user", force: bool = False) -> int:
         bundled_hash = hashlib.sha256(bundled_text.encode("utf-8")).hexdigest()
 
         if target_path.exists():
-            if not force:
-                skipped_existing.append(item.label)
-                # Preserve any prior manifest entry as-is so we don't lie about ownership.
-                if item.rel_path in existing_files:
-                    new_files[item.rel_path] = existing_files[item.rel_path]
-                continue
-            # --force: only overwrite files we own and the user hasn't edited.
             on_disk_hash = _sha256(target_path)
             recorded_hash = existing_files.get(item.rel_path)
+            if recorded_hash is None and on_disk_hash == bundled_hash:
+                # No manifest entry, but the file on disk is byte-for-byte the one
+                # we ship — it is ours whatever became of the manifest (deleted,
+                # malformed, emptied by the pre-fix wipe bug, or left behind when
+                # CLAUDE_CONFIG_DIR moved the root). Re-adopt it: without this the
+                # record can never be rebuilt, and `--force` refuses every file
+                # forever, blaming the user for edits they never made.
+                recorded_hash = bundled_hash
+
+            if not force:
+                skipped_existing.append(item.label)
+                # Carry ownership forward so we don't lie about what we manage.
+                if recorded_hash is not None:
+                    new_files[item.rel_path] = recorded_hash
+                continue
+            # --force: only overwrite files we own and the user hasn't edited.
             if recorded_hash is None:
-                # Not in manifest -> not ours. Don't touch.
+                # Not in manifest and not identical to ours -> not ours. Don't touch.
                 skipped_user_edited.append(item.label)
                 continue
             if on_disk_hash != recorded_hash:

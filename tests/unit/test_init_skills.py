@@ -194,9 +194,7 @@ class TestInstallSkills:
         assert (home / ".claude" / "commands" / "spotlights-objective-setting.md").is_file()
         assert not (cwd / ".claude").exists()
 
-    def test_user_scope_honours_claude_config_dir(
-        self, fake_bundle, monkeypatch, tmp_path
-    ):
+    def test_user_scope_honours_claude_config_dir(self, fake_bundle, monkeypatch, tmp_path):
         """CLAUDE_CONFIG_DIR moves Claude Code's whole ~/.claude, so install there.
 
         Writing to $HOME/.claude with that variable set put the skills where
@@ -236,18 +234,173 @@ class TestInstallSkills:
             project_root / ".claude" / "commands" / "spotlights-objective-setting.md"
         ).is_file()
 
-    def test_blank_claude_config_dir_falls_back_to_home(
-        self, fake_bundle, monkeypatch, tmp_path
-    ):
-        """An empty/whitespace value is not a path; treat it as unset."""
+    def test_blank_claude_config_dir_matches_claude_code(self, fake_bundle, monkeypatch, tmp_path):
+        """A set-but-empty value is a cwd-relative root, not a fallback to $HOME.
+
+        Claude Code resolves `process.env.CLAUDE_CONFIG_DIR ?? join(homedir(),
+        ".claude")` — nullish, so `""` is used as the root and it reads
+        `./commands`. Verified against the installed CLI: with
+        `CLAUDE_CONFIG_DIR=""` it does not see `~/.claude`'s config at all.
+        Treating blank as unset wrote to `~/.claude/commands/` and reported
+        success while Claude Code looked in the working directory.
+        """
         home = tmp_path / "home"
         home.mkdir()
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
         monkeypatch.setenv("HOME", str(home))
-        monkeypatch.setenv("CLAUDE_CONFIG_DIR", "   ")
+        monkeypatch.chdir(cwd)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", "")
 
         (fake_bundle / "objective-setting.md").write_text("body\n", encoding="utf-8")
         assert init_skills.install_skills(scope="user") == 0
+
+        assert (cwd / "commands" / "spotlights-objective-setting.md").is_file()
+        assert not (home / ".claude").exists()
+
+    def test_claude_config_dir_is_not_tilde_expanded(self, fake_bundle, monkeypatch, tmp_path):
+        """Claude Code passes the value to path.join verbatim — no `~` expansion.
+
+        So `~/relocated` is a directory literally named `~`, relative to cwd.
+        Expanding it ourselves would write to $HOME/relocated while Claude Code
+        read ./~/relocated.
+        """
+        home = tmp_path / "home"
+        home.mkdir()
+        cwd = tmp_path / "cwd"
+        cwd.mkdir()
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.chdir(cwd)
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", "~/relocated")
+
+        (fake_bundle / "objective-setting.md").write_text("body\n", encoding="utf-8")
+        assert init_skills.install_skills(scope="user") == 0
+
+        assert (cwd / "~" / "relocated" / "commands").is_dir()
+        assert not (home / "relocated").exists()
+
+    @pytest.mark.parametrize("suffix", ["", "/", "/."])
+    def test_claude_config_dir_naming_the_default_keeps_default_layout(
+        self, fake_bundle, monkeypatch, tmp_path, suffix
+    ):
+        """`CLAUDE_CONFIG_DIR=~/.claude` must not move the manifest.
+
+        It names exactly where the default layout already installs. Honouring it
+        literally put the files in the right place but moved the manifest to
+        ~/.claude/.spotlights/, orphaning an existing ~/.spotlights/ — and an
+        install whose manifest cannot be found is one --force can never upgrade.
+        """
+        home = tmp_path / "home"
+        (home / ".claude").mkdir(parents=True)
+        monkeypatch.setenv("HOME", str(home))
+        monkeypatch.setenv("CLAUDE_CONFIG_DIR", f"{home / '.claude'}{suffix}")
+
+        body = "body\n"
+        (fake_bundle / "objective-setting.md").write_text(body, encoding="utf-8")
+        assert init_skills.install_skills(scope="user") == 0
+
+        # Files where Claude Code reads them, manifest where the default keeps it.
         assert (home / ".claude" / "commands" / "spotlights-objective-setting.md").is_file()
+        assert (home / ".spotlights" / "manifest.json").is_file()
+        assert not (home / ".claude" / ".spotlights").exists()
+
+        manifest = json.loads(
+            (home / ".spotlights" / "manifest.json").read_text(encoding="utf-8")
+        )
+        assert manifest["files"] == {
+            ".claude/commands/spotlights-objective-setting.md": _sha256_text(body)
+        }
+
+    def test_plain_rerun_readopts_files_matching_the_bundle(self, fake_bundle, project_root):
+        """A lost manifest must not permanently disable --force.
+
+        The manifest is the only ownership record, and a plain re-run rewrites it.
+        With no re-adoption, one lost manifest turned every subsequent run into
+        "skipped (user-edited or not managed by spotlights)" forever — about files
+        byte-identical to the ones we ship.
+        """
+        v1 = "v1 body\n"
+        (fake_bundle / "objective-setting.md").write_text(v1, encoding="utf-8")
+        assert init_skills.install_skills(scope="project") == 0
+
+        manifest_path = project_root / ".spotlights" / "manifest.json"
+        rel = ".claude/commands/spotlights-objective-setting.md"
+
+        # The record is lost (deleted here; malformed JSON and a relocated root
+        # reach the same state).
+        manifest_path.unlink()
+
+        # A plain re-run rebuilds ownership from the bytes on disk...
+        assert init_skills.install_skills(scope="project") == 0
+        assert json.loads(manifest_path.read_text(encoding="utf-8"))["files"] == {
+            rel: _sha256_text(v1)
+        }
+
+        # ...so a later upgrade still works.
+        v2 = "v2 body — upgraded\n"
+        (fake_bundle / "objective-setting.md").write_text(v2, encoding="utf-8")
+        assert init_skills.install_skills(scope="project", force=True) == 0
+        assert (project_root / rel).read_text(encoding="utf-8") == v2
+
+    def test_force_readopts_files_matching_the_bundle(self, fake_bundle, project_root):
+        """--force re-adopts directly, without needing a plain re-run first."""
+        (fake_bundle / "objective-setting.md").write_text("v1\n", encoding="utf-8")
+        assert init_skills.install_skills(scope="project") == 0
+        (project_root / ".spotlights" / "manifest.json").unlink()
+
+        assert init_skills.install_skills(scope="project", force=True) == 0
+
+        rel = ".claude/commands/spotlights-objective-setting.md"
+        assert (project_root / rel).read_text(encoding="utf-8") == "v1\n"
+        manifest = json.loads(
+            (project_root / ".spotlights" / "manifest.json").read_text(encoding="utf-8")
+        )
+        assert manifest["files"] == {rel: _sha256_text("v1\n")}
+
+    def test_readoption_after_malformed_manifest(self, fake_bundle, project_root, capsys):
+        """The validator discards a bad manifest; re-adoption must rebuild it.
+
+        Otherwise the round-2 malformed-manifest guard traded a crash for a
+        silently unupgradeable install.
+        """
+        (fake_bundle / "objective-setting.md").write_text("v1\n", encoding="utf-8")
+        assert init_skills.install_skills(scope="project") == 0
+
+        manifest_path = project_root / ".spotlights" / "manifest.json"
+        manifest_path.write_text('{"files": null}', encoding="utf-8")
+
+        assert init_skills.install_skills(scope="project") == 0
+        assert "unusable manifest" in capsys.readouterr().err
+
+        rel = ".claude/commands/spotlights-objective-setting.md"
+        assert json.loads(manifest_path.read_text(encoding="utf-8"))["files"] == {
+            rel: _sha256_text("v1\n")
+        }
+
+    def test_readoption_does_not_claim_user_edited_files(self, fake_bundle, project_root):
+        """Re-adoption keys on bundled bytes, so it never swallows a user's file.
+
+        The guard rail on the fix above: a file that differs from what we ship
+        stays unmanaged and untouched even after the manifest is gone.
+        """
+        (fake_bundle / "objective-setting.md").write_text("v1\n", encoding="utf-8")
+        assert init_skills.install_skills(scope="project") == 0
+
+        rel = ".claude/commands/spotlights-objective-setting.md"
+        edited = "user edited this\n"
+        (project_root / rel).write_text(edited, encoding="utf-8")
+        (project_root / ".spotlights" / "manifest.json").unlink()
+
+        assert init_skills.install_skills(scope="project") == 0
+        manifest = json.loads(
+            (project_root / ".spotlights" / "manifest.json").read_text(encoding="utf-8")
+        )
+        assert rel not in manifest["files"]
+
+        # And --force still refuses to clobber it.
+        (fake_bundle / "objective-setting.md").write_text("v2\n", encoding="utf-8")
+        assert init_skills.install_skills(scope="project", force=True) == 0
+        assert (project_root / rel).read_text(encoding="utf-8") == edited
 
     @pytest.mark.parametrize(
         "payload",
