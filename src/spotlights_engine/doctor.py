@@ -32,6 +32,7 @@ from spotlights_engine.costing.rates import (
     RATES_ENV_VAR,
     ModelRate,
     _canonical_model_id,
+    _canonical_rate_key,
     load_rates,
 )
 from spotlights_engine.costing.records import PROVIDER_FOR_CLI
@@ -141,6 +142,12 @@ def _rate_key_for(name: str, model: str | None) -> str:
 
 def probe_cli(name: str, *, rates: dict[str, ModelRate], cwd: Path | None = None) -> CheckResult:
     """Live-check one agent CLI: install, auth, and priced model."""
+    # Canonicalize table keys on entry so a caller-supplied dict keyed with a
+    # LiteLLM route prefix still matches models the CLI reports without one —
+    # mirrors `compute_cost`. Dicts from `load_rates` are already canonical, so
+    # this is a no-op there.
+    rates = {_canonical_rate_key(k): v for k, v in rates.items()}
+
     resolved = shutil.which(name)
     if resolved is None:
         return CheckResult(
