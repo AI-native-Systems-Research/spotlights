@@ -26,7 +26,7 @@ from spotlights_engine.one_shot_apply.errors import (
     WorktreeError,
 )
 from spotlights_engine.one_shot_apply.usage_manifest import ApplyUsageManifest
-from spotlights_engine.prep_evolve.errors import SelectionError, StalenessError
+from spotlights_engine.prep_evolve.errors import StalenessError
 from tests.unit.prep_evolve._fixtures import (
     CAND_FILE,
     make_repo,
@@ -38,6 +38,7 @@ from tests.unit.prep_evolve._fixtures import (
 
 CAND_ID = "cand-v1_attention-0002"
 SECOND_CAND_ID = "cand-v1_attention-0003"
+THIRD_CAND_ID = "cand-v1_attention-0004"
 
 
 def _git_only_path(tmp_path: Path) -> str:
@@ -444,7 +445,14 @@ def test_non_git_repo_raises(tmp_path: Path) -> None:
         )
 
 
-def test_print_prompt_leaves_the_worktree_and_runs_no_agent(run) -> None:
+def test_print_prompt_creates_no_worktree_and_runs_no_agent(run) -> None:
+    """The whole point: nothing is created, so nothing has to be cleaned up.
+
+    A worktree existed only so the gate could read bytes from a clean checkout.
+    Validation now reads `--repo` — prep-evolve's own call — which leaves this
+    path with no filesystem side effect in the target repo at all, and makes it
+    safe to sweep.
+    """
     run_dir, repo = run
     called: list[str] = []
 
@@ -452,6 +460,7 @@ def test_print_prompt_leaves_the_worktree_and_runs_no_agent(run) -> None:
         called.append("ran")
         raise AssertionError("claude must not run under --print-prompt")
 
+    before = _worktrees(repo)
     result = one_shot_apply(
         OneShotApplyInput(
             result=run_dir, repo=str(repo), candidate=CAND_ID, print_prompt=True
@@ -463,21 +472,12 @@ def test_print_prompt_leaves_the_worktree_and_runs_no_agent(run) -> None:
     assert result.patches == []
     assert len(result.prompts) == 1
     preview = result.prompts[0]
-    worktree = Path(preview.worktree)
-    assert worktree.is_dir()
-    assert (worktree / CAND_FILE).is_file()
+    assert preview.worktree is None
+    assert preview.worktree_parent is None
     assert CAND_FILE in preview.prompt
-    assert len(_worktrees(repo)) == 2  # main tree + the one left for the caller
-    assert Path(preview.worktree_parent) == worktree.parent
-
-    # Not our job to clean up under --print-prompt, but don't leak in the test.
-    subprocess.run(
-        ["git", "worktree", "remove", "--force", str(worktree)], cwd=repo, check=True
-    )
-    # `worktree_parent` exists precisely so a --print-prompt consumer can clean
-    # up the temp scaffolding; use it here too, or the test leaks an empty
-    # spotlights-apply-XXXXXXXX/ under the system temp dir on every run.
-    shutil.rmtree(preview.worktree_parent, ignore_errors=True)
+    assert _worktrees(repo) == before  # no new worktree registered
+    # And no `spotlights-apply-XXXX/` scaffolding left in the system temp dir.
+    assert "spotlights-apply-" not in render_prompt_block(preview)
 
 
 def test_print_prompt_writes_only_the_prompt_file(run) -> None:
@@ -507,20 +507,13 @@ def test_print_prompt_writes_only_the_prompt_file(run) -> None:
         preview
     )
 
-    subprocess.run(
-        ["git", "worktree", "remove", "--force", preview.worktree], cwd=repo, check=True
-    )
-    shutil.rmtree(preview.worktree_parent, ignore_errors=True)
 
+def test_the_handoff_prompt_says_how_to_create_a_worktree(run) -> None:
+    """The consumer needs a checkout and now has to make it, so hand them the command.
 
-def test_the_handoff_prompt_carries_the_same_header_as_the_run_path(run) -> None:
-    """This task changes the format, not the behaviour: a worktree still exists here.
-
-    Its predecessor asserted the file said "still live", which was the hedge the
-    single shared NOTE had to carry. Both paths still render the run-path branch
-    — `--print-prompt` creates a worktree, so `preview.worktree` is set — so the
-    NOTE now says one thing on both. A later task stops creating the worktree and
-    replaces this test with the `(none` version.
+    The mirror of `test_the_saved_prompt_admits_its_worktree_paths_are_dead`:
+    the run path's copy names two dead directories, this one names none and
+    gives the recipe instead.
     """
     run_dir, repo = run
     result = one_shot_apply(
@@ -531,18 +524,12 @@ def test_the_handoff_prompt_carries_the_same_header_as_the_run_path(run) -> None
     )
 
     preview = result.prompts[0]
-    assert Path(preview.worktree).is_dir()
     written = (Path(preview.path) / "apply.prompt.txt").read_text(encoding="utf-8")
-    assert f"WORKTREE:  {preview.worktree}\n" in written
-    assert f"WORKTREE_PARENT:  {preview.worktree_parent}\n" in written
-    assert "deleted when the" in written  # the same NOTE the run path gets
-    assert "still live" not in written  # the hedge is gone
-    assert "--print-prompt" not in written
-
-    subprocess.run(
-        ["git", "worktree", "remove", "--force", preview.worktree], cwd=repo, check=True
+    assert "WORKTREE:  (none" in written
+    assert (
+        f"git -C {repo.resolve()} worktree add --detach <dir> {preview.base_sha}" in written
     )
-    shutil.rmtree(preview.worktree_parent, ignore_errors=True)
+    assert "still live" not in written
 
 
 def _preview(**overrides) -> PromptPreview:
@@ -605,35 +592,82 @@ def test_the_header_with_a_worktree_keeps_both_paths_and_drops_the_hedge() -> No
     assert "still live" not in block
 
 
-def test_a_failed_prompt_write_gives_the_worktree_back(run, tmp_path: Path) -> None:
-    """A handoff whose prompt never reached disk is not a handoff.
+def test_a_failed_prompt_write_skips_one_candidate_and_writes_the_rest(run) -> None:
+    """Replaces the old "gives the worktree back" test: there is no worktree now.
 
-    `--print-prompt` keeps the worktree precisely because the caller is going to
-    work in it, and it learns where it is from the file. If the write fails there
-    is no caller and no path to it, so the worktree must be reclaimed rather than
-    left registered in the target repo with nothing pointing at it — the same
-    leak the no-`--candidate` guard refuses to risk in a sweep.
+    What still matters is that one unwritable directory costs one candidate.
+    Blocking the *first* one proves the sweep continues past a failure rather
+    than merely surviving one at the end.
     """
     run_dir, repo = run
-    blocked = tmp_path / "blocked"
+    _write_candidates(run_dir, [SECOND_CAND_ID])
+    # A *file* where the first candidate's apply dir must be: `mkdir` raises
+    # FileExistsError there and nowhere else.
+    blocked = run_dir / "apply" / "v1_attention" / CAND_ID
+    blocked.parent.mkdir(parents=True)
     blocked.write_text("not a directory\n", encoding="utf-8")
 
-    with pytest.raises(ArtifactWriteError) as excinfo:
+    result = one_shot_apply(
+        OneShotApplyInput(result=run_dir, repo=str(repo), print_prompt=True),
+        claude_runner=_runner(),
+    )
+
+    assert [p.candidate_id for p in result.prompts] == [SECOND_CAND_ID]
+    assert len(result.skipped) == 1
+    assert result.skipped[0].candidate_id == CAND_ID
+    assert "could not write the apply prompt" in result.skipped[0].reason
+    assert _worktrees(repo) == [f"worktree {repo.resolve()}"]
+
+
+def test_print_prompt_validates_the_repo_and_records_a_dirty_tree(run) -> None:
+    """prep-evolve parity: uncommitted work does not refuse the run.
+
+    The dirty file here is the **candidate's own**, which is the case that
+    matters — it is the hotspot being worked on, so it is the file most likely to
+    be dirty. Appended *after* the recorded range, so lines 3-5 still hold
+    `_get_tile_size` and the gate is genuinely green: this is a dirty candidate
+    file that passes, not one that fails. `DIRTY: true` is the only trace, and it
+    is information rather than a gate. See "Known limitations" in the design doc.
+    """
+    run_dir, repo = run
+    cand = repo / CAND_FILE
+    cand.write_text(
+        cand.read_text(encoding="utf-8") + "\n# uncommitted, below the recorded range\n",
+        encoding="utf-8",
+    )
+
+    result = one_shot_apply(
+        OneShotApplyInput(
+            result=run_dir, repo=str(repo), candidate=CAND_ID, print_prompt=True
+        ),
+        claude_runner=_runner(),
+    )
+
+    assert len(result.prompts) == 1
+    assert result.prompts[0].dirty is True
+    written = (Path(result.prompts[0].path) / "apply.prompt.txt").read_text(encoding="utf-8")
+    assert "DIRTY:     true" in written
+
+
+def test_print_prompt_gate_reads_the_working_tree_not_head(run) -> None:
+    """The documented cost of dropping the worktree, pinned rather than left implicit.
+
+    A gutted *working tree* now fails the gate even though HEAD is fine — the
+    exact inverse of `test_validation_runs_against_the_worktree_not_a_dirty_repo`,
+    which still holds for the run path. Loud, so it gets noticed; the silent
+    inverse (working tree matches, HEAD does not) is the known limitation the
+    design records `git show` as the upgrade path for.
+    """
+    run_dir, repo = run
+    (repo / CAND_FILE).write_text("# gutted\n" * 20, encoding="utf-8")
+
+    with pytest.raises(StalenessError):
         one_shot_apply(
             OneShotApplyInput(
-                result=run_dir,
-                repo=str(repo),
-                candidate=CAND_ID,
-                out=blocked,
-                print_prompt=True,
+                result=run_dir, repo=str(repo), candidate=CAND_ID, print_prompt=True
             ),
             claude_runner=_runner(),
         )
-
-    # The CLI catches `OneShotApplyError` and turns it into `apply: <msg>`/exit 2;
-    # a bare OSError would reach the user as a traceback instead.
-    assert isinstance(excinfo.value, OneShotApplyError)
-    assert len(_worktrees(repo)) == 1  # main tree only — nothing left behind
 
 
 def test_print_prompt_clears_an_earlier_applys_artifacts(run) -> None:
@@ -672,11 +706,6 @@ def test_print_prompt_clears_an_earlier_applys_artifacts(run) -> None:
     assert Path(preview.path) == out_dir
     assert sorted(p.name for p in out_dir.iterdir()) == ["apply.prompt.txt"]
 
-    subprocess.run(
-        ["git", "worktree", "remove", "--force", preview.worktree], cwd=repo, check=True
-    )
-    shutil.rmtree(preview.worktree_parent, ignore_errors=True)
-
 
 def test_a_full_apply_writes_all_four_artifacts(run) -> None:
     """The run path's complete output: patch, notes, prompt, manifest — no more, no less.
@@ -698,18 +727,61 @@ def test_a_full_apply_writes_all_four_artifacts(run) -> None:
     assert sorted(artifact.files) == expected
 
 
-def test_print_prompt_without_a_candidate_raises_and_leaves_no_worktree(run) -> None:
-    """A sweep under --print-prompt would leave one worktree per candidate; refuse it."""
+def test_print_prompt_without_a_candidate_writes_one_prompt_per_candidate(run) -> None:
+    """The guard existed only to bound the worktree leak; there is no leak now.
+
+    `--print-prompt` composes with bare selection exactly like the run path,
+    which is the second half of what made the flag skill-only.
+    """
     run_dir, repo = run
+    _write_candidates(run_dir, [SECOND_CAND_ID])
     before = _worktrees(repo)
 
-    with pytest.raises(SelectionError):
-        one_shot_apply(
-            OneShotApplyInput(result=run_dir, repo=str(repo), print_prompt=True),
-            claude_runner=_runner(),
-        )
+    result = one_shot_apply(
+        OneShotApplyInput(result=run_dir, repo=str(repo), print_prompt=True),
+        claude_runner=_runner(),
+    )
 
+    assert [p.candidate_id for p in result.prompts] == [CAND_ID, SECOND_CAND_ID]
+    assert result.skipped == []
     assert _worktrees(repo) == before
+    for preview in result.prompts:
+        assert sorted(p.name for p in Path(preview.path).iterdir()) == ["apply.prompt.txt"]
+
+
+def test_print_prompt_top_n_clears_only_the_selected_candidates(run) -> None:
+    """Clearing is scoped to what the invocation selected, not to the whole run.
+
+    `--print-prompt` deletes an earlier apply's patch/notes/manifest, and a sweep
+    does that per candidate. An unselected candidate's finished apply must
+    survive untouched — asserted through a third candidate's `apply.patch`,
+    which is the file whose loss is unrecoverable.
+    """
+    run_dir, repo = run
+    _write_candidates(run_dir, [SECOND_CAND_ID, THIRD_CAND_ID])
+    sorted_dir = write_sorted(run_dir, [CAND_ID, SECOND_CAND_ID, THIRD_CAND_ID])
+
+    # A finished apply for the candidate that --top-n 2 will not reach.
+    untouched = run_dir / "apply" / "v1_attention" / THIRD_CAND_ID
+    untouched.mkdir(parents=True)
+    (untouched / "apply.patch").write_text("# an earlier apply\n", encoding="utf-8")
+
+    # A stale file for the first candidate, seeded before the one_shot_apply call.
+    stale = run_dir / "apply" / "v1_attention" / CAND_ID
+    stale.mkdir(parents=True)
+    (stale / "apply.patch").write_text("# superseded\n", encoding="utf-8")
+
+    result = one_shot_apply(
+        OneShotApplyInput(result=sorted_dir, repo=str(repo), top_n=2, print_prompt=True),
+        claude_runner=_runner(),
+    )
+
+    assert [p.candidate_id for p in result.prompts] == [CAND_ID, SECOND_CAND_ID]
+    assert (untouched / "apply.patch").read_text(encoding="utf-8") == "# an earlier apply\n"
+    assert not (untouched / "apply.prompt.txt").exists()
+    # And clearing did happen for the two that were selected.
+    selected = run_dir / "apply" / "v1_attention" / CAND_ID
+    assert sorted(p.name for p in selected.iterdir()) == ["apply.prompt.txt"]
 
 
 def test_missing_claude_binary_raises_before_the_loop_with_the_real_runner(
@@ -763,12 +835,6 @@ def test_print_prompt_does_not_require_claude_on_path(
     )
 
     assert len(result.prompts) == 1
-    subprocess.run(
-        ["git", "worktree", "remove", "--force", result.prompts[0].worktree],
-        cwd=repo,
-        check=True,
-    )
-    shutil.rmtree(result.prompts[0].worktree_parent, ignore_errors=True)
 
 
 def test_injected_runner_does_not_require_claude_on_path(
@@ -1149,14 +1215,19 @@ def test_a_failed_diff_leaves_no_stale_patch_from_a_previous_run(
     assert not (out_dir / "apply.patch").exists()
 
 
-def _write_two_candidates(run_dir: Path) -> None:
-    """Rewrite result.json with a second candidate, cloned from the first."""
+def _write_candidates(run_dir: Path, extra_ids: list[str]) -> None:
+    """Rewrite result.json with `extra_ids` cloned from the first candidate."""
     data = make_result_dict()
     cands = data["module_runs"]["v1/attention"]["candidates"]["candidates"]
-    second = json.loads(json.dumps(cands[0]))
-    second["id"] = SECOND_CAND_ID
-    cands.append(second)
+    for cid in extra_ids:
+        clone = json.loads(json.dumps(cands[0]))
+        clone["id"] = cid
+        cands.append(clone)
     (run_dir / "result.json").write_text(json.dumps(data), encoding="utf-8")
+
+
+def _write_two_candidates(run_dir: Path) -> None:
+    _write_candidates(run_dir, [SECOND_CAND_ID])
 
 
 def test_an_unexpected_exception_in_a_sweep_skips_one_candidate_and_continues(
@@ -1337,12 +1408,3 @@ def test_print_prompt_writes_no_manifest(run) -> None:
     )
     assert result.patches == []
     assert not (run_dir / "apply" / "v1_attention" / CAND_ID / "manifest.json").exists()
-
-    # --print-prompt leaves the worktree for its caller; clean it up here, or the
-    # test leaks an empty spotlights-apply-XXXXXXXX/ under the system temp dir.
-    subprocess.run(
-        ["git", "worktree", "remove", "--force", result.prompts[0].worktree],
-        cwd=repo,
-        check=True,
-    )
-    shutil.rmtree(result.prompts[0].worktree_parent, ignore_errors=True)

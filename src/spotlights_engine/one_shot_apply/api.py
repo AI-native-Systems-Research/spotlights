@@ -1,21 +1,25 @@
 """`one_shot_apply(input, config) -> OneShotApplyResult`.
 
-Per candidate: resolve → capture base sha → worktree → **validate inside the
-worktree** → build prompt → run `claude -p` → collect patch + notes → remove
-the worktree in a `finally`.
+Run path, per candidate: resolve → capture base sha → worktree → **validate
+inside the worktree** → build prompt → run `claude -p` → collect patch + notes
+→ remove the worktree in a `finally`.
 
 Two orchestration decisions carry the design's weight:
 
-- **Validation runs against the worktree, not `--repo`.** The bytes validated
-  are then exactly the bytes the agent edits, the recorded excerpt hash is
-  truthful, and your own checkout may be dirty while an apply runs. `prep-evolve`
-  has no such concern because it validates and points the evolver at the same
-  path; the worktree introduces the asymmetry. With no tests being run, this
-  gate is the only correctness check in the design.
-- **`print_prompt` runs steps 1-5 and stops**, leaving the worktree in place.
-  That is what `/spotlights-apply-candidate` consumes: it gets a validated
-  worktree and the prompt in one call, so the staleness gate is never
-  reimplemented in markdown.
+- **The run path validates against the worktree, not `--repo`.** The bytes
+  validated are then exactly the bytes the agent edits, the recorded excerpt
+  hash is truthful, and your own checkout may be dirty while an apply runs.
+  `prep-evolve` has no such concern because it validates and points the evolver
+  at the same path; the worktree introduces the asymmetry. With no tests being
+  run, this gate is the only correctness check in the design.
+- **`--print-prompt` creates no worktree at all.** Its deliverable is a prompt,
+  not edits, so it validates `--repo` — `prep-evolve`'s own call — and reports
+  the working tree's cleanliness in the header rather than sidestepping it with
+  a checkout. Nothing is registered in the target repo and nothing has to be
+  cleaned up, which is what makes the flag usable outside
+  `/spotlights-apply-candidate` and safe to sweep. The trade is a gate that
+  reads working-tree bytes while its consumer works at `BASE`; see the design
+  doc's "Known limitations".
 
 Failure semantics follow `prep_evolve`'s batch loop in shape — a single
 explicit `--candidate` raises; a sweep records a per-candidate skip and
@@ -81,6 +85,7 @@ from spotlights_engine.prep_evolve.resolve import (
 )
 from spotlights_engine.prep_evolve.spec import EvolveSpec, SourceRevision
 from spotlights_engine.prep_evolve.validate_target import (
+    capture_revision,
     ensure_repo_dir,
     validate_candidate_target,
 )
@@ -332,6 +337,43 @@ def _build_spec_in_worktree(
     )
 
 
+def _build_spec_from_repo(
+    *,
+    sel: CandidateSelection,
+    loaded: LoadedResult,
+    repo_path: Path,
+    revision: SourceRevision,
+    direction: Direction,
+) -> EvolveSpec:
+    """Validate against `repo_path` — prep-evolve's call — and assemble the spec.
+
+    The `--print-prompt` counterpart of `_build_spec_in_worktree`. No worktree
+    exists on this path, so `repo_path` is both the gate's target and the only
+    checkout in play, exactly as in `prep_evolve.api`. The cost is that the gate
+    reads working-tree bytes while the consumer will work at `BASE`: a dirty
+    candidate file can therefore pass here and mean something different there.
+    `revision.dirty` carries that into the header, which is a warning and not a
+    gate. See "Known limitations" in the design doc.
+
+    `revision` is built once per invocation by the caller rather than derived
+    here: `git status --porcelain` carries no pathspec, so its answer is
+    repo-wide and cannot vary between candidates.
+    """
+    validated = validate_candidate_target(repo_path, sel.candidate)
+    return build_spec(
+        loaded=loaded,
+        module=resolve_module(loaded.project_tree, sel.qn),
+        qn=sel.qn,
+        candidate=sel.candidate,
+        findings=resolve_findings(sel.run, sel.qn),
+        repo_path=str(repo_path),
+        validated=validated,
+        revision=revision,
+        scope="candidate",
+        direction=direction,
+    )
+
+
 def _write_artifacts(
     *,
     out_dir: Path,
@@ -518,11 +560,11 @@ def _write_prompt_only(*, out_dir: Path, preview: PromptPreview, candidate_id: s
     handoff's fresh prompt beside a superseded patch. Same ordering principle as
     `_write_artifacts`, for the same reason.
 
-    On failure the partial file is removed and `ArtifactWriteError` raised, so
-    the caller's `finally` still reclaims the worktree: a handoff whose prompt
-    never reached disk is not a handoff, and leaving the worktree registered in
-    the target repo with nothing pointing at it is the leak `--print-prompt`
-    already refuses to risk in a sweep.
+    On failure the partial file is removed and `ArtifactWriteError` raised. The
+    caller has nothing to reclaim — no worktree, no agent session — but the
+    directory has already been cleared by this point, so raising a typed error
+    matters: the batch loop turns it into one recorded skip instead of letting a
+    bare `OSError` past its handler and abandoning every candidate still queued.
     """
     try:
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -535,6 +577,53 @@ def _write_prompt_only(*, out_dir: Path, preview: PromptPreview, candidate_id: s
         raise ArtifactWriteError(
             f"could not write the apply prompt for {candidate_id} to {out_dir}: {exc}"
         ) from exc
+
+
+def _process_candidate_prompt_only(
+    *,
+    sel: CandidateSelection,
+    loaded: LoadedResult,
+    repo_path: Path,
+    base: Path,
+    revision: SourceRevision,
+    direction: Direction,
+    result: OneShotApplyResult,
+) -> None:
+    """The `--print-prompt` pipeline: validate, render, clear, write. No worktree.
+
+    Deliberately not a branch inside `_process_candidate`. That function's whole
+    shape — `worktree = None`, `try`, `finally: remove_worktree(...)` — exists to
+    make a worktree safe against an interrupt landing in the wrong window. With
+    nothing to reclaim, the same scaffolding around a single file write is dead
+    weight that a reader has to disprove.
+
+    An `ArtifactWriteError` from the write propagates: the batch loop records it
+    as a per-candidate skip, and a single explicit `--candidate` re-raises it.
+    """
+    spec = _build_spec_from_repo(
+        sel=sel,
+        loaded=loaded,
+        repo_path=repo_path,
+        revision=revision,
+        direction=direction,
+    )
+    prompt_dir = _apply_dir(base, sel.qn, sel.candidate.id)
+    preview = PromptPreview(
+        candidate_id=sel.candidate.id,
+        module_qualified_name=sel.qn,
+        # The resolved path, matching the `worktree add` recipe in the header
+        # rather than the as-recorded `spec.run.repo_path` — the recipe is a git
+        # command a reader runs, and it must name the repo in hand.
+        repo_path=str(repo_path),
+        worktree=None,
+        worktree_parent=None,
+        base_sha=revision.git_commit or "",
+        dirty=revision.dirty,
+        prompt=build_apply_prompt(spec=spec),
+        path=str(prompt_dir),
+    )
+    _write_prompt_only(out_dir=prompt_dir, preview=preview, candidate_id=sel.candidate.id)
+    result.prompts.append(preview)
 
 
 def _process_candidate(
@@ -560,7 +649,6 @@ def _process_candidate(
     # target repo and the temp directory holding it — once per interrupted
     # candidate.
     worktree: Worktree | None = None
-    keep_worktree = False
     try:
         worktree = create_worktree(repo_path, base_sha)
         spec = _build_spec_in_worktree(
@@ -589,21 +677,6 @@ def _process_candidate(
             prompt=prompt,
         )
 
-        if input.print_prompt:
-            # The file, not stdout, is the handoff: the caller reads WORKTREE out
-            # of it. Written inside the `try` so a failure here still reaches the
-            # `finally` and gives the worktree back.
-            prompt_dir = _apply_dir(base, sel.qn, sel.candidate.id)
-            preview.path = str(prompt_dir)
-            _write_prompt_only(
-                out_dir=prompt_dir, preview=preview, candidate_id=sel.candidate.id
-            )
-            result.prompts.append(preview)
-            # Only set once the handoff has actually succeeded, so a leaked
-            # worktree can never coexist with a swallowed exception.
-            keep_worktree = True
-            return
-
         # Passed only when set, so a runner injected by a caller who predates
         # this argument keeps working instead of raising TypeError.
         model_kwargs = (
@@ -619,13 +692,12 @@ def _process_candidate(
         )
         collection = collect_patch(worktree)
     finally:
-        if worktree is not None and not keep_worktree:
+        if worktree is not None:
             remove_worktree(worktree)
 
     # After the `finally`, so a leaked worktree can never be traded for an
     # accounting failure — and after the runner, since `run.usage` and
-    # `run.duration_s` are the inputs. `--print-prompt` returned above, inside
-    # the `try`, so it never reaches this.
+    # `run.duration_s` are the inputs.
     usage_manifest = build_apply_usage_manifest(
         candidate_id=sel.candidate.id,
         module_qualified_name=sel.qn,
@@ -676,13 +748,6 @@ def one_shot_apply(
     claude_runner: ClaudeRunner | None = None,
 ) -> OneShotApplyResult:
     """Turn one (or every) candidate into a patch plus its notes."""
-    if input.print_prompt and input.candidate is None:
-        raise SelectionError(
-            "--print-prompt requires --candidate: without one, a sweep would "
-            "leave one worktree per candidate registered in the target repo "
-            "with nothing to clean them up"
-        )
-
     config = config or OneShotApplyConfig()
     captured_at = config.captured_at or _now_iso()
     runner = claude_runner or run_apply_claude
@@ -724,6 +789,23 @@ def one_shot_apply(
 
     base = input.out or location.run_dir
 
+    # Built once, not per candidate. `capture_revision`'s `git status
+    # --porcelain` carries no pathspec, so `dirty` is a property of the repo and
+    # cannot vary between candidates — and a 20-candidate sweep must not shell
+    # out to git 40 extra times for one boolean.
+    #
+    # `git_commit` is the invocation-level `base_sha` from `require_git_repo`,
+    # not `capture_revision`'s own `rev-parse HEAD`: one authoritative base
+    # commit, so there is no window in which two calls could disagree because
+    # someone committed mid-sweep.
+    prompt_revision: SourceRevision | None = None
+    if input.print_prompt:
+        prompt_revision = SourceRevision(
+            git_commit=base_sha,
+            dirty=capture_revision(repo_path, captured_at).dirty,
+            captured_at=captured_at,
+        )
+
     direction = input.direction or infer_direction(loaded.context.objective)
     if input.direction is None:
         result.warnings.append(
@@ -735,20 +817,31 @@ def one_shot_apply(
 
     for sel in selections:
         try:
-            _process_candidate(
-                sel=sel,
-                loaded=loaded,
-                repo_path=repo_path,
-                base=base,
-                base_sha=base_sha,
-                repo_url=repo_url,
-                spotlights_sha=spotlights_sha,
-                input=input,
-                captured_at=captured_at,
-                direction=direction,
-                claude_runner=runner,
-                result=result,
-            )
+            if prompt_revision is not None:
+                _process_candidate_prompt_only(
+                    sel=sel,
+                    loaded=loaded,
+                    repo_path=repo_path,
+                    base=base,
+                    revision=prompt_revision,
+                    direction=direction,
+                    result=result,
+                )
+            else:
+                _process_candidate(
+                    sel=sel,
+                    loaded=loaded,
+                    repo_path=repo_path,
+                    base=base,
+                    base_sha=base_sha,
+                    repo_url=repo_url,
+                    spotlights_sha=spotlights_sha,
+                    input=input,
+                    captured_at=captured_at,
+                    direction=direction,
+                    claude_runner=runner,
+                    result=result,
+                )
         except (PrepEvolveError, OneShotApplyError) as exc:
             if not batch:
                 raise

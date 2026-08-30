@@ -128,29 +128,11 @@ def test_print_prompt_prints_the_file_path_and_not_the_prompt(
     # "0 candidate(s) written" under a prompt handoff would read as failure.
     assert "candidate(s) written" not in captured.err
 
-    # The worktree is left in place for the caller, which now finds it by reading
-    # the file — the only place those two paths are still published. Clean up
-    # both it and the temp-dir parent WORKTREE_PARENT names (create_worktree
-    # allocates it via tempfile.mkdtemp; only this cleanup removes it).
-    import shutil
-    import subprocess
-
+    # No worktree is created now, so the header says none and gives the recipe.
     written = (out_dir / "apply.prompt.txt").read_text(encoding="utf-8")
-    worktree = next(
-        ln.split("WORKTREE:", 1)[1].strip()
-        for ln in written.splitlines()
-        if ln.startswith("WORKTREE:")
-    )
-    worktree_parent = next(
-        ln.split("WORKTREE_PARENT:", 1)[1].strip()
-        for ln in written.splitlines()
-        if ln.startswith("WORKTREE_PARENT:")
-    )
-    assert Path(worktree).is_dir()
-    assert Path(worktree_parent).is_dir()
-    subprocess.run(["git", "worktree", "remove", "--force", worktree], cwd=repo, check=True)
-    shutil.rmtree(worktree_parent, ignore_errors=True)
-    assert not Path(worktree_parent).exists()
+    assert "WORKTREE:  (none" in written
+    assert "WORKTREE_PARENT:" not in written
+    assert f"git -C {repo.resolve()} worktree add --detach <dir>" in written
 
 
 def test_out_of_scope_files_are_flagged_on_stderr(
