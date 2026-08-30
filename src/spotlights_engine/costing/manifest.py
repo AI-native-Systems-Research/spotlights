@@ -7,7 +7,12 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from spotlights_engine.costing.rates import ByModelCost, CostCoverage, CostSummary
+from spotlights_engine.costing.rates import (
+    ByModelCost,
+    CostCoverage,
+    CostSummary,
+    _canonical_model_id,
+)
 from spotlights_engine.costing.records import UsageRecord
 
 
@@ -136,7 +141,7 @@ class RunManifest(BaseModel):
 def aggregate_models_used(records: list[UsageRecord]) -> list[ModelUsed]:
     grouped: dict[tuple[str, str, str], UsageTotals] = defaultdict(UsageTotals)
     for record in records:
-        model = record.model or record.cli
+        model = _canonical_model_id(record.model) if record.model else record.cli
         key = (record.provider, model, record.role)
         totals = grouped[key]
         totals.input += record.input

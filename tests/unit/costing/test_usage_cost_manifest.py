@@ -271,6 +271,54 @@ def test_run_manifest_groups_models_and_totals_tokens() -> None:
     assert manifest.cost.amount_usd == 35.0
 
 
+def test_run_manifest_models_used_matches_by_model_for_route_prefixed_id() -> None:
+    """`models_used` and `cost.by_model` must carry the same model string for
+    the same record — the docstring on `_group_key` promises 1:1 lockstep. A
+    route-prefixed or context-tagged id from the CLI (`aws/claude-opus-5[1m]`
+    in the DAM sandbox) is canonicalized on the cost side; the models_used
+    side must apply the same canonicalization or the two sections of the run
+    manifest disagree for the same underlying model.
+    """
+    record = UsageRecord.from_usage(
+        AgentUsage(input=100, output=10, model="aws/claude-opus-5[1m]"),
+        step="module_deep_research",
+        module_qualified_name="pkg/a",
+        session_index=1,
+        invocation_index=0,
+        invocation_id="i0",
+        cli="claude",
+        role="deep_research",
+    )
+    summary = compute_cost(
+        [record],
+        {
+            "anthropic:claude-opus-5": ModelRate(
+                input=0.01, output=0.02, cache_read=0.0, cache_create=0.0
+            )
+        },
+    )
+
+    manifest = build_run_manifest(
+        run_id="run-1",
+        date="2026-07-06T00:00:00Z",
+        objective="find spots",
+        provenance={},
+        config_fingerprint={},
+        records=[record],
+        cost=summary,
+        wall_clock_s=1.0,
+        candidates_path="/tmp/out/index.md",
+        num_candidates=0,
+        module_status={"SUCCEEDED": 1},
+        notes=[],
+    )
+
+    assert len(manifest.models_used) == 1
+    assert len(manifest.cost.by_model) == 1
+    assert manifest.models_used[0].model == manifest.cost.by_model[0].model
+    assert manifest.models_used[0].model == "claude-opus-5"
+
+
 def _opus_record() -> UsageRecord:
     """One Opus 4.8 record priced by both bundled tables. The bedrock `aws/`
     prefix here exercises the loader's route-prefix canonicalization — the
