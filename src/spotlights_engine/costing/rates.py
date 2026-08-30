@@ -92,35 +92,65 @@ class CostSummary(BaseModel):
 
     amount_usd: float = 0.0
     priced_token_share: float = Field(default=0.0, ge=0.0, le=1.0)
-    source: Literal[
-        "contracted-rate-table", "litellm-proxy-log", "public-api-rate-table"
-    ] = "contracted-rate-table"
+    source: Literal["contracted-rate-table", "litellm-proxy-log", "public-api-rate-table"] = (
+        "contracted-rate-table"
+    )
     rate_note: str = ""
     unpriced_models: list[str] = Field(default_factory=list)
     coverage: CostCoverage = Field(default_factory=CostCoverage)
     by_model: list[ByModelCost] = Field(default_factory=list)
 
 
-def _load_rates_from(
-    path: Path | None, env_var: str, bundled: Path
+def _build_canonical_rate_map(
+    items: Iterable[tuple[str, ModelRate]],
 ) -> dict[str, ModelRate]:
+    """Build a canonical-key rate map, raising on canonical-key collision.
+
+    Two raw keys that canonicalize to the same string (e.g.
+    `anthropic:aws/claude-opus-5` and `anthropic:claude-opus-5` — both legal,
+    both naming the same rate row) would otherwise silently overwrite in a
+    plain dict comprehension, and pricing would land on whichever entry JSON
+    iteration happened to visit last. Raise instead: pricing is per canonical
+    model, so a duplicate is unambiguously an author error.
+    """
+    result: dict[str, ModelRate] = {}
+    raw_by_canonical: dict[str, str] = {}
+    for raw_key, rate in items:
+        canonical = _canonical_rate_key(raw_key)
+        prior = raw_by_canonical.get(canonical)
+        if prior is not None:
+            raise ValueError(
+                f"duplicate rate-table entry: {prior!r} and {raw_key!r} both "
+                f"canonicalize to {canonical!r}"
+            )
+        result[canonical] = rate
+        raw_by_canonical[canonical] = raw_key
+    return result
+
+
+def _load_rates_from(path: Path | None, env_var: str, bundled: Path) -> dict[str, ModelRate]:
     """Load a rate table keyed by `"provider:model"`.
 
     Precedence: explicit `path` > `env_var` env var > the `bundled` default
     table. Keys starting with `_` are comments. Model portions are
     canonicalized (context tag + LiteLLM route prefix stripped) so a table
     keyed `anthropic:aws/claude-opus-5` and one keyed `anthropic:claude-opus-5`
-    are equivalent — pricing is per model, not per route.
+    are equivalent — pricing is per model, not per route. A table containing
+    two entries that canonicalize to the same key is rejected rather than
+    silently applying only one of them.
     """
     if path is None:
         env_path = os.environ.get(env_var)
         path = Path(env_path) if env_path else bundled
     payload = json.loads(path.read_text(encoding="utf-8"))
-    return {
-        _canonical_rate_key(key): ModelRate.model_validate(value)
-        for key, value in payload.items()
-        if not key.startswith("_")
-    }
+    try:
+        return _build_canonical_rate_map(
+            (key, ModelRate.model_validate(value))
+            for key, value in payload.items()
+            if not key.startswith("_")
+        )
+    except ValueError as exc:
+        raise ValueError(f"{path}: {exc}") from exc
 
 
 def load_rates(path: Path | None = None) -> dict[str, ModelRate]:
@@ -138,9 +168,7 @@ def load_external_rates(path: Path | None = None) -> dict[str, ModelRate]:
     Precedence: explicit `path` > `SPOTLIGHTS_EXTERNAL_RATES_FILE` env var > the
     checked-in external default table. Keys starting with `_` are comments.
     """
-    return _load_rates_from(
-        path, EXTERNAL_RATES_ENV_VAR, _BUNDLED_EXTERNAL_RATES_PATH
-    )
+    return _load_rates_from(path, EXTERNAL_RATES_ENV_VAR, _BUNDLED_EXTERNAL_RATES_PATH)
 
 
 # Context-window variant tag a CLI appends to the model id, e.g. the "[1m]" in
@@ -216,7 +244,9 @@ def compute_cost(
     # records whose model id the CLI reported without the prefix. Dicts coming
     # from `load_rates`/`load_external_rates` are already canonical, so this
     # is a no-op there; the rebuild is cheap and shields internal API callers.
-    rates = {_canonical_rate_key(k): v for k, v in rates.items()}
+    # A collision (two entries canonicalizing to the same key) is rejected so
+    # a misconfigured caller doesn't silently price against the last-visited row.
+    rates = _build_canonical_rate_map(rates.items())
 
     # Materialize once so we can iterate twice (grouping + coverage) without
     # forcing the caller to hand us a list.
@@ -283,9 +313,7 @@ def compute_cost(
         )
 
     total_tokens = sum(_bucket_tokens(bucket) for bucket in grouped.values())
-    priced_tokens = sum(
-        _bucket_tokens(bucket) for bucket in grouped.values() if bucket["priced"]
-    )
+    priced_tokens = sum(_bucket_tokens(bucket) for bucket in grouped.values() if bucket["priced"])
 
     by_model = [
         ByModelCost(
@@ -295,9 +323,7 @@ def compute_cost(
             rate_key=str(bucket["rate_key"]),
             priced=bool(bucket["priced"]),
             amount_usd=float(bucket["amount_usd"]),
-            priced_token_share=(
-                _bucket_tokens(bucket) / total_tokens if total_tokens else 0.0
-            ),
+            priced_token_share=(_bucket_tokens(bucket) / total_tokens if total_tokens else 0.0),
         )
         for (provider, model, role), bucket in sorted(grouped.items())
     ]
@@ -318,9 +344,7 @@ def compute_cost(
             )
         )
     if unpriced:
-        note_parts.append(
-            "PARTIAL cost — no contracted rate for: " + ", ".join(sorted(unpriced))
-        )
+        note_parts.append("PARTIAL cost — no contracted rate for: " + ", ".join(sorted(unpriced)))
     if unresolved:
         note_parts.append(
             f"{unresolved} invocation(s) had an unresolved model id "
