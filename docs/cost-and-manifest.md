@@ -24,6 +24,24 @@ the CLI chose for itself; and where a value was passed, a gateway alias such as
 `models_requested` to answer "what did this run intend", and `models_used` to
 answer "what actually ran". See [Choosing models](agent-cli-setup.md#choosing-models).
 
+## `apply` reports its own cost, separately
+
+`spotlights-engine apply` does not appear in `run_manifest.json`. Each applied
+candidate gets its own `manifest.json` beside its `apply.patch`, priced from the
+same rate tables and carrying the same `cost` / `external_cost` / `models_used`
+/ `timing` shape wherever the two describe the same thing — apply's `timing` has
+no `accumulated_duration_s`, which is a sum over a parallel run's modules.
+
+This is deliberate, and it is the answer when a run's recorded cost is lower
+than the bill: apply runs *after* the run, against a repo state the run never
+analyzed, and can run many times over one run's candidates. Folding its spend
+into the run's totals would mutate a published artifact and make a run's cost
+depend on how often someone applied its candidates afterwards.
+
+`persistence.read_usage_records` enumerates the four run steps explicitly
+rather than iterating `UsageStep` — that is the mechanism keeping the two
+separate. See `docs/one-shot-apply.md` for the file's fields.
+
 ## Cost and rate tables
 
 Cost is computed from token counts and a rate table. The engine never uses CLI-reported `total_cost_usd` for billing, because those values can reflect provider list price rather than your LiteLLM contract. The checked-in table at `src/spotlights_engine/costing/rates.json` contains public default rates for the current Claude/Codex models. Point `SPOTLIGHTS_RATES_FILE` at your contracted LiteLLM table before running if your billing differs:

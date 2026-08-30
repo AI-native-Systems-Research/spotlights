@@ -92,9 +92,85 @@ def test_non_git_repo_exits_2(tmp_path: Path, capsys: pytest.CaptureFixture) -> 
     assert "git" in capsys.readouterr().err
 
 
-def test_print_prompt_writes_the_prompt_and_worktree_to_stdout(
+def test_a_print_prompt_sweep_tallies_prompts_not_candidates(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Nothing was applied, so `candidate(s) written` would be a lie — and `0` a worse one.
+
+    The tally counted only `result.patches`, so a print-prompt sweep read
+    `apply: 0 candidate(s) written, 2 skipped` while two prompts sat on disk.
+    """
+    import spotlights_engine.one_shot_apply.cli as cli_mod
+    from spotlights_engine.one_shot_apply.api import (
+        OneShotApplyResult,
+        PromptPreview,
+        SkippedApply,
+    )
+
+    run_dir, repo = run
+
+    def _prompt_preview(cid: str) -> PromptPreview:
+        return PromptPreview(
+            candidate_id=cid,
+            module_qualified_name="v1/attention",
+            repo_path=str(repo),
+            worktree=None,
+            worktree_parent=None,
+            base_sha="0" * 40,
+            prompt="BODY",
+            path=str(run_dir / "apply" / "v1_attention" / cid),
+        )
+
+    monkeypatch.setattr(
+        cli_mod,
+        "one_shot_apply",
+        lambda inp, cfg: OneShotApplyResult(
+            prompts=[_prompt_preview("cand-a"), _prompt_preview("cand-b")],
+            skipped=[SkippedApply(reason="stale", candidate_id="cand-c")],
+        ),
+    )
+
+    code = apply_main(["--result", str(run_dir), "--repo", str(repo), "--print-prompt"])
+    captured = capsys.readouterr()
+
+    assert code == 0
+    assert "apply: 2 prompt(s) written, 1 skipped" in captured.err
+    assert "candidate(s) written" not in captured.err
+    assert "  skipped cand-c: stale" in captured.err
+    # stdout stays the machine-readable list.
+    assert "written" not in captured.out
+
+
+def test_a_clean_print_prompt_still_prints_a_tally(
     run, capsys: pytest.CaptureFixture
 ) -> None:
+    """Ungated, exactly like `prep-evolve`'s.
+
+    A tally that appears only when something failed is the kind of conditional
+    output that reads as breakage. `prep-evolve` prints its own unconditionally,
+    down to `0 bundle(s) written, 0 skipped` on an empty run.
+    """
+    run_dir, repo = run
+    code = apply_main(
+        [
+            "--result", str(run_dir), "--repo", str(repo),
+            "--candidate", CAND_ID, "--print-prompt",
+        ]
+    )
+    assert code == 0
+    assert "apply: 1 prompt(s) written, 0 skipped" in capsys.readouterr().err
+
+
+def test_print_prompt_prints_the_file_path_and_not_the_prompt(
+    run, capsys: pytest.CaptureFixture
+) -> None:
+    """stdout is one path line; the prompt itself lives only in the file.
+
+    The prompt is no longer dumped to stdout, so a caller cannot `tee` it — it
+    reads `apply.prompt.txt` at the printed path instead. stdout stays
+    machine-readable (one line per candidate, same shape as the run path), which
+    a multi-KB prompt block interleaved with it would destroy.
+    """
     run_dir, repo = run
     code = apply_main(
         [
@@ -110,33 +186,25 @@ def test_print_prompt_writes_the_prompt_and_worktree_to_stdout(
     captured = capsys.readouterr()
     out = captured.out
     assert code == 0
-    assert "WORKTREE:" in out
-    assert CAND_FILE in out
-    # `--print-prompt` writes nothing and skips nothing, so there is no tally to
-    # print: "0 candidate(s) written" under a prompt dump would read as failure.
+
+    out_dir = run_dir / "apply" / "v1_attention" / CAND_ID
+    assert out.strip() == f"{CAND_ID}: {out_dir} (1 file, prompt only)"
+    # The dump is gone: neither the block's headers nor its body reach stdout.
+    assert "PROMPT:" not in out
+    assert "WORKTREE:" not in out
+    assert CAND_FILE not in out
+
+    # Ungated, matching prep-evolve — so a clean handoff says so rather than
+    # printing nothing. `prompt(s)`, because nothing was applied.
+    assert "apply: 1 prompt(s) written, 0 skipped" in captured.err
     assert "candidate(s) written" not in captured.err
 
-    # The worktree is left in place for the caller; clean it up, including the
-    # temp-dir parent that WORKTREE_PARENT points at (create_worktree allocates
-    # it via tempfile.mkdtemp; only this cleanup removes it).
-    import shutil
-    import subprocess
-
-    worktree = next(
-        ln.split("WORKTREE:", 1)[1].strip()
-        for ln in out.splitlines()
-        if ln.startswith("WORKTREE:")
-    )
-    worktree_parent = next(
-        ln.split("WORKTREE_PARENT:", 1)[1].strip()
-        for ln in out.splitlines()
-        if ln.startswith("WORKTREE_PARENT:")
-    )
-    assert Path(worktree).is_dir()
-    assert Path(worktree_parent).is_dir()
-    subprocess.run(["git", "worktree", "remove", "--force", worktree], cwd=repo, check=True)
-    shutil.rmtree(worktree_parent, ignore_errors=True)
-    assert not Path(worktree_parent).exists()
+    # No worktree is created, so there is nothing to parse out and nothing to
+    # clean up — the two properties that made this flag skill-only.
+    written = (out_dir / "apply.prompt.txt").read_text(encoding="utf-8")
+    assert "WORKTREE:  (none" in written
+    assert "WORKTREE_PARENT:" not in written
+    assert f"git -C {repo.resolve()} worktree add --detach <dir>" in written
 
 
 def test_out_of_scope_files_are_flagged_on_stderr(

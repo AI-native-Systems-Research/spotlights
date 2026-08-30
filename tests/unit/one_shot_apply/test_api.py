@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from spotlights_engine.costing.usage import AgentUsage
 from spotlights_engine.one_shot_apply import worktree as worktree_mod
 from spotlights_engine.one_shot_apply.api import (
     OneShotApplyInput,
@@ -24,7 +25,8 @@ from spotlights_engine.one_shot_apply.errors import (
     OneShotApplyError,
     WorktreeError,
 )
-from spotlights_engine.prep_evolve.errors import SelectionError, StalenessError
+from spotlights_engine.one_shot_apply.usage_manifest import ApplyUsageManifest
+from spotlights_engine.prep_evolve.errors import StalenessError
 from tests.unit.prep_evolve._fixtures import (
     CAND_FILE,
     make_repo,
@@ -36,6 +38,7 @@ from tests.unit.prep_evolve._fixtures import (
 
 CAND_ID = "cand-v1_attention-0002"
 SECOND_CAND_ID = "cand-v1_attention-0003"
+THIRD_CAND_ID = "cand-v1_attention-0004"
 
 
 def _git_only_path(tmp_path: Path) -> str:
@@ -60,7 +63,8 @@ def _worktrees(repo: Path) -> list[str]:
 
 
 def _runner(*, edit: str | None = "# agent edit\n", summary: str | None = "did the thing",
-            error: str | None = None, new_file: str | None = None):
+            error: str | None = None, new_file: str | None = None,
+            usage: AgentUsage | None = None, duration_s: float = 0.01):
     """A fake claude_runner that edits the worktree it is handed."""
 
     def _run(*, candidate_id: str, prompt: str, worktree: Path, max_turns: int,
@@ -72,7 +76,9 @@ def _runner(*, edit: str | None = "# agent edit\n", summary: str | None = "did t
             (worktree / new_file).write_text("NEW = 1\n", encoding="utf-8")
         if summary is not None:
             (worktree / "CHANGE-SUMMARY.md").write_text(summary, encoding="utf-8")
-        return ApplyRunResult(candidate_id=candidate_id, duration_s=0.01, error=error)
+        return ApplyRunResult(
+            candidate_id=candidate_id, duration_s=duration_s, error=error, usage=usage
+        )
 
     return _run
 
@@ -104,6 +110,7 @@ def test_single_candidate_writes_patch_and_notes(run) -> None:
         "APPLY-NOTES.md",
         "apply.patch",
         "apply.prompt.txt",
+        "manifest.json",
     ]
     patch_text = (out_dir / "apply.patch").read_text(encoding="utf-8")
     assert "# agent edit" in patch_text
@@ -401,7 +408,7 @@ def test_no_edit_produces_notes_but_no_patch(run) -> None:
     )
     artifact = result.patches[0]
     assert artifact.patch_produced is False
-    assert artifact.files == ["APPLY-NOTES.md", "apply.prompt.txt"]
+    assert artifact.files == ["APPLY-NOTES.md", "apply.prompt.txt", "manifest.json"]
     assert not (Path(artifact.path) / "apply.patch").exists()
 
 
@@ -421,7 +428,7 @@ def test_a_rerun_that_produces_no_patch_removes_the_stale_patch(run) -> None:
     )
     artifact = second.patches[0]
     assert artifact.patch_produced is False
-    assert artifact.files == ["APPLY-NOTES.md", "apply.prompt.txt"]
+    assert artifact.files == ["APPLY-NOTES.md", "apply.prompt.txt", "manifest.json"]
     assert not (out_dir / "apply.patch").exists()
 
 
@@ -438,7 +445,14 @@ def test_non_git_repo_raises(tmp_path: Path) -> None:
         )
 
 
-def test_print_prompt_leaves_the_worktree_and_runs_no_agent(run) -> None:
+def test_print_prompt_creates_no_worktree_and_runs_no_agent(run) -> None:
+    """The whole point: nothing is created, so nothing has to be cleaned up.
+
+    A worktree existed only so the gate could read bytes from a clean checkout.
+    Validation now reads `--repo` — prep-evolve's own call — which leaves this
+    path with no filesystem side effect in the target repo at all, and makes it
+    safe to sweep.
+    """
     run_dir, repo = run
     called: list[str] = []
 
@@ -446,6 +460,7 @@ def test_print_prompt_leaves_the_worktree_and_runs_no_agent(run) -> None:
         called.append("ran")
         raise AssertionError("claude must not run under --print-prompt")
 
+    before = _worktrees(repo)
     result = one_shot_apply(
         OneShotApplyInput(
             result=run_dir, repo=str(repo), candidate=CAND_ID, print_prompt=True
@@ -457,35 +472,316 @@ def test_print_prompt_leaves_the_worktree_and_runs_no_agent(run) -> None:
     assert result.patches == []
     assert len(result.prompts) == 1
     preview = result.prompts[0]
-    worktree = Path(preview.worktree)
-    assert worktree.is_dir()
-    assert (worktree / CAND_FILE).is_file()
+    assert preview.worktree is None
+    assert preview.worktree_parent is None
     assert CAND_FILE in preview.prompt
-    assert len(_worktrees(repo)) == 2  # main tree + the one left for the caller
-    assert Path(preview.worktree_parent) == worktree.parent
-
-    # Not our job to clean up under --print-prompt, but don't leak in the test.
-    subprocess.run(
-        ["git", "worktree", "remove", "--force", str(worktree)], cwd=repo, check=True
-    )
-    # `worktree_parent` exists precisely so a --print-prompt consumer can clean
-    # up the temp scaffolding; use it here too, or the test leaks an empty
-    # spotlights-apply-XXXXXXXX/ under the system temp dir on every run.
-    shutil.rmtree(preview.worktree_parent, ignore_errors=True)
+    assert _worktrees(repo) == before  # no new worktree registered
+    # And no `spotlights-apply-XXXX/` scaffolding left in the system temp dir.
+    assert "spotlights-apply-" not in render_prompt_block(preview)
 
 
-def test_print_prompt_without_a_candidate_raises_and_leaves_no_worktree(run) -> None:
-    """A sweep under --print-prompt would leave one worktree per candidate; refuse it."""
+def test_print_prompt_writes_only_the_prompt_file(run) -> None:
+    """`--print-prompt` writes `apply.prompt.txt` and nothing besides it.
+
+    The file *is* the handoff — the caller reads `WORKTREE:` out of it — so it
+    has to exist on disk rather than only on stdout. Exactly one file, though:
+    no patch and no `CHANGE-SUMMARY.md` because no agent ran, no
+    `APPLY-NOTES.md` because there is no outcome to document yet, and no
+    `manifest.json` because nothing was spent. Asserted as an exact directory
+    listing, not a set of `.exists()` checks: the point is what is *absent*.
+    """
     run_dir, repo = run
-    before = _worktrees(repo)
+    result = one_shot_apply(
+        OneShotApplyInput(
+            result=run_dir, repo=str(repo), candidate=CAND_ID, print_prompt=True
+        ),
+        claude_runner=_runner(),
+    )
 
-    with pytest.raises(SelectionError):
+    preview = result.prompts[0]
+    out_dir = Path(preview.path)
+    assert out_dir == run_dir / "apply" / "v1_attention" / CAND_ID
+    assert sorted(p.name for p in out_dir.iterdir()) == ["apply.prompt.txt"]
+    # Same renderer, same bytes as the run path writes — the two must not drift.
+    assert (out_dir / "apply.prompt.txt").read_text(encoding="utf-8") == render_prompt_block(
+        preview
+    )
+
+
+def test_the_handoff_prompt_says_how_to_create_a_worktree(run) -> None:
+    """The consumer needs a checkout and now has to make it, so hand them the command.
+
+    The mirror of `test_the_saved_prompt_admits_its_worktree_paths_are_dead`:
+    the run path's copy names two dead directories, this one names none and
+    gives the recipe instead.
+    """
+    run_dir, repo = run
+    result = one_shot_apply(
+        OneShotApplyInput(
+            result=run_dir, repo=str(repo), candidate=CAND_ID, print_prompt=True
+        ),
+        claude_runner=_runner(),
+    )
+
+    preview = result.prompts[0]
+    written = (Path(preview.path) / "apply.prompt.txt").read_text(encoding="utf-8")
+    assert "WORKTREE:  (none" in written
+    assert (
+        f"git -C {repo.resolve()} worktree add --detach <dir> {preview.base_sha}" in written
+    )
+    assert "still live" not in written
+
+
+def _preview(**overrides) -> PromptPreview:
+    """A minimal PromptPreview for exercising `render_prompt_block` directly."""
+    fields = {
+        "candidate_id": CAND_ID,
+        "module_qualified_name": "v1/attention",
+        "repo_path": "/repos/vllm",
+        "worktree": "/tmp/spotlights-apply-x/worktree",
+        "worktree_parent": "/tmp/spotlights-apply-x",
+        "base_sha": "0" * 40,
+        "prompt": "BODY",
+    }
+    fields.update(overrides)
+    return PromptPreview(**fields)
+
+
+def test_the_header_without_a_worktree_says_how_to_make_one() -> None:
+    """`--print-prompt` renders no worktree path, because there is none.
+
+    The reader has to create their own, so the header hands them the exact
+    command instead of a directory. `WORKTREE:` keeps its spelling rather than
+    being dropped: an existing `grep '^WORKTREE:'` gets prose back and fails
+    loudly the moment it is used as a path, where a missing line would hand it
+    an empty string — the input most likely to do something quiet and wrong.
+    """
+    block = render_prompt_block(_preview(worktree=None, worktree_parent=None, dirty=False))
+
+    assert "WORKTREE:  (none" in block
+    assert "WORKTREE_PARENT:" not in block
+    assert "/tmp/spotlights-apply-x" not in block
+    assert "git -C /repos/vllm worktree add --detach <dir> " + "0" * 40 in block
+    assert "DIRTY:     false" in block
+    assert block.endswith("PROMPT:\nBODY\n")
+
+
+def test_the_header_reports_a_dirty_repo_as_dirty() -> None:
+    """The gate read working-tree bytes; this is the only place that is visible.
+
+    Not a gate — information. A consumer works at BASE, so a dirty candidate
+    file means the validated bytes and the bytes they will edit can differ.
+    """
+    block = render_prompt_block(_preview(worktree=None, worktree_parent=None, dirty=True))
+    assert "DIRTY:     true" in block
+
+
+def test_the_header_with_a_worktree_keeps_both_paths_and_drops_the_hedge() -> None:
+    """The run path's format is unchanged except that the NOTE no longer hedges.
+
+    It used to have to describe both callers in one block ("if this file came
+    from --print-prompt..."), because both rendered identical headers. They no
+    longer do, so this block says one thing: these paths are already dead.
+    """
+    block = render_prompt_block(_preview())
+
+    assert "WORKTREE:  /tmp/spotlights-apply-x/worktree\n" in block
+    assert "WORKTREE_PARENT:  /tmp/spotlights-apply-x\n" in block
+    assert "DIRTY:" not in block  # a permanently-false line invites a wrong reading
+    assert "--print-prompt" not in block  # the hedge is gone
+    assert "still live" not in block
+
+
+def test_a_failed_prompt_write_skips_one_candidate_and_writes_the_rest(run) -> None:
+    """Replaces the old "gives the worktree back" test: there is no worktree now.
+
+    What still matters is that one unwritable directory costs one candidate.
+    Blocking the *first* one proves the sweep continues past a failure rather
+    than merely surviving one at the end.
+    """
+    run_dir, repo = run
+    _write_candidates(run_dir, [SECOND_CAND_ID])
+    # A *file* where the first candidate's apply dir must be: `mkdir` raises
+    # FileExistsError there and nowhere else.
+    blocked = run_dir / "apply" / "v1_attention" / CAND_ID
+    blocked.parent.mkdir(parents=True)
+    blocked.write_text("not a directory\n", encoding="utf-8")
+
+    result = one_shot_apply(
+        OneShotApplyInput(result=run_dir, repo=str(repo), print_prompt=True),
+        claude_runner=_runner(),
+    )
+
+    assert [p.candidate_id for p in result.prompts] == [SECOND_CAND_ID]
+    assert len(result.skipped) == 1
+    assert result.skipped[0].candidate_id == CAND_ID
+    assert "could not write the apply prompt" in result.skipped[0].reason
+    assert _worktrees(repo) == [f"worktree {repo.resolve()}"]
+
+
+def test_print_prompt_validates_the_repo_and_records_a_dirty_tree(run) -> None:
+    """prep-evolve parity: uncommitted work does not refuse the run.
+
+    The dirty file here is the **candidate's own**, which is the case that
+    matters — it is the hotspot being worked on, so it is the file most likely to
+    be dirty. Appended *after* the recorded range, so lines 3-5 still hold
+    `_get_tile_size` and the gate is genuinely green: this is a dirty candidate
+    file that passes, not one that fails. `DIRTY: true` is the only trace, and it
+    is information rather than a gate. See "Known limitations" in the design doc.
+    """
+    run_dir, repo = run
+    cand = repo / CAND_FILE
+    cand.write_text(
+        cand.read_text(encoding="utf-8") + "\n# uncommitted, below the recorded range\n",
+        encoding="utf-8",
+    )
+
+    result = one_shot_apply(
+        OneShotApplyInput(
+            result=run_dir, repo=str(repo), candidate=CAND_ID, print_prompt=True
+        ),
+        claude_runner=_runner(),
+    )
+
+    assert len(result.prompts) == 1
+    assert result.prompts[0].dirty is True
+    written = (Path(result.prompts[0].path) / "apply.prompt.txt").read_text(encoding="utf-8")
+    assert "DIRTY:     true" in written
+
+
+def test_print_prompt_gate_reads_the_working_tree_not_head(run) -> None:
+    """The documented cost of dropping the worktree, pinned rather than left implicit.
+
+    A gutted *working tree* now fails the gate even though HEAD is fine — the
+    exact inverse of `test_validation_runs_against_the_worktree_not_a_dirty_repo`,
+    which still holds for the run path. Loud, so it gets noticed; the silent
+    inverse (working tree matches, HEAD does not) is the known limitation the
+    design records `git show` as the upgrade path for.
+    """
+    run_dir, repo = run
+    (repo / CAND_FILE).write_text("# gutted\n" * 20, encoding="utf-8")
+
+    with pytest.raises(StalenessError):
         one_shot_apply(
-            OneShotApplyInput(result=run_dir, repo=str(repo), print_prompt=True),
+            OneShotApplyInput(
+                result=run_dir, repo=str(repo), candidate=CAND_ID, print_prompt=True
+            ),
             claude_runner=_runner(),
         )
 
+
+def test_print_prompt_clears_an_earlier_applys_artifacts(run) -> None:
+    """Reruns share the directory, and `--print-prompt` leaves only the prompt in it.
+
+    A patch, notes and manifest from an earlier apply of this candidate describe a
+    session that has been superseded by the handoff starting now. Keeping them
+    would leave the directory documenting an outcome the caller is about to
+    replace — and a patch beside a prompt that produced it is exactly the
+    confusion `apply.patch`'s base-commit header exists to prevent.
+
+    Destructive on purpose: `--print-prompt` is how you *restart* a candidate, so
+    the previous patch is discarded before the new attempt begins.
+    """
+    run_dir, repo = run
+    applied = one_shot_apply(
+        OneShotApplyInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+        claude_runner=_runner(),
+    )
+    out_dir = Path(applied.patches[0].path)
+    assert sorted(p.name for p in out_dir.iterdir()) == [
+        "APPLY-NOTES.md",
+        "apply.patch",
+        "apply.prompt.txt",
+        "manifest.json",
+    ]
+
+    result = one_shot_apply(
+        OneShotApplyInput(
+            result=run_dir, repo=str(repo), candidate=CAND_ID, print_prompt=True
+        ),
+        claude_runner=_runner(),
+    )
+
+    preview = result.prompts[0]
+    assert Path(preview.path) == out_dir
+    assert sorted(p.name for p in out_dir.iterdir()) == ["apply.prompt.txt"]
+
+
+def test_a_full_apply_writes_all_four_artifacts(run) -> None:
+    """The run path's complete output: patch, notes, prompt, manifest — no more, no less.
+
+    Pinned as an exact listing against both the directory and `ApplyArtifact.files`,
+    because the two are read by different consumers (a human opening the folder, and
+    `/spotlights-share-candidates` folding it into a bundle) and a file present in
+    one but unreported by the other is invisible to whichever reads the other.
+    """
+    run_dir, repo = run
+    result = one_shot_apply(
+        OneShotApplyInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+        claude_runner=_runner(),
+    )
+
+    expected = ["APPLY-NOTES.md", "apply.patch", "apply.prompt.txt", "manifest.json"]
+    artifact = result.patches[0]
+    assert sorted(p.name for p in Path(artifact.path).iterdir()) == expected
+    assert sorted(artifact.files) == expected
+
+
+def test_print_prompt_without_a_candidate_writes_one_prompt_per_candidate(run) -> None:
+    """The guard existed only to bound the worktree leak; there is no leak now.
+
+    `--print-prompt` composes with bare selection exactly like the run path,
+    which is the second half of what made the flag skill-only.
+    """
+    run_dir, repo = run
+    _write_candidates(run_dir, [SECOND_CAND_ID])
+    before = _worktrees(repo)
+
+    result = one_shot_apply(
+        OneShotApplyInput(result=run_dir, repo=str(repo), print_prompt=True),
+        claude_runner=_runner(),
+    )
+
+    assert [p.candidate_id for p in result.prompts] == [CAND_ID, SECOND_CAND_ID]
+    assert result.skipped == []
     assert _worktrees(repo) == before
+    for preview in result.prompts:
+        assert sorted(p.name for p in Path(preview.path).iterdir()) == ["apply.prompt.txt"]
+
+
+def test_print_prompt_top_n_clears_only_the_selected_candidates(run) -> None:
+    """Clearing is scoped to what the invocation selected, not to the whole run.
+
+    `--print-prompt` deletes an earlier apply's patch/notes/manifest, and a sweep
+    does that per candidate. An unselected candidate's finished apply must
+    survive untouched — asserted through a third candidate's `apply.patch`,
+    which is the file whose loss is unrecoverable.
+    """
+    run_dir, repo = run
+    _write_candidates(run_dir, [SECOND_CAND_ID, THIRD_CAND_ID])
+    sorted_dir = write_sorted(run_dir, [CAND_ID, SECOND_CAND_ID, THIRD_CAND_ID])
+
+    # A finished apply for the candidate that --top-n 2 will not reach.
+    untouched = run_dir / "apply" / "v1_attention" / THIRD_CAND_ID
+    untouched.mkdir(parents=True)
+    (untouched / "apply.patch").write_text("# an earlier apply\n", encoding="utf-8")
+
+    # A stale file for the first candidate, seeded before the one_shot_apply call.
+    stale = run_dir / "apply" / "v1_attention" / CAND_ID
+    stale.mkdir(parents=True)
+    (stale / "apply.patch").write_text("# superseded\n", encoding="utf-8")
+
+    result = one_shot_apply(
+        OneShotApplyInput(result=sorted_dir, repo=str(repo), top_n=2, print_prompt=True),
+        claude_runner=_runner(),
+    )
+
+    assert [p.candidate_id for p in result.prompts] == [CAND_ID, SECOND_CAND_ID]
+    assert (untouched / "apply.patch").read_text(encoding="utf-8") == "# an earlier apply\n"
+    assert not (untouched / "apply.prompt.txt").exists()
+    # And clearing did happen for the two that were selected.
+    selected = run_dir / "apply" / "v1_attention" / CAND_ID
+    assert sorted(p.name for p in selected.iterdir()) == ["apply.prompt.txt"]
 
 
 def test_missing_claude_binary_raises_before_the_loop_with_the_real_runner(
@@ -539,12 +835,6 @@ def test_print_prompt_does_not_require_claude_on_path(
     )
 
     assert len(result.prompts) == 1
-    subprocess.run(
-        ["git", "worktree", "remove", "--force", result.prompts[0].worktree],
-        cwd=repo,
-        check=True,
-    )
-    shutil.rmtree(result.prompts[0].worktree_parent, ignore_errors=True)
 
 
 def test_injected_runner_does_not_require_claude_on_path(
@@ -709,6 +999,94 @@ def test_a_notes_write_that_fails_partway_leaves_neither_artifact_behind(
     # own it documents an apply that left nothing else behind.
     assert not (out_dir / "apply.patch").exists()
     assert not (out_dir / "apply.prompt.txt").exists()
+    # The notes write fails *before* the manifest write, which sits under its
+    # own guard after this handler — so this run's manifest was never reached,
+    # let alone created. Absent for a different reason than the three above, and
+    # still absent. The stale case is the next test.
+    assert not (out_dir / "manifest.json").exists()
+
+
+def test_a_failed_write_also_clears_a_previous_runs_manifest(
+    run, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Reruns share the directory, so "nothing here" has to mean all four names.
+
+    This run's `manifest.json` is written after the cleanup handler and is
+    unreachable from it — but a *previous* apply of this candidate left one in
+    the same directory. If the handler skipped that name, a failed rerun would
+    leave last run's accounting sitting alone beside no patch and no notes:
+    accounting for a patch that is not there, which is the one state the
+    handler exists to prevent.
+    """
+    run_dir, repo = run
+    out_dir = run_dir / "apply" / "v1_attention" / CAND_ID
+    out_dir.mkdir(parents=True, exist_ok=True)
+    (out_dir / "manifest.json").write_text('{"stale": true}\n', encoding="utf-8")
+
+    real_write_text = Path.write_text
+
+    def _fail_the_notes(self: Path, data: str, *args: object, **kwargs: object) -> int:
+        if self.name != "APPLY-NOTES.md":
+            return real_write_text(self, data, *args, **kwargs)  # type: ignore[arg-type]
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(Path, "write_text", _fail_the_notes)
+
+    with pytest.raises(ArtifactWriteError):
+        one_shot_apply(
+            OneShotApplyInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+            claude_runner=_runner(),
+        )
+
+    assert not (out_dir / "manifest.json").exists()
+    assert not (out_dir / "apply.patch").exists()
+    assert not (out_dir / "APPLY-NOTES.md").exists()
+    assert not (out_dir / "apply.prompt.txt").exists()
+
+
+def test_a_manifest_write_that_fails_leaves_the_patch_and_its_notes_behind(
+    run, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The one write whose failure must cost nothing but itself.
+
+    `manifest.json` is written after the `finally` that destroys the worktree,
+    so the patch beside it cannot be produced again — while a directory holding
+    patch + notes + prompt and no manifest is exactly what every apply
+    directory looked like before the manifest existed, i.e. a state a reader
+    reads correctly. So an `ENOSPC` on the last and smallest write degrades the
+    accounting instead of unlinking three good artifacts and raising
+    `ArtifactWriteError`, which the batch loop would record as a skipped
+    candidate for a patch that had already succeeded.
+    """
+    run_dir, repo = run
+    real_write_text = Path.write_text
+
+    def _fail_only_the_manifest(
+        self: Path, data: str, *args: object, **kwargs: object
+    ) -> int:
+        if self.name != "manifest.json":
+            return real_write_text(self, data, *args, **kwargs)  # type: ignore[arg-type]
+        raise OSError(28, "No space left on device")
+
+    monkeypatch.setattr(Path, "write_text", _fail_only_the_manifest)
+
+    # No `pytest.raises`: the call returning at all is half of what this test
+    # asserts.
+    result = one_shot_apply(
+        OneShotApplyInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+        claude_runner=_runner(),
+    )
+
+    artifact = result.patches[0]
+    out_dir = Path(artifact.path)
+    assert artifact.patch_produced is True
+    assert (out_dir / "apply.patch").stat().st_size > 0
+    assert (out_dir / "APPLY-NOTES.md").exists()
+    assert (out_dir / "apply.prompt.txt").exists()
+    assert not (out_dir / "manifest.json").exists()
+    # The file list is the artifact's own record of what a reviewer will find,
+    # so it must not promise a manifest that is not there.
+    assert artifact.files == ["APPLY-NOTES.md", "apply.patch", "apply.prompt.txt"]
 
 
 def test_a_keyboard_interrupt_during_the_agent_session_leaks_no_worktree(run) -> None:
@@ -786,7 +1164,7 @@ def test_a_failed_diff_still_writes_notes_and_does_not_claim_no_patch(
     assert artifact.collection_error is not None
     assert "timed out" in artifact.collection_error
     assert artifact.patch_produced is False
-    assert artifact.files == ["APPLY-NOTES.md", "apply.prompt.txt"]
+    assert artifact.files == ["APPLY-NOTES.md", "apply.prompt.txt", "manifest.json"]
 
     notes = (Path(artifact.path) / "APPLY-NOTES.md").read_text(encoding="utf-8")
     assert "No patch could be collected" in notes
@@ -837,14 +1215,19 @@ def test_a_failed_diff_leaves_no_stale_patch_from_a_previous_run(
     assert not (out_dir / "apply.patch").exists()
 
 
-def _write_two_candidates(run_dir: Path) -> None:
-    """Rewrite result.json with a second candidate, cloned from the first."""
+def _write_candidates(run_dir: Path, extra_ids: list[str]) -> None:
+    """Rewrite result.json with `extra_ids` cloned from the first candidate."""
     data = make_result_dict()
     cands = data["module_runs"]["v1/attention"]["candidates"]["candidates"]
-    second = json.loads(json.dumps(cands[0]))
-    second["id"] = SECOND_CAND_ID
-    cands.append(second)
+    for cid in extra_ids:
+        clone = json.loads(json.dumps(cands[0]))
+        clone["id"] = cid
+        cands.append(clone)
     (run_dir / "result.json").write_text(json.dumps(data), encoding="utf-8")
+
+
+def _write_two_candidates(run_dir: Path) -> None:
+    _write_candidates(run_dir, [SECOND_CAND_ID])
 
 
 def test_an_unexpected_exception_in_a_sweep_skips_one_candidate_and_continues(
@@ -928,3 +1311,100 @@ def test_an_unexpected_exception_still_raises_for_an_explicit_candidate(run) -> 
             OneShotApplyInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
             claude_runner=_boom,
         )
+
+
+def test_the_manifest_lands_beside_the_patch_and_agrees_with_the_artifact(run) -> None:
+    """The session's tokens were previously parsed, copied onto ApplyArtifact, and
+    dropped. This is the surface that ends that: a clean apply and a timed-out
+    apply used to report the same thing about cost, which was nothing."""
+    run_dir, repo = run
+    usage = AgentUsage(
+        input=100, output=200, cache_read=300, cache_create=400,
+        model="aws/claude-opus-5", api_time_s=12.5,
+    )
+    result = one_shot_apply(
+        OneShotApplyInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+        claude_runner=_runner(usage=usage, duration_s=33.0),
+    )
+
+    artifact = result.patches[0]
+    assert "manifest.json" in artifact.files
+    out_dir = Path(artifact.path)
+
+    m = ApplyUsageManifest.model_validate_json(
+        (out_dir / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert m.candidate_id == artifact.candidate_id
+    assert m.module_qualified_name == artifact.module_qualified_name
+    assert m.target.commit_sha == artifact.base_sha
+    assert m.total_tokens == 1000
+    assert m.models_used[0].role == "one_shot_apply"
+    assert m.timing.wall_clock_s == 33.0
+    assert m.timing.api_time_s == 12.5
+    # Priced by the bundled contracted table, so a real dollar figure — the
+    # amount is the bundled table's business, not this test's.
+    assert m.cost.amount_usd > 0.0
+    assert m.external_cost is not None
+    assert m.external_cost.amount_usd > m.cost.amount_usd
+
+
+def test_the_manifest_keys_are_sorted_on_disk_like_the_run_manifest(run) -> None:
+    """`json.dumps(..., indent=2, sort_keys=True)`, matching persistence.py:89.
+    Stable key order is what keeps a re-run's diff to the values that changed."""
+    run_dir, repo = run
+    result = one_shot_apply(
+        OneShotApplyInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+        claude_runner=_runner(usage=AgentUsage(input=1, output=2, model="aws/claude-opus-5")),
+    )
+    text = (Path(result.patches[0].path) / "manifest.json").read_text(encoding="utf-8")
+    keys = list(json.loads(text).keys())
+    assert keys == sorted(keys)
+    assert text.endswith("\n")
+
+
+def test_a_session_that_produced_no_patch_still_gets_a_manifest(run) -> None:
+    """Written unconditionally, like the notes and the prompt and unlike the
+    patch. A session that errored or chose not to edit still spent tokens, and
+    that is precisely when someone asks what it cost."""
+    run_dir, repo = run
+    # The fixture repo has no `origin`, and the builder appends a second note for
+    # that gap. Give it one, so `notes` below is exactly the degraded-usage
+    # sentence and nothing else — and so the resolved `repo_url` is asserted to
+    # have actually reached the file, which is the only check on that wiring.
+    origin = "https://example.invalid/attn.git"
+    subprocess.run(["git", "remote", "add", "origin", origin], cwd=repo, check=True)
+
+    result = one_shot_apply(
+        OneShotApplyInput(result=run_dir, repo=str(repo), candidate=CAND_ID),
+        claude_runner=_runner(edit=None, summary=None, error="model unavailable"),
+    )
+
+    artifact = result.patches[0]
+    assert artifact.patch_produced is False
+    out_dir = Path(artifact.path)
+    assert not (out_dir / "apply.patch").exists()
+
+    m = ApplyUsageManifest.model_validate_json(
+        (out_dir / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert m.models_used == []
+    assert m.target.repo_url == origin
+    # `startswith`, not equality: `spotlights_commit_sha()` shells out to `git
+    # rev-parse HEAD` and returns "" from a wheel/sdist export with no engine
+    # checkout, which appends a second, unrelated note. The degraded-usage
+    # sentence is what this test is about, and it is pinned in full.
+    assert m.notes.startswith("no usage records found: model unavailable")
+
+
+def test_print_prompt_writes_no_manifest(run) -> None:
+    """`--print-prompt` returns before the runner, so there is no session and
+    nothing to account for."""
+    run_dir, repo = run
+    result = one_shot_apply(
+        OneShotApplyInput(
+            result=run_dir, repo=str(repo), candidate=CAND_ID, print_prompt=True
+        ),
+        claude_runner=_runner(),
+    )
+    assert result.patches == []
+    assert not (run_dir / "apply" / "v1_attention" / CAND_ID / "manifest.json").exists()

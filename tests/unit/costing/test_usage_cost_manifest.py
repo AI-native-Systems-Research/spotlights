@@ -2,8 +2,10 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from spotlights_engine.costing.manifest import (
+    RunManifestCost,
     RunManifestModelsRequested,
     build_run_manifest,
 )
@@ -723,3 +725,67 @@ def test_models_requested_finds_a_model_pinned_on_any_single_step() -> None:
     assert requested.claude == "pinned-claude"
     # Not step 2's `gpt-5.5` default, which would otherwise shadow this.
     assert requested.codex == "pinned-codex"
+
+
+def test_cost_block_matches_the_translation_build_run_manifest_performs() -> None:
+    """`cost_block` is the extraction of an inline translation, so it must be
+    exactly that translation — including the one field it deliberately drops.
+
+    `CostSummary.unpriced_models` duplicates `coverage.unpriced_models`, and
+    `RunManifestCost` omits it on purpose. A refactor that "just forwards
+    everything" would reintroduce it and change the published JSON shape.
+    """
+    from spotlights_engine.costing.manifest import cost_block
+
+    records = [
+        UsageRecord.from_usage(
+            AgentUsage(input=10, output=20, cache_read=30, cache_create=40, model="m1"),
+            step="agent_proposals",
+            module_qualified_name="pkg/a",
+            session_index=1,
+            invocation_index=0,
+            invocation_id="i0",
+            cli="claude",
+            role="agent_proposals",
+        )
+    ]
+    summary = compute_cost(
+        records,
+        {"anthropic:m1": ModelRate(input=1.0, output=1.0, cache_read=1.0, cache_create=1.0)},
+    )
+
+    block = cost_block(summary)
+    assert block.amount_usd == summary.amount_usd
+    assert block.priced_token_share == summary.priced_token_share
+    assert block.source == summary.source
+    assert block.rate_note == summary.rate_note
+    assert block.coverage == summary.coverage
+    assert block.by_model == summary.by_model
+
+    # The dropped field stays dropped.
+    assert "unpriced_models" not in block.model_dump()
+    with pytest.raises(ValidationError):
+        RunManifestCost(amount_usd=1.0, unpriced_models=["x"])
+
+    # And the manifest's own block is produced by exactly this function.
+    manifest = build_run_manifest(
+        run_id="run-1",
+        date="2026-08-26T00:00:00Z",
+        objective="find spots",
+        provenance={
+            "repo_url": "https://example.test/repo.git",
+            "target_commit_sha": "abc",
+            "spotlights_commit_sha": "def",
+        },
+        config_fingerprint={},
+        records=records,
+        cost=summary,
+        external_cost=summary,
+        wall_clock_s=1.0,
+        candidates_path="/tmp/out/index.md",
+        num_candidates=1,
+        module_status={"SUCCEEDED": 1},
+        notes=[],
+    )
+    assert manifest.cost == block
+    assert manifest.external_cost == block
