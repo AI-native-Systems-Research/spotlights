@@ -64,7 +64,7 @@ def _runner(*, edit: str | None = "# agent edit\n", summary: str | None = "did t
     """A fake claude_runner that edits the worktree it is handed."""
 
     def _run(*, candidate_id: str, prompt: str, worktree: Path, max_turns: int,
-             wallclock_s: int) -> ApplyRunResult:
+             wallclock_s: int, claude_model: str | None = None) -> ApplyRunResult:
         if edit is not None:
             target = worktree / CAND_FILE
             target.write_text(target.read_text(encoding="utf-8") + edit, encoding="utf-8")
@@ -863,7 +863,8 @@ def test_an_unexpected_exception_in_a_sweep_skips_one_candidate_and_continues(
     _write_two_candidates(run_dir)
 
     def _boom_on_the_first(*, candidate_id: str, prompt: str, worktree: Path,
-                           max_turns: int, wallclock_s: int) -> ApplyRunResult:
+                           max_turns: int, wallclock_s: int,
+                           claude_model: str | None = None) -> ApplyRunResult:
         if candidate_id == CAND_ID:
             raise RuntimeError("a bug nobody anticipated")
         return _runner()(

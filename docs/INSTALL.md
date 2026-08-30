@@ -46,21 +46,25 @@ source .venv/bin/activate
 
 ## Install the Spotlights skill
 
-The engine ships Claude Code slash commands (currently `/spotlights-objective-setting`, `/spotlights-sort-candidates`, `/spotlights-share-candidates`, and `/spotlights-apply-candidate`) as bundled markdown templates. They are not active until you install them into a Claude Code commands directory. Locally In the project:
+The engine ships Claude Code slash commands (currently `/spotlights-objective-setting`, `/spotlights-sort-candidates`, `/spotlights-share-candidates`, and `/spotlights-apply-candidate`) as bundled markdown templates. They are not active until you install them into a Claude Code commands directory. By default `init` installs them once, system-wide, so they are available from every directory:
 
 ```bash
-spotlights-engine init           # writes .claude/commands/spotlights-*.md
+spotlights-engine init           # writes ~/.claude/commands/spotlights-*.md
 ```
 
-Or install once, system-wide:
+Or scope them to a single checkout — useful when you want the commands pinned to one project's version, or committed alongside it:
 
 ```bash
-spotlights-engine init --scope user   # writes ~/.claude/commands/spotlights-*.md
+spotlights-engine init --scope project   # writes ./.claude/commands/spotlights-*.md
 ```
 
-`init` records what it installed in `<scope-root>/.spotlights/manifest.json` (sha256 per file). Re-running `spotlights-engine init` is a no-op for existing files. To pick up new bundled versions after a package upgrade, use `--force` — files the user has edited (hash differs from the manifest) are preserved.
+Re-running `spotlights-engine init` only adds files that are missing; anything already on disk is left alone. To pick up new bundled versions after a package upgrade, use `--force`, which rewrites every file the bundle ships — so any edits you made to those files are discarded. Files Spotlights does not ship (your own notes inside a skill directory, for instance) are never touched either way. `init` records what it installed in `<scope-root>/.spotlights/manifest.json` (sha256 per file); that is a record of the install, not an input to the overwrite decision.
 
-Open Claude Code in the same directory and the slash commands appear:
+If you set `CLAUDE_CONFIG_DIR` to move Claude Code's config directory, a user-scope `init` follows it and writes to `$CLAUDE_CONFIG_DIR/commands/` instead. What matters is whether the variable is *set*, not whether it has a value: set to the empty string it names a `commands/` directory relative to your working directory, which is what Claude Code itself reads in that case. The value is used literally — no `~` expansion, so `CLAUDE_CONFIG_DIR=~/.claude` in a config file that does not expand tildes means a directory actually named `~`.
+
+Symlinks are followed wherever they appear, so managing `~/.claude`, `commands/`, a single skill directory or file, or `.spotlights/` through a dotfiles repo (stow, chezmoi, plain `ln -s`) works — including on a fresh clone whose links do not point at anything yet, where `init` creates what they point at.
+
+Open Claude Code (in any directory for a user-scope install, or in the project directory for `--scope project`) and the slash commands appear:
 
 ```
 /spotlights-objective-setting
@@ -77,8 +81,9 @@ Before your first real run, verify the environment end-to-end:
 spotlights-engine doctor
 ```
 
-`doctor` runs each agent CLI (`claude`, `codex`)
-with a one-word prompt. A single probe proves three things at once:
+`doctor` runs each agent CLI (`claude`, `codex`) with a one-word prompt, using the
+model your config resolves to rather than the CLI's own default — otherwise it can
+pass on a model no real run would ask for. A single probe proves three things at once:
 
 - **install** — the CLI resolves on PATH and executes;
 - **auth** — it exits cleanly with parseable output (an unauthenticated CLI errors out);
@@ -89,6 +94,14 @@ It exits non-zero on any failure. Because it launches the CLIs, `doctor` spends 
 tiny amount per probe — that is the only way to verify auth and the reported model.
 If a probe reports a model with no rate row, add it to the table or point
 `SPOTLIGHTS_RATES_FILE` at a table that prices it. See [docs/cost-and-manifest.md](cost-and-manifest.md).
+
+`doctor` also prints a `models` check naming the effective model for each CLI and
+where the value came from — the bundled `models.yaml`, a file named by
+`$SPOTLIGHTS_MODELS_FILE`, or the CLI's own config. With `codex` left blank you
+will see *two* Codex probes rather than one: step 2 pins its built-in `gpt-5.5`
+while steps 3 and 5 inherit `~/.codex/config.toml`, so both models get checked and
+a green result cannot hide an unprobed step. Setting `codex` collapses that back to
+a single probe. See [Choosing models](agent-cli-setup.md#choosing-models).
 
 ## Engine Configuration
 
@@ -111,3 +124,5 @@ All flags are optional once `--repo` and the agent CLIs are available.
 | `--no-review` | off | Alias for `--review-iterations 0`. Mutually exclusive with `--review-iterations`. |
 | `--enable-claude-search` | off | Also run the Claude runner in step 3 (default: Codex only). Enable when using the `claude` CLI directly against Anthropic (its `WebSearch` works); leave off behind a LiteLLM server, where `WebSearch` is currently unreliable. |
 | `--no-deep-research` | off | Skip step 3 entirely (no research session, no findings); step 4 short-circuits to zero proposals, steps 1/2/5 unchanged. Cheap candidates-only mode. The step-3-only knobs (`--enable-claude-search`, `--no-candidate-hotspots`, `--max-findings-per-module`) become no-ops but still count in the resume fingerprint, so resume a run with the same flags it was started with. |
+| `--claude-model ID` | from `models.yaml` (ships blank → the CLI's own default) | Model id passed as `claude --model` at every step. Overrides `models.yaml` / `$SPOTLIGHTS_MODELS_FILE` for one run. Pass it empty (`--claude-model ""`) to force "inherit `~/.claude/settings.json`" even when the file pins something. A set value is part of the resume fingerprint, so resume a run with the model it was started with. See [Choosing models](agent-cli-setup.md#choosing-models). |
+| `--codex-model ID` | from `models.yaml` (ships blank) | Model id passed to Codex at every step. Same precedence and empty-string rule as `--claude-model`. One wart: candidate discovery (step 2) keeps a built-in `gpt-5.5` default for resume compatibility, so a blank value leaves step 2 on `gpt-5.5` while steps 3 and 5 inherit `~/.codex/config.toml`; setting a value makes all three agree. |

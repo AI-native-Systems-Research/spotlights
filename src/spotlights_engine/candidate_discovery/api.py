@@ -53,7 +53,16 @@ class DiscoveryConfig(BaseModel):
     num_review_iterations: int = Field(default=3, ge=0)
     per_iteration_wallclock_s: int = Field(default=900, ge=1)
     claude_max_turns: int = Field(default=30, ge=1)
-    codex_model: str = Field(default="gpt-5.5", pattern=r"^[\w.\-/]+$")
+    # Global model id passed to `claude --model`. None means "inherit the CLI's
+    # own default"; see `spotlights_engine.model_config`.
+    claude_model: str | None = None
+    # `None` means "inherit the CLI's own default" (no `-c model=...`). The
+    # default stays `gpt-5.5` rather than None: this value is part of the resume
+    # `config_fingerprint`, so changing it would invalidate every run dir created
+    # before `models.yaml` existed. A blank value in `models.yaml` therefore
+    # leaves step 2 on `gpt-5.5`; set an explicit id to change it everywhere.
+    # The pattern allows `[...]` for context-window variants (e.g. `x[1m]`).
+    codex_model: str | None = Field(default="gpt-5.5", pattern=r"^[\w.\-/\[\]]+$")
     codex_reasoning_effort: Literal["minimal", "low", "medium", "high", "xhigh"] = "high"
 
 

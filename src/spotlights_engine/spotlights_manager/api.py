@@ -18,6 +18,7 @@ from spotlights_engine.candidate_discovery.api import (
     DiscoveryConfig,
     IterationTelemetry,
 )
+from spotlights_engine.model_config import ModelConfig
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
 from spotlights_engine.modules_extractor import ExtractorConfig
 from spotlights_engine.modules_extractor.agent import ExtractionInvocation
@@ -52,6 +53,13 @@ class SpotlightsManagerConfig(BaseModel):
     extractor: ExtractorConfig = Field(default_factory=ExtractorConfig)
     discovery: DiscoveryConfig | None = None
     deep_research: CodexExecOptions | None = None
+
+    # The run's resolved model request, as the CLI decided it (flag > models.yaml
+    # > blank). Two jobs: it is the source for step 3, which is the one step with
+    # no config object of its own, and it is what the run manifest records as
+    # intent. Per-step configs still carry their own `claude_model`/`codex_model`
+    # so a library caller can differ from this; None here means "inherit".
+    models: ModelConfig | None = None
     proposal_from_finding: ProposalFromFindingConfig | None = None
     agent_proposals: AgentProposalsConfig | None = None
 

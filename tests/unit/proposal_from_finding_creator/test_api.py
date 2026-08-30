@@ -115,7 +115,8 @@ def test_runner_exception_becomes_recoverable_issue_and_siblings_continue(
     inp = make_input(n_candidates=1, n_findings=2)
 
     def _runner(
-        *, pair_key, prompt, schema_text, repo_path, max_turns, wallclock_s
+        *, pair_key, prompt, schema_text, repo_path, max_turns, wallclock_s,
+        claude_model=None,
     ) -> PairRunResult:
         if pair_key == "cand-v1_kv_offload-0001__find-v1_kv_offload-0001":
             raise RuntimeError("transient runner crash")

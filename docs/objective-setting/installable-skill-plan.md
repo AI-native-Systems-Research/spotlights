@@ -93,16 +93,34 @@ spotlights-engine init [--scope project|user] [--force]
 Behavior:
 - Locate bundled templates via `importlib.resources.files("spotlights_engine") / "_templates" / "commands"`.
 - Resolve destination:
-  - `--scope project` (default): `<cwd>/.claude/commands/`
-  - `--scope user`: `~/.claude/commands/`
+  - `--scope user` (default): `~/.claude/commands/`, or `$CLAUDE_CONFIG_DIR/commands/`
+    when that variable is *set* — resolved exactly as Claude Code resolves it, since
+    writing anywhere else installs skills that silently never appear: nullish rather
+    than falsy (set-but-empty is used *as* the root, giving a cwd-relative
+    `commands/`), no tilde expansion, NFC-normalized. A value that merely spells the
+    default location is treated as the default, so the manifest does not migrate.
+  - `--scope project`: `<cwd>/.claude/commands/` (unaffected by `CLAUDE_CONFIG_DIR`)
+- Follow symlinks wherever they appear on the destination path, including at the
+  installed file itself, and create the directories a dangling link's target needs.
+  Managing any of `~/.claude`, `commands/`, one skill directory, one skill file, or
+  `.spotlights/` through a dotfiles repo is a supported layout.
+- Never raise on an unwritable destination: report it and exit non-zero, writing the
+  manifest for whatever did land first.
 - For each `<name>.md` in the bundle, write `<dest>/spotlights-<name>.md` (apply prefix at install time, like spec-kit).
 - After writing each file, compute its sha256 and record it in the manifest.
 - Write `<scope-root>/.spotlights/manifest.json` with the shape below.
-- Default first-run behavior: skip files that already exist (don't overwrite).
-- `--force` behavior: read existing manifest, hash each managed file currently on disk, compare to manifest:
-  - if hash matches → file is unchanged since install → safe to overwrite with bundled version,
-  - if hash differs → user has edited it → skip and warn (still rewrite manifest entry only after the user re-runs without `--force` or accepts overwrite).
-- Print a one-line summary: `installed: spotlights-objective-setting`.
+- Default behavior: skip files that already exist (don't overwrite).
+- `--force` behavior: overwrite every file the bundle ships, discarding local edits
+  to those files. This is spec-kit's `force=True` mode, and the manifest is not
+  consulted — "force install this version" means exactly that. (Spec-kit's
+  hash-compare-and-preserve behavior lives on a *separate* `refresh_managed` mode
+  used by its migration paths, not on `--force`. Conflating the two is what made an
+  early version of our installer treat `--force` as a no-op on any edited file.)
+- Files the bundle does not ship are never written, at any force level.
+- `version`/`installed_at` describe the files on disk, not the run, so they only
+  advance when *every* bundled file was written — and are carried forward from the
+  prior manifest as a pair or not at all.
+- Print a one-line summary: `installed: spotlights-objective-setting.md`.
 
 **Manifest shape** (`.spotlights/manifest.json`, modeled on spec-kit's `speckit.manifest.json`):
 
@@ -147,8 +165,8 @@ In [tests/](../../tests/):
 ## Decisions
 
 1. **Templates location**: repo-root `templates/commands/` (mirrors spec-kit). Wheel builds bundle them into the package via `[tool.hatch.build.targets.wheel.force-include]`. The installer's `_bundled_templates()` checks the package-data path first, then falls back to a `__file__`-relative walk up to `<repo>/templates/commands/` for editable installs. Both flows tested end-to-end.
-2. **`init` scope default**: `project` (`./.claude/`). The package install (`pip install spotlights-engine`) is the same regardless; `--scope user` is documented as the "I want this skill everywhere" shortcut.
-3. **Manifest format**: spec-kit shape — `{integration, version, installed_at, files: {path: sha256}}`. The hash enables safe `--force` upgrades (only overwrite files the user hasn't edited) and clean future `uninstall-skills`. Worth the few extra lines now to avoid a painful migration later.
+2. **`init` scope default**: `user` (`~/.claude/`) — the skills are engine-versioned, not project-specific, so installing them once per machine matches how people actually use them. (This originally shipped as `project`; the default was flipped later.) The package install (`pip install spotlights-engine`) is the same regardless; `--scope project` pins the commands to a single checkout.
+3. **Manifest format**: spec-kit shape — `{integration, version, installed_at, files: {path: sha256}}`. It is a *record*, never an input to the overwrite decision: it says which files this integration put on disk, at which version, so a future `uninstall-skills` knows what it owns and a `doctor` can tell a pristine install from an edited one. `--force` does not consult it — see Behavior above. (Spec-kit's hash-compare-and-preserve lives on its separate `refresh_managed` mode; reading the hash into `--force` is exactly the conflation that broke an early version of this installer.)
 
 ## Out of scope (explicit non-goals)
 

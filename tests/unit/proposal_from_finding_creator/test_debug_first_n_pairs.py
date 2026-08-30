@@ -39,7 +39,8 @@ def test_debug_first_n_pairs_caps_runner_invocations(
     invoked: list[str] = []
 
     def _runner(
-        *, pair_key, prompt, schema_text, repo_path, max_turns, wallclock_s
+        *, pair_key, prompt, schema_text, repo_path, max_turns, wallclock_s,
+        claude_model=None,
     ):
         invoked.append(pair_key)
         finding_id = pair_key.split("__")[1]
@@ -82,7 +83,8 @@ def test_debug_first_n_pairs_above_total_runs_all_pairs(
     invoked: list[str] = []
 
     def _runner(
-        *, pair_key, prompt, schema_text, repo_path, max_turns, wallclock_s
+        *, pair_key, prompt, schema_text, repo_path, max_turns, wallclock_s,
+        claude_model=None,
     ):
         invoked.append(pair_key)
         finding_id = pair_key.split("__")[1]

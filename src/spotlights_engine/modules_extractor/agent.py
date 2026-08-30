@@ -92,6 +92,7 @@ def run_extraction(
     repo_path: Path,
     prompt: str,
     claude_bin: str = "claude",
+    claude_model: str | None = None,
     max_turns: int = 60,
     timeout_s: int = 1800,
     artifacts_dir: Path | None = None,
@@ -144,6 +145,8 @@ def run_extraction(
         "--max-turns",
         str(max_turns),
     ]
+    if claude_model:
+        argv += ["--model", claude_model]
 
     attempt_prompt = prompt
     attempts = _VALIDATION_RETRIES + 1

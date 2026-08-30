@@ -45,7 +45,8 @@ def test_max_parallel_pairs_caps_in_flight_runners(
     lock = threading.Lock()
 
     def _runner(
-        *, pair_key, prompt, schema_text, repo_path, max_turns, wallclock_s
+        *, pair_key, prompt, schema_text, repo_path, max_turns, wallclock_s,
+        claude_model=None,
     ) -> PairRunResult:
         nonlocal in_flight, peak
         with lock:

@@ -363,6 +363,7 @@ def run_structured_claude_stage(
     stage_name: str,
     attempt_dir: Path | None,
     claude_bin: str = "claude",
+    claude_model: str | None = None,
     max_turns: int,
     timeout_s: int,
     on_event: Callable[[str], None] | None = None,
@@ -393,6 +394,8 @@ def run_structured_claude_stage(
         "--max-turns",
         str(max_turns),
     ]
+    if claude_model:
+        argv += ["--model", claude_model]
 
     try:
         result = run_streaming_claude(
