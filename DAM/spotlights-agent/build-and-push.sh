@@ -13,7 +13,12 @@
 #   TAG=0.1.1 ./build-and-push.sh    # override tag
 #
 # Overridable env vars: QUAY_USER, IMAGE, TAG, PLATFORM_BASE_TAG,
-#                       QUAY_ENCRIPTED_PASS.
+#                       CLAUDE_VERSION, QUAY_ENCRIPTED_PASS.
+#
+# Pin CLAUDE_VERSION for reproducible builds — otherwise the Dockerfile
+# resolves "latest" at build time and two builds from the same commit
+# may bake different claude binaries. Example:
+#   CLAUDE_VERSION=1.0.88 ./build-and-push.sh
 #
 # The image installs Spotlights from the local checkout (the repo root, which
 # is the docker build context). The upstream repo is private, so cloning it
@@ -38,8 +43,9 @@ fi
 
 QUAY_USER="${QUAY_USER:?set QUAY_USER to your quay.io username or org}"
 IMAGE="${IMAGE:-spotlights-agent}"
-TAG="${TAG:-0.1.3}"
+TAG="${TAG:-0.1.4}"
 PLATFORM_BASE_TAG="${PLATFORM_BASE_TAG:-latest}"
+CLAUDE_VERSION="${CLAUDE_VERSION:-}"
 
 REF="quay.io/${QUAY_USER}/${IMAGE}:${TAG}"
 
@@ -52,12 +58,14 @@ if [[ -n "${QUAY_ENCRIPTED_PASS:-}" ]]; then
 fi
 
 echo "Building ${REF}"
-echo "  platform-base: ${PLATFORM_BASE_TAG}"
-echo "  build context: ${CTX}"
+echo "  platform-base:  ${PLATFORM_BASE_TAG}"
+echo "  claude version: ${CLAUDE_VERSION:-<latest at build time>}"
+echo "  build context:  ${CTX}"
 
 docker build \
   --platform linux/amd64 \
   --build-arg "PLATFORM_BASE_TAG=${PLATFORM_BASE_TAG}" \
+  --build-arg "CLAUDE_VERSION=${CLAUDE_VERSION}" \
   -f "${DOCKERFILE}" \
   -t "${REF}" \
   "${CTX}"
