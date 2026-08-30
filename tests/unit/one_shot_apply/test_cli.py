@@ -387,3 +387,85 @@ def test_a_selection_skip_without_a_module_does_not_print_a_literal_none(
     assert code == 0  # a recorded skip is still a produced outcome
     assert f"skipped {CAND_ID}: no longer in result.json" in err
     assert "None" not in err
+
+
+def test_a_bad_model_id_in_the_file_exits_2_and_names_the_file(
+    run, tmp_path: Path, monkeypatch, capsys: pytest.CaptureFixture
+) -> None:
+    """`apply` must reject a malformed id the main CLI already rejects.
+
+    `OneShotApplyInput.claude_model` carries no pattern, so without an explicit
+    check a value like "bad model id" reached `claude --model` and failed as an
+    opaque subprocess error — after a worktree had been created. The main CLI
+    rejects the identical file value at startup, so the two entry points
+    disagreed about the same `models.yaml`.
+    """
+    models = tmp_path / "models.yaml"
+    models.write_text("claude: bad model id\ncodex:\n", encoding="utf-8")
+    monkeypatch.setenv("SPOTLIGHTS_MODELS_FILE", str(models))
+    run_dir, repo = run
+
+    code = apply_main(["--result", str(run_dir), "--repo", str(repo)])
+
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "not a valid model id" in err
+    # Names the file, not the flag: the value did not come from a flag.
+    assert str(models) in err
+    assert "--claude-model" not in err
+
+
+def test_a_bad_model_id_on_the_flag_exits_2_and_names_the_flag(
+    run, capsys: pytest.CaptureFixture
+) -> None:
+    """The flag path was unvalidated too — `.strip()` does not remove inner spaces."""
+    run_dir, repo = run
+
+    code = apply_main(
+        [
+            "--result", str(run_dir), "--repo", str(repo),
+            "--claude-model", "bad model id",
+        ]
+    )
+
+    assert code == 2
+    err = capsys.readouterr().err
+    assert "--claude-model" in err
+    assert "not a valid model id" in err
+
+
+@pytest.mark.parametrize(
+    "model",
+    [
+        "aws/claude-opus-5",
+        "opus",
+        # Real ids a stricter pattern would wrongly reject.
+        "anthropic.claude-opus-4-v1:0",
+        "anthropic/claude-opus-4:online",
+        "claude-opus-5[1m]",
+    ],
+)
+def test_valid_model_ids_are_not_rejected(run, model: str, capsys) -> None:
+    """The guard must not over-reject: Claude ids are unconstrained downstream."""
+    run_dir, repo = run
+
+    apply_main(
+        ["--result", str(run_dir), "--repo", str(repo), "--claude-model", model,
+         "--print-prompt"]
+    )
+
+    # Only the model-id guard is under test: the run may still fail for unrelated
+    # reasons, but never with this complaint.
+    assert "not a valid model id" not in capsys.readouterr().err
+
+
+def test_an_explicitly_empty_flag_still_means_inherit(run, capsys) -> None:
+    """`--claude-model ""` is a request to inherit, not a malformed id."""
+    run_dir, repo = run
+
+    apply_main(
+        ["--result", str(run_dir), "--repo", str(repo), "--claude-model", "",
+         "--print-prompt"]
+    )
+
+    assert "not a valid model id" not in capsys.readouterr().err

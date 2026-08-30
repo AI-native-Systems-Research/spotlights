@@ -33,9 +33,14 @@ from spotlights_engine.defaults import (
     DEFAULT_REPO as _DEFAULT_REPO,
 )
 from spotlights_engine.model_config import (
+    CLAUDE_MODEL_EXPECTED,
+    CLAUDE_MODEL_RE,
+    CODEX_MODEL_EXPECTED,
+    CODEX_MODEL_RE,
     MODELS_ENV_VAR,
     ModelConfig,
     load_model_config,
+    model_id_error,
     models_path,
 )
 from spotlights_engine.module_deep_research import (
@@ -426,32 +431,23 @@ def _build_input(args: argparse.Namespace) -> SpotlightsManagerInput:
     return SpotlightsManagerInput(**input_kwargs)
 
 
-#: What `DiscoveryConfig.codex_model` accepts. Validating against it here means a
-#: bad Codex id fails at the flag instead of inside pydantic after `--dry-run`
-#: has already reported the run as fine.
-_CODEX_MODEL_RE = re.compile(r"^[\w.\-/\[\]]+$")
-
-#: Claude ids are not constrained by any field downstream, and real ones contain
-#: characters the Codex pattern rejects — Bedrock's `...-v1:0`, OpenRouter's
-#: `...:online`. So only reject what could not be an argv value at all.
-_CLAUDE_MODEL_RE = re.compile(r"^\S+$")
-
-
 def _validate_model_id(
     source: str, value: str, *, from_flag: bool, pattern: re.Pattern[str], expected: str
 ) -> None:
     """Reject a model id that would fail deeper in the stack, or is unusable.
 
-    A flag error goes through argparse (usage text, exit 2). A file value raises
-    instead: printing argparse usage for a typo in `models.yaml` would point the
-    reader at the wrong thing, so the message names the file.
+    The check itself lives in `model_config` so `apply`'s CLI applies exactly the
+    same rule; only the reporting differs. A flag error goes through argparse
+    (usage text, exit 2). A file value raises instead: printing argparse usage for
+    a typo in `models.yaml` would point the reader at the wrong thing, so the
+    message names the file.
     """
-    if pattern.match(value):
+    problem = model_id_error(source, value, pattern=pattern, expected=expected)
+    if problem is None:
         return
-    detail = f"{value!r} is not a valid model id ({expected})"
     if from_flag:
-        _build_argparser().error(f"{source}: {detail}")
-    raise ValueError(f"{source}: {detail}")
+        _build_argparser().error(problem)
+    raise ValueError(problem)
 
 
 def _codex_explicitly_blank(args: argparse.Namespace) -> bool:
@@ -498,8 +494,8 @@ def _resolve_models(args: argparse.Namespace) -> tuple[str | None, str | None]:
             "--claude-model" if from_flag else f"{file_path} (claude)",
             claude,
             from_flag=from_flag,
-            pattern=_CLAUDE_MODEL_RE,
-            expected="no whitespace",
+            pattern=CLAUDE_MODEL_RE,
+            expected=CLAUDE_MODEL_EXPECTED,
         )
     if codex:
         from_flag = args.codex_model is not None
@@ -507,8 +503,8 @@ def _resolve_models(args: argparse.Namespace) -> tuple[str | None, str | None]:
             "--codex-model" if from_flag else f"{file_path} (codex)",
             codex,
             from_flag=from_flag,
-            pattern=_CODEX_MODEL_RE,
-            expected="expected letters, digits, and any of . - _ / [ ]",
+            pattern=CODEX_MODEL_RE,
+            expected=CODEX_MODEL_EXPECTED,
         )
     return claude, codex
 
