@@ -83,6 +83,9 @@ class AgentProposalsConfig(BaseModel):
     max_parallel_candidates: int = Field(default=5, ge=1)
 
     claude_max_turns: int = Field(default=30, ge=1)
+    # Global model id passed to `claude --model`. None means "inherit the CLI's
+    # own default"; see `spotlights_engine.model_config`.
+    claude_model: str | None = None
     claude_wallclock_s: int = Field(default=600, ge=1)
     codex_wallclock_s: int = Field(default=600, ge=1)
     codex_model: str | None = None
@@ -117,6 +120,7 @@ class _ClaudeRunner(Protocol):
         repo_path: Path,
         max_turns: int,
         wallclock_s: int,
+        claude_model: str | None = None,
     ) -> CandidateAgentRunResult: ...
 
 
@@ -261,6 +265,14 @@ async def _run_claude_pass(
     assert config.repo_path is not None  # guarded in _validate_setup
     run_start = time.monotonic()
     try:
+        # Passed only when set: a caller-injected runner written before
+        # this argument existed would raise TypeError on an unexpected
+        # keyword, and the broad `except Exception` below would turn that
+        # signature mismatch into a silent "zero results" rather than a
+        # visible failure.
+        model_kwargs = (
+            {"claude_model": config.claude_model} if config.claude_model else {}
+        )
         run_result = await asyncio.to_thread(
             runner,
             candidate_id=candidate.id,
@@ -269,6 +281,7 @@ async def _run_claude_pass(
             repo_path=config.repo_path,
             max_turns=config.claude_max_turns,
             wallclock_s=config.claude_wallclock_s,
+            **model_kwargs,
         )
     except Exception as exc:  # noqa: BLE001
         duration = time.monotonic() - run_start

@@ -15,6 +15,7 @@ import argparse
 import dataclasses
 import json
 import logging
+import re
 import sys
 from pathlib import Path
 
@@ -31,10 +32,22 @@ from spotlights_engine.defaults import (
 from spotlights_engine.defaults import (
     DEFAULT_REPO as _DEFAULT_REPO,
 )
+from spotlights_engine.model_config import (
+    MODELS_ENV_VAR,
+    ModelConfig,
+    load_model_config,
+    models_path,
+)
+from spotlights_engine.module_deep_research import (
+    CodexExecOptions,
+)
 from spotlights_engine.module_knowledge import (
     KnowledgeBase,
     KnowledgeRecord,
     RetrieveRequest,
+)
+from spotlights_engine.modules_extractor import (
+    ExtractorConfig,
 )
 from spotlights_engine.proposal_from_finding_creator import (
     ProposalFromFindingConfig,
@@ -170,6 +183,26 @@ def _build_argparser() -> argparse.ArgumentParser:
         action="store_const",
         const=0,
         help="Disable the candidate-discovery review session (alias for --review-iterations 0).",
+    )
+
+    p.add_argument(
+        "--claude-model",
+        default=None,
+        metavar="ID",
+        help=(
+            "Model id passed to `claude --model` for every step. Overrides "
+            f"models.yaml (or ${MODELS_ENV_VAR}) for this run. Omit to use the "
+            "file; leave the file blank to inherit ~/.claude/settings.json."
+        ),
+    )
+    p.add_argument(
+        "--codex-model",
+        default=None,
+        metavar="ID",
+        help=(
+            "Model id passed to Codex for every step. Overrides models.yaml "
+            f"(or ${MODELS_ENV_VAR}) for this run. Omit to use the file."
+        ),
     )
 
     p.add_argument(
@@ -393,31 +426,141 @@ def _build_input(args: argparse.Namespace) -> SpotlightsManagerInput:
     return SpotlightsManagerInput(**input_kwargs)
 
 
+#: What `DiscoveryConfig.codex_model` accepts. Validating against it here means a
+#: bad Codex id fails at the flag instead of inside pydantic after `--dry-run`
+#: has already reported the run as fine.
+_CODEX_MODEL_RE = re.compile(r"^[\w.\-/\[\]]+$")
+
+#: Claude ids are not constrained by any field downstream, and real ones contain
+#: characters the Codex pattern rejects — Bedrock's `...-v1:0`, OpenRouter's
+#: `...:online`. So only reject what could not be an argv value at all.
+_CLAUDE_MODEL_RE = re.compile(r"^\S+$")
+
+
+def _validate_model_id(
+    source: str, value: str, *, from_flag: bool, pattern: re.Pattern[str], expected: str
+) -> None:
+    """Reject a model id that would fail deeper in the stack, or is unusable.
+
+    A flag error goes through argparse (usage text, exit 2). A file value raises
+    instead: printing argparse usage for a typo in `models.yaml` would point the
+    reader at the wrong thing, so the message names the file.
+    """
+    if pattern.match(value):
+        return
+    detail = f"{value!r} is not a valid model id ({expected})"
+    if from_flag:
+        _build_argparser().error(f"{source}: {detail}")
+    raise ValueError(f"{source}: {detail}")
+
+
+def _codex_explicitly_blank(args: argparse.Namespace) -> bool:
+    """True when the user passed `--codex-model ""` (as opposed to omitting it).
+
+    The distinction matters only for step 2, the one step with a built-in Codex
+    default that a blank value would otherwise not override.
+    """
+    return args.codex_model is not None and not args.codex_model.strip()
+
+
+def _resolve_models(args: argparse.Namespace) -> tuple[str | None, str | None]:
+    """The run's `(claude, codex)` model ids, or `None` to inherit the CLI default.
+
+    Precedence: `--claude-model` / `--codex-model` > `SPOTLIGHTS_MODELS_FILE` >
+    the bundled `models.yaml` > the agent CLI's own config. Resolved once, here,
+    so every step config carries an explicit value and nothing deeper in the
+    stack reads a config file.
+
+    A flag passed as an empty string (`--codex-model ""`) is an explicit request
+    to inherit, and beats a value in the file — otherwise a pinned bundled file
+    would leave no way to ask for the CLI's own default from the command line.
+    An omitted flag is `None` and falls through to the file.
+    """
+    # Only read the file when a flag has not already answered. A stale
+    # SPOTLIGHTS_MODELS_FILE is an error, and it should not abort a run that
+    # specified both models on the command line and would have ignored the file.
+    needs_file = args.claude_model is None or args.codex_model is None
+    file_cfg = load_model_config() if needs_file else ModelConfig()
+
+    if args.claude_model is None:
+        claude = file_cfg.claude
+    else:
+        claude = args.claude_model.strip() or None
+    if args.codex_model is None:
+        codex = file_cfg.codex
+    else:
+        codex = args.codex_model.strip() or None
+
+    file_path = models_path()
+    if claude:
+        from_flag = args.claude_model is not None
+        _validate_model_id(
+            "--claude-model" if from_flag else f"{file_path} (claude)",
+            claude,
+            from_flag=from_flag,
+            pattern=_CLAUDE_MODEL_RE,
+            expected="no whitespace",
+        )
+    if codex:
+        from_flag = args.codex_model is not None
+        _validate_model_id(
+            "--codex-model" if from_flag else f"{file_path} (codex)",
+            codex,
+            from_flag=from_flag,
+            pattern=_CODEX_MODEL_RE,
+            expected="expected letters, digits, and any of . - _ / [ ]",
+        )
+    return claude, codex
+
+
 def _build_config(args: argparse.Namespace) -> SpotlightsManagerConfig:
-    proposal_cfg: ProposalFromFindingConfig | None = None
-    if args.max_parallel_pairs is not None or args.debug_first_n_pairs is not None:
-        kwargs: dict = {}
-        if args.max_parallel_pairs is not None:
-            kwargs["max_parallel_pairs"] = args.max_parallel_pairs
-        if args.debug_first_n_pairs is not None:
-            kwargs["debug_first_n_pairs"] = args.debug_first_n_pairs
-        proposal_cfg = ProposalFromFindingConfig(**kwargs)
+    claude_model, codex_model = _resolve_models(args)
 
-    agent_cfg: AgentProposalsConfig | None = None
-    if (
-        args.max_parallel_candidates is not None
-        or args.debug_first_n_candidates is not None
-    ):
-        kwargs = {}
-        if args.max_parallel_candidates is not None:
-            kwargs["max_parallel_candidates"] = args.max_parallel_candidates
-        if args.debug_first_n_candidates is not None:
-            kwargs["debug_first_n_candidates"] = args.debug_first_n_candidates
-        agent_cfg = AgentProposalsConfig(**kwargs)
+    proposal_kwargs: dict = {}
+    if args.max_parallel_pairs is not None:
+        proposal_kwargs["max_parallel_pairs"] = args.max_parallel_pairs
+    if args.debug_first_n_pairs is not None:
+        proposal_kwargs["debug_first_n_pairs"] = args.debug_first_n_pairs
+    if claude_model:
+        proposal_kwargs["claude_model"] = claude_model
+    proposal_cfg = (
+        ProposalFromFindingConfig(**proposal_kwargs) if proposal_kwargs else None
+    )
 
-    discovery_cfg: DiscoveryConfig | None = None
+    agent_kwargs: dict = {}
+    if args.max_parallel_candidates is not None:
+        agent_kwargs["max_parallel_candidates"] = args.max_parallel_candidates
+    if args.debug_first_n_candidates is not None:
+        agent_kwargs["debug_first_n_candidates"] = args.debug_first_n_candidates
+    if claude_model:
+        agent_kwargs["claude_model"] = claude_model
+    if codex_model:
+        agent_kwargs["codex_model"] = codex_model
+    agent_cfg = AgentProposalsConfig(**agent_kwargs) if agent_kwargs else None
+
+    discovery_kwargs: dict = {}
     if args.review_iterations is not None:
-        discovery_cfg = DiscoveryConfig(num_review_iterations=args.review_iterations)
+        discovery_kwargs["num_review_iterations"] = args.review_iterations
+    if claude_model:
+        discovery_kwargs["claude_model"] = claude_model
+    if codex_model:
+        discovery_kwargs["codex_model"] = codex_model
+    elif _codex_explicitly_blank(args):
+        # `DiscoveryConfig.codex_model` defaults to `gpt-5.5` (kept for resume
+        # compatibility), so "no value" cannot mean inherit here the way it does
+        # for every other step. An *explicitly* empty flag is a deliberate ask,
+        # and has to override that default or `--codex-model ""` would silently
+        # do nothing to step 2.
+        discovery_kwargs["codex_model"] = None
+    discovery_cfg = DiscoveryConfig(**discovery_kwargs) if discovery_kwargs else None
+
+    # Step 1 always has a config object, so stamp the model straight onto it.
+    extractor_cfg = ExtractorConfig(claude_model=claude_model)
+
+    # Step 3 has no config object of its own: its Codex model rides on the
+    # `CodexExecOptions` the manager copies per module, the Claude model on a
+    # dedicated manager field.
+    deep_research_cfg = CodexExecOptions(model=codex_model) if codex_model else None
 
     include = _flatten_include(args.include)
     return SpotlightsManagerConfig(
@@ -425,7 +568,10 @@ def _build_config(args: argparse.Namespace) -> SpotlightsManagerConfig:
         output_folder=args.output_folder,
         max_parallel_sessions=args.max_parallel,
         module_filter=ModuleFilter(include=include) if include else None,
+        extractor=extractor_cfg,
         discovery=discovery_cfg,
+        deep_research=deep_research_cfg,
+        models=ModelConfig(claude=claude_model, codex=codex_model),
         proposal_from_finding=proposal_cfg,
         agent_proposals=agent_cfg,
         resume=args.resume,
@@ -662,6 +808,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         include = _flatten_include(args.include)
         scope = ", ".join(include) if include else "(all modules)"
+        # Resolve models here as well: a dry run that reports "fine" and is
+        # followed by a real run that dies on a bad id or an unparseable
+        # models file is worse than no dry run at all.
+        try:
+            dry_claude, dry_codex = _resolve_models(args)
+        except (OSError, ValueError) as exc:
+            print(f"spotlights-engine: {exc}", file=sys.stderr)
+            return 2
         print("dry-run: no agents invoked, no cost incurred.")
         print(f"  repo:        {args.repo}")
         print(f"  objective:   {args.objective!r}")
@@ -669,6 +823,24 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  max-parallel:{args.max_parallel}")
         if args.max_cost is not None:
             print(f"  max-cost:    ${args.max_cost:.2f}")
+        # Report what the engine will actually pass, not what the config says.
+        # Step 2 has a built-in Codex default, so `(CLI default)` here would be
+        # the same misreport doctor and the run manifest were fixed to avoid.
+        # An explicit `--codex-model ""` overrides step 2's built-in default in
+        # the real run, so the dry run must not claim otherwise.
+        if _codex_explicitly_blank(args):
+            codex_label = "(CLI default)"
+        elif dry_codex:
+            codex_label = dry_codex
+        else:
+            default_codex = DiscoveryConfig().codex_model
+            codex_label = (
+                f"{default_codex} (step 2 default; steps 3+5 inherit)"
+                if default_codex
+                else "(CLI default)"
+            )
+        print(f"  claude-model:{dry_claude or '(CLI default)'}")
+        print(f"  codex-model: {codex_label}")
         if not args.enable_deep_research:
             print("  deep-research: DISABLED (step 3 skipped, step 4 empty)")
         return 0
@@ -676,7 +848,12 @@ def main(argv: list[str] | None = None) -> int:
     _configure_logging(args)
 
     inp = _build_input(args)
-    cfg = _build_config(args)
+    try:
+        cfg = _build_config(args)
+    except (OSError, ValueError) as exc:
+        # A malformed or unreadable models file must not be a traceback.
+        print(f"spotlights-engine: {exc}", file=sys.stderr)
+        return 2
 
     result = run_with_telemetry(inp, config=cfg)
     _print_summary(result, deep_research_enabled=inp.enable_deep_research)

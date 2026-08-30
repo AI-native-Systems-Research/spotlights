@@ -19,6 +19,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel
+
 from spotlights_engine.agent_proposals import (
     AgentProposalsConfig,
     AgentProposalsSetupError,
@@ -32,7 +34,10 @@ from spotlights_engine.candidate_discovery import (
     DiscoveryValidationError,
     discover,
 )
-from spotlights_engine.costing.manifest import build_run_manifest
+from spotlights_engine.costing.manifest import (
+    RunManifestModelsRequested,
+    build_run_manifest,
+)
 from spotlights_engine.costing.rates import (
     compute_cost,
     load_external_rates,
@@ -225,6 +230,86 @@ def _build_discovery_config(
     return base.model_copy(
         update={"repo_path": repo_path, "artifacts_dir": artifacts_dir}
     )
+
+
+def _effective_claude_model(cfg: SpotlightsManagerConfig) -> str | None:
+    """The Claude model this run uses, wherever the caller happened to set it.
+
+    Step 3 has no config object of its own, so it used to read `cfg.models`
+    alone — which meant a library caller pinning `claude_model` on the per-step
+    configs (documented as supported) ran step 3 on the CLI default while the
+    manifest reported the pinned id. Both now derive from this one function so
+    they cannot disagree.
+    """
+    discovery = cfg.discovery if cfg.discovery is not None else DiscoveryConfig()
+    return (
+        _first_set(
+            cfg.models.claude if cfg.models else None,
+            _explicit(cfg.extractor, "claude_model"),
+            _explicit(discovery, "claude_model"),
+            _explicit(cfg.proposal_from_finding, "claude_model"),
+            _explicit(cfg.agent_proposals, "claude_model"),
+        )
+        or None
+    )
+
+
+def _models_requested(cfg: SpotlightsManagerConfig) -> RunManifestModelsRequested:
+    """What the engine actually asked each CLI for, for the run manifest.
+
+    Read off the step configs rather than `cfg.models`, because the two can
+    differ: step 2 carries a built-in `gpt-5.5` Codex default, so a blank
+    `models.codex` still results in the engine passing a model. Recording ""
+    there would claim "the CLI chose" when it did not.
+
+    An empty string means the engine genuinely passed no `--model`.
+    """
+    discovery = cfg.discovery if cfg.discovery is not None else DiscoveryConfig()
+    # Read Claude off the step configs too, not just `cfg.models`. A library
+    # caller setting `claude_model` on the per-step configs is documented as
+    # supported, and would otherwise be recorded as "the engine passed no
+    # model" — the opposite of the truth. The CLI stamps the same value into
+    # every step, so any of them is representative; check the ones that always
+    # exist first.
+    claude = _effective_claude_model(cfg) or ""
+    codex = _first_set(
+        cfg.models.codex if cfg.models else None,
+        _explicit(cfg.discovery, "codex_model"),
+        _explicit(cfg.deep_research, "model"),
+        _explicit(cfg.agent_proposals, "codex_model"),
+        # Nothing was asked for explicitly, so fall back to what step 2 will
+        # nevertheless pass: its field default.
+        discovery.codex_model,
+    )
+    return RunManifestModelsRequested(claude=claude, codex=codex)
+
+
+def _explicit(model: BaseModel | None, field: str) -> str | None:
+    """A field's value only when the caller actually set it.
+
+    `DiscoveryConfig.codex_model` defaults to `gpt-5.5`, so reading it plainly
+    cannot tell a request apart from a default — and the default would shadow a
+    model a library caller pinned on a different step. Pydantic records which
+    fields were supplied, so ask that instead.
+    """
+    if model is None or field not in model.model_fields_set:
+        return None
+    value = getattr(model, field, None)
+    return value if isinstance(value, str) and value else None
+
+
+def _first_set(*values: str | None) -> str:
+    """First non-empty value, or `""`. Used to find a model wherever it was set.
+
+    The CLI stamps one pair into every step, so any of them answers. A library
+    caller may set only one step's config, and every step that carries a model is
+    checked so that case is recorded truthfully rather than as `""` — which the
+    manifest defines as "the engine passed no model".
+    """
+    for value in values:
+        if value:
+            return value
+    return ""
 
 
 def _build_deep_research_options(
@@ -761,9 +846,23 @@ async def _do_step3(
     options = _build_deep_research_options(
         cfg, mgr_input.repo_path, module_paths.deep_research_last_message_path
     )
+    # Passed only when set: `research_module` is a documented monkeypatch seam
+    # (see its rebinding above), so a runner written before this argument
+    # existed would raise TypeError on an unexpected keyword — and the caller
+    # wraps this in a broad `except Exception`, which would record that
+    # signature mismatch as a retryable step-3 failure on every module rather
+    # than a visible error. Same reasoning as steps 4, 5 and apply.
+    model_kwargs: dict[str, Any] = (
+        {"claude_model": model} if (model := _effective_claude_model(cfg)) else {}
+    )
     start = time.monotonic()
     result = await asyncio.to_thread(
-        lambda: research_module(research_input, options, segment=segment)
+        lambda: research_module(
+            research_input,
+            options,
+            segment=segment,
+            **model_kwargs,
+        )
     )
     duration = time.monotonic() - start
     if hasattr(result, "output") and hasattr(result, "usages"):
@@ -1747,6 +1846,7 @@ async def _run_async(
         deep_research_cfg=config.deep_research,
         proposal_from_finding_cfg=config.proposal_from_finding,
         agent_proposals_cfg=config.agent_proposals,
+        models=config.models,
     )
     manifest = _ensure_resume_compatible(
         paths,
@@ -1927,6 +2027,7 @@ async def _run_async(
         num_candidates=num_candidates,
         module_status=counts,
         notes=usage_notes,
+        models_requested=_models_requested(config),
     )
     P.write_run_manifest(paths, public_manifest)
 

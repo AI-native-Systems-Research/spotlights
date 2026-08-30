@@ -101,6 +101,7 @@ def fake_runner_factory(
         repo_path: Path,
         max_turns: int,
         wallclock_s: int,
+        claude_model: str | None = None,
     ) -> PairRunResult:
         if pair_key in errors:
             return PairRunResult(

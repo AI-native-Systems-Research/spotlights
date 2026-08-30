@@ -79,6 +79,7 @@ def run_pair(
     repo_path: Path,
     max_turns: int,
     wallclock_s: int,
+    claude_model: str | None = None,
 ) -> PairRunResult:
     """Run one Claude session and return the parsed structured output."""
     # Resolve via shutil.which so Windows finds the .CMD shim. Bare
@@ -98,6 +99,8 @@ def run_pair(
         "--max-turns",
         str(max_turns),
     ]
+    if claude_model:
+        argv += ["--model", claude_model]
     env = _clean_env()
     start = time.monotonic()
     try:

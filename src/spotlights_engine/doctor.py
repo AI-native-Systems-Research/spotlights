@@ -35,6 +35,12 @@ from spotlights_engine.costing.rates import (
     load_rates,
 )
 from spotlights_engine.costing.records import PROVIDER_FOR_CLI
+from spotlights_engine.model_config import (
+    MODELS_ENV_VAR,
+    ModelConfig,
+    load_model_config,
+    models_path,
+)
 
 # Minimal prompt: cheapest thing that still forces a real model turn and a
 # usage payload we can read the model id from.
@@ -63,12 +69,17 @@ class ProbeOutcome:
     error: str
 
 
-def _probe_model(name: str, *, cwd: Path | None = None) -> ProbeOutcome:
+def _probe_model(
+    name: str, *, cwd: Path | None = None, model: str | None = None
+) -> ProbeOutcome:
     """Run one agent CLI with a trivial prompt and read the reported model.
 
     Reuses the same exec clients and usage parsers the pipeline uses, so the
-    model id and rate key match what a real run would produce. Any failure to
-    launch, a non-zero exit, or unparseable output becomes `ok=False`.
+    model id and rate key match what a real run would produce. `model` is the
+    configured global id, passed so the probe exercises the model a real run
+    would use rather than the CLI's own default — without it, doctor can report
+    an unpriced model that no run would ever ask for. Any failure to launch, a
+    non-zero exit, or unparseable output becomes `ok=False`.
     """
     from spotlights_engine.module_deep_research.agent_exec import ModuleResearchRunner
 
@@ -84,6 +95,7 @@ def _probe_model(name: str, *, cwd: Path | None = None) -> ProbeOutcome:
             client = ClaudeExecClient(
                 ClaudeExecOptions(
                     cwd=run_cwd,
+                    model=model,
                     max_turns=1,
                     allowed_tools=(),
                     timeout_seconds=_PROBE_TIMEOUT_SECONDS,
@@ -98,6 +110,7 @@ def _probe_model(name: str, *, cwd: Path | None = None) -> ProbeOutcome:
             client = CodexExecClient(
                 CodexExecOptions(
                     cwd=run_cwd,
+                    model=model,
                     search=False,
                     json_events=True,
                     timeout_seconds=_PROBE_TIMEOUT_SECONDS,
@@ -138,8 +151,18 @@ def _rate_key_for(name: str, model: str | None) -> str:
     return f"{provider}:{name}"
 
 
-def probe_cli(name: str, *, rates: dict[str, ModelRate], cwd: Path | None = None) -> CheckResult:
-    """Live-check one agent CLI: install, auth, and priced model."""
+def probe_cli(
+    name: str,
+    *,
+    rates: dict[str, ModelRate],
+    cwd: Path | None = None,
+    model: str | None = None,
+) -> CheckResult:
+    """Live-check one agent CLI: install, auth, and priced model.
+
+    `model` is the configured global id for this CLI, so the probe checks the
+    model a real run would use.
+    """
     resolved = shutil.which(name)
     if resolved is None:
         return CheckResult(
@@ -148,7 +171,7 @@ def probe_cli(name: str, *, rates: dict[str, ModelRate], cwd: Path | None = None
             detail=f"`{name}` not found on PATH — install it (see README) and re-open your shell",
         )
 
-    outcome = _probe_model(name, cwd=cwd)
+    outcome = _probe_model(name, cwd=cwd, model=model)
     if not outcome.ok:
         return CheckResult(name=name, ok=False, detail=outcome.error)
 
@@ -188,6 +211,67 @@ def check_rates() -> CheckResult:
     return CheckResult(name="rates", ok=False, detail="no rate table found")
 
 
+def _effective_codex_model(configured: str | None) -> str | None:
+    """The Codex model a run will really use when the config says nothing.
+
+    Candidate discovery (step 2) keeps a built-in `gpt-5.5` default — it is part
+    of the resume fingerprint, so it cannot be dropped. Reporting or probing
+    "inherit" while step 2 pins a model would make a green doctor followed by a
+    403 on every module. Steps 3 and 5 do inherit in that case, which is a
+    pre-existing asymmetry this only reports, never hides.
+    """
+    if configured:
+        return configured
+    from spotlights_engine.candidate_discovery.api import DiscoveryConfig
+
+    return DiscoveryConfig().codex_model
+
+
+def check_models() -> CheckResult:
+    """Report the configured model per CLI and where the value came from.
+
+    This is a config check, not a probe: it says what the engine *will ask for*.
+    `probe_cli` above reports what a CLI actually answers with. A blank value
+    here means the engine passes no `--model` and the CLI picks for itself.
+    """
+    resolved = models_path()
+    from_env = bool(os.environ.get(MODELS_ENV_VAR))
+    source = (
+        f"{MODELS_ENV_VAR}={resolved}" if from_env else f"bundled {resolved.name}"
+    )
+    if not resolved.is_file():
+        # An absent *bundled* file is fine — the file is optional and both CLIs
+        # fall back to their own default. An absent file that someone explicitly
+        # pointed the env var at is a typo, and silently using the CLI default
+        # while the operator believes their pin is active is the worst outcome.
+        if from_env:
+            return CheckResult(
+                name="models",
+                ok=False,
+                detail=f"{source} does not point to a readable file",
+            )
+        return CheckResult(
+            name="models",
+            ok=True,
+            detail=f"no {resolved.name} — both CLIs use their own default",
+        )
+    try:
+        cfg = load_model_config()
+    except (OSError, ValueError) as exc:
+        return CheckResult(name="models", ok=False, detail=f"{source}: {exc}")
+    codex_effective = _effective_codex_model(cfg.codex)
+    codex_label = codex_effective or "CLI default"
+    if not cfg.codex and codex_effective:
+        codex_label = f"{codex_effective} (step 2 default; steps 3+5 inherit)"
+    parts = [
+        f"claude={cfg.claude or 'CLI default'}",
+        f"codex={codex_label}",
+    ]
+    return CheckResult(
+        name="models", ok=True, detail=f"{source} → {', '.join(parts)}"
+    )
+
+
 def run_checks() -> list[CheckResult]:
     rates_check = check_rates()
     # If the rate table itself is unreadable, load_rates would raise; probing
@@ -197,10 +281,47 @@ def run_checks() -> list[CheckResult]:
         rates = load_rates()
     except (OSError, ValueError):
         rates = {}
+    # Probe the models a run would actually ask for, not each CLI's own default.
+    try:
+        models = load_model_config()
+    except (OSError, ValueError):
+        models = ModelConfig()
     return [
-        probe_cli("claude", rates=rates),
-        probe_cli("codex", rates=rates),
+        probe_cli("claude", rates=rates, model=models.claude),
+        *_codex_probes(rates=rates, configured=models.codex),
         rates_check,
+        check_models(),
+    ]
+
+
+def _codex_probes(
+    *, rates: dict[str, ModelRate], configured: str | None
+) -> list[CheckResult]:
+    """One codex probe, or two when the pipeline is not using a single model.
+
+    With nothing configured, step 2 pins its built-in default while steps 3 and 5
+    inherit `~/.codex/config.toml` — two different models. Probing only one of
+    them means a green doctor can still be followed by unpriced usage or a 403 in
+    whichever step went unchecked, which is exactly what this check exists to
+    prevent. So probe both and label them.
+    """
+    if configured:
+        return [probe_cli("codex", rates=rates, model=configured)]
+
+    step2 = _effective_codex_model(None)
+    inherited = probe_cli("codex", rates=rates, model=None)
+    if not step2:
+        return [inherited]
+    pinned = probe_cli("codex", rates=rates, model=step2)
+    return [
+        CheckResult(
+            name="codex (steps 3+5, inherited)",
+            ok=inherited.ok,
+            detail=inherited.detail,
+        ),
+        CheckResult(
+            name=f"codex (step 2, {step2})", ok=pinned.ok, detail=pinned.detail
+        ),
     ]
 
 

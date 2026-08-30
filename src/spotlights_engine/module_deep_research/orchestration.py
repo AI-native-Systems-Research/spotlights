@@ -64,11 +64,16 @@ def select_runners(
     runner: ModuleResearchRunner | None,
     runners: Sequence[ModuleResearchRunner] | None,
     enable_claude_search: bool = False,
+    claude_model: str | None = None,
 ) -> tuple[ModuleResearchRunner, ...]:
     """Resolve caller-provided runners or create the default runner set.
 
     The default set is Codex only; when `enable_claude_search` is true, Claude
     is added so step 3 fans out to Codex + Claude.
+
+    `claude_model` applies only to the default Claude runner built here. The
+    Codex model rides on `codex_options`, and caller-supplied `runner`/`runners`
+    carry their own options — this does not reach inside them.
     """
     if runner is not None and runners is not None:
         raise ValueError("pass either runner or runners, not both")
@@ -81,7 +86,9 @@ def select_runners(
         CodexExecClient(codex_options or CodexExecOptions(cwd=repo_path)),
     ]
     if enable_claude_search:
-        default_runners.append(ClaudeExecClient(ClaudeExecOptions(cwd=repo_path)))
+        default_runners.append(
+            ClaudeExecClient(ClaudeExecOptions(cwd=repo_path, model=claude_model))
+        )
     return tuple(default_runners)
 
 
