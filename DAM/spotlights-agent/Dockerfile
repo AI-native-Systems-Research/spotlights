@@ -67,7 +67,7 @@ RUN --mount=type=cache,target=/root/.npm \
 COPY DAM/spotlights-agent/harness-tools.toml /etc/mise/conf.d/harness-tools.toml
 RUN --mount=type=cache,target=/root/.npm \
     mise install "npm:@openai/codex" "npm:@zed-industries/codex-acp" && \
-    chown -R 65532 /etc/mise \
+    chown -R 65532:0 /etc/mise \
       "$(dirname "$(mise where npm:@openai/codex)")" \
       "$(dirname "$(mise where npm:@zed-industries/codex-acp)")" && \
     find /etc/mise -name '*.lock' -exec chmod 644 {} +
