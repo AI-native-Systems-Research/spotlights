@@ -192,15 +192,21 @@ _ROUTE_PREFIX_RE = re.compile(
 )
 
 
-def _canonical_model_id(model: str) -> str:
+def canonical_model_id(model: str) -> str:
     """Strip the context-window tag and LiteLLM route prefix from a model id.
 
     Both variants map to the same rate row: pricing is per model, not per
     context window or route. Called on both sides of the lookup (record model
     id + rate-table key) so `aws/claude-opus-5`, `claude-opus-5`, and
     `aws/claude-opus-5[1m]` all resolve to the same key.
+
+    A degenerate id that strips to empty (e.g. `"[1m]"` on its own, or
+    `"aws/"` — malformed, not emitted by any real CLI) is returned unchanged
+    so the bad id surfaces in `unpriced_models` under its own visibly-broken
+    key rather than colliding silently on `"provider:"`.
     """
-    return _ROUTE_PREFIX_RE.sub("", _CONTEXT_TAG_RE.sub("", model))
+    stripped = _ROUTE_PREFIX_RE.sub("", _CONTEXT_TAG_RE.sub("", model))
+    return stripped or model
 
 
 def _canonical_rate_key(key: str) -> str:
@@ -211,13 +217,13 @@ def _canonical_rate_key(key: str) -> str:
     provider, sep, model = key.partition(":")
     if not sep:
         return key
-    return f"{provider}:{_canonical_model_id(model)}"
+    return f"{provider}:{canonical_model_id(model)}"
 
 
 def _rate_key(record: UsageRecord) -> tuple[str, bool]:
     """`(provider:model, resolved)`; unresolved models fall back to the CLI family."""
     if record.model:
-        return f"{record.provider}:{_canonical_model_id(record.model)}", True
+        return f"{record.provider}:{canonical_model_id(record.model)}", True
     return f"{record.provider}:{record.cli}", False
 
 
@@ -228,7 +234,7 @@ def _group_key(record: UsageRecord) -> tuple[str, str, str]:
     model canonicalization matches `_rate_key` so the group's `rate_key` is the
     exact string we look up in the rate table.
     """
-    model = _canonical_model_id(record.model) if record.model else record.cli
+    model = canonical_model_id(record.model) if record.model else record.cli
     return (record.provider, model, record.role)
 
 
@@ -369,6 +375,7 @@ __all__ = [
     "CostCoverage",
     "CostSummary",
     "ModelRate",
+    "canonical_model_id",
     "compute_cost",
     "load_external_rates",
     "load_rates",
