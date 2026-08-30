@@ -15,6 +15,15 @@ Each completed engine run writes a public run manifest to:
 
 The manifest records the target repo URL and commit, the Spotlights engine commit, the objective, grouped per-model token usage, wall/API timing, output counts, and cost. Usage is captured from the Claude and Codex CLI streams as durable per-invocation records under each module's artifacts directory, then aggregated from disk when the run finishes or resumes.
 
+It also records `models_requested` beside `models_used`: the model id the engine
+*asked* each CLI for (from `--claude-model` / `--codex-model` or `models.yaml`)
+next to what the CLI streams actually reported back. The two differ legitimately.
+An empty `models_requested` entry means the engine passed no `--model` at all and
+the CLI chose for itself; and where a value was passed, a gateway alias such as
+`aws/claude-opus-5` may come back reported under a different id. Use
+`models_requested` to answer "what did this run intend", and `models_used` to
+answer "what actually ran". See [Choosing models](agent-cli-setup.md#choosing-models).
+
 ## Cost and rate tables
 
 Cost is computed from token counts and a rate table. The engine never uses CLI-reported `total_cost_usd` for billing, because those values can reflect provider list price rather than your LiteLLM contract. The checked-in table at `src/spotlights_engine/costing/rates.json` contains public default rates for the current Claude/Codex models. Point `SPOTLIGHTS_RATES_FILE` at your contracted LiteLLM table before running if your billing differs:
