@@ -31,8 +31,8 @@ from spotlights_engine.costing.rates import (
     _BUNDLED_RATES_PATH,
     RATES_ENV_VAR,
     ModelRate,
-    _canonical_model_id,
-    _canonical_rate_key,
+    _build_canonical_rate_map,
+    canonical_model_id,
     load_rates,
 )
 from spotlights_engine.costing.records import PROVIDER_FOR_CLI
@@ -149,7 +149,7 @@ def _rate_key_for(name: str, model: str | None) -> str:
     """
     provider = PROVIDER_FOR_CLI[name]
     if model:
-        return f"{provider}:{_canonical_model_id(model)}"
+        return f"{provider}:{canonical_model_id(model)}"
     return f"{provider}:{name}"
 
 
@@ -168,8 +168,12 @@ def probe_cli(
     # Canonicalize table keys on entry so a caller-supplied dict keyed with a
     # LiteLLM route prefix still matches models the CLI reports without one —
     # mirrors `compute_cost`. Dicts from `load_rates` are already canonical, so
-    # this is a no-op there.
-    rates = {_canonical_rate_key(k): v for k, v in rates.items()}
+    # this is a no-op there. A caller-supplied dict with two raw keys that
+    # canonicalize to the same string is rejected here, matching `compute_cost`:
+    # a plain dict comprehension would silently keep whichever entry Python
+    # visited last, and doctor would return green on a table `compute_cost`
+    # would abort on.
+    rates = _build_canonical_rate_map(rates.items())
 
     resolved = shutil.which(name)
     if resolved is None:

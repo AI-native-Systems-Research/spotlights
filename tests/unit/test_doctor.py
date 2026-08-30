@@ -1,3 +1,5 @@
+import pytest
+
 from spotlights_engine import doctor
 from spotlights_engine.doctor import ProbeOutcome
 
@@ -82,6 +84,27 @@ def test_probe_cli_canonicalizes_caller_rates_dict(monkeypatch):
     res = doctor.probe_cli("claude", rates=route_prefixed_rates)
     assert res.ok is True
     assert "anthropic:claude-opus-4-8" in res.detail
+
+
+def test_probe_cli_rejects_duplicate_canonical_keys(monkeypatch):
+    """Two raw rate-table keys canonicalizing to the same string must be
+    rejected, matching `compute_cost`. A plain dict comprehension would silently
+    keep whichever entry Python visited last, and doctor would return green on a
+    table `compute_cost` would abort on — the exact "doctor said green; run
+    crashes" divergence this check exists to prevent.
+    """
+    monkeypatch.setattr(doctor.shutil, "which", lambda _n: "/bin/" + _n)
+    monkeypatch.setattr(
+        doctor,
+        "_probe_model",
+        lambda name, **_kw: ProbeOutcome(ok=True, model="claude-opus-4-8", error=""),
+    )
+    colliding = {
+        "anthropic:aws/claude-opus-4-8": object(),
+        "anthropic:claude-opus-4-8": object(),
+    }
+    with pytest.raises(ValueError, match="duplicate rate-table entry"):
+        doctor.probe_cli("claude", rates=colliding)
 
 
 def test_probe_cli_strips_context_window_tag(monkeypatch):
