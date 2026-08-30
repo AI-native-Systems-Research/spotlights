@@ -513,14 +513,14 @@ def test_print_prompt_writes_only_the_prompt_file(run) -> None:
     shutil.rmtree(preview.worktree_parent, ignore_errors=True)
 
 
-def test_the_handoff_prompt_says_its_worktree_is_still_live(run) -> None:
-    """The mirror of `test_the_saved_prompt_admits_its_worktree_paths_are_dead`.
+def test_the_handoff_prompt_carries_the_same_header_as_the_run_path(run) -> None:
+    """This task changes the format, not the behaviour: a worktree still exists here.
 
-    One renderer serves both paths, and the worktree's status differs between
-    them: dead in a completed apply's artifact, alive here — this is the whole
-    point of `--print-prompt`, and the prompt body names it as the working
-    directory. A file that told this caller the directory was gone would be
-    telling it to abandon the handoff it just received.
+    Its predecessor asserted the file said "still live", which was the hedge the
+    single shared NOTE had to carry. Both paths still render the run-path branch
+    — `--print-prompt` creates a worktree, so `preview.worktree` is set — so the
+    NOTE now says one thing on both. A later task stops creating the worktree and
+    replaces this test with the `(none` version.
     """
     run_dir, repo = run
     result = one_shot_apply(
@@ -533,7 +533,11 @@ def test_the_handoff_prompt_says_its_worktree_is_still_live(run) -> None:
     preview = result.prompts[0]
     assert Path(preview.worktree).is_dir()
     written = (Path(preview.path) / "apply.prompt.txt").read_text(encoding="utf-8")
-    assert "still live" in written
+    assert f"WORKTREE:  {preview.worktree}\n" in written
+    assert f"WORKTREE_PARENT:  {preview.worktree_parent}\n" in written
+    assert "deleted when the" in written  # the same NOTE the run path gets
+    assert "still live" not in written  # the hedge is gone
+    assert "--print-prompt" not in written
 
     subprocess.run(
         ["git", "worktree", "remove", "--force", preview.worktree], cwd=repo, check=True

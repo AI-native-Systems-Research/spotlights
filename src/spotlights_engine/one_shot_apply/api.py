@@ -204,6 +204,8 @@ def render_prompt_block(preview: PromptPreview) -> str:
     `WORKTREE:` and `WORKTREE_PARENT:` must keep their exact spelling and stay
     one-per-line: they are parsed out of the written file.
 
+    Keep the NOTE's wrapping: `"deleted when the"` is asserted as one substring.
+
     Ends in a newline.
     """
     head = (
@@ -228,9 +230,9 @@ def render_prompt_block(preview: PromptPreview) -> str:
             f"WORKTREE:  {preview.worktree}\n"
             f"WORKTREE_PARENT:  {preview.worktree_parent}\n"
             f"NOTE: WORKTREE and WORKTREE_PARENT are a historical record, not\n"
-            f"      directories you can enter: they were throwaway paths, deleted\n"
-            f"      when the apply finished. To run this prompt again, make an\n"
-            f"      equivalent checkout and work in it:\n"
+            f"      directories you can enter: they were throwaway paths,\n"
+            f"      deleted when the apply finished. To run this prompt again,\n"
+            f"      make an equivalent checkout and work in it:\n"
             f"        {_worktree_add_cmd(preview)}\n"
         )
     return f"{head}{mid}PROMPT:\n{preview.prompt}\n"
