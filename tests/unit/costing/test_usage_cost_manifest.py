@@ -205,6 +205,17 @@ def test_compute_cost_strips_litellm_route_prefix_from_model_id() -> None:
     )
     assert hf.amount_usd == pytest.approx(100 * 0.01 + 10 * 0.02)
 
+    # Stacked LiteLLM route prefixes collapse in one pass. LiteLLM's OpenRouter
+    # provider emits `openrouter/anthropic/claude-opus-5`; both segments are
+    # LiteLLM route labels and must strip together, or the model silently drops
+    # into `unpriced_models` and the cost total goes partial with no error.
+    stacked = compute_cost(
+        [_record("openrouter/anthropic/claude-opus-5", 0)],
+        {"anthropic:claude-opus-5": rate},
+    )
+    assert stacked.amount_usd == pytest.approx(100 * 0.01 + 10 * 0.02)
+    assert stacked.unpriced_models == []
+
 
 def test_run_manifest_groups_models_and_totals_tokens() -> None:
     records = [

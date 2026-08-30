@@ -155,10 +155,12 @@ _CONTEXT_TAG_RE = re.compile(r"\[[^\]]*\]$")
 # and one reporting "aws/claude-opus-5" hit the same row. The set is a small
 # allowlist of LiteLLM's own custom_llm_provider labels rather than a generic
 # "strip anything before /" — some legitimate model ids contain a slash
-# (e.g. HuggingFace org/model paths) and we don't want to eat those.
+# (e.g. HuggingFace org/model paths) and we don't want to eat those. The `+`
+# collapses stacked LiteLLM routes: LiteLLM's OpenRouter provider emits
+# "openrouter/anthropic/claude-opus-5", which must strip both segments.
 _ROUTE_PREFIX_RE = re.compile(
-    r"^(?:aws|bedrock|azure|azure_ai|vertex|vertex_ai|"
-    r"openrouter|anthropic|openai|gemini)/"
+    r"^(?:(?:aws|bedrock|azure|azure_ai|vertex|vertex_ai|"
+    r"openrouter|anthropic|openai|gemini)/)+"
 )
 
 
