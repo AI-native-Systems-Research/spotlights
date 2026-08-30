@@ -44,3 +44,27 @@ def test_the_skill_collects_the_patch_against_the_base_commit(
     text = (tmp_path / REL).read_text(encoding="utf-8")
     assert 'git diff "<BASE>" >>' in text
     assert "git diff >>" not in text
+
+
+def test_the_skill_creates_its_own_worktree_from_the_base_commit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`--print-prompt` leaves no worktree, so the skill must make one.
+
+    It used to read `WORKTREE:` out of `apply.prompt.txt`. That line now holds
+    prose, and a skill that parsed it as a path would `cd` into a directory
+    named "(none — create one...)". Mechanical: `worktree add --detach <BASE>`
+    carries no validation judgment, so the staleness gate is still entirely in
+    Python and the "do not work around it" instruction still means what it said.
+    """
+    monkeypatch.chdir(tmp_path)
+    assert install_skills(scope="project") == 0
+    text = (tmp_path / REL).read_text(encoding="utf-8")
+
+    assert 'worktree add --detach "$WT_PARENT/worktree"' in text
+    assert "mktemp -d -t spotlights-apply-XXXXXX" in text
+    # The line it must no longer parse out of the artifact.
+    assert "WORKTREE_PARENT:  <path>" not in text
+    assert "Read `WORKTREE` and `WORKTREE_PARENT` off their own lines" not in text
+    # The gate instruction survives the change.
+    assert "Do not work around the gate" in text
