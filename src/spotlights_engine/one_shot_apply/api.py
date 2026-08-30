@@ -146,10 +146,16 @@ class PromptPreview(BaseModel):
     candidate_id: str
     module_qualified_name: str
     repo_path: str
-    worktree: str
-    worktree_parent: str
+    # `None` under `--print-prompt`, which creates no worktree: there is no path
+    # to report, and reporting one would name a directory that does not exist.
+    worktree: str | None
+    worktree_parent: str | None
     base_sha: str
     prompt: str
+    # Whether `--repo` had uncommitted changes when the gate read it. Set only
+    # under `--print-prompt`, where validation reads the working tree; the run
+    # path validates a fresh worktree, which is clean by construction.
+    dirty: bool | None = None
     # The directory `apply.prompt.txt` was written to. Set only under
     # `--print-prompt`, where this file is the whole output and the caller needs
     # to be told where it landed; on the run path the same directory is already
@@ -158,52 +164,76 @@ class PromptPreview(BaseModel):
     path: str | None = None
 
 
+def _worktree_add_cmd(preview: PromptPreview) -> str:
+    """The one command that turns a base commit into a runnable checkout.
+
+    Shell-quoted for the same reason as the recipe in `APPLY-NOTES.md`: this is
+    meant to be copy-pasted, and a repo path containing a space would otherwise
+    be split by the shell.
+    """
+    return (
+        f"git -C {shlex.quote(preview.repo_path)} worktree add --detach "
+        f"<dir> {preview.base_sha}"
+    )
+
+
 def render_prompt_block(preview: PromptPreview) -> str:
-    """The `--print-prompt` block: header lines, then the prompt body.
+    """The `apply.prompt.txt` block: header lines, then the prompt body.
 
     One renderer, two writers — `_write_prompt_only` under `--print-prompt` and
-    `_write_artifacts` on the run path both write this string to
-    `apply.prompt.txt`. Sharing it is the point: the same candidate must not be
-    able to produce different bytes depending on which path wrote the file.
+    `_write_artifacts` on the run path. The *body* is byte-identical between
+    them by construction (`build_apply_prompt` carries no path). The *header* is
+    where they legitimately differ, and it branches exactly once, on whether a
+    worktree exists:
 
-    The `NOTE:` block exists because the two worktree paths mean different
-    things on the two paths, and the difference is not visible in the file. On
-    the run path `_write_artifacts` is called after the `finally` that removes
-    the worktree, so the paths are already *dead* — and the prompt body names
-    that same directory as its working directory, which is the line a reader
-    reusing this prompt would actually act on. Under `--print-prompt` they are
-    *live*, and handing them over is the reason the flag exists. The fields stay
-    on both paths (they correlate the artifact with the run's logs, and dropping
-    them would leave the misleading body line behind unexplained); the NOTE says
-    which case the reader is in, and gives the one command that turns a dead
-    copy back into something runnable.
+    - Run path: real `WORKTREE:`/`WORKTREE_PARENT:` lines, plus a NOTE saying
+      they are already dead — `_write_artifacts` is called after the `finally`
+      that removed the worktree. Kept rather than dropped because they correlate
+      the artifact with the run's logs.
+    - `--print-prompt`: no worktree was created, so there is no path to report.
+      `WORKTREE:` keeps its spelling and carries prose instead. Dropping the
+      line would hand an existing `grep '^WORKTREE:'` an empty string, and an
+      empty path argument is the input most likely to do something quiet and
+      wrong; prose fails loudly the moment it is used as a path.
+
+    `DIRTY:` appears only on the print-prompt path, where the gate read the
+    working tree and whether that was clean is a real property. A
+    permanently-`false` line on the run path would invite a reader to think it
+    could vary.
 
     `WORKTREE:` and `WORKTREE_PARENT:` must keep their exact spelling and stay
-    one-per-line: the skill parses them out of the written file to know where to
-    work and what to clean up.
+    one-per-line: they are parsed out of the written file.
 
     Ends in a newline.
     """
-    return (
+    head = (
         f"CANDIDATE: {preview.candidate_id}\n"
         f"MODULE:    {preview.module_qualified_name}\n"
         f"BASE:      {preview.base_sha}\n"
         f"REPO:      {preview.repo_path}\n"
-        f"WORKTREE:  {preview.worktree}\n"
-        f"WORKTREE_PARENT:  {preview.worktree_parent}\n"
-        f"NOTE: WORKTREE and WORKTREE_PARENT are throwaway paths, deleted when the\n"
-        f"      apply finishes — and the prompt below names WORKTREE as its working\n"
-        f"      directory. If this file came from --print-prompt, both are\n"
-        f"      still live: handing them over is the point of that flag, and\n"
-        f"      removing both when you are done is the caller's job. In a\n"
-        f"      completed apply's copy of this file they are a historical record,\n"
-        f"      not a directory you can enter. To run this prompt again, make an\n"
-        f"      equivalent checkout and use that as the working directory instead:\n"
-        f"        git -C {shlex.quote(preview.repo_path)} worktree add --detach"
-        f" <dir> {preview.base_sha}\n"
-        f"PROMPT:\n"
-        f"{preview.prompt}\n"
     )
+    if preview.worktree is None:
+        # `unknown` is unreachable in practice — `require_git_repo` has already
+        # proved this is a checkout — but `capture_revision` returns `None` for
+        # `dirty` if git disappears between the two calls, and "unknown" is the
+        # honest rendering of that. Never print `None`.
+        dirty = "unknown" if preview.dirty is None else str(preview.dirty).lower()
+        mid = (
+            f"DIRTY:     {dirty}\n"
+            f"WORKTREE:  (none — create one; it is yours to remove when you are done)\n"
+            f"  {_worktree_add_cmd(preview)}\n"
+        )
+    else:
+        mid = (
+            f"WORKTREE:  {preview.worktree}\n"
+            f"WORKTREE_PARENT:  {preview.worktree_parent}\n"
+            f"NOTE: WORKTREE and WORKTREE_PARENT are a historical record, not\n"
+            f"      directories you can enter: they were throwaway paths, deleted\n"
+            f"      when the apply finished. To run this prompt again, make an\n"
+            f"      equivalent checkout and work in it:\n"
+            f"        {_worktree_add_cmd(preview)}\n"
+        )
+    return f"{head}{mid}PROMPT:\n{preview.prompt}\n"
 
 
 class SkippedApply(BaseModel):
@@ -539,7 +569,7 @@ def _process_candidate(
             captured_at=captured_at,
             direction=direction,
         )
-        prompt = build_apply_prompt(spec=spec, worktree=worktree.path)
+        prompt = build_apply_prompt(spec=spec)
         # Built on both paths, not just under --print-prompt: it is what the
         # CLI prints there and what `apply.prompt.txt` records here, and one
         # value feeding both is what keeps the two byte-identical.

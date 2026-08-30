@@ -7,14 +7,12 @@ the two paths cannot drift on the part that matters.
 
 The findings/proposals/target body is `prep_evolve.digest.render_digest`, the
 same block every evolver bundle embeds. What this module adds around it is the
-apply-specific contract: the worktree to edit, the hard scope boundary, the base
-commit, the oracles as a recipe rather than a task, and the instruction to
-write a rationale file the collector folds into APPLY-NOTES.md.
+apply-specific contract: the hard scope boundary, the base commit, the oracles
+as a recipe rather than a task, and the instruction to write a rationale file
+the collector folds into APPLY-NOTES.md.
 """
 
 from __future__ import annotations
-
-from pathlib import Path
 
 from spotlights_engine.one_shot_apply.scope import candidate_target, scope_lines
 from spotlights_engine.prep_evolve.digest import render_digest
@@ -44,20 +42,24 @@ def _oracle_block(target: Target) -> str:
     return "\n".join(lines)
 
 
-def build_apply_prompt(*, spec: EvolveSpec, worktree: Path) -> str:
+def build_apply_prompt(*, spec: EvolveSpec) -> str:
     """Render the apply prompt for one candidate.
 
-    `spec.run.repo_path` is the real target repo (identity); `worktree` is the
-    detached, throwaway checkout the agent actually edits.
+    Deliberately carries **no filesystem path**. The run path sets the agent's
+    cwd to the worktree it created; a `--print-prompt` consumer sets cwd to the
+    one it created itself. Neither needs the directory spelled out here, and
+    naming one would make the body wrong on the path where no worktree exists.
+    Location lives in `render_prompt_block`'s header, which is the only part of
+    `apply.prompt.txt` that differs between the two paths. The payoff: this
+    string is byte-identical for a given candidate no matter who rendered it.
     """
     target = candidate_target(spec)
     base_sha = spec.source_revision.git_commit or "(unknown)"
     return f"""You are implementing ONE proposed optimization in an isolated git worktree.
 
-Working directory: {worktree}
-This is a detached worktree of {spec.run.repo_path} at commit {base_sha}.
-It is throwaway. It has no build artifacts, no virtualenv, and no compiled
-extensions — nothing in it is runnable.
+Your working directory is a detached git worktree of {spec.run.repo_path} at
+commit {base_sha}. It is throwaway. It has no build artifacts, no virtualenv,
+and no compiled extensions — nothing in it is runnable.
 
 {render_digest(spec)}
 

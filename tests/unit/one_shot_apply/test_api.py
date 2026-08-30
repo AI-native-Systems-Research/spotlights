@@ -541,6 +541,66 @@ def test_the_handoff_prompt_says_its_worktree_is_still_live(run) -> None:
     shutil.rmtree(preview.worktree_parent, ignore_errors=True)
 
 
+def _preview(**overrides) -> PromptPreview:
+    """A minimal PromptPreview for exercising `render_prompt_block` directly."""
+    fields = {
+        "candidate_id": CAND_ID,
+        "module_qualified_name": "v1/attention",
+        "repo_path": "/repos/vllm",
+        "worktree": "/tmp/spotlights-apply-x/worktree",
+        "worktree_parent": "/tmp/spotlights-apply-x",
+        "base_sha": "0" * 40,
+        "prompt": "BODY",
+    }
+    fields.update(overrides)
+    return PromptPreview(**fields)
+
+
+def test_the_header_without_a_worktree_says_how_to_make_one() -> None:
+    """`--print-prompt` renders no worktree path, because there is none.
+
+    The reader has to create their own, so the header hands them the exact
+    command instead of a directory. `WORKTREE:` keeps its spelling rather than
+    being dropped: an existing `grep '^WORKTREE:'` gets prose back and fails
+    loudly the moment it is used as a path, where a missing line would hand it
+    an empty string — the input most likely to do something quiet and wrong.
+    """
+    block = render_prompt_block(_preview(worktree=None, worktree_parent=None, dirty=False))
+
+    assert "WORKTREE:  (none" in block
+    assert "WORKTREE_PARENT:" not in block
+    assert "/tmp/spotlights-apply-x" not in block
+    assert "git -C /repos/vllm worktree add --detach <dir> " + "0" * 40 in block
+    assert "DIRTY:     false" in block
+    assert block.endswith("PROMPT:\nBODY\n")
+
+
+def test_the_header_reports_a_dirty_repo_as_dirty() -> None:
+    """The gate read working-tree bytes; this is the only place that is visible.
+
+    Not a gate — information. A consumer works at BASE, so a dirty candidate
+    file means the validated bytes and the bytes they will edit can differ.
+    """
+    block = render_prompt_block(_preview(worktree=None, worktree_parent=None, dirty=True))
+    assert "DIRTY:     true" in block
+
+
+def test_the_header_with_a_worktree_keeps_both_paths_and_drops_the_hedge() -> None:
+    """The run path's format is unchanged except that the NOTE no longer hedges.
+
+    It used to have to describe both callers in one block ("if this file came
+    from --print-prompt..."), because both rendered identical headers. They no
+    longer do, so this block says one thing: these paths are already dead.
+    """
+    block = render_prompt_block(_preview())
+
+    assert "WORKTREE:  /tmp/spotlights-apply-x/worktree\n" in block
+    assert "WORKTREE_PARENT:  /tmp/spotlights-apply-x\n" in block
+    assert "DIRTY:" not in block  # a permanently-false line invites a wrong reading
+    assert "--print-prompt" not in block  # the hedge is gone
+    assert "still live" not in block
+
+
 def test_a_failed_prompt_write_gives_the_worktree_back(run, tmp_path: Path) -> None:
     """A handoff whose prompt never reached disk is not a handoff.
 
