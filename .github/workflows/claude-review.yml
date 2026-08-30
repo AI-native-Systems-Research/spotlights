@@ -1,18 +1,5 @@
 name: Claude Code Action
 
-# SECURITY — this workflow runs on a PERSISTENT self-hosted runner (`models6`).
-# Untrusted code must never reach it. Two gates enforce that; do not relax either
-# without re-reading docs/superpowers/specs/2026-08-30-spotlights-phase1-security-design.md:
-#
-#   1. `pull_request` runs ONLY for same-repo PRs (fork PRs start no job at all).
-#      A fork PR gets no secrets from GitHub anyway, so auto-review could not
-#      work there — the trigger would grant code execution and nothing else.
-#   2. Comment/mention paths go through `check-permissions`, which requires
-#      admin/write/maintain via the collaborator API and fails closed.
-#
-# Note `author_association` is NOT used: it reports COLLABORATOR for read-only
-# collaborators too. The permission-level API distinguishes them.
-
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -22,7 +9,6 @@ on:
     types: [created]
 
 jobs:
-  # Runs on a GitHub-hosted runner so untrusted input is evaluated away from `models6`.
   check-permissions:
     if: |
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
@@ -54,7 +40,6 @@ jobs:
             }
 
   claude:
-    # `always()` so the PR path is not blocked by check-permissions being skipped.
     needs: check-permissions
     if: |
       always() && (
@@ -106,8 +91,6 @@ jobs:
           allowed_bots: 'github-actions,claude'
           claude_args: '--model claude-sonnet-4-6 --allowedTools "Skill Agent Bash Read Edit Write"'
           show_full_output: true
-          # NOTE: these marketplaces are cloned at run time and cannot be SHA-pinned
-          # through this input — accepted residual risk, gated to trusted callers above.
           plugin_marketplaces: |
             https://github.com/anthropics/claude-plugins-official.git
             https://github.com/obra/superpowers-marketplace.git
