@@ -80,7 +80,7 @@ jobs:
             echo "prompt=" >> "$GITHUB_OUTPUT"
           fi
 
-      - uses: anthropics/claude-code-action@a874e9ecd7bb36efdad65429c6b35815f5a08f10 # v1
+      - uses: anthropics/claude-code-action@v1
         env:
           ANTHROPIC_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
           CLAUDE_CODE_DISABLE_THINKING: "1"
