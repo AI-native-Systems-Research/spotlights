@@ -359,9 +359,7 @@ def test_load_external_rates_returns_bundled_table() -> None:
     assert "anthropic:claude-opus-4-8" in external
     assert "openai:codex" in external
     # Public Opus list price ($5/MTok input) exceeds the contracted rate.
-    assert external["anthropic:claude-opus-4-8"].input == pytest.approx(
-        0.000005
-    )
+    assert external["anthropic:claude-opus-4-8"].input == pytest.approx(0.000005)
 
 
 def test_load_external_rates_env_var_and_explicit_path(
@@ -408,12 +406,67 @@ def test_load_external_rates_env_var_and_explicit_path(
     assert from_path["anthropic:claude-opus-4-8"].input == pytest.approx(0.9)
 
 
+def test_load_rates_rejects_duplicate_canonical_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two raw keys that collapse to the same canonical key must fail loudly.
+
+    A plain dict comprehension would keep only whichever entry JSON iteration
+    happened to visit last, silently mis-pricing the collided row.
+    """
+    custom = tmp_path / "rates.json"
+    custom.write_text(
+        json.dumps(
+            {
+                "anthropic:aws/claude-opus-5": {
+                    "input": 0.1,
+                    "output": 0.2,
+                    "cache_read": 0.0,
+                    "cache_create": 0.0,
+                },
+                "anthropic:claude-opus-5": {
+                    "input": 0.9,
+                    "output": 0.9,
+                    "cache_read": 0.0,
+                    "cache_create": 0.0,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(EXTERNAL_RATES_ENV_VAR, str(custom))
+
+    with pytest.raises(ValueError) as excinfo:
+        load_external_rates()
+
+    msg = str(excinfo.value)
+    assert "anthropic:aws/claude-opus-5" in msg
+    assert "anthropic:claude-opus-5" in msg
+    assert str(custom) in msg
+
+
+def test_compute_cost_rejects_duplicate_canonical_keys() -> None:
+    """A caller-supplied rates dict with a canonical-key collision is rejected."""
+    rate_a = ModelRate(input=0.1, output=0.2, cache_read=0.0, cache_create=0.0)
+    rate_b = ModelRate(input=0.9, output=0.9, cache_read=0.0, cache_create=0.0)
+
+    with pytest.raises(ValueError) as excinfo:
+        compute_cost(
+            [],
+            {
+                "anthropic:aws/claude-opus-5": rate_a,
+                "anthropic:claude-opus-5": rate_b,
+            },
+        )
+    msg = str(excinfo.value)
+    assert "anthropic:aws/claude-opus-5" in msg
+    assert "anthropic:claude-opus-5" in msg
+
+
 def test_compute_cost_source_label_and_table_divergence() -> None:
     records = [_opus_record()]
     contracted = compute_cost(records, load_rates())
-    external = compute_cost(
-        records, load_external_rates(), source="public-api-rate-table"
-    )
+    external = compute_cost(records, load_external_rates(), source="public-api-rate-table")
 
     assert contracted.source == "contracted-rate-table"
     assert external.source == "public-api-rate-table"
@@ -425,9 +478,7 @@ def test_compute_cost_source_label_and_table_divergence() -> None:
 def test_run_manifest_carries_external_cost() -> None:
     records = [_opus_record()]
     contracted = compute_cost(records, load_rates())
-    external = compute_cost(
-        records, load_external_rates(), source="public-api-rate-table"
-    )
+    external = compute_cost(records, load_external_rates(), source="public-api-rate-table")
 
     manifest = build_run_manifest(
         run_id="run-1",
@@ -610,9 +661,7 @@ def test_compute_cost_reports_coverage_and_by_model_on_partial_run() -> None:
     # Per-row shares must sum to 1.0 (they partition the run's tokens).
     assert sum(r.priced_token_share for r in summary.by_model) == pytest.approx(1.0)
     # by_model dollar sum invariant: matches amount_usd.
-    assert sum(r.amount_usd for r in summary.by_model) == pytest.approx(
-        summary.amount_usd
-    )
+    assert sum(r.amount_usd for r in summary.by_model) == pytest.approx(summary.amount_usd)
 
 
 def test_compute_cost_full_coverage_when_every_model_has_a_rate() -> None:
