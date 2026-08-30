@@ -39,9 +39,51 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             {
               echo 'prompt<<PROMPT_EOF'
-              echo '/code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
-              echo ''
-              echo 'When posting the review comment prefix it with ## 🤖 Claude Code Review'
+              cat <<'INNER_EOF'
+          /code-review ${{ github.repository }}/pull/${{ github.event.pull_request.number }}
+
+          After the review runs and produces findings, post them per the protocol below.
+          Do NOT use the plugin's default posting path. Deviating from this protocol is a bug.
+
+          STEP 1 — RECONCILE PRIOR BOT THREADS
+          List existing review threads on this PR via `gh api graphql` (reviewThreads, first 100).
+          For each thread whose first comment's author is `claude[bot]` AND `isResolved` is false:
+            - If any human has replied on the thread, LEAVE IT ALONE. Human state wins.
+            - Else if the finding no longer applies to current HEAD — the anchored code was
+              deleted, meaningfully changed, or the concern is otherwise moot — reply once with
+              a one-line reason ("Resolved: <reason>."), then call `resolveReviewThread` on it
+              via GraphQL.
+            - Else leave it alone (still applies).
+
+          STEP 2 — DEDUP SURVIVING BOT THREADS
+          Cluster the still-unresolved `claude[bot]` threads by underlying issue: same defect
+          AND same recommendation, ignoring wording, file path, and line number. In each
+          cluster of 2+ threads:
+            - If any thread has a human reply, that one is the survivor.
+            - Else pick the survivor by (a) shortest self-contained body, (b) anchor still
+              present in HEAD (`isOutdated == false`), (c) clearest anchor point.
+            - For every non-survivor, post a one-line reply
+              `Duplicate of <survivor permalink> — resolving.` then `resolveReviewThread` it.
+            - If cluster members disagree materially on the recommendation, do NOT cluster —
+              leave both open. Err on the side of leaving threads open.
+
+          STEP 3 — POST NEW FINDINGS
+          Compare each fresh finding against the surviving threads from steps 1 and 2. Drop any
+          finding that falls in an existing cluster; do NOT re-post it.
+          Rank the remaining findings by severity and keep at most the TOP 5. Skip nits.
+          Submit exactly ONE PR review via `gh api --method POST /repos/{owner}/{repo}/pulls/{n}/reviews`:
+            - `event`: `COMMENT`
+            - `body`: empty string. Do NOT list findings in the review body. No shared summary.
+            - `comments`: one entry per finding, each anchored to `path` + `line`, body ≤400
+              characters, one short paragraph. No `## 🤖 Claude Code Review` header inside
+              inline entries. No banner, no signature.
+
+          FORBIDDEN
+            - `gh pr comment`, or any POST to `/issues/{n}/comments` on this PR.
+            - Submitting more than one review per invocation.
+            - Re-posting a finding that duplicates a surviving thread.
+            - Any Conversation-tab comment. All output goes inline on the Files-changed tab.
+          INNER_EOF
               echo 'PROMPT_EOF'
             } >> $GITHUB_OUTPUT
           else
