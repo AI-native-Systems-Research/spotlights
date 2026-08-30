@@ -111,6 +111,31 @@ def test_run_checks_returns_all(monkeypatch):
     assert any(n.startswith("codex") for n in names)
 
 
+def test_run_checks_surfaces_schema_invalid_rate_table(monkeypatch, tmp_path):
+    """A rate table that parses as JSON but fails validation must not pass silently.
+
+    `check_rates` only verifies file existence, so a schema-invalid entry (here,
+    a negative price) reaches `load_rates` as a ValueError. Before the fix that
+    ValueError was swallowed into `rates = {}` and every model read as unpriced
+    with no hint that the rate table was the problem.
+    """
+    bad = tmp_path / "rates.json"
+    bad.write_text(
+        '{"anthropic:claude-opus-5": {"input_per_mtok": -1.0, "output_per_mtok": 1.0}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SPOTLIGHTS_RATES_FILE", str(bad))
+    monkeypatch.setattr(doctor.shutil, "which", lambda _n: "/bin/" + _n)
+    monkeypatch.setattr(
+        doctor,
+        "_probe_model",
+        lambda name, **_kw: ProbeOutcome(ok=True, model=None, error=""),
+    )
+    rates_check = next(r for r in doctor.run_checks() if r.name == "rates")
+    assert rates_check.ok is False
+    assert "rate table invalid" in rates_check.detail
+
+
 def test_main_exit_code_fail(monkeypatch, capsys):
     monkeypatch.setattr(doctor.shutil, "which", lambda _n: None)
     code = doctor.main([])
