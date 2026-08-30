@@ -63,21 +63,17 @@ jobs:
 
       - name: Set prompt for PR review
         id: set-prompt
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          REPO: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          if [ "$EVENT_NAME" = "pull_request" ]; then
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
             {
               echo 'prompt<<PROMPT_EOF'
-              echo "/code-review --comment ${REPO}/pull/${PR_NUMBER}"
+              echo '/code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
               echo ''
               echo 'When posting the review comment prefix it with ## 🤖 Claude Code Review'
               echo 'PROMPT_EOF'
-            } >> "$GITHUB_OUTPUT"
+            } >> $GITHUB_OUTPUT
           else
-            echo "prompt=" >> "$GITHUB_OUTPUT"
+            echo "prompt=" >> $GITHUB_OUTPUT
           fi
 
       - uses: anthropics/claude-code-action@v1
