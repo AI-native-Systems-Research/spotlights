@@ -68,6 +68,22 @@ def test_probe_cli_codex_family_fallback_ok(monkeypatch):
     assert "openai:codex" in res.detail
 
 
+def test_probe_cli_canonicalizes_caller_rates_dict(monkeypatch):
+    """A caller-supplied rates dict keyed with a LiteLLM route prefix still
+    matches records whose CLI-reported model id lacks the prefix — mirrors
+    `compute_cost`'s canonicalize-on-entry behavior."""
+    monkeypatch.setattr(doctor.shutil, "which", lambda _n: "/bin/" + _n)
+    monkeypatch.setattr(
+        doctor,
+        "_probe_model",
+        lambda name, **_kw: ProbeOutcome(ok=True, model="claude-opus-4-8", error=""),
+    )
+    route_prefixed_rates = {"anthropic:aws/claude-opus-4-8": object()}
+    res = doctor.probe_cli("claude", rates=route_prefixed_rates)
+    assert res.ok is True
+    assert "anthropic:claude-opus-4-8" in res.detail
+
+
 def test_probe_cli_strips_context_window_tag(monkeypatch):
     monkeypatch.setattr(doctor.shutil, "which", lambda _n: "/bin/" + _n)
     monkeypatch.setattr(
