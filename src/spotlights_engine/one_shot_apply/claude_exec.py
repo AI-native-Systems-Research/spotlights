@@ -184,6 +184,7 @@ def run_apply_claude(
     worktree: Path,
     max_turns: int,
     wallclock_s: int,
+    claude_model: str | None = None,
 ) -> ApplyRunResult:
     """Run one `claude -p` apply session with `worktree` as the working directory."""
     # Resolve via shutil.which so Windows finds the .CMD shim. Bare
@@ -214,6 +215,8 @@ def run_apply_claude(
         "--max-turns",
         str(max_turns),
     ]
+    if claude_model:
+        argv += ["--model", claude_model]
     env = _clean_env()
     start = time.monotonic()
     try:

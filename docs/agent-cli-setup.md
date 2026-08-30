@@ -48,6 +48,86 @@ wire_api = "chat"              # use "responses" only if the gateway is set up f
 requires_openai_auth = false  # gateway key, not an OpenAI sk- key
 ```
 
+## Choosing models
+
+A run's model has to be something you choose, not something inherited from
+whoever's machine it ran on — otherwise the same command produces different
+results for different people.
+
+The bundled `models.yaml` ships **blank**, so out of the box nothing changes:
+Claude inherits `~/.claude/settings.json`, Codex inherits `~/.codex/config.toml`,
+and every existing run dir still resumes. Model ids are gateway-specific aliases,
+so there is no default that would be right for everyone.
+
+Two ways to pin it. Both are global: one Claude model and one Codex model for
+every step of the pipeline.
+
+**Per run** — a flag:
+
+```bash
+spotlights-engine --claude-model aws/claude-opus-4-8 --codex-model gpt-5.5 ...
+```
+
+**Durably, for yourself** — keep your own file *outside the repo* and point
+`SPOTLIGHTS_MODELS_FILE` at it:
+
+```bash
+mkdir -p ~/.config/spotlights
+cat > ~/.config/spotlights/models.yaml <<'EOF'
+claude: aws/claude-opus-4-8
+codex: gpt-5.5
+EOF
+export SPOTLIGHTS_MODELS_FILE=~/.config/spotlights/models.yaml
+```
+
+This is the right place for a personal preference. `models.yaml` in the package is
+tracked by git, so editing it shows up as a local modification you could push to
+everyone by accident — and on the day somebody *does* change it upstream, your
+`git pull` will refuse to merge until you stash your edit. A file outside the repo
+has neither problem, because git never sees it.
+
+**Durably, for everyone** — edit the tracked `models.yaml`. That is a change to the
+team's default, so it goes through a commit and review like any other. It also
+changes the resume fingerprint, so run dirs started before the change will no
+longer resume.
+
+Leave a value blank to inherit that CLI's own default. The file itself is
+optional, and a missing key or blank value means "inherit". One exception: if
+`SPOTLIGHTS_MODELS_FILE` names a file that does not exist, that is an error, not
+an empty config — a typo there would otherwise run on CLI defaults while you
+believed your pin was live. Use an empty file to mean "pin nothing".
+To force inherit for one run even though the file pins something, pass the flag
+empty: `--codex-model ""`.
+
+One exception: candidate discovery (step 2) has a built-in Codex default of
+`gpt-5.5`, kept so run dirs created before this config existed still resume. A
+blank `codex` therefore leaves step 2 on `gpt-5.5` while steps 3 and 5 inherit
+your `config.toml`. Setting `codex` makes all three agree.
+
+Precedence, highest first:
+
+1. `--claude-model` / `--codex-model`
+2. `SPOTLIGHTS_MODELS_FILE`
+3. the bundled `models.yaml`
+4. the agent CLI's own config
+
+Two things worth knowing:
+
+- **A resolved model beats `ANTHROPIC_MODEL`.** Once the engine passes `--model`,
+  that env var no longer has any effect. It works only while the resolved value
+  is blank.
+- **Model ids are gateway-specific.** `aws/claude-opus-4-8` is a LiteLLM alias,
+  not a portable name. Check what your gateway exposes.
+
+`spotlights-engine doctor` prints the effective model for each CLI, which file it
+came from, and probes that model live — so a green check means the model a run
+will use actually works and is priced. With `codex` blank you will see two Codex
+checks, because step 2 and steps 3+5 are then on different models and both get
+probed. Each run's `run_manifest.json` records
+both `models_requested` (what the engine asked for, step 2's built-in default
+included) and `models_used` (what the CLIs reported back) — they can differ when
+the request is blank.
+
 ## Verify
 
 ```bash

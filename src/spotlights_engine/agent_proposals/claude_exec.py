@@ -77,6 +77,7 @@ def run_candidate_claude(
     repo_path: Path,
     max_turns: int,
     wallclock_s: int,
+    claude_model: str | None = None,
 ) -> CandidateAgentRunResult:
     """Run one Claude session for a single candidate."""
     # Resolve via shutil.which so Windows finds the .CMD shim. Bare
@@ -96,6 +97,8 @@ def run_candidate_claude(
         "--max-turns",
         str(max_turns),
     ]
+    if claude_model:
+        argv += ["--model", claude_model]
     env = _clean_env()
     start = time.monotonic()
     try:

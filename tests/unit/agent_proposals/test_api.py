@@ -126,6 +126,7 @@ def test_runner_exception_does_not_stop_siblings(
         repo_path,
         max_turns,
         wallclock_s,
+        claude_model=None,
     ):
         if candidate_id == "cand-v1_kv_offload-0001":
             raise RuntimeError("transient runner crash")

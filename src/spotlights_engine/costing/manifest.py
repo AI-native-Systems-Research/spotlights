@@ -82,6 +82,20 @@ class RunManifestOutputs(BaseModel):
     module_status: dict[str, int] = Field(default_factory=dict)
 
 
+class RunManifestModelsRequested(BaseModel):
+    """What the run *asked* each agent CLI for, per `models.yaml` / `--*-model`.
+
+    Distinct from `models_used`, which is parsed back out of CLI output and says
+    what actually ran. An empty string means the engine passed no `--model` and
+    the CLI chose for itself, so the two can legitimately differ.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    claude: str = ""
+    codex: str = ""
+
+
 class RunManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -89,6 +103,9 @@ class RunManifest(BaseModel):
     date: str
     target: RunManifestTarget
     spotlights: RunManifestSpotlights
+    models_requested: RunManifestModelsRequested = Field(
+        default_factory=RunManifestModelsRequested
+    )
     models_used: list[ModelUsed] = Field(default_factory=list)
     total_tokens: int = 0
     cost: RunManifestCost
@@ -131,6 +148,7 @@ def build_run_manifest(
     num_candidates: int,
     module_status: dict[str, int],
     notes: list[str],
+    models_requested: RunManifestModelsRequested | None = None,
 ) -> RunManifest:
     note_parts = list(notes)
     if cost.unpriced_models:
@@ -163,6 +181,7 @@ def build_run_manifest(
             pipeline="deep-research",
             config=dict(config_fingerprint),
         ),
+        models_requested=models_requested or RunManifestModelsRequested(),
         models_used=aggregate_models_used(records),
         total_tokens=sum(record.total_tokens for record in records),
         cost=RunManifestCost(
@@ -203,6 +222,7 @@ __all__ = [
     "ModelUsed",
     "RunManifest",
     "UsageTotals",
+    "RunManifestModelsRequested",
     "aggregate_models_used",
     "build_run_manifest",
 ]

@@ -18,6 +18,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from spotlights_engine.model_config import load_model_config
 from spotlights_engine.one_shot_apply.api import (
     NOTES_NAME,
     OneShotApplyConfig,
@@ -100,6 +101,15 @@ def _build_argparser() -> argparse.ArgumentParser:
         help="Cap on agent turns per candidate (default: 40).",
     )
     p.add_argument(
+        "--claude-model",
+        default=None,
+        metavar="ID",
+        help=(
+            "Model id passed to `claude --model`. Overrides models.yaml "
+            "(or $SPOTLIGHTS_MODELS_FILE) for this run. Omit to use the file."
+        ),
+    )
+    p.add_argument(
         "--wallclock",
         dest="wallclock_s",
         type=int,
@@ -135,6 +145,7 @@ def _parse_top_n(raw: str) -> int | None:
 _FIELD_TO_FLAG = {
     "wallclock_s": "--wallclock",
     "max_turns": "--max-turns",
+    "claude_model": "--claude-model",
     "top_n": "--top-n",
 }
 
@@ -167,6 +178,19 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
+    # Resolved before the input is built, and guarded on its own: a malformed
+    # models file raises ValueError, which the ValidationError handler below
+    # would not catch. An explicitly empty flag means "inherit", same as the
+    # main CLI.
+    try:
+        if args.claude_model is None:
+            claude_model = load_model_config().claude
+        else:
+            claude_model = args.claude_model.strip() or None
+    except (OSError, ValueError) as exc:
+        print(f"apply: {exc}", file=sys.stderr)
+        return 2
+
     try:
         inp = OneShotApplyInput(
             result=args.result,
@@ -179,6 +203,7 @@ def main(argv: list[str] | None = None) -> int:
             top_n=top_n,
             max_turns=args.max_turns,
             wallclock_s=args.wallclock_s,
+            claude_model=claude_model,
             print_prompt=args.print_prompt,
         )
     except ValidationError as exc:

@@ -155,7 +155,8 @@ def test_out_of_scope_files_are_flagged_on_stderr(
     from spotlights_engine.one_shot_apply.claude_exec import ApplyRunResult
 
     def _fake_run_apply_claude(
-        *, candidate_id: str, prompt: str, worktree: Path, max_turns: int, wallclock_s: int
+        *, candidate_id: str, prompt: str, worktree: Path, max_turns: int,
+        wallclock_s: int, claude_model: str | None = None,
     ) -> ApplyRunResult:
         target = worktree / CAND_FILE
         target.write_text(target.read_text(encoding="utf-8") + "# in-scope\n", encoding="utf-8")

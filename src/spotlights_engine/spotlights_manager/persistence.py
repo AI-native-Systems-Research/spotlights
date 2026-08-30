@@ -267,15 +267,31 @@ def _stable_hash(payload: Any) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+#: Model-selection fields that are omitted from the fingerprint when unset.
+#: These were added after run dirs existed in the wild; including a new key —
+#: even with a null value — changes the hash and makes every older run dir fail
+#: `--resume`. Omitting them while unset keeps a default config hashing exactly
+#: as it did before they existed, and a *set* value still invalidates resume,
+#: which is what the fingerprint is for. Same reasoning as the
+#: `enable_deep_research` omission in `build_input_fingerprint`.
+_OPTIONAL_MODEL_FIELDS = ("claude_model",)
+
+
 def hash_pydantic_excluding(model: BaseModel | None, *, exclude: set[str]) -> str:
     """Stable hash of a pydantic model with selected fields excluded.
 
     Used for `config_fingerprint` so that changing manager-owned path fields
     (`artifacts_dir`, `repo_path`) doesn't trigger a spurious resume mismatch.
+    Unset model-selection fields are excluded too; see `_OPTIONAL_MODEL_FIELDS`.
     """
     if model is None:
         return _stable_hash(None)
-    payload = model.model_dump(mode="json", exclude=exclude)
+    unset_models = {
+        field
+        for field in _OPTIONAL_MODEL_FIELDS
+        if getattr(model, field, None) is None
+    }
+    payload = model.model_dump(mode="json", exclude=exclude | unset_models)
     return _stable_hash(payload)
 
 
@@ -312,6 +328,7 @@ def build_config_fingerprint(
     deep_research_cfg: BaseModel | None,
     proposal_from_finding_cfg: BaseModel | None,
     agent_proposals_cfg: BaseModel | None,
+    models: BaseModel | None = None,
 ) -> dict[str, Any]:
     effective_discovery_cfg = discovery_cfg or DiscoveryConfig()
     effective_deep_research_cfg = deep_research_cfg or CodexExecOptions()
@@ -336,7 +353,23 @@ def build_config_fingerprint(
         "agent_proposals_hash": hash_pydantic_excluding(
             effective_agent_proposals_cfg, exclude={"artifacts_dir", "repo_path"}
         ),
+        # Step 3's Claude model lives only here — it has no config object of its
+        # own — so without this key a caller who set `models` and nothing else
+        # could resume across a model change and silently mix two models'
+        # findings in one result. Omitted entirely when it pins nothing, so a
+        # default run's fingerprint is unchanged from before this key existed.
+        **_models_fingerprint(models),
     }
+
+
+def _models_fingerprint(models: BaseModel | None) -> dict[str, Any]:
+    """`{"models_hash": ...}` when a model is pinned, otherwise `{}`."""
+    if models is None:
+        return {}
+    payload = models.model_dump(mode="json")
+    if not any(payload.values()):
+        return {}
+    return {"models_hash": _stable_hash(payload)}
 
 
 def default_agent_proposals_hash() -> str:
