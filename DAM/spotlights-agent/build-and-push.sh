@@ -2,7 +2,7 @@
 # Build and push the Spotlights DAM image to Quay.
 #
 # Auth: if the repo root `.env` file (or your ambient env) sets
-# QUAY_ENCRIPTED_PASS, this script does a non-interactive
+# QUAY_ENCRYPTED_PASS, this script does a non-interactive
 # `docker login quay.io` for you before push. Generate that value in the
 # Quay UI: username → Account Settings → Generate Encrypted Password →
 # "Docker Login" tab (or use a robot-account token — same variable).
@@ -13,7 +13,7 @@
 #   TAG=0.1.1 ./build-and-push.sh    # override tag
 #
 # Overridable env vars: QUAY_USER, IMAGE, TAG, PLATFORM_BASE_TAG,
-#                       CLAUDE_VERSION, QUAY_ENCRIPTED_PASS.
+#                       CLAUDE_VERSION, QUAY_ENCRYPTED_PASS.
 #
 # Pin CLAUDE_VERSION for reproducible builds — otherwise the Dockerfile
 # resolves "latest" at build time and two builds from the same commit
@@ -30,7 +30,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 CTX="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 DOCKERFILE="${SCRIPT_DIR}/Dockerfile"
 
-# Load ${CTX}/.env so credentials (QUAY_ENCRIPTED_PASS, etc.) don't have
+# Load ${CTX}/.env so credentials (QUAY_ENCRYPTED_PASS, etc.) don't have
 # to live in the interactive shell. Anything set in the environment
 # already wins; .env just fills in the blanks.
 ENV_FILE="${CTX}/.env"
@@ -51,9 +51,9 @@ REF="quay.io/${QUAY_USER}/${IMAGE}:${TAG}"
 
 # Log in early so both the base-image pull (private DAM registry) and the
 # push work. `--password-stdin` keeps the secret out of `ps`.
-if [[ -n "${QUAY_ENCRIPTED_PASS:-}" ]]; then
+if [[ -n "${QUAY_ENCRYPTED_PASS:-}" ]]; then
   echo "Logging in to quay.io as ${QUAY_USER}"
-  printf '%s' "${QUAY_ENCRIPTED_PASS}" \
+  printf '%s' "${QUAY_ENCRYPTED_PASS}" \
     | docker login quay.io -u "${QUAY_USER}" --password-stdin
 fi
 

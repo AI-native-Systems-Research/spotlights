@@ -265,7 +265,7 @@ TAG=0.1.3 ./build-and-push.sh             # override tag
 QUAY_USER=my-org TAG=0.1.3 ./build-and-push.sh
 ```
 
-Auth for the push: either put `QUAY_USER` + `QUAY_ENCRIPTED_PASS` in a repo-root
+Auth for the push: either put `QUAY_USER` + `QUAY_ENCRYPTED_PASS` in a repo-root
 `.env` (generate the encrypted password in Quay: *Account Settings → Generate
 Encrypted Password → Docker Login tab*), or run `docker login quay.io`
 interactively first. The script prints the exact `quay.io/…:tag` ref to paste
