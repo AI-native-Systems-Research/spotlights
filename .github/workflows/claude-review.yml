@@ -1,26 +1,69 @@
 name: Claude Code Action
 
-permissions:
-  contents: write
-  pull-requests: write
-  issues: write
-  id-token: write
+# SECURITY — this workflow runs on a PERSISTENT self-hosted runner (`models6`).
+# Untrusted code must never reach it. Two gates enforce that; do not relax either
+# without re-reading docs/superpowers/specs/2026-08-30-spotlights-phase1-security-design.md:
+#
+#   1. `pull_request` runs ONLY for same-repo PRs (fork PRs start no job at all).
+#      A fork PR gets no secrets from GitHub anyway, so auto-review could not
+#      work there — the trigger would grant code execution and nothing else.
+#   2. Comment/mention paths go through `check-permissions`, which requires
+#      admin/write/maintain via the collaborator API and fails closed.
+#
+# Note `author_association` is NOT used: it reports COLLABORATOR for read-only
+# collaborators too. The permission-level API distinguishes them.
 
 on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   issue_comment:
     types: [created]
   pull_request_review_comment:
     types: [created]
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
 
 jobs:
-  claude:
+  # Runs on a GitHub-hosted runner so untrusted input is evaluated away from `models6`.
+  check-permissions:
     if: |
-      github.event_name == 'pull_request' ||
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude'))
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      allowed: ${{ steps.check.outputs.allowed }}
+    steps:
+      - name: Check invoker permissions
+        id: check
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8
+        with:
+          script: |
+            try {
+              const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                username: context.actor
+              });
+              const allowed = ['admin', 'write', 'maintain'].includes(data.permission);
+              core.setOutput('allowed', allowed ? 'true' : 'false');
+              if (!allowed) {
+                core.info(`User ${context.actor} has '${data.permission}' permission — skipping.`);
+              }
+            } catch (e) {
+              core.setOutput('allowed', 'false');
+              core.info(`User ${context.actor} is not a collaborator — skipping.`);
+            }
+
+  claude:
+    # `always()` so the PR path is not blocked by check-permissions being skipped.
+    needs: check-permissions
+    if: |
+      always() && (
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name == github.repository) ||
+        (github.event_name != 'pull_request' &&
+         needs.check-permissions.outputs.allowed == 'true')
+      )
+    runs-on: [self-hosted]
     timeout-minutes: 60
     permissions:
       contents: write
@@ -29,31 +72,30 @@ jobs:
       id-token: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
       - name: Set prompt for PR review
         id: set-prompt
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
+          if [ "$EVENT_NAME" = "pull_request" ]; then
             {
               echo 'prompt<<PROMPT_EOF'
-              echo '/code-review --comment ${{ github.repository }}/pull/${{ github.event.pull_request.number }}'
+              echo "/code-review --comment ${REPO}/pull/${PR_NUMBER}"
               echo ''
               echo 'When posting the review comment prefix it with ## 🤖 Claude Code Review'
               echo 'PROMPT_EOF'
-            } >> $GITHUB_OUTPUT
+            } >> "$GITHUB_OUTPUT"
           else
-            echo "prompt=" >> $GITHUB_OUTPUT
+            echo "prompt=" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Debug prompt
-        run: |
-          echo "Event: ${{ github.event_name }}"
-          echo "Prompt: ${{ steps.set-prompt.outputs.prompt }}"
-          
-      - uses: anthropics/claude-code-action@v1
+      - uses: anthropics/claude-code-action@a874e9ecd7bb36efdad65429c6b35815f5a08f10 # v1
         env:
           ANTHROPIC_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
           CLAUDE_CODE_DISABLE_THINKING: "1"
@@ -61,10 +103,11 @@ jobs:
           GH_HOST: github.com
         with:
           anthropic_api_key: ${{ secrets.LITELLM_API_KEY }}
-          # github_token: ${{ secrets.GITHUB_TOKEN }}
           allowed_bots: 'github-actions,claude'
-          claude_args: '--model claude-sonnet-4-6 --dangerously-skip-permissions --allowedTools "Skill Agent Bash Read Edit Write"'
+          claude_args: '--model claude-sonnet-4-6 --allowedTools "Skill Agent Bash Read Edit Write"'
           show_full_output: true
+          # NOTE: these marketplaces are cloned at run time and cannot be SHA-pinned
+          # through this input — accepted residual risk, gated to trusted callers above.
           plugin_marketplaces: |
             https://github.com/anthropics/claude-plugins-official.git
             https://github.com/obra/superpowers-marketplace.git
