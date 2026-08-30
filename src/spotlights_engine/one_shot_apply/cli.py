@@ -5,11 +5,11 @@ shape deliberately mirrors `prep-evolve` (`--result`, `--repo`, `--index`,
 `--candidate`, `--module`, `--out`, `--top-n`, `--direction`) so the two stages
 are interchangeable at the call site.
 
-`--print-prompt` runs resolution, worktree creation, and validation, leaves
-`apply.prompt.txt` as the only file in the candidate's apply dir (clearing an
-earlier apply's artifacts out of it) and prints that directory, then exits —
-leaving the worktree in place for `/spotlights-apply-candidate` to work in, which
-reads its path out of that file's `WORKTREE:` line.
+`--print-prompt` runs resolution and validation, leaves `apply.prompt.txt` as the
+only file in each selected candidate's apply dir (clearing an earlier apply's
+artifacts out of it) and prints those directories, then exits. It creates no
+worktree: the file carries the base commit and the `git worktree add` command,
+and the caller makes its own checkout if it needs one.
 """
 
 from __future__ import annotations
@@ -121,12 +121,12 @@ def _build_argparser() -> argparse.ArgumentParser:
         "--print-prompt",
         action="store_true",
         help=(
-            "Resolve, create and validate the worktree, then write "
-            "apply.prompt.txt as the only file in the candidate's apply dir "
-            "(DELETING any apply.patch/APPLY-NOTES.md/manifest.json an earlier "
-            "apply left there), print that directory, and exit. Runs no agent "
-            "and leaves the worktree in place for the caller, which finds it in "
-            "the WORKTREE line of that file. Requires --candidate."
+            "Resolve and validate, then write apply.prompt.txt as the only file "
+            "in each selected candidate's apply dir (DELETING any "
+            "apply.patch/APPLY-NOTES.md/manifest.json an earlier apply left "
+            "there), print those directories, and exit. Runs no agent and "
+            "creates no worktree; the file carries the base commit and the "
+            "`git worktree add` command to make one."
         ),
     )
     return p
@@ -267,16 +267,22 @@ def main(argv: list[str] | None = None) -> int:
             "See APPLY-NOTES.md for the recorded oracles.",
             file=sys.stderr,
         )
-    if result.patches or result.skipped:
-        # The same closing tally `prep-evolve` prints, on stderr for the same
-        # reason: stdout stays the machine-readable one-line-per-candidate list.
-        # Gated because `--print-prompt` writes nothing and skips nothing, and
-        # "0 candidate(s) written" under a prompt dump reads as a failure.
-        print(
-            f"apply: {len(result.patches)} candidate(s) written, "
-            f"{len(result.skipped)} skipped",
-            file=sys.stderr,
-        )
+    # The same closing tally `prep-evolve` prints (`prep_evolve/cli.py:150`), on
+    # stderr for the same reason: stdout stays the machine-readable
+    # one-line-per-candidate list. Ungated for the same reason too — a tally that
+    # appears only when something failed reads as breakage, and `prep-evolve`
+    # prints `0 bundle(s) written, 0 skipped` on an empty run rather than going
+    # quiet.
+    #
+    # `prompt(s)` under `--print-prompt`: nothing was applied there, and
+    # "written" already means "a patch was produced" on the run path. Only the
+    # noun varies — the shape must stay parseable as one line.
+    noun = "prompt" if result.prompts else "candidate"
+    count = len(result.prompts) if result.prompts else len(result.patches)
+    print(
+        f"apply: {count} {noun}(s) written, {len(result.skipped)} skipped",
+        file=sys.stderr,
+    )
     for s in result.skipped:
         # A skip raised during *selection* — a ranked id that is no longer in
         # result.json — knows the candidate id but not its module, so

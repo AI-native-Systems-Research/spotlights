@@ -92,6 +92,75 @@ def test_non_git_repo_exits_2(tmp_path: Path, capsys: pytest.CaptureFixture) -> 
     assert "git" in capsys.readouterr().err
 
 
+def test_a_print_prompt_sweep_tallies_prompts_not_candidates(
+    run, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture
+) -> None:
+    """Nothing was applied, so `candidate(s) written` would be a lie — and `0` a worse one.
+
+    The tally counted only `result.patches`, so a print-prompt sweep read
+    `apply: 0 candidate(s) written, 2 skipped` while two prompts sat on disk.
+    """
+    import spotlights_engine.one_shot_apply.cli as cli_mod
+    from spotlights_engine.one_shot_apply.api import (
+        OneShotApplyResult,
+        PromptPreview,
+        SkippedApply,
+    )
+
+    run_dir, repo = run
+
+    def _prompt_preview(cid: str) -> PromptPreview:
+        return PromptPreview(
+            candidate_id=cid,
+            module_qualified_name="v1/attention",
+            repo_path=str(repo),
+            worktree=None,
+            worktree_parent=None,
+            base_sha="0" * 40,
+            prompt="BODY",
+            path=str(run_dir / "apply" / "v1_attention" / cid),
+        )
+
+    monkeypatch.setattr(
+        cli_mod,
+        "one_shot_apply",
+        lambda inp, cfg: OneShotApplyResult(
+            prompts=[_prompt_preview("cand-a"), _prompt_preview("cand-b")],
+            skipped=[SkippedApply(reason="stale", candidate_id="cand-c")],
+        ),
+    )
+
+    code = apply_main(["--result", str(run_dir), "--repo", str(repo), "--print-prompt"])
+    captured = capsys.readouterr()
+
+    assert code == 0
+    assert "apply: 2 prompt(s) written, 1 skipped" in captured.err
+    assert "candidate(s) written" not in captured.err
+    assert "  skipped cand-c: stale" in captured.err
+    # stdout stays the machine-readable list.
+    assert "written" not in captured.out
+
+
+def test_a_clean_print_prompt_still_prints_a_tally(
+    run, capsys: pytest.CaptureFixture
+) -> None:
+    """Ungated, exactly like `prep-evolve`'s.
+
+    A tally that appears only when something failed is the kind of conditional
+    output that reads as breakage. `prep-evolve` prints its own unconditionally,
+    down to `0 bundle(s) written, 0 skipped` on an empty run.
+    """
+    run_dir, repo = run
+    code = apply_main(
+        [
+            "--result", str(run_dir), "--repo", str(repo),
+            "--candidate", CAND_ID, "--print-prompt",
+        ]
+    )
+    assert code == 0
+    assert "apply: 1 prompt(s) written, 0 skipped" in capsys.readouterr().err
+
+
 def test_print_prompt_prints_the_file_path_and_not_the_prompt(
     run, capsys: pytest.CaptureFixture
 ) -> None:
@@ -124,11 +193,14 @@ def test_print_prompt_prints_the_file_path_and_not_the_prompt(
     assert "PROMPT:" not in out
     assert "WORKTREE:" not in out
     assert CAND_FILE not in out
-    # `--print-prompt` writes no patch and skips nothing, so there is no tally:
-    # "0 candidate(s) written" under a prompt handoff would read as failure.
+
+    # Ungated, matching prep-evolve — so a clean handoff says so rather than
+    # printing nothing. `prompt(s)`, because nothing was applied.
+    assert "apply: 1 prompt(s) written, 0 skipped" in captured.err
     assert "candidate(s) written" not in captured.err
 
-    # No worktree is created now, so the header says none and gives the recipe.
+    # No worktree is created, so there is nothing to parse out and nothing to
+    # clean up — the two properties that made this flag skill-only.
     written = (out_dir / "apply.prompt.txt").read_text(encoding="utf-8")
     assert "WORKTREE:  (none" in written
     assert "WORKTREE_PARENT:" not in written
