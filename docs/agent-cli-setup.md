@@ -68,14 +68,28 @@ every step of the pipeline.
 spotlights-engine --claude-model aws/claude-opus-4-8 --codex-model gpt-5.5 ...
 ```
 
-**Durably** — edit `models.yaml` inside the installed package, or keep your own
-copy anywhere and point `SPOTLIGHTS_MODELS_FILE` at it (the sane option when the
-engine is installed as a tool):
+**Durably, for yourself** — keep your own file *outside the repo* and point
+`SPOTLIGHTS_MODELS_FILE` at it:
 
-```yaml
+```bash
+mkdir -p ~/.config/spotlights
+cat > ~/.config/spotlights/models.yaml <<'EOF'
 claude: aws/claude-opus-4-8
 codex: gpt-5.5
+EOF
+export SPOTLIGHTS_MODELS_FILE=~/.config/spotlights/models.yaml
 ```
+
+This is the right place for a personal preference. `models.yaml` in the package is
+tracked by git, so editing it shows up as a local modification you could push to
+everyone by accident — and on the day somebody *does* change it upstream, your
+`git pull` will refuse to merge until you stash your edit. A file outside the repo
+has neither problem, because git never sees it.
+
+**Durably, for everyone** — edit the tracked `models.yaml`. That is a change to the
+team's default, so it goes through a commit and review like any other. It also
+changes the resume fingerprint, so run dirs started before the change will no
+longer resume.
 
 Leave a value blank to inherit that CLI's own default. The file itself is
 optional, and a missing key or blank value means "inherit". One exception: if
