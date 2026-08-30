@@ -217,6 +217,20 @@ def test_compute_cost_strips_litellm_route_prefix_from_model_id() -> None:
     assert stacked.unpriced_models == []
 
 
+def test_canonical_model_id_preserves_degenerate_inputs() -> None:
+    """An id that strips to empty is returned unchanged so a malformed id lands
+    in `unpriced_models` under its own visibly-broken key rather than every bad
+    record silently colliding on the empty-model rate key `"provider:"`."""
+    from spotlights_engine.costing.rates import canonical_model_id
+
+    # Pure context tag: stripping the "[1m]" leaves nothing behind.
+    assert canonical_model_id("[1m]") == "[1m]"
+    # Pure route prefix: stripping the "aws/" leaves nothing behind.
+    assert canonical_model_id("aws/") == "aws/"
+    # An id that legitimately reduces to nothing (empty in, empty out) is fine.
+    assert canonical_model_id("") == ""
+
+
 def test_run_manifest_groups_models_and_totals_tokens() -> None:
     records = [
         UsageRecord.from_usage(
