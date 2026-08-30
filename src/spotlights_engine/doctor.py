@@ -282,13 +282,25 @@ def check_models() -> CheckResult:
 
 def run_checks() -> list[CheckResult]:
     rates_check = check_rates()
-    # If the rate table itself is unreadable, load_rates would raise; probing
-    # then can't validate pricing, so fall back to an empty table (every model
-    # reads as unpriced, which the rates check already flagged).
+    # `check_rates()` only verifies file existence, so a rate table that parses
+    # as JSON but fails schema validation, or one with duplicate canonical keys,
+    # slips past it. Surface those content-level errors on the rates check
+    # itself — without this, a schema-invalid rate file lands in the broad
+    # ValueError catch below and every probe reports its model as unpriced with
+    # no hint that the rate table is the problem. (Pre-existing bug, not
+    # introduced by this PR; `pydantic.ValidationError` is a `ValueError`
+    # subclass and was already reaching this handler before the duplicate-key
+    # wrapper in `_load_rates_from` was added.) OSError still falls back
+    # silently because `check_rates` already reports missing/unreadable files.
+    rates: dict[str, ModelRate] = {}
     try:
         rates = load_rates()
-    except (OSError, ValueError):
-        rates = {}
+    except OSError:
+        pass
+    except ValueError as exc:
+        rates_check = CheckResult(
+            name="rates", ok=False, detail=f"rate table invalid: {exc}"
+        )
     # Probe the models a run would actually ask for, not each CLI's own default.
     try:
         models = load_model_config()
