@@ -209,6 +209,22 @@ def canonical_model_id(model: str) -> str:
     return stripped or model
 
 
+def display_model_id(model: str) -> str:
+    """Strip only the LiteLLM route prefix from a model id, keeping the
+    context-window tag.
+
+    Used for `models_used[*].model` and `cost.by_model[*].model` — the
+    manifest's display side. Same rate row prices bedrock and direct-API
+    variants (`aws/claude-opus-5` vs `claude-opus-5`), so the route prefix
+    is noise for a reader scanning what actually ran; but the context tag
+    (`[1m]`) distinguishes real product variants a reader wants to see. Rate
+    lookup still uses `canonical_model_id` (strips both) — this pair keeps
+    the display readable while the lookup stays route-and-context-agnostic.
+    """
+    stripped = _ROUTE_PREFIX_RE.sub("", model)
+    return stripped or model
+
+
 def _canonical_rate_key(key: str) -> str:
     """Canonicalize a rate-table key `"provider:model"` — provider left alone,
     model canonicalized. A key with no colon (malformed) is returned as-is so
@@ -230,11 +246,13 @@ def _rate_key(record: UsageRecord) -> tuple[str, bool]:
 def _group_key(record: UsageRecord) -> tuple[str, str, str]:
     """`(provider, model_or_cli, role)` — same grouping as `aggregate_models_used`.
 
-    Kept in lockstep so `cost.by_model` lines up 1:1 with `models_used`; the
-    model canonicalization matches `_rate_key` so the group's `rate_key` is the
-    exact string we look up in the rate table.
+    Kept in lockstep so `cost.by_model` lines up 1:1 with `models_used`. Uses
+    `display_model_id` (strips route prefix, keeps context tag) so the two
+    sections of the manifest carry the same reader-facing model string; the
+    `rate_key` on the same row uses `canonical_model_id` (strips both) for the
+    rate-table lookup.
     """
-    model = canonical_model_id(record.model) if record.model else record.cli
+    model = display_model_id(record.model) if record.model else record.cli
     return (record.provider, model, record.role)
 
 
@@ -377,6 +395,7 @@ __all__ = [
     "ModelRate",
     "canonical_model_id",
     "compute_cost",
+    "display_model_id",
     "load_external_rates",
     "load_rates",
 ]
