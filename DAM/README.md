@@ -202,6 +202,11 @@ without you having to keep the terminal open.
   is the source of truth. Rerunning the same command picks up where you left
   off; pass `--no-resume` to force a cold run. If a run *was* interrupted, the
   stale `"status": "RUNNING"` in `manifest.json` is expected — resume anyway.
+- `--artifacts-dir` and `--output-folder` are **different things**. The
+  artifacts folder is the resumable checkpoint tree plus raw per-invocation
+  logs — useful for debug and resume, but noisy for a reader. Rendered,
+  human-readable results (`index.md`, per-module pages, `result.json`) only
+  land under `--output-folder`, and only once the run completes.
 
 ## After a run
 
