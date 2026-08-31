@@ -116,6 +116,11 @@ def test_local_directory_install_records_no_commit(
             {"direct_url.json": json.dumps({"vcs_info": {"vcs": "git"}})},
             id="git-without-commit-id",
         ),
+        pytest.param({"direct_url.json": json.dumps([])}, id="root-not-a-mapping"),
+        pytest.param(
+            {"direct_url.json": json.dumps({"vcs_info": {"vcs": "git", "commit_id": 12345}})},
+            id="commit-id-not-a-string",
+        ),
     ],
 )
 def test_degrades_to_empty_rather_than_raising(
@@ -144,3 +149,30 @@ def test_collect_provenance_carries_the_installed_commit(
 
     assert prov["spotlights_commit_sha"] == INSTALL_SHA
     assert prov["target_commit_sha"] == ""
+
+
+def test_non_utf8_direct_url_json_never_reaches_the_caller(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`Distribution.read_text` decodes as UTF-8 and suppresses only filesystem
+    errors, so non-UTF-8 bytes raise `UnicodeDecodeError` straight through it.
+
+    Deliberately a real `PathDistribution` over a real dist-info: the behaviour
+    under test belongs to the stdlib, and a fake would only assert this test's
+    own assumption about it.
+    """
+    dist_info = tmp_path / "spotlights_engine-0.1.0.dist-info"
+    dist_info.mkdir()
+    (dist_info / "METADATA").write_text(
+        "Metadata-Version: 2.1\nName: spotlights-engine\nVersion: 0.1.0\n",
+        encoding="utf-8",
+    )
+    (dist_info / "direct_url.json").write_bytes(
+        b'{"vcs_info": {"vcs": "git", "commit_id": "\xff\xfe"}}'
+    )
+    _no_git(monkeypatch)
+    monkeypatch.setattr(
+        P.metadata, "distribution", lambda name: metadata.PathDistribution(dist_info)
+    )
+
+    assert P.spotlights_commit_sha() == ""

@@ -62,10 +62,18 @@ def _installed_vcs_commit() -> str:
     """
     try:
         raw = metadata.distribution(_DIST_NAME).read_text("direct_url.json")
-    except metadata.PackageNotFoundError:
+    except (metadata.PackageNotFoundError, ValueError):
+        # `ValueError` is here for `UnicodeDecodeError`: `read_text` decodes as
+        # UTF-8 and suppresses only filesystem errors, so non-UTF-8 bytes in the
+        # file would otherwise fail the run over a descriptive field.
+        return ""
+    # `read_text` answers `None` when the dist-info carries no `direct_url.json`
+    # — the ordinary wheel install. Kept out of the parse-failure path below so
+    # the common case and a genuinely malformed file never share one diagnosis.
+    if not raw:
         return ""
     try:
-        info = json.loads(raw or "")
+        info = json.loads(raw)
     except ValueError:
         return ""
     if not isinstance(info, dict):
@@ -73,7 +81,11 @@ def _installed_vcs_commit() -> str:
     vcs_info = info.get("vcs_info")
     if not isinstance(vcs_info, dict) or vcs_info.get("vcs") != "git":
         return ""
-    return str(vcs_info.get("commit_id") or "")
+    # Returned as-is rather than through `str()`: PEP 610 says this is a hex
+    # string, and coercing whatever a non-conforming installer wrote would put a
+    # plausible-looking commit in the manifest for someone to chase.
+    commit_id = vcs_info.get("commit_id")
+    return commit_id if isinstance(commit_id, str) else ""
 
 
 def spotlights_commit_sha() -> str:
