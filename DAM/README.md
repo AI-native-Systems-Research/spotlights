@@ -188,6 +188,14 @@ without you having to keep the terminal open.
 - `--include` takes slash-form leaf qualified names — repeat the flag or pass
   multiple values to widen scope. Without `--include` the engine covers the
   whole repo, which is rarely what you want.
+- On a DAM sandbox, keep `--max-parallel` at **1 or 2**. The engine fans out
+  `claude`/`codex` subprocesses per module, and the sandbox's shared CPU/memory
+  tier gets thrashed above that — pushing it higher might slow the run down instead
+  of speeding it up.
+- Keep `--max-parallel-candidates`, and `--max-parallel-pairs` at **1** if you want interruptions to
+  resume cleanly. With values >1, if the run halts mid-flight the checkpoint
+  tree can end up with partial progress across concurrent candidates that
+  doesn't resume from exactly where it stopped.
 - A single-module run takes roughly **30–45 minutes** and a few dollars in API
   cost. The full 8-module vLLM example runs around **$26** at default rates.
 - Runs are **resumable** — the on-disk checkpoint tree under `--artifacts-dir`
