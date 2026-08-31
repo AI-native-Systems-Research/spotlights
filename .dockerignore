@@ -5,6 +5,10 @@
 
 # Local user config / caches
 .claude/
+# ...except the DAM image's workspace seed, which must ship in the build
+# context so Claude Code's LiteLLM routing config (ANTHROPIC_BASE_URL) lands
+# in the image. Mirrors the negation in .gitignore.
+!DAM/spotlights-agent/workspace/.claude/
 .claudeignore
 .spotlights/
 .venv/
