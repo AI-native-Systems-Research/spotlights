@@ -88,7 +88,7 @@ def test_a_complete_capture_prices_one_record_against_both_tables() -> None:
 
     assert len(m.models_used) == 1
     row = m.models_used[0]
-    assert row.model == "aws/claude-opus-5"
+    assert row.model == "claude-opus-5"
     assert row.provider == "anthropic"
     assert row.role == "one_shot_apply"
     assert row.usage.input == 1000
@@ -162,10 +162,10 @@ def test_an_unpriced_model_is_named_in_both_notes_and_in_coverage() -> None:
 
     assert m.cost.amount_usd == 0.0
     assert m.cost.priced_token_share == 0.0
-    assert m.cost.coverage.unpriced_models == ["anthropic:aws/claude-opus-9"]
+    assert m.cost.coverage.unpriced_models == ["anthropic:claude-opus-9"]
     assert m.notes == (
-        "unpriced models excluded from cost: anthropic:aws/claude-opus-9; "
-        "external: unpriced models excluded from cost: anthropic:aws/claude-opus-9"
+        "unpriced models excluded from cost: anthropic:claude-opus-9; "
+        "external: unpriced models excluded from cost: anthropic:claude-opus-9"
     )
     # The tokens are still counted — only the dollars are missing.
     assert m.total_tokens == 37000
