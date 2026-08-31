@@ -16,6 +16,7 @@ only malformed YAML or a wrong value type does.
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 import yaml
@@ -23,6 +24,38 @@ from pydantic import BaseModel, ConfigDict, field_validator
 from pydantic import ValidationError as PydanticValidationError
 
 MODELS_ENV_VAR = "SPOTLIGHTS_MODELS_FILE"
+
+#: What `DiscoveryConfig.codex_model` accepts. Kept identical to that field's
+#: `pattern=` so a value validated here cannot fail later inside pydantic.
+CODEX_MODEL_RE = re.compile(r"^[\w.\-/\[\]]+$")
+
+#: Claude ids are not constrained by any field downstream, and real ones contain
+#: characters the Codex pattern rejects — Bedrock's `...-v1:0`, OpenRouter's
+#: `...:online`. So only reject what could not be an argv value at all.
+CLAUDE_MODEL_RE = re.compile(r"^\S+$")
+
+CLAUDE_MODEL_EXPECTED = "no whitespace"
+CODEX_MODEL_EXPECTED = "expected letters, digits, and any of . - _ / [ ]"
+
+
+def model_id_error(
+    source: str, value: str, *, pattern: re.Pattern[str], expected: str
+) -> str | None:
+    """The complaint about a bad model id, or `None` when it is acceptable.
+
+    Returns a message rather than raising so each caller can surface it the way
+    its own CLI does — argparse usage text for a flag, a plain stderr line for a
+    value read out of a file.
+
+    Uses `fullmatch` rather than `match`: `match` with a trailing `$` also accepts
+    a trailing newline, so `"opus\n"` would pass. The anchors are kept in the
+    patterns anyway, so they stay copy-identical to the pydantic fields they
+    mirror, where `pattern=` is applied with search semantics.
+    """
+    if pattern.fullmatch(value):
+        return None
+    return f"{source}: {value!r} is not a valid model id ({expected})"
+
 
 _BUNDLED_MODELS_PATH = Path(__file__).parent / "models.yaml"
 
@@ -106,4 +139,14 @@ def load_model_config(path: Path | None = None) -> ModelConfig:
         raise ValueError(f"{resolved}: {exc}") from exc
 
 
-__all__ = ["MODELS_ENV_VAR", "ModelConfig", "load_model_config", "models_path"]
+__all__ = [
+    "CLAUDE_MODEL_EXPECTED",
+    "CLAUDE_MODEL_RE",
+    "CODEX_MODEL_EXPECTED",
+    "CODEX_MODEL_RE",
+    "MODELS_ENV_VAR",
+    "ModelConfig",
+    "load_model_config",
+    "model_id_error",
+    "models_path",
+]
