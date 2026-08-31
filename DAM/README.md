@@ -54,7 +54,13 @@ the Spotlights custom image. The wizard's three steps map onto:
    Then for **Provider** pick **IBM LiteLLM ETE Proxy** — the image ships with
    a `~/.claude/settings.json` and `~/.codex/config.toml` that route `claude`
    and `codex` through IBM's LiteLLM endpoint.
-3. **Grant connections → credentials.** Attach at minimum `ANTHROPIC_API_KEY`
+3. **Disable hibernate.** In the **Lifecycle** section, set the idle-minutes
+   field to `0` ("Never hibernates"). Spotlights runs are 30–45 minutes per
+   module and are typically detached via `nohup` — if the sandbox hibernates
+   mid-run to free resources, the engine dies. The checkpoint tree preserves
+   progress so you can resume, but hibernation only wakes "on the next
+   message," which a background daemon won't send.
+4. **Grant connections → credentials.** Attach at minimum `ANTHROPIC_API_KEY`
    and `OPENAI_API_KEY` — these are wire-injected into the sandbox and are
    what the `claude` and `codex` CLIs read at run time. If you already know
    you'll be cloning a private target repo, attach a
