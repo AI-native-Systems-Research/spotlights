@@ -297,10 +297,12 @@ def test_run_manifest_groups_models_and_totals_tokens() -> None:
 def test_run_manifest_models_used_matches_by_model_for_route_prefixed_id() -> None:
     """`models_used` and `cost.by_model` must carry the same model string for
     the same record — the docstring on `_group_key` promises 1:1 lockstep. A
-    route-prefixed or context-tagged id from the CLI (`aws/claude-opus-5[1m]`
-    in the DAM sandbox) is canonicalized on the cost side; the models_used
-    side must apply the same canonicalization or the two sections of the run
-    manifest disagree for the same underlying model.
+    route-prefixed, context-tagged id from the CLI (`aws/claude-opus-5[1m]` in
+    the DAM sandbox) has its LiteLLM route prefix stripped on both sides so
+    the two sections of the manifest carry the same string; the context tag
+    is preserved on the display side because it names a real product variant
+    the reader wants to see, while the `rate_key` on the same by_model row
+    strips both (routes and context share one rate row).
     """
     record = UsageRecord.from_usage(
         AgentUsage(input=100, output=10, model="aws/claude-opus-5[1m]"),
@@ -339,7 +341,8 @@ def test_run_manifest_models_used_matches_by_model_for_route_prefixed_id() -> No
     assert len(manifest.models_used) == 1
     assert len(manifest.cost.by_model) == 1
     assert manifest.models_used[0].model == manifest.cost.by_model[0].model
-    assert manifest.models_used[0].model == "claude-opus-5"
+    assert manifest.models_used[0].model == "claude-opus-5[1m]"
+    assert manifest.cost.by_model[0].rate_key == "anthropic:claude-opus-5"
 
 
 def _opus_record() -> UsageRecord:

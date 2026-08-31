@@ -11,7 +11,7 @@ from spotlights_engine.costing.rates import (
     ByModelCost,
     CostCoverage,
     CostSummary,
-    canonical_model_id,
+    display_model_id,
 )
 from spotlights_engine.costing.records import UsageRecord
 
@@ -123,7 +123,7 @@ class RunManifest(BaseModel):
 def aggregate_models_used(records: list[UsageRecord]) -> list[ModelUsed]:
     grouped: dict[tuple[str, str, str], UsageTotals] = defaultdict(UsageTotals)
     for record in records:
-        model = canonical_model_id(record.model) if record.model else record.cli
+        model = display_model_id(record.model) if record.model else record.cli
         key = (record.provider, model, record.role)
         totals = grouped[key]
         totals.input += record.input
