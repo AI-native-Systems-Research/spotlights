@@ -1,5 +1,11 @@
 name: Claude Code Action
 
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  id-token: write
+
 on:
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
@@ -14,7 +20,6 @@ jobs:
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude'))
     runs-on: ubuntu-latest
-    permissions: {}
     outputs:
       allowed: ${{ steps.check.outputs.allowed }}
     steps:
