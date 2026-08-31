@@ -55,7 +55,7 @@ worktree needs a commit, and a patch without a recorded base is not applicable.
 | `--top-n` | With a sorted `--result`: only the top N ranked candidates. Default `all`. |
 | `--max-turns` | Agent turn cap per candidate. Default `40`. Must be `>= 1` (exit 2 otherwise). |
 | `--wallclock` | Wall-clock cap in seconds per candidate. Default `1800`. Must be `>= 1` (exit 2 otherwise). |
-| `--print-prompt` | Create and validate the worktree, print it and the prompt, exit. **Requires `--candidate`.** |
+| `--print-prompt` | Clear each selected candidate's apply dir, write `apply.prompt.txt` as its only file, print those directories, exit. Creates no worktree; runs no agent. |
 
 ## Artifacts
 
@@ -63,8 +63,15 @@ worktree needs a commit, and a patch without a recorded base is not applicable.
 <base>/apply/<module>/<candidate-id>/
 ├── apply.patch        # git diff against the base commit, SHA in a header comment
 ├── apply.prompt.txt   # the prompt the agent was given, verbatim
-└── APPLY-NOTES.md     # the travelling documentation
+├── APPLY-NOTES.md     # the travelling documentation
+└── manifest.json      # this session's tokens, cost, provenance, timing
 ```
+
+`--print-prompt` writes into these same directories — one per candidate it
+selects — but leaves **only** `apply.prompt.txt` in each: no agent ran, so there
+is no patch, nothing to document, and nothing to account for. Any of the other
+three left by an earlier apply of that candidate is deleted, so each directory
+describes the handoff in progress rather than the session it replaces.
 
 `apply.patch` is a `git diff`, not `format-patch`: the latter needs a commit, and
 the repo stays untouched.
@@ -74,31 +81,33 @@ absent but `APPLY-NOTES.md` and `apply.prompt.txt` are still written, and a stal
 patch left over from an earlier run of the same candidate is deleted, so the
 directory can never hold a patch that the notes go on to deny exists.
 
-`apply.prompt.txt` is the exact block `--print-prompt` emits — candidate, module,
-base commit, repo, worktree paths, then the prompt body — written on every path,
-patch or no patch. It is meant to be reusable on its own: take the file, and the
-prompt is what a fresh agent needs to attempt the same change. It also answers
-the question the notes cannot: whether a disappointing outcome came from the agent
-or from what the agent was *told*. "No in-scope edit was possible" and "the target
-the prompt named was the wrong one" read the same in the notes and differently
-here. Both `--print-prompt` and the run path render it from the same function, so
-the file the `/spotlights-apply-candidate` skill saves by teeing that stdout is
-byte-identical to the one the CLI writes itself.
+`apply.prompt.txt` records candidate, module, base commit and repo in a header,
+then the prompt body — written on every path, patch or no patch. It is meant to
+be reusable on its own: take the file, and the body is what a fresh agent needs
+to attempt the same change. It also answers the question the notes cannot:
+whether a disappointing outcome came from the agent or from what the agent was
+*told*. "No in-scope edit was possible" and "the target the prompt named was the
+wrong one" read the same in the notes and differently here.
 
-The two worktree paths in it are **dead by the time you read it** — the run
-deletes the worktree before writing the artifact, and the skill deletes it at its
-own last step. They are kept as a record that correlates the artifact with the
-run, and the file's `NOTE:` block says so, along with the one command that turns
-it back into something runnable:
+The **body** carries no filesystem path, so it is byte-identical for a given
+candidate no matter which path rendered it. The **header** is where the two
+differ, and it says which one you are reading:
+
+- From the run path, `WORKTREE:` and `WORKTREE_PARENT:` name the throwaway
+  checkout the agent edited. They are **dead by the time you read them** — the
+  run removes the worktree before writing this file — and the `NOTE:` block says
+  so. They are kept because they correlate the artifact with the run's logs.
+- From `--print-prompt`, there is no worktree to name. `WORKTREE:` holds prose
+  instead of a path, and the header carries a `DIRTY:` line plus the one command
+  that turns the base commit into a checkout you can work in:
 
 ```bash
 git -C <repo> worktree add --detach <dir> <base-sha>
 ```
 
-That is what makes the file reusable rather than merely readable: the prompt body
-names the old worktree as its working directory, so a reader needs somewhere to
-put a live one. Dropping the two fields instead would have left that body line in
-place with nothing to explain it.
+`DIRTY:` says whether `--repo` had uncommitted changes when the staleness gate
+read it. The gate reads your working tree while you will work at the base commit,
+so the two can differ — see [Inspecting the prompt](#inspecting-the-prompt).
 
 `apply.patch` carries a header comment recording the candidate, module, repo,
 and base commit, plus the apply command:
@@ -138,6 +147,50 @@ If the patch does not apply cleanly, `git -C <repo> apply -3 "$PWD/apply.patch"`
 falls back to a three-way merge (same directory, same rule); `patch -p1 <
 apply.patch` works without git, run from the repo root instead.
 
+### `manifest.json`
+
+What this candidate's apply cost. One `claude -p` session runs per candidate,
+so this file accounts for 100% of the model spend behind the directory.
+
+- `models_used` — the four disjoint token buckets (input, output, cache read,
+  cache create), grouped per model.
+- `total_tokens` — their sum, across every group.
+- `cost` — priced through the contracted rate table. `external_cost` — the
+  same tokens at public list price, which is the figure to quote externally.
+  When `priced_token_share` is below 1.0 the dollar amount is partial and
+  `coverage.unpriced_models` names what was left out.
+- `target` / `spotlights` — the repo, commit, and objective this patch was
+  produced against, plus the engine commit that produced it. Note that
+  `target.commit_sha` is the repo's HEAD *when apply ran*, which may differ
+  from the commit the originating run analyzed.
+- `timing.wall_clock_s` / `api_time_s` — when the two are exactly equal, the
+  stream reported no API duration and the wall clock stood in.
+- `notes` — why anything above is incomplete.
+
+Same field names and same blocks as `run_manifest.json` wherever the two
+describe the same thing, so one reader parses both. Apply's spend is
+deliberately **not** in `run_manifest.json`: apply runs after the run, against
+a repo state the run never analyzed, and can run many times over one run's
+candidates.
+
+A session killed by `--wallclock` loses its usage totals — the timeout severs
+the CLI's exit handshake after the work is already done — so the file is
+written with `models_used: []`, zeroed costs, a real `wall_clock_s`, and the
+reason in `notes`. Nothing changes name or disappears.
+
+Summing a sweep, plus the companion line that says which manifests are
+degraded — each of those contributes `0.0` to the sum and nothing in the sum
+itself says so:
+
+````bash
+jq -s 'map(.cost.amount_usd) | add' apply/*/*/manifest.json
+jq -r 'select(.notes != "") | "\(.candidate_id): \(.notes)"' apply/*/*/manifest.json
+````
+
+The interactive `/spotlights-apply-candidate` path writes three files, not
+four: the agent *is* the session there, so there is no `claude -p` stream to
+parse and no usage totals to report.
+
 ## The interactive front door: `/spotlights-apply-candidate`
 
 The stage runs a nested `claude -p` you cannot influence. When you want to be
@@ -149,10 +202,12 @@ use the bundled skill instead (install it with `spotlights-engine init`):
 ```
 
 It picks a candidate, calls `spotlights-engine apply --print-prompt` to get the
-prompt *and* a created, validated worktree in one call, does the work
-in-session, then collects the same three artifacts and removes both the
-worktree and its `WORKTREE_PARENT` scaffolding directory. The prompt is shared
-between the two paths, so they cannot drift on the part that matters.
+validated prompt, reads it from the written `apply.prompt.txt`, creates a
+throwaway worktree at the recorded base commit, does the work in-session, then
+collects the remaining artifacts and removes both the worktree and its temp-dir
+parent. The prompt is shared between the two paths, so they cannot drift on the
+part that matters — and the skill no longer has to save a copy of it, because
+the engine already wrote the file.
 
 ### Naming the candidate up front
 
@@ -190,9 +245,78 @@ move a candidate between the two paths without translating anything.
 > [!TIP]
 > Passing a candidate to the **skill** is how you stay in the loop on one candidate.
 > Passing it to the **stage** (`spotlights-engine apply --candidate <id>`) runs the
-> same prompt unattended. Use `--print-prompt` if you want to inspect the prompt
-> and the validated worktree before deciding which way to go — it leaves the
-> worktree in place for you.
+> same prompt unattended. Use `--print-prompt` if you want to read the prompt and
+> check its scope bound before deciding which way to go — it runs no agent, costs
+> nothing, and creates nothing you have to clean up.
+
+## Inspecting the prompt
+
+`--print-prompt` does the resolution and the validation — locate the run, resolve
+the repo, run the staleness gate against `--repo`, render the prompt — and then
+stops. It runs no agent, spends nothing, and creates no worktree, so there is
+nothing to clean up afterwards. It takes the same selectors the run path does:
+
+```console
+$ spotlights-engine apply --print-prompt \
+    --result ./spotlights-out --repo ../vllm --candidate cand-vllm_v1_kv_offload-0002
+cand-vllm_v1_kv_offload-0002: spotlights-out/apply/vllm_v1_kv_offload/cand-vllm_v1_kv_offload-0002 (1 file, prompt only)
+
+$ spotlights-engine apply --print-prompt --result ./spotlights-out/sorted --repo ../vllm --top-n 3
+```
+
+The prompt is **not** printed to stdout — it is in `apply.prompt.txt` in each
+printed directory, and stdout stays one machine-readable line per candidate.
+stderr closes with the same tally `prep-evolve` prints, counting prompts:
+
+```
+apply: 3 prompt(s) written, 0 skipped
+```
+
+A stale candidate in a sweep is skipped with a reason rather than aborting the
+rest, and the exit code is still `0` when anything was written — so read the
+tally or the `skipped` lines, not `$?`.
+
+Read the prompt, and the commit to work from, out of the file:
+
+```bash
+cat "<dir>/apply.prompt.txt"                # the whole block
+grep '^BASE:' "<dir>/apply.prompt.txt"      # the commit to check out
+grep '^DIRTY:' "<dir>/apply.prompt.txt"     # was --repo clean when the gate ran?
+```
+
+To actually implement the change, make your own checkout at `BASE` — the header
+gives you the command — and work in that. Your own checkout is never modified
+and may be dirty throughout.
+
+Two consequences worth knowing:
+
+- **The gate reads your working tree, not the base commit.** Uncommitted work
+  does not refuse the run (that is `prep-evolve`'s behaviour too, and refusing
+  would make the command unusable mid-task), and `DIRTY:` records it. But if the
+  dirty file is the candidate's own, the line ranges in the prompt were validated
+  against bytes that are not the bytes at `BASE`. Local edits that gut the symbol
+  give a loud `StalenessError`; local edits that *put the symbol where the
+  candidate says it is* pass quietly and point the scope bound at the wrong code.
+  `git stash` first if you want the gate to read exactly what you will edit.
+- **A directory holding only `apply.prompt.txt` is a prompt handoff, not a
+  failed apply.** On the run path the artifacts are written together, so a lone
+  prompt file used to mean a half-finished write; `--print-prompt` produces that
+  state deliberately.
+- **It clears each selected candidate's apply directory.** See below.
+
+> [!WARNING]
+> `--print-prompt` **deletes** any `apply.patch`, `APPLY-NOTES.md` and
+> `manifest.json` an earlier apply of the same candidate left in that directory,
+> so that only the new `apply.prompt.txt` remains. It is how a candidate gets
+> restarted: those files describe a session the handoff supersedes, and a patch
+> sitting next to a prompt that did not produce it is worse than no patch. The
+> deleted patch is **not recoverable** — the worktree that produced it is long
+> gone. Copy the directory elsewhere first if you want to keep it, or read the
+> prompt straight out of the existing `apply.prompt.txt` instead, which the run
+> path already wrote.
+> In a sweep this happens for **every candidate the invocation selects** — all of
+> them with no `--candidate`, or the top N with `--top-n N` — so check what
+> `--top-n` covers before restarting a run whose earlier patches you want.
 
 ## Sharing the patch
 

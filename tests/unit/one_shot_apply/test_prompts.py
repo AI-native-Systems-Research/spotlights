@@ -6,10 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from spotlights_engine.one_shot_apply.prompts import (
-    CHANGE_SUMMARY_NAME,
-    build_apply_prompt,
-)
+from spotlights_engine.one_shot_apply.prompts import build_apply_prompt
 from spotlights_engine.prep_evolve.extract import build_spec, infer_direction
 from spotlights_engine.prep_evolve.resolve import (
     find_candidate,
@@ -53,41 +50,51 @@ def spec(tmp_path: Path) -> EvolveSpec:
     )
 
 
-def test_base_sha_is_present(spec: EvolveSpec, tmp_path: Path) -> None:
-    prompt = build_apply_prompt(spec=spec, worktree=tmp_path / "wt")
+def test_base_sha_is_present(spec: EvolveSpec) -> None:
+    prompt = build_apply_prompt(spec=spec)
     assert BASE_SHA in prompt
 
 
-def test_oracles_appear_verbatim(spec: EvolveSpec, tmp_path: Path) -> None:
-    prompt = build_apply_prompt(spec=spec, worktree=tmp_path / "wt")
+def test_oracles_appear_verbatim(spec: EvolveSpec) -> None:
+    prompt = build_apply_prompt(spec=spec)
     # The fixture rationale yields this correctness oracle and these metrics.
     assert "pytest tests/kernels/test_tile.py" in prompt
     assert "TPOT" in prompt and "TTFT" in prompt
 
 
 def test_scope_is_confined_to_the_candidate_file_and_range(
-    spec: EvolveSpec, tmp_path: Path
+    spec: EvolveSpec,
 ) -> None:
-    prompt = build_apply_prompt(spec=spec, worktree=tmp_path / "wt")
+    prompt = build_apply_prompt(spec=spec)
     assert f"{CAND_FILE}:{CAND_START}-{CAND_END}" in prompt
     # The other module main file is NOT in scope for --scope candidate.
     assert "pkg/attn/launch.py" not in prompt
 
 
 def test_findings_with_urls_and_proposals_are_included(
-    spec: EvolveSpec, tmp_path: Path
+    spec: EvolveSpec,
 ) -> None:
-    prompt = build_apply_prompt(spec=spec, worktree=tmp_path / "wt")
+    prompt = build_apply_prompt(spec=spec)
     assert "POD-Attention" in prompt
     assert "https://arxiv.org/abs/2410.18038" in prompt
     assert "Make tile size GQA-aware" in prompt
 
 
-def test_prompt_forbids_running_tests_and_names_the_worktree(
-    spec: EvolveSpec, tmp_path: Path
+def test_prompt_forbids_running_tests_and_names_no_working_directory(
+    spec: EvolveSpec,
 ) -> None:
-    worktree = tmp_path / "wt"
-    prompt = build_apply_prompt(spec=spec, worktree=worktree)
-    assert str(worktree) in prompt
+    """The body carries no filesystem path, so it is byte-identical on both paths.
+
+    Location moved to the header (`render_prompt_block`), which is the only part
+    of `apply.prompt.txt` that legitimately differs between the run path and
+    `--print-prompt`. A path in the body would be wrong under `--print-prompt`,
+    where no worktree exists — and the body is the half a consumer feeds to
+    another agent verbatim.
+    """
+    prompt = build_apply_prompt(spec=spec)
     assert "Do not run tests" in prompt
-    assert CHANGE_SUMMARY_NAME in prompt
+    assert "isolated git worktree" in prompt
+    # No absolute path anywhere: the body must not name a directory.
+    assert "Working directory:" not in prompt
+    assert "/tmp" not in prompt
+    assert "spotlights-apply-" not in prompt

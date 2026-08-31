@@ -5,9 +5,11 @@ shape deliberately mirrors `prep-evolve` (`--result`, `--repo`, `--index`,
 `--candidate`, `--module`, `--out`, `--top-n`, `--direction`) so the two stages
 are interchangeable at the call site.
 
-`--print-prompt` runs resolution, worktree creation, and validation, then
-prints the worktree path and the prompt and exits — leaving the worktree in
-place for `/spotlights-apply-candidate` to work in.
+`--print-prompt` runs resolution and validation, leaves `apply.prompt.txt` as the
+only file in each selected candidate's apply dir (clearing an earlier apply's
+artifacts out of it) and prints those directories, then exits. It creates no
+worktree: the file carries the base commit and the `git worktree add` command,
+and the caller makes its own checkout if it needs one.
 """
 
 from __future__ import annotations
@@ -24,7 +26,6 @@ from spotlights_engine.one_shot_apply.api import (
     OneShotApplyConfig,
     OneShotApplyInput,
     one_shot_apply,
-    render_prompt_block,
 )
 from spotlights_engine.one_shot_apply.errors import OneShotApplyError
 from spotlights_engine.prep_evolve.errors import PrepEvolveError
@@ -36,7 +37,7 @@ def _build_argparser() -> argparse.ArgumentParser:
         description=(
             "Implement one candidate with a single Claude Code session in a "
             "throwaway git worktree, and write apply.patch + apply.prompt.txt "
-            "+ APPLY-NOTES.md. "
+            "+ APPLY-NOTES.md + manifest.json (that session's tokens and cost). "
             "Runs no tests and no benchmarks; the target repo is never modified."
         ),
     )
@@ -120,9 +121,12 @@ def _build_argparser() -> argparse.ArgumentParser:
         "--print-prompt",
         action="store_true",
         help=(
-            "Resolve, create and validate the worktree, then print the "
-            "worktree path and the prompt and exit. Runs no agent, writes no "
-            "artifacts, and leaves the worktree in place for the caller."
+            "Resolve and validate, then write apply.prompt.txt as the only file "
+            "in each selected candidate's apply dir (DELETING any "
+            "apply.patch/APPLY-NOTES.md/manifest.json an earlier apply left "
+            "there), print those directories, and exit. Runs no agent and "
+            "creates no worktree; the file carries the base commit and the "
+            "`git worktree add` command to make one."
         ),
     )
     return p
@@ -220,10 +224,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"warning: {w}", file=sys.stderr)
 
     for preview in result.prompts:
-        # Same renderer the run path writes to `apply.prompt.txt`, so a skill
-        # that tees this stdout into that filename produces the same bytes the
-        # engine would have written itself.
-        print(render_prompt_block(preview), end="")
+        # The prompt is not printed: it is written to `apply.prompt.txt` in the
+        # directory named here, and the caller reads it from there. stdout stays
+        # one machine-readable line per candidate — the same shape the run path
+        # below prints — which a multi-KB prompt block spliced into it would
+        # destroy. `(1 file, ...)` and not a bare count so the line cannot be
+        # mistaken for a finished apply that happened to write one artifact.
+        print(f"{preview.candidate_id}: {preview.path} (1 file, prompt only)")
 
     for artifact in result.patches:
         # File count first, matching `prep-evolve`'s per-bundle line, so a sweep
@@ -260,16 +267,22 @@ def main(argv: list[str] | None = None) -> int:
             "See APPLY-NOTES.md for the recorded oracles.",
             file=sys.stderr,
         )
-    if result.patches or result.skipped:
-        # The same closing tally `prep-evolve` prints, on stderr for the same
-        # reason: stdout stays the machine-readable one-line-per-candidate list.
-        # Gated because `--print-prompt` writes nothing and skips nothing, and
-        # "0 candidate(s) written" under a prompt dump reads as a failure.
-        print(
-            f"apply: {len(result.patches)} candidate(s) written, "
-            f"{len(result.skipped)} skipped",
-            file=sys.stderr,
-        )
+    # The same closing tally `prep-evolve` prints (`prep_evolve/cli.py:150`), on
+    # stderr for the same reason: stdout stays the machine-readable
+    # one-line-per-candidate list. Ungated for the same reason too — a tally that
+    # appears only when something failed reads as breakage, and `prep-evolve`
+    # prints `0 bundle(s) written, 0 skipped` on an empty run rather than going
+    # quiet.
+    #
+    # `prompt(s)` under `--print-prompt`: nothing was applied there, and
+    # "written" already means "a patch was produced" on the run path. Only the
+    # noun varies — the shape must stay parseable as one line.
+    noun = "prompt" if result.prompts else "candidate"
+    count = len(result.prompts) if result.prompts else len(result.patches)
+    print(
+        f"apply: {count} {noun}(s) written, {len(result.skipped)} skipped",
+        file=sys.stderr,
+    )
     for s in result.skipped:
         # A skip raised during *selection* — a ranked id that is no longer in
         # result.json — knows the candidate id but not its module, so

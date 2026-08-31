@@ -15,12 +15,45 @@ on:
     types: [opened, synchronize, reopened, ready_for_review]
 
 jobs:
-  claude:
+  check-permissions:
     if: |
-      github.event_name == 'pull_request' ||
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude'))
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
+    outputs:
+      allowed: ${{ steps.check.outputs.allowed }}
+    steps:
+      - name: Check invoker permissions
+        id: check
+        uses: actions/github-script@v8
+        with:
+          script: |
+            try {
+              const { data } = await github.rest.repos.getCollaboratorPermissionLevel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                username: context.actor
+              });
+              const allowed = ['admin', 'write', 'maintain'].includes(data.permission);
+              core.setOutput('allowed', allowed ? 'true' : 'false');
+              if (!allowed) {
+                core.info(`User ${context.actor} has '${data.permission}' permission — skipping.`);
+              }
+            } catch (e) {
+              core.setOutput('allowed', 'false');
+              core.info(`User ${context.actor} is not a collaborator — skipping.`);
+            }
+
+  claude:
+    needs: check-permissions
+    if: |
+      always() && (
+        (github.event_name == 'pull_request' &&
+         github.event.pull_request.head.repo.full_name == github.repository) ||
+        (github.event_name != 'pull_request' &&
+         needs.check-permissions.outputs.allowed == 'true')
+      )
+    runs-on: [self-hosted]
     timeout-minutes: 60
     permissions:
       contents: write
@@ -48,11 +81,6 @@ jobs:
             echo "prompt=" >> $GITHUB_OUTPUT
           fi
 
-      - name: Debug prompt
-        run: |
-          echo "Event: ${{ github.event_name }}"
-          echo "Prompt: ${{ steps.set-prompt.outputs.prompt }}"
-          
       - uses: anthropics/claude-code-action@v1
         env:
           ANTHROPIC_BASE_URL: ${{ secrets.LITELLM_BASE_URL }}
@@ -61,9 +89,8 @@ jobs:
           GH_HOST: github.com
         with:
           anthropic_api_key: ${{ secrets.LITELLM_API_KEY }}
-          # github_token: ${{ secrets.GITHUB_TOKEN }}
           allowed_bots: 'github-actions,claude'
-          claude_args: '--model claude-sonnet-4-6 --dangerously-skip-permissions --allowedTools "Skill Agent Bash Read Edit Write"'
+          claude_args: '--model claude-sonnet-4-6 --allowedTools "Skill Agent Bash Read Edit Write"'
           show_full_output: true
           plugin_marketplaces: |
             https://github.com/anthropics/claude-plugins-official.git

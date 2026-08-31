@@ -1,21 +1,25 @@
 """`one_shot_apply(input, config) -> OneShotApplyResult`.
 
-Per candidate: resolve → capture base sha → worktree → **validate inside the
-worktree** → build prompt → run `claude -p` → collect patch + notes → remove
-the worktree in a `finally`.
+Run path, per candidate: resolve → capture base sha → worktree → **validate
+inside the worktree** → build prompt → run `claude -p` → collect patch + notes
+→ remove the worktree in a `finally`.
 
 Two orchestration decisions carry the design's weight:
 
-- **Validation runs against the worktree, not `--repo`.** The bytes validated
-  are then exactly the bytes the agent edits, the recorded excerpt hash is
-  truthful, and your own checkout may be dirty while an apply runs. `prep-evolve`
-  has no such concern because it validates and points the evolver at the same
-  path; the worktree introduces the asymmetry. With no tests being run, this
-  gate is the only correctness check in the design.
-- **`print_prompt` runs steps 1-5 and stops**, leaving the worktree in place.
-  That is what `/spotlights-apply-candidate` consumes: it gets a validated
-  worktree and the prompt in one call, so the staleness gate is never
-  reimplemented in markdown.
+- **The run path validates against the worktree, not `--repo`.** The bytes
+  validated are then exactly the bytes the agent edits, the recorded excerpt
+  hash is truthful, and your own checkout may be dirty while an apply runs.
+  `prep-evolve` has no such concern because it validates and points the evolver
+  at the same path; the worktree introduces the asymmetry. With no tests being
+  run, this gate is the only correctness check in the design.
+- **`--print-prompt` creates no worktree at all.** Its deliverable is a prompt,
+  not edits, so it validates `--repo` — `prep-evolve`'s own call — and reports
+  the working tree's cleanliness in the header rather than sidestepping it with
+  a checkout. Nothing is registered in the target repo and nothing has to be
+  cleaned up, which is what makes the flag usable outside
+  `/spotlights-apply-candidate` and safe to sweep. The trade is a gate that
+  reads working-tree bytes while its consumer works at `BASE`; see the design
+  doc's "Known limitations".
 
 Failure semantics follow `prep_evolve`'s batch loop in shape — a single
 explicit `--candidate` raises; a sweep records a per-candidate skip and
@@ -29,6 +33,7 @@ can afford the narrow handler because re-running it is free.
 from __future__ import annotations
 
 import contextlib
+import json
 import shlex
 from collections.abc import Callable
 from datetime import UTC, datetime
@@ -51,6 +56,11 @@ from spotlights_engine.one_shot_apply.errors import (
 from spotlights_engine.one_shot_apply.notes import render_apply_notes
 from spotlights_engine.one_shot_apply.prompts import build_apply_prompt
 from spotlights_engine.one_shot_apply.scope import out_of_scope_files
+from spotlights_engine.one_shot_apply.usage_manifest import (
+    MANIFEST_NAME,
+    ApplyUsageManifest,
+    build_apply_usage_manifest,
+)
 from spotlights_engine.one_shot_apply.worktree import (
     FileChange,
     Worktree,
@@ -75,8 +85,13 @@ from spotlights_engine.prep_evolve.resolve import (
 )
 from spotlights_engine.prep_evolve.spec import EvolveSpec, SourceRevision
 from spotlights_engine.prep_evolve.validate_target import (
+    capture_revision,
     ensure_repo_dir,
     validate_candidate_target,
+)
+from spotlights_engine.spotlights_manager.provenance import (
+    resolve_repo_url,
+    spotlights_commit_sha,
 )
 from spotlights_engine.utils.id_helpers import slug_for
 
@@ -136,55 +151,96 @@ class PromptPreview(BaseModel):
     candidate_id: str
     module_qualified_name: str
     repo_path: str
-    worktree: str
-    worktree_parent: str
+    # `None` under `--print-prompt`, which creates no worktree: there is no path
+    # to report, and reporting one would name a directory that does not exist.
+    worktree: str | None
+    worktree_parent: str | None
     base_sha: str
     prompt: str
+    # Whether `--repo` had uncommitted changes when the gate read it. Set only
+    # under `--print-prompt`, where validation reads the working tree; the run
+    # path validates a fresh worktree, which is clean by construction.
+    dirty: bool | None = None
+    # The directory `apply.prompt.txt` was written to. Set only under
+    # `--print-prompt`, where this file is the whole output and the caller needs
+    # to be told where it landed; on the run path the same directory is already
+    # reported as `ApplyArtifact.path`, and it is not known at the point this
+    # model is built (it is computed after the agent session returns).
+    path: str | None = None
+
+
+def _worktree_add_cmd(preview: PromptPreview) -> str:
+    """The one command that turns a base commit into a runnable checkout.
+
+    Shell-quoted for the same reason as the recipe in `APPLY-NOTES.md`: this is
+    meant to be copy-pasted, and a repo path containing a space would otherwise
+    be split by the shell.
+    """
+    return (
+        f"git -C {shlex.quote(preview.repo_path)} worktree add --detach "
+        f"<dir> {preview.base_sha}"
+    )
 
 
 def render_prompt_block(preview: PromptPreview) -> str:
-    """The `--print-prompt` block: header lines, then the prompt body.
+    """The `apply.prompt.txt` block: header lines, then the prompt body.
 
-    One renderer, two consumers — the CLI prints this to stdout under
-    `--print-prompt`, and `_write_artifacts` writes the same string to
-    `apply.prompt.txt` beside the patch. Sharing it is the point: the skill
-    tees the CLI's stdout into that filename, so the two paths must not be
-    able to drift into producing different bytes for the same candidate.
+    One renderer, two writers — `_write_prompt_only` under `--print-prompt` and
+    `_write_artifacts` on the run path. The *body* is byte-identical between
+    them by construction (`build_apply_prompt` carries no path). The *header* is
+    where they legitimately differ, and it branches exactly once, on whether a
+    worktree exists:
 
-    The `NOTE:` block exists because the two worktree paths are *dead* in every
-    saved copy of this file. On the run path `_write_artifacts` is called after
-    the `finally` that removes the worktree; on the skill path the worktree
-    survives only until its step 5 removes it. So the saved artifact always
-    records a directory that is gone — and the prompt body names that same
-    directory as its working directory, which is the line a reader reusing this
-    prompt would actually act on. The fields stay (they correlate the artifact
-    with the run's logs, and dropping them would leave the misleading body line
-    behind unexplained); what they mean is now stated, with the one command that
-    turns the file back into something runnable.
+    - Run path: real `WORKTREE:`/`WORKTREE_PARENT:` lines, plus a NOTE saying
+      they are already dead — `_write_artifacts` is called after the `finally`
+      that removed the worktree. Kept rather than dropped because they correlate
+      the artifact with the run's logs.
+    - `--print-prompt`: no worktree was created, so there is no path to report.
+      `WORKTREE:` keeps its spelling and carries prose instead. Dropping the
+      line would hand an existing `grep '^WORKTREE:'` an empty string, and an
+      empty path argument is the input most likely to do something quiet and
+      wrong; prose fails loudly the moment it is used as a path.
+
+    `DIRTY:` appears only on the print-prompt path, where the gate read the
+    working tree and whether that was clean is a real property. A
+    permanently-`false` line on the run path would invite a reader to think it
+    could vary.
 
     `WORKTREE:` and `WORKTREE_PARENT:` must keep their exact spelling and stay
-    one-per-line: the skill parses them out of stdout to know where to work and
-    what to clean up.
+    one-per-line: they are parsed out of the written file.
 
-    Ends in a newline, so the CLI prints it with `end=""`.
+    Keep the NOTE's wrapping: `"deleted when the"` is asserted as one substring.
+
+    Ends in a newline.
     """
-    return (
+    head = (
         f"CANDIDATE: {preview.candidate_id}\n"
         f"MODULE:    {preview.module_qualified_name}\n"
         f"BASE:      {preview.base_sha}\n"
         f"REPO:      {preview.repo_path}\n"
-        f"WORKTREE:  {preview.worktree}\n"
-        f"WORKTREE_PARENT:  {preview.worktree_parent}\n"
-        f"NOTE: WORKTREE and WORKTREE_PARENT are throwaway paths, deleted when the\n"
-        f"      run finishes — and the prompt below names WORKTREE as its working\n"
-        f"      directory. In a saved copy of this file both are a historical record,\n"
-        f"      not a directory you can enter. To run this prompt again, make an\n"
-        f"      equivalent checkout and use that as the working directory instead:\n"
-        f"        git -C {shlex.quote(preview.repo_path)} worktree add --detach"
-        f" <dir> {preview.base_sha}\n"
-        f"PROMPT:\n"
-        f"{preview.prompt}\n"
     )
+    if preview.worktree is None:
+        # `unknown` is unreachable in practice — `require_git_repo` has already
+        # proved this is a checkout — but `capture_revision` returns `None` for
+        # `dirty` if git disappears between the two calls, and "unknown" is the
+        # honest rendering of that. Never print `None`.
+        dirty = "unknown" if preview.dirty is None else str(preview.dirty).lower()
+        mid = (
+            f"DIRTY:     {dirty}\n"
+            f"WORKTREE:  (none — create one; it is yours to remove when you are done)\n"
+            f"  {_worktree_add_cmd(preview)}\n"
+        )
+    else:
+        mid = (
+            f"WORKTREE:  {preview.worktree}\n"
+            f"WORKTREE_PARENT:  {preview.worktree_parent}\n"
+            f"NOTE: WORKTREE and WORKTREE_PARENT are a historical record, not\n"
+            f"      directories you can enter: they were throwaway paths,\n"
+            f"      deleted when the apply finished. To run this prompt again,\n"
+            f"      make an equivalent checkout and work in it:\n"
+            f"        {_worktree_add_cmd(preview)}\n"
+        )
+    return f"{head}{mid}PROMPT:\n{preview.prompt}\n"
 
 
 class SkippedApply(BaseModel):
@@ -281,6 +337,43 @@ def _build_spec_in_worktree(
     )
 
 
+def _build_spec_from_repo(
+    *,
+    sel: CandidateSelection,
+    loaded: LoadedResult,
+    repo_path: Path,
+    revision: SourceRevision,
+    direction: Direction,
+) -> EvolveSpec:
+    """Validate against `repo_path` — prep-evolve's call — and assemble the spec.
+
+    The `--print-prompt` counterpart of `_build_spec_in_worktree`. No worktree
+    exists on this path, so `repo_path` is both the gate's target and the only
+    checkout in play, exactly as in `prep_evolve.api`. The cost is that the gate
+    reads working-tree bytes while the consumer will work at `BASE`: a dirty
+    candidate file can therefore pass here and mean something different there.
+    `revision.dirty` carries that into the header, which is a warning and not a
+    gate. See "Known limitations" in the design doc.
+
+    `revision` is built once per invocation by the caller rather than derived
+    here: `git status --porcelain` carries no pathspec, so its answer is
+    repo-wide and cannot vary between candidates.
+    """
+    validated = validate_candidate_target(repo_path, sel.candidate)
+    return build_spec(
+        loaded=loaded,
+        module=resolve_module(loaded.project_tree, sel.qn),
+        qn=sel.qn,
+        candidate=sel.candidate,
+        findings=resolve_findings(sel.run, sel.qn),
+        repo_path=str(repo_path),
+        validated=validated,
+        revision=revision,
+        scope="candidate",
+        direction=direction,
+    )
+
+
 def _write_artifacts(
     *,
     out_dir: Path,
@@ -294,8 +387,9 @@ def _write_artifacts(
     agent_error: str | None,
     preview: PromptPreview,
     collect_error: str | None = None,
+    usage_manifest: ApplyUsageManifest,
 ) -> tuple[list[str], bool, list[str]]:
-    """Write `apply.patch` (when non-empty), `apply.prompt.txt`, and `APPLY-NOTES.md`.
+    """Write `apply.patch` (when non-empty), `APPLY-NOTES.md`, `apply.prompt.txt`, `manifest.json`.
 
     Returns `(files, produced, out_of_scope)` — `out_of_scope` is computed
     once here, from `manifest` against `spec.targets`, and threaded both into
@@ -312,10 +406,25 @@ def _write_artifacts(
     outcome is "no edit" or "the diff failed" and the notes alone cannot say
     whether the instruction or the agent was at fault.
 
+    `manifest.json` is written last, unconditionally, and under its own guard.
+    Last because a SIGKILL between writes must land on a state a reader reads
+    correctly, and "patch + notes + prompt, no manifest" is exactly what every
+    apply directory looked like before this file existed. Manifest-first would
+    create the one state that is not readable: accounting for a patch that is
+    not there. Unconditionally because a session that errored, produced no
+    edit, or whose diff failed still spent tokens, and that is when someone
+    asks what it cost. Under its own guard because the patch is unrecoverable
+    once the worktree is gone: a failure to write the accounting must cost the
+    accounting only, never the patch.
+
     Every filesystem write is wrapped: an `OSError` becomes an
     `ArtifactWriteError`, which the batch loop already knows how to record as
     a per-candidate skip. Left bare, it would propagate past that loop's
-    handler and abandon every candidate still queued.
+    handler and abandon every candidate still queued. The cleanup covers the
+    three artifacts written all-or-nothing plus any `manifest.json` a *previous*
+    apply of this candidate left here — reruns share the directory, and a stale
+    manifest surviving alone would be the unreadable state above. This run's
+    manifest is written after the handler, so the handler can never reach it.
     """
     patch_produced = bool(patch.strip())
     out_of_scope = out_of_scope_files(spec, manifest) if patch_produced else []
@@ -385,17 +494,136 @@ def _write_artifacts(
         # that says which commit the patch belongs to, and this directory is
         # also where a *previous* run's artifacts sit. Leaving last run's notes
         # next to no patch is a directory that documents a patch which is not
-        # there. Remove all three, so the failure reads as "nothing here" — the
+        # there. Remove all four, so the failure reads as "nothing here" — the
         # same invariant the empty-patch branch above maintains. `apply.prompt.txt`
         # goes too: on its own it would document an apply that produced nothing.
-        for name in (PATCH_NAME, PROMPT_NAME, NOTES_NAME):
+        # `manifest.json` is in the tuple for the stale case only: this run's is
+        # written after this handler and so is unreachable from here, but a
+        # previous run's would otherwise survive alone — accounting for a patch
+        # that is not there, the one state this handler exists to prevent.
+        for name in (PATCH_NAME, PROMPT_NAME, NOTES_NAME, MANIFEST_NAME):
             with contextlib.suppress(OSError):
                 (out_dir / name).unlink(missing_ok=True)
         raise ArtifactWriteError(
             f"could not write apply artifacts for {sel.candidate.id} to {out_dir}: {exc}"
         ) from exc
 
+    # Accounting must never be the reason a patch write fails. The patch is
+    # unrecoverable — the worktree is already gone — while a directory holding
+    # patch + notes + prompt and no manifest is exactly what every apply
+    # directory looked like before this file existed, so a reader reads it
+    # correctly. Hence its own guard, outside the all-or-nothing write above:
+    # this failure costs the accounting and nothing else. `ValueError` is here
+    # for the serialization, not the write — `model_dump`/`json.dumps` are
+    # inside the guard and are not `OSError` sources.
+    #
+    # `sort_keys=True`, matching how `run_manifest.json` is written
+    # (`persistence.py:89`): stable key order keeps a re-run's diff to the
+    # values that actually changed.
+    try:
+        (out_dir / MANIFEST_NAME).write_text(
+            json.dumps(usage_manifest.model_dump(mode="json"), indent=2, sort_keys=True)
+            + "\n",
+            encoding="utf-8",
+        )
+        files.append(MANIFEST_NAME)
+    except (OSError, ValueError):
+        # A half-written manifest is worse than none: it parses as JSON or it
+        # does not, and a truncated one that happens to parse under-reports the
+        # spend. Remove it and leave the three artifacts that matter.
+        with contextlib.suppress(OSError):
+            (out_dir / MANIFEST_NAME).unlink(missing_ok=True)
+
     return sorted(files), patch_produced, out_of_scope
+
+
+def _write_prompt_only(*, out_dir: Path, preview: PromptPreview, candidate_id: str) -> None:
+    """Write `apply.prompt.txt` alone, for the `--print-prompt` handoff.
+
+    Deliberately not routed through `_write_artifacts`: there is no patch, no
+    notes and no manifest to write here, and nothing to be consistent *with*.
+    The lone prompt file is a legitimate state on this path — which is the one
+    thing `_write_artifacts`' `OSError` handler exists to rule out on the run
+    path, where a prompt with no notes beside it means a half-finished write.
+    Same file name and same bytes; different invariant.
+
+    A patch, notes or manifest from an earlier *full* apply of this candidate is
+    deleted. Reruns share the directory, and `--print-prompt` is how a candidate
+    gets restarted — so those files describe a session this handoff supersedes.
+    Leaving them would make the directory document an outcome that is about to be
+    replaced, and put a patch next to a prompt that is not the one that produced
+    it. Destructive by design, and the reason the flag is not a read-only
+    operation despite running no agent.
+
+    Cleared *before* the prompt is written, not after: a SIGKILL between the two
+    steps then leaves an empty directory — "nothing here" — instead of this
+    handoff's fresh prompt beside a superseded patch. Same ordering principle as
+    `_write_artifacts`, for the same reason.
+
+    On failure the partial file is removed and `ArtifactWriteError` raised. The
+    caller has nothing to reclaim — no worktree, no agent session — but the
+    directory has already been cleared by this point, so raising a typed error
+    matters: the batch loop turns it into one recorded skip instead of letting a
+    bare `OSError` past its handler and abandoning every candidate still queued.
+    """
+    try:
+        out_dir.mkdir(parents=True, exist_ok=True)
+        for name in (PATCH_NAME, NOTES_NAME, MANIFEST_NAME):
+            (out_dir / name).unlink(missing_ok=True)
+        (out_dir / PROMPT_NAME).write_text(render_prompt_block(preview), encoding="utf-8")
+    except OSError as exc:
+        with contextlib.suppress(OSError):
+            (out_dir / PROMPT_NAME).unlink(missing_ok=True)
+        raise ArtifactWriteError(
+            f"could not write the apply prompt for {candidate_id} to {out_dir}: {exc}"
+        ) from exc
+
+
+def _process_candidate_prompt_only(
+    *,
+    sel: CandidateSelection,
+    loaded: LoadedResult,
+    repo_path: Path,
+    base: Path,
+    revision: SourceRevision,
+    direction: Direction,
+    result: OneShotApplyResult,
+) -> None:
+    """The `--print-prompt` pipeline: validate, render, clear, write. No worktree.
+
+    Deliberately not a branch inside `_process_candidate`. That function's whole
+    shape — `worktree = None`, `try`, `finally: remove_worktree(...)` — exists to
+    make a worktree safe against an interrupt landing in the wrong window. With
+    nothing to reclaim, the same scaffolding around a single file write is dead
+    weight that a reader has to disprove.
+
+    An `ArtifactWriteError` from the write propagates: the batch loop records it
+    as a per-candidate skip, and a single explicit `--candidate` re-raises it.
+    """
+    spec = _build_spec_from_repo(
+        sel=sel,
+        loaded=loaded,
+        repo_path=repo_path,
+        revision=revision,
+        direction=direction,
+    )
+    prompt_dir = _apply_dir(base, sel.qn, sel.candidate.id)
+    preview = PromptPreview(
+        candidate_id=sel.candidate.id,
+        module_qualified_name=sel.qn,
+        # The resolved path, matching the `worktree add` recipe in the header
+        # rather than the as-recorded `spec.run.repo_path` — the recipe is a git
+        # command a reader runs, and it must name the repo in hand.
+        repo_path=str(repo_path),
+        worktree=None,
+        worktree_parent=None,
+        base_sha=revision.git_commit or "",
+        dirty=revision.dirty,
+        prompt=build_apply_prompt(spec=spec),
+        path=str(prompt_dir),
+    )
+    _write_prompt_only(out_dir=prompt_dir, preview=preview, candidate_id=sel.candidate.id)
+    result.prompts.append(preview)
 
 
 def _process_candidate(
@@ -405,6 +633,8 @@ def _process_candidate(
     repo_path: Path,
     base: Path,
     base_sha: str,
+    repo_url: str,
+    spotlights_sha: str,
     input: OneShotApplyInput,
     captured_at: str,
     direction: Direction,
@@ -419,7 +649,6 @@ def _process_candidate(
     # target repo and the temp directory holding it — once per interrupted
     # candidate.
     worktree: Worktree | None = None
-    keep_worktree = False
     try:
         worktree = create_worktree(repo_path, base_sha)
         spec = _build_spec_in_worktree(
@@ -430,7 +659,7 @@ def _process_candidate(
             captured_at=captured_at,
             direction=direction,
         )
-        prompt = build_apply_prompt(spec=spec, worktree=worktree.path)
+        prompt = build_apply_prompt(spec=spec)
         # Built on both paths, not just under --print-prompt: it is what the
         # CLI prints there and what `apply.prompt.txt` records here, and one
         # value feeding both is what keeps the two byte-identical.
@@ -448,13 +677,6 @@ def _process_candidate(
             prompt=prompt,
         )
 
-        if input.print_prompt:
-            result.prompts.append(preview)
-            # Only set once the handoff has actually succeeded, so a leaked
-            # worktree can never coexist with a swallowed exception.
-            keep_worktree = True
-            return
-
         # Passed only when set, so a runner injected by a caller who predates
         # this argument keeps working instead of raising TypeError.
         model_kwargs = (
@@ -470,8 +692,24 @@ def _process_candidate(
         )
         collection = collect_patch(worktree)
     finally:
-        if worktree is not None and not keep_worktree:
+        if worktree is not None:
             remove_worktree(worktree)
+
+    # After the `finally`, so a leaked worktree can never be traded for an
+    # accounting failure — and after the runner, since `run.usage` and
+    # `run.duration_s` are the inputs.
+    usage_manifest = build_apply_usage_manifest(
+        candidate_id=sel.candidate.id,
+        module_qualified_name=sel.qn,
+        date=captured_at,
+        objective=spec.objective.goal,
+        target_commit_sha=base_sha,
+        repo_url=repo_url,
+        spotlights_sha=spotlights_sha,
+        usage=run.usage,
+        duration_s=run.duration_s,
+        agent_error=run.error,
+    )
 
     out_dir = _apply_dir(base, sel.qn, sel.candidate.id)
     files, patch_produced, out_of_scope = _write_artifacts(
@@ -486,6 +724,7 @@ def _process_candidate(
         preview=preview,
         agent_error=run.error,
         collect_error=collection.collect_error,
+        usage_manifest=usage_manifest,
     )
     result.patches.append(
         ApplyArtifact(
@@ -509,13 +748,6 @@ def one_shot_apply(
     claude_runner: ClaudeRunner | None = None,
 ) -> OneShotApplyResult:
     """Turn one (or every) candidate into a patch plus its notes."""
-    if input.print_prompt and input.candidate is None:
-        raise SelectionError(
-            "--print-prompt requires --candidate: without one, a sweep would "
-            "leave one worktree per candidate registered in the target repo "
-            "with nothing to clean them up"
-        )
-
     config = config or OneShotApplyConfig()
     captured_at = config.captured_at or _now_iso()
     runner = claude_runner or run_apply_claude
@@ -529,6 +761,19 @@ def one_shot_apply(
     repo_path = resolve_repo_path(input.repo, input.index or location.index)
     ensure_repo_dir(repo_path)
     base_sha = require_git_repo(repo_path)
+
+    # Resolved once per invocation, not per candidate: a 20-candidate sweep must
+    # not shell out to git 40 extra times for two values that cannot change
+    # mid-sweep. Both degrade to "" rather than raising — a repo may have no
+    # origin remote, and a wheel install has no engine checkout.
+    #
+    # `repo_url` is re-derived from this checkout's `origin`, not read from the
+    # originating run's `provenance.repo_url`, so the two can disagree if
+    # `origin` was retargeted since the run. Harmless while apply has no
+    # `--repo-url`: the URL describes the checkout the patch was produced
+    # against, which is the checkout in hand.
+    repo_url = resolve_repo_url(repo_path)
+    spotlights_sha = spotlights_commit_sha()
 
     # Setup-time check, mirroring agent_proposals/proposal_from_finding_creator.
     # Skipped for injected runners (every test) and --print-prompt (runs no
@@ -544,6 +789,23 @@ def one_shot_apply(
 
     base = input.out or location.run_dir
 
+    # Built once, not per candidate. `capture_revision`'s `git status
+    # --porcelain` carries no pathspec, so `dirty` is a property of the repo and
+    # cannot vary between candidates — and a 20-candidate sweep must not shell
+    # out to git 40 extra times for one boolean.
+    #
+    # `git_commit` is the invocation-level `base_sha` from `require_git_repo`,
+    # not `capture_revision`'s own `rev-parse HEAD`: one authoritative base
+    # commit, so there is no window in which two calls could disagree because
+    # someone committed mid-sweep.
+    prompt_revision: SourceRevision | None = None
+    if input.print_prompt:
+        prompt_revision = SourceRevision(
+            git_commit=base_sha,
+            dirty=capture_revision(repo_path, captured_at).dirty,
+            captured_at=captured_at,
+        )
+
     direction = input.direction or infer_direction(loaded.context.objective)
     if input.direction is None:
         result.warnings.append(
@@ -555,18 +817,31 @@ def one_shot_apply(
 
     for sel in selections:
         try:
-            _process_candidate(
-                sel=sel,
-                loaded=loaded,
-                repo_path=repo_path,
-                base=base,
-                base_sha=base_sha,
-                input=input,
-                captured_at=captured_at,
-                direction=direction,
-                claude_runner=runner,
-                result=result,
-            )
+            if prompt_revision is not None:
+                _process_candidate_prompt_only(
+                    sel=sel,
+                    loaded=loaded,
+                    repo_path=repo_path,
+                    base=base,
+                    revision=prompt_revision,
+                    direction=direction,
+                    result=result,
+                )
+            else:
+                _process_candidate(
+                    sel=sel,
+                    loaded=loaded,
+                    repo_path=repo_path,
+                    base=base,
+                    base_sha=base_sha,
+                    repo_url=repo_url,
+                    spotlights_sha=spotlights_sha,
+                    input=input,
+                    captured_at=captured_at,
+                    direction=direction,
+                    claude_runner=runner,
+                    result=result,
+                )
         except (PrepEvolveError, OneShotApplyError) as exc:
             if not batch:
                 raise

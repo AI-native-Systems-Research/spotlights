@@ -1,0 +1,78 @@
+{
+  "candidate_id": "cand-vllm_v1_attention-0002",
+  "cost": {
+    "amount_usd": 2.37000813,
+    "by_model": [
+      {
+        "amount_usd": 2.37000813,
+        "model": "aws/claude-opus-5",
+        "priced": true,
+        "priced_token_share": 1.0,
+        "provider": "anthropic",
+        "rate_key": "anthropic:aws/claude-opus-5",
+        "role": "one_shot_apply"
+      }
+    ],
+    "coverage": {
+      "priced_models": [
+        "anthropic:aws/claude-opus-5"
+      ],
+      "unpriced_models": []
+    },
+    "priced_token_share": 1.0,
+    "rate_note": "rates applied: anthropic:aws/claude-opus-5 (LiteLLM (bedrock) rate: Claude Opus 5 $3.80/MTok input, $19/MTok output, $0.38/MTok cache read, $4.75/MTok cache write. Keyed by the CLI-reported model id (bedrock 'aws/' prefix). Override for a different contract or 1h cache writes.)",
+    "source": "contracted-rate-table"
+  },
+  "date": "2026-08-11T21:29:48+00:00",
+  "external_cost": {
+    "amount_usd": 3.1184317500000005,
+    "by_model": [
+      {
+        "amount_usd": 3.1184317500000005,
+        "model": "aws/claude-opus-5",
+        "priced": true,
+        "priced_token_share": 1.0,
+        "provider": "anthropic",
+        "rate_key": "anthropic:aws/claude-opus-5",
+        "role": "one_shot_apply"
+      }
+    ],
+    "coverage": {
+      "priced_models": [
+        "anthropic:aws/claude-opus-5"
+      ],
+      "unpriced_models": []
+    },
+    "priced_token_share": 1.0,
+    "rate_note": "rates applied: anthropic:aws/claude-opus-5 (Public Anthropic API list price: Claude Opus 5 $5.00/MTok input, $25.00/MTok output, $0.50/MTok cache read, $6.25/MTok 5m cache write (1.25x). Keyed by the CLI-reported model id (the bedrock 'aws/' prefix is what the CLI emits even for direct billing comparison). Override for 1h cache writes ($10/MTok).)",
+    "source": "public-api-rate-table"
+  },
+  "models_used": [
+    {
+      "model": "aws/claude-opus-5",
+      "provider": "anthropic",
+      "role": "one_shot_apply",
+      "usage": {
+        "cache_create": 54803,
+        "cache_read": 1102476,
+        "input": 3915,
+        "output": 88204
+      }
+    }
+  ],
+  "module_qualified_name": "vllm/v1/attention",
+  "notes": "",
+  "spotlights": {
+    "commit_sha": "6c23650a2dd309648d1652145eb9f29fa2609206"
+  },
+  "target": {
+    "commit_sha": "83ad767eed3be3ee7f2df63be693bfaca5c7c922",
+    "objective": "reduce the median TTFT and median TPOT (Time Per Output Token)",
+    "repo_url": "https://github.com/vllm-project/vllm.git"
+  },
+  "timing": {
+    "api_time_s": 1121.7,
+    "wall_clock_s": 1216.3
+  },
+  "total_tokens": 1249398
+}
