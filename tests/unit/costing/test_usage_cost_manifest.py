@@ -122,7 +122,7 @@ def test_compute_cost_strips_context_window_tag_from_model_id() -> None:
     """A "[1m]" context-variant id prices off its base model's rate row."""
     records = [
         UsageRecord.from_usage(
-            AgentUsage(input=100, output=10, model="aws/claude-opus-4-8[1m]"),
+            AgentUsage(input=100, output=10, model="claude-opus-4-8[1m]"),
             step="module_deep_research",
             module_qualified_name="pkg/a",
             session_index=1,
@@ -136,7 +136,7 @@ def test_compute_cost_strips_context_window_tag_from_model_id() -> None:
     summary = compute_cost(
         records,
         {
-            "anthropic:aws/claude-opus-4-8": ModelRate(
+            "anthropic:claude-opus-4-8": ModelRate(
                 input=0.01,
                 output=0.02,
                 cache_read=0.001,
@@ -149,6 +149,86 @@ def test_compute_cost_strips_context_window_tag_from_model_id() -> None:
     assert summary.amount_usd == pytest.approx(100 * 0.01 + 10 * 0.02)
     assert summary.unpriced_models == []
     assert "PARTIAL cost" not in summary.rate_note
+
+
+def test_compute_cost_strips_litellm_route_prefix_from_model_id() -> None:
+    """A CLI reporting a plain model id prices against a table keyed with the
+    LiteLLM route prefix — and vice versa. Pricing is per model, not per route
+    (bedrock vs direct-API), so `aws/claude-opus-5` and `claude-opus-5` must
+    hit the same row from either direction."""
+
+    def _record(model: str, idx: int) -> UsageRecord:
+        return UsageRecord.from_usage(
+            AgentUsage(input=100, output=10, model=model),
+            step="module_deep_research",
+            module_qualified_name="pkg/a",
+            session_index=1,
+            invocation_index=idx,
+            invocation_id=f"i{idx}",
+            cli="claude",
+            role="deep_research",
+        )
+
+    rate = ModelRate(input=0.01, output=0.02, cache_read=0.0, cache_create=0.0)
+
+    # CLI reports the unprefixed form (the user's DAM-image bug); table has the
+    # route-prefixed key. Both sides canonicalize on lookup, so it hits.
+    unprefixed_hit = compute_cost(
+        [_record("claude-opus-5", 0)],
+        {"anthropic:aws/claude-opus-5": rate},
+    )
+    assert unprefixed_hit.amount_usd == pytest.approx(100 * 0.01 + 10 * 0.02)
+    assert unprefixed_hit.unpriced_models == []
+
+    # Reverse: CLI reports the prefixed form, table has the unprefixed key
+    # (what the loader normalizes to). Also hits.
+    prefixed_hit = compute_cost(
+        [_record("aws/claude-opus-5", 0)],
+        {"anthropic:claude-opus-5": rate},
+    )
+    assert prefixed_hit.amount_usd == pytest.approx(100 * 0.01 + 10 * 0.02)
+    assert prefixed_hit.unpriced_models == []
+
+    # Context tag + route prefix together also collapse to the canonical row.
+    both_tags = compute_cost(
+        [_record("aws/claude-opus-5[1m]", 0)],
+        {"anthropic:claude-opus-5": rate},
+    )
+    assert both_tags.amount_usd == pytest.approx(100 * 0.01 + 10 * 0.02)
+
+    # An unknown-prefixed model id (not in the allowlist) is left alone — the
+    # loader canonicalizes both sides, so a table keyed `hf-org/model-x` and a
+    # CLI reporting `hf-org/model-x` still match without eating the slash.
+    hf = compute_cost(
+        [_record("hf-org/model-x", 0)],
+        {"anthropic:hf-org/model-x": rate},
+    )
+    assert hf.amount_usd == pytest.approx(100 * 0.01 + 10 * 0.02)
+
+    # Stacked LiteLLM route prefixes collapse in one pass. LiteLLM's OpenRouter
+    # provider emits `openrouter/anthropic/claude-opus-5`; both segments are
+    # LiteLLM route labels and must strip together, or the model silently drops
+    # into `unpriced_models` and the cost total goes partial with no error.
+    stacked = compute_cost(
+        [_record("openrouter/anthropic/claude-opus-5", 0)],
+        {"anthropic:claude-opus-5": rate},
+    )
+    assert stacked.amount_usd == pytest.approx(100 * 0.01 + 10 * 0.02)
+    assert stacked.unpriced_models == []
+
+
+def test_canonical_model_id_preserves_degenerate_inputs() -> None:
+    """An id that strips to empty is returned unchanged so a malformed id lands
+    in `unpriced_models` under its own visibly-broken key rather than every bad
+    record silently colliding on the empty-model rate key `"provider:"`."""
+    from spotlights_engine.costing.rates import canonical_model_id
+
+    # Pure context tag: stripping the "[1m]" leaves nothing behind.
+    assert canonical_model_id("[1m]") == "[1m]"
+    # Pure route prefix: stripping the "aws/" leaves nothing behind.
+    assert canonical_model_id("aws/") == "aws/"
+    # An id that legitimately reduces to nothing (empty in, empty out) is fine.
+    assert canonical_model_id("") == ""
 
 
 def test_run_manifest_groups_models_and_totals_tokens() -> None:
@@ -216,8 +296,61 @@ def test_run_manifest_groups_models_and_totals_tokens() -> None:
     assert manifest.cost.amount_usd == 35.0
 
 
+def test_run_manifest_models_used_matches_by_model_for_route_prefixed_id() -> None:
+    """`models_used` and `cost.by_model` must carry the same model string for
+    the same record — the docstring on `_group_key` promises 1:1 lockstep. A
+    route-prefixed, context-tagged id from the CLI (`aws/claude-opus-5[1m]` in
+    the DAM sandbox) has its LiteLLM route prefix stripped on both sides so
+    the two sections of the manifest carry the same string; the context tag
+    is preserved on the display side because it names a real product variant
+    the reader wants to see, while the `rate_key` on the same by_model row
+    strips both (routes and context share one rate row).
+    """
+    record = UsageRecord.from_usage(
+        AgentUsage(input=100, output=10, model="aws/claude-opus-5[1m]"),
+        step="module_deep_research",
+        module_qualified_name="pkg/a",
+        session_index=1,
+        invocation_index=0,
+        invocation_id="i0",
+        cli="claude",
+        role="deep_research",
+    )
+    summary = compute_cost(
+        [record],
+        {
+            "anthropic:claude-opus-5": ModelRate(
+                input=0.01, output=0.02, cache_read=0.0, cache_create=0.0
+            )
+        },
+    )
+
+    manifest = build_run_manifest(
+        run_id="run-1",
+        date="2026-07-06T00:00:00Z",
+        objective="find spots",
+        provenance={},
+        config_fingerprint={},
+        records=[record],
+        cost=summary,
+        wall_clock_s=1.0,
+        candidates_path="/tmp/out/index.md",
+        num_candidates=0,
+        module_status={"SUCCEEDED": 1},
+        notes=[],
+    )
+
+    assert len(manifest.models_used) == 1
+    assert len(manifest.cost.by_model) == 1
+    assert manifest.models_used[0].model == manifest.cost.by_model[0].model
+    assert manifest.models_used[0].model == "claude-opus-5[1m]"
+    assert manifest.cost.by_model[0].rate_key == "anthropic:claude-opus-5"
+
+
 def _opus_record() -> UsageRecord:
-    """One Opus 4.8 record priced by both bundled tables."""
+    """One Opus 4.8 record priced by both bundled tables. The bedrock `aws/`
+    prefix here exercises the loader's route-prefix canonicalization — the
+    bundled tables key their rows without the prefix."""
     return UsageRecord.from_usage(
         AgentUsage(
             input=1000,
@@ -238,17 +371,21 @@ def _opus_record() -> UsageRecord:
 
 def test_load_external_rates_returns_bundled_table() -> None:
     external = load_external_rates()
-    assert "anthropic:aws/claude-opus-4-8" in external
+    # Bundled keys are canonical (no LiteLLM route prefix); the loader would
+    # strip a prefix if one were present.
+    assert "anthropic:claude-opus-4-8" in external
     assert "openai:codex" in external
     # Public Opus list price ($5/MTok input) exceeds the contracted rate.
-    assert external["anthropic:aws/claude-opus-4-8"].input == pytest.approx(
-        0.000005
-    )
+    assert external["anthropic:claude-opus-4-8"].input == pytest.approx(0.000005)
 
 
 def test_load_external_rates_env_var_and_explicit_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # A user-supplied table keyed with the LiteLLM `aws/` prefix must still be
+    # reachable — the loader normalizes both sides of the lookup, so writing
+    # `anthropic:aws/claude-opus-4-8` in the file works even though runtime
+    # lookups produce `anthropic:claude-opus-4-8`.
     custom = tmp_path / "ext.json"
     custom.write_text(
         json.dumps(
@@ -263,17 +400,16 @@ def test_load_external_rates_env_var_and_explicit_path(
         ),
         encoding="utf-8",
     )
-    # Env-var precedence over the bundled default.
     monkeypatch.setenv(EXTERNAL_RATES_ENV_VAR, str(custom))
     from_env = load_external_rates()
-    assert from_env["anthropic:aws/claude-opus-4-8"].input == pytest.approx(0.1)
+    assert from_env["anthropic:claude-opus-4-8"].input == pytest.approx(0.1)
 
-    # Explicit path wins over the env var.
+    # Explicit path wins over the env var; canonical key also works directly.
     other = tmp_path / "other.json"
     other.write_text(
         json.dumps(
             {
-                "anthropic:aws/claude-opus-4-8": {
+                "anthropic:claude-opus-4-8": {
                     "input": 0.9,
                     "output": 0.2,
                     "cache_read": 0.0,
@@ -284,15 +420,70 @@ def test_load_external_rates_env_var_and_explicit_path(
         encoding="utf-8",
     )
     from_path = load_external_rates(other)
-    assert from_path["anthropic:aws/claude-opus-4-8"].input == pytest.approx(0.9)
+    assert from_path["anthropic:claude-opus-4-8"].input == pytest.approx(0.9)
+
+
+def test_load_rates_rejects_duplicate_canonical_keys(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Two raw keys that collapse to the same canonical key must fail loudly.
+
+    A plain dict comprehension would keep only whichever entry JSON iteration
+    happened to visit last, silently mis-pricing the collided row.
+    """
+    custom = tmp_path / "rates.json"
+    custom.write_text(
+        json.dumps(
+            {
+                "anthropic:aws/claude-opus-5": {
+                    "input": 0.1,
+                    "output": 0.2,
+                    "cache_read": 0.0,
+                    "cache_create": 0.0,
+                },
+                "anthropic:claude-opus-5": {
+                    "input": 0.9,
+                    "output": 0.9,
+                    "cache_read": 0.0,
+                    "cache_create": 0.0,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv(EXTERNAL_RATES_ENV_VAR, str(custom))
+
+    with pytest.raises(ValueError) as excinfo:
+        load_external_rates()
+
+    msg = str(excinfo.value)
+    assert "anthropic:aws/claude-opus-5" in msg
+    assert "anthropic:claude-opus-5" in msg
+    assert str(custom) in msg
+
+
+def test_compute_cost_rejects_duplicate_canonical_keys() -> None:
+    """A caller-supplied rates dict with a canonical-key collision is rejected."""
+    rate_a = ModelRate(input=0.1, output=0.2, cache_read=0.0, cache_create=0.0)
+    rate_b = ModelRate(input=0.9, output=0.9, cache_read=0.0, cache_create=0.0)
+
+    with pytest.raises(ValueError) as excinfo:
+        compute_cost(
+            [],
+            {
+                "anthropic:aws/claude-opus-5": rate_a,
+                "anthropic:claude-opus-5": rate_b,
+            },
+        )
+    msg = str(excinfo.value)
+    assert "anthropic:aws/claude-opus-5" in msg
+    assert "anthropic:claude-opus-5" in msg
 
 
 def test_compute_cost_source_label_and_table_divergence() -> None:
     records = [_opus_record()]
     contracted = compute_cost(records, load_rates())
-    external = compute_cost(
-        records, load_external_rates(), source="public-api-rate-table"
-    )
+    external = compute_cost(records, load_external_rates(), source="public-api-rate-table")
 
     assert contracted.source == "contracted-rate-table"
     assert external.source == "public-api-rate-table"
@@ -304,9 +495,7 @@ def test_compute_cost_source_label_and_table_divergence() -> None:
 def test_run_manifest_carries_external_cost() -> None:
     records = [_opus_record()]
     contracted = compute_cost(records, load_rates())
-    external = compute_cost(
-        records, load_external_rates(), source="public-api-rate-table"
-    )
+    external = compute_cost(records, load_external_rates(), source="public-api-rate-table")
 
     manifest = build_run_manifest(
         run_id="run-1",
@@ -489,9 +678,7 @@ def test_compute_cost_reports_coverage_and_by_model_on_partial_run() -> None:
     # Per-row shares must sum to 1.0 (they partition the run's tokens).
     assert sum(r.priced_token_share for r in summary.by_model) == pytest.approx(1.0)
     # by_model dollar sum invariant: matches amount_usd.
-    assert sum(r.amount_usd for r in summary.by_model) == pytest.approx(
-        summary.amount_usd
-    )
+    assert sum(r.amount_usd for r in summary.by_model) == pytest.approx(summary.amount_usd)
 
 
 def test_compute_cost_full_coverage_when_every_model_has_a_rate() -> None:

@@ -29,9 +29,10 @@ from pathlib import Path
 
 from spotlights_engine.costing.rates import (
     _BUNDLED_RATES_PATH,
-    _CONTEXT_TAG_RE,
     RATES_ENV_VAR,
     ModelRate,
+    _build_canonical_rate_map,
+    canonical_model_id,
     load_rates,
 )
 from spotlights_engine.costing.records import PROVIDER_FOR_CLI
@@ -144,10 +145,11 @@ def _probe_model(
 
 def _rate_key_for(name: str, model: str | None) -> str:
     """Mirror `costing.rates._rate_key`: model → `provider:model` (context tag
-    stripped), else the `provider:cli` family fallback."""
+    and LiteLLM route prefix stripped), else the `provider:cli` family fallback.
+    """
     provider = PROVIDER_FOR_CLI[name]
     if model:
-        return f"{provider}:{_CONTEXT_TAG_RE.sub('', model)}"
+        return f"{provider}:{canonical_model_id(model)}"
     return f"{provider}:{name}"
 
 
@@ -163,6 +165,16 @@ def probe_cli(
     `model` is the configured global id for this CLI, so the probe checks the
     model a real run would use.
     """
+    # Canonicalize table keys on entry so a caller-supplied dict keyed with a
+    # LiteLLM route prefix still matches models the CLI reports without one —
+    # mirrors `compute_cost`. Dicts from `load_rates` are already canonical, so
+    # this is a no-op there. A caller-supplied dict with two raw keys that
+    # canonicalize to the same string is rejected here, matching `compute_cost`:
+    # a plain dict comprehension would silently keep whichever entry Python
+    # visited last, and doctor would return green on a table `compute_cost`
+    # would abort on.
+    rates = _build_canonical_rate_map(rates.items())
+
     resolved = shutil.which(name)
     if resolved is None:
         return CheckResult(
@@ -274,13 +286,25 @@ def check_models() -> CheckResult:
 
 def run_checks() -> list[CheckResult]:
     rates_check = check_rates()
-    # If the rate table itself is unreadable, load_rates would raise; probing
-    # then can't validate pricing, so fall back to an empty table (every model
-    # reads as unpriced, which the rates check already flagged).
+    # `check_rates()` only verifies file existence, so a rate table that parses
+    # as JSON but fails schema validation, or one with duplicate canonical keys,
+    # slips past it. Surface those content-level errors on the rates check
+    # itself — without this, a schema-invalid rate file lands in the broad
+    # ValueError catch below and every probe reports its model as unpriced with
+    # no hint that the rate table is the problem. (Pre-existing bug, not
+    # introduced by this PR; `pydantic.ValidationError` is a `ValueError`
+    # subclass and was already reaching this handler before the duplicate-key
+    # wrapper in `_load_rates_from` was added.) OSError still falls back
+    # silently because `check_rates` already reports missing/unreadable files.
+    rates: dict[str, ModelRate] = {}
     try:
         rates = load_rates()
-    except (OSError, ValueError):
-        rates = {}
+    except OSError:
+        pass
+    except ValueError as exc:
+        rates_check = CheckResult(
+            name="rates", ok=False, detail=f"rate table invalid: {exc}"
+        )
     # Probe the models a run would actually ask for, not each CLI's own default.
     try:
         models = load_model_config()

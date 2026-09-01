@@ -1,10 +1,13 @@
+import pytest
+
 from spotlights_engine import doctor
 from spotlights_engine.doctor import ProbeOutcome
 
-# A rate table with both real key shapes: a model-keyed Claude row and the
-# codex CLI-family fallback row (codex reports no resolvable model id).
+# A rate table with both real key shapes: a model-keyed Claude row (canonical,
+# no LiteLLM route prefix) and the codex CLI-family fallback row (codex reports
+# no resolvable model id).
 RATES = {
-    "anthropic:aws/claude-opus-4-8": object(),
+    "anthropic:claude-opus-4-8": object(),
     "openai:codex": object(),
 }
 
@@ -37,7 +40,7 @@ def test_probe_cli_priced_model_ok(monkeypatch):
     )
     res = doctor.probe_cli("claude", rates=RATES)
     assert res.ok is True
-    assert "anthropic:aws/claude-opus-4-8" in res.detail
+    assert "anthropic:claude-opus-4-8" in res.detail
 
 
 def test_probe_cli_unpriced_model_fails(monkeypatch):
@@ -67,6 +70,43 @@ def test_probe_cli_codex_family_fallback_ok(monkeypatch):
     assert "openai:codex" in res.detail
 
 
+def test_probe_cli_canonicalizes_caller_rates_dict(monkeypatch):
+    """A caller-supplied rates dict keyed with a LiteLLM route prefix still
+    matches records whose CLI-reported model id lacks the prefix — mirrors
+    `compute_cost`'s canonicalize-on-entry behavior."""
+    monkeypatch.setattr(doctor.shutil, "which", lambda _n: "/bin/" + _n)
+    monkeypatch.setattr(
+        doctor,
+        "_probe_model",
+        lambda name, **_kw: ProbeOutcome(ok=True, model="claude-opus-4-8", error=""),
+    )
+    route_prefixed_rates = {"anthropic:aws/claude-opus-4-8": object()}
+    res = doctor.probe_cli("claude", rates=route_prefixed_rates)
+    assert res.ok is True
+    assert "anthropic:claude-opus-4-8" in res.detail
+
+
+def test_probe_cli_rejects_duplicate_canonical_keys(monkeypatch):
+    """Two raw rate-table keys canonicalizing to the same string must be
+    rejected, matching `compute_cost`. A plain dict comprehension would silently
+    keep whichever entry Python visited last, and doctor would return green on a
+    table `compute_cost` would abort on — the exact "doctor said green; run
+    crashes" divergence this check exists to prevent.
+    """
+    monkeypatch.setattr(doctor.shutil, "which", lambda _n: "/bin/" + _n)
+    monkeypatch.setattr(
+        doctor,
+        "_probe_model",
+        lambda name, **_kw: ProbeOutcome(ok=True, model="claude-opus-4-8", error=""),
+    )
+    colliding = {
+        "anthropic:aws/claude-opus-4-8": object(),
+        "anthropic:claude-opus-4-8": object(),
+    }
+    with pytest.raises(ValueError, match="duplicate rate-table entry"):
+        doctor.probe_cli("claude", rates=colliding)
+
+
 def test_probe_cli_strips_context_window_tag(monkeypatch):
     monkeypatch.setattr(doctor.shutil, "which", lambda _n: "/bin/" + _n)
     monkeypatch.setattr(
@@ -92,6 +132,31 @@ def test_run_checks_returns_all(monkeypatch):
     # pinned model and the model steps 3+5 inherit are different and both get
     # probed, so the check is named per-scope.
     assert any(n.startswith("codex") for n in names)
+
+
+def test_run_checks_surfaces_schema_invalid_rate_table(monkeypatch, tmp_path):
+    """A rate table that parses as JSON but fails validation must not pass silently.
+
+    `check_rates` only verifies file existence, so a schema-invalid entry (here,
+    a negative price) reaches `load_rates` as a ValueError. Before the fix that
+    ValueError was swallowed into `rates = {}` and every model read as unpriced
+    with no hint that the rate table was the problem.
+    """
+    bad = tmp_path / "rates.json"
+    bad.write_text(
+        '{"anthropic:claude-opus-5": {"input_per_mtok": -1.0, "output_per_mtok": 1.0}}',
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SPOTLIGHTS_RATES_FILE", str(bad))
+    monkeypatch.setattr(doctor.shutil, "which", lambda _n: "/bin/" + _n)
+    monkeypatch.setattr(
+        doctor,
+        "_probe_model",
+        lambda name, **_kw: ProbeOutcome(ok=True, model=None, error=""),
+    )
+    rates_check = next(r for r in doctor.run_checks() if r.name == "rates")
+    assert rates_check.ok is False
+    assert "rate table invalid" in rates_check.detail
 
 
 def test_main_exit_code_fail(monkeypatch, capsys):
