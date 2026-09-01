@@ -243,8 +243,7 @@ From the terminal:
 To pull results off the sandbox, ask the chat agent to package the output
 folder — a prompt that reliably works:
 
-> Zip spotlights-out and publish it to the artifact library as a private
-> artifact so I can download it from the Files view.
+> Zip spotlights-out so I can download it from the Files view.
 
 Then, in the DAM UI's **Files** tab, click the ⋯ (three-dot) menu next to the
 resulting `.zip` and select **Download**.
