@@ -119,6 +119,38 @@ class RunManifestModelsRequested(BaseModel):
     codex: str = ""
 
 
+class RunManifestRunConfig(BaseModel):
+    """The knobs that shaped this run's cost and output volume.
+
+    Purely descriptive, like `models_requested`: written for whoever reads the
+    results later, never read back by the engine. Deliberately *not* part of
+    `spotlights.config` -- that block is the `--resume` fingerprint, so adding
+    keys to it would invalidate every run directory already on disk.
+
+    Without this, results are individually correct but not comparable. Two runs
+    on one target at the same module count can differ several-fold in spend
+    purely because one had deep research off, and nothing else in the manifest
+    distinguishes them.
+
+    Optional on `RunManifest` rather than default-constructed: field defaults
+    here are zero/False, not the engine's real defaults, so a block nobody
+    populated would assert "this run used 0 review iterations". A caller that
+    cannot supply the values omits the block instead, the same way
+    `external_cost` is absent rather than $0.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    review_iterations: int = 0
+    max_findings_per_module: int = 0
+    include_candidate_hotspots: bool = False
+    enable_claude_search: bool = False
+    enable_deep_research: bool = False
+    max_parallel_sessions: int = 0
+    max_parallel_pairs: int = 0
+    max_parallel_candidates: int = 0
+
+
 class RunManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -129,6 +161,7 @@ class RunManifest(BaseModel):
     models_requested: RunManifestModelsRequested = Field(
         default_factory=RunManifestModelsRequested
     )
+    run_config: RunManifestRunConfig | None = None
     models_used: list[ModelUsed] = Field(default_factory=list)
     total_tokens: int = 0
     cost: RunManifestCost
@@ -172,6 +205,7 @@ def build_run_manifest(
     module_status: dict[str, int],
     notes: list[str],
     models_requested: RunManifestModelsRequested | None = None,
+    run_config: RunManifestRunConfig | None = None,
 ) -> RunManifest:
     note_parts = list(notes)
     if cost.unpriced_models:
@@ -205,6 +239,7 @@ def build_run_manifest(
             config=dict(config_fingerprint),
         ),
         models_requested=models_requested or RunManifestModelsRequested(),
+        run_config=run_config,
         models_used=aggregate_models_used(records),
         total_tokens=sum(record.total_tokens for record in records),
         cost=cost_block(cost),
@@ -228,6 +263,7 @@ __all__ = [
     "RunManifest",
     "UsageTotals",
     "RunManifestModelsRequested",
+    "RunManifestRunConfig",
     "aggregate_models_used",
     "build_run_manifest",
     "cost_block",

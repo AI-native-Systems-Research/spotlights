@@ -36,6 +36,7 @@ from spotlights_engine.candidate_discovery import (
 )
 from spotlights_engine.costing.manifest import (
     RunManifestModelsRequested,
+    RunManifestRunConfig,
     build_run_manifest,
 )
 from spotlights_engine.costing.rates import (
@@ -282,6 +283,39 @@ def _models_requested(cfg: SpotlightsManagerConfig) -> RunManifestModelsRequeste
         discovery.codex_model,
     )
     return RunManifestModelsRequested(claude=claude, codex=codex)
+
+
+def _run_config(
+    input: SpotlightsManagerInput, cfg: SpotlightsManagerConfig
+) -> RunManifestRunConfig:
+    """The knobs that shaped this run's cost and output volume, for the manifest.
+
+    Same reasoning as `_models_requested`: read the *effective* value each step
+    will actually use, not what `cfg` was handed. The parallelism knobs live on
+    step configs that are `| None` when the caller left them alone, and a `None`
+    there does not mean "no parallelism" -- it means the step falls back to its
+    own field default. Recording 0 or omitting the row would misdescribe a run
+    that ran 5 pairs wide.
+    """
+    discovery = cfg.discovery if cfg.discovery is not None else DiscoveryConfig()
+    proposal = (
+        cfg.proposal_from_finding
+        if cfg.proposal_from_finding is not None
+        else ProposalFromFindingConfig()
+    )
+    agent_proposals = (
+        cfg.agent_proposals if cfg.agent_proposals is not None else AgentProposalsConfig()
+    )
+    return RunManifestRunConfig(
+        review_iterations=discovery.num_review_iterations,
+        max_findings_per_module=input.max_findings_per_module,
+        include_candidate_hotspots=input.include_candidate_hotspots,
+        enable_claude_search=input.enable_claude_search,
+        enable_deep_research=input.enable_deep_research,
+        max_parallel_sessions=cfg.max_parallel_sessions,
+        max_parallel_pairs=proposal.max_parallel_pairs,
+        max_parallel_candidates=agent_proposals.max_parallel_candidates,
+    )
 
 
 def _explicit(model: BaseModel | None, field: str) -> str | None:
@@ -2028,6 +2062,7 @@ async def _run_async(
         module_status=counts,
         notes=usage_notes,
         models_requested=_models_requested(config),
+        run_config=_run_config(input, config),
     )
     P.write_run_manifest(paths, public_manifest)
 
