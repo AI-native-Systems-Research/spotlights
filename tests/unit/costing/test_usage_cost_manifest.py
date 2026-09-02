@@ -1000,13 +1000,13 @@ def test_run_config_reports_step_field_defaults_not_zero_for_unset_configs() -> 
     assert recorded.enable_deep_research is True
 
 
-def test_run_manifest_omits_run_config_when_the_caller_cannot_supply_it() -> None:
-    """Absent, not a block of zeros.
+def test_run_manifest_leaves_run_config_null_when_the_caller_cannot_supply_it() -> None:
+    """Empty, not a block of zeros.
 
     `RunManifestRunConfig`'s field defaults are zero/False, not the engine's real
     defaults, so a default-constructed block would assert "this run used 0 review
-    iterations". A caller with nothing to record leaves it off, the same way
-    `external_cost` is absent rather than $0.
+    iterations". A caller with nothing to record leaves it `None`, the same way
+    `external_cost` reads as `null` rather than $0.
     """
     manifest = build_run_manifest(
         run_id="r",
@@ -1023,6 +1023,9 @@ def test_run_manifest_omits_run_config_when_the_caller_cannot_supply_it() -> Non
         notes=[],
     )
     assert manifest.run_config is None
+    # What `write_run_manifest` actually lands on disk: it dumps without
+    # `exclude_none`, so the key is present and null rather than gone.
+    assert manifest.model_dump(mode="json")["run_config"] is None
     assert "run_config" not in manifest.model_dump(exclude_none=True)
 
 

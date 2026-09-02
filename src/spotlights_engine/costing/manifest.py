@@ -135,8 +135,10 @@ class RunManifestRunConfig(BaseModel):
     Optional on `RunManifest` rather than default-constructed: field defaults
     here are zero/False, not the engine's real defaults, so a block nobody
     populated would assert "this run used 0 review iterations". A caller that
-    cannot supply the values omits the block instead, the same way
-    `external_cost` is absent rather than $0.
+    cannot supply the values leaves it `None`, which reaches the JSON as
+    `"run_config": null` -- `write_run_manifest` dumps without `exclude_none`,
+    so the key is present and empty rather than gone. `external_cost` reads as
+    `null` rather than $0 for the same reason.
     """
 
     model_config = ConfigDict(extra="forbid")
