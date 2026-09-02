@@ -16,6 +16,14 @@
     "unit": "per_token",
     "note": "Public Anthropic API list price: Claude Opus 5 $5.00/MTok input, $25.00/MTok output, $0.50/MTok cache read, $6.25/MTok 5m cache write (1.25x). Override for 1h cache writes ($10/MTok)."
   },
+  "anthropic:claude-sonnet-5": {
+    "input": 0.000002,
+    "output": 0.00001,
+    "cache_read": 0.0000002,
+    "cache_create": 0.0000025,
+    "unit": "per_token",
+    "note": "Public Anthropic API list price: Claude Sonnet 5 $2.00/MTok input, $10.00/MTok output, $0.20/MTok cache read (0.1x), $2.50/MTok 5m cache write (1.25x). Override for 1h cache writes. Priced because aws/claude-sonnet-5 is on the proxy and is the cheap model for calibration runs; there is no contracted row for it in rates.json, so a Sonnet run's amount_usd stays partial until the contracted rate is supplied."
+  },
   "openai:codex": {
     "input": 0.000005,
     "output": 0.00003,

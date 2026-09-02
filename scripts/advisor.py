@@ -38,6 +38,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from spotlights_engine.costing.rates import canonical_model_id
+
 REPO_ROOT = Path(__file__).resolve().parents[1]
 RATES = REPO_ROOT / "src/spotlights_engine/costing/rates.json"
 EXTERNAL_RATES = REPO_ROOT / "src/spotlights_engine/costing/external_rates.json"
@@ -64,13 +66,41 @@ def blended_rate(rate: dict, mix: dict[str, float]) -> float:
     return sum(float(rate.get(b) or 0.0) * mix.get(b, 0.0) for b in BUCKETS)
 
 
+def canonical_rate_key(key: str) -> str:
+    """Canonicalize the model half of a `provider:model` rate key.
+
+    Mirrors the engine's own private `_canonical_rate_key`: the provider is left
+    alone, the model is canonicalized. A key with no colon is returned as-is.
+    """
+    provider, sep, model = key.partition(":")
+    if not sep:
+        return key
+    return f"{provider}:{canonical_model_id(model)}"
+
+
 def pick_rate(table: dict[str, dict], wanted: str) -> tuple[str, dict] | None:
-    """Find a rate row by loose model-name match (keys are `provider:model`)."""
+    """Find a rate row for a model id, matching the way the engine does.
+
+    Keys are `provider:model`, and neither side is guaranteed bare: a real model
+    id carries a LiteLLM route prefix and sometimes a context tag
+    (`aws/claude-opus-5`, `aws/claude-opus-4-8[1m]`), and a table supplied via
+    SPOTLIGHTS_RATES_FILE may key its rows the same way -- which is why the
+    engine's own loader canonicalizes keys too. So canonicalize BOTH sides with
+    the engine's `canonical_model_id` and match exactly.
+
+    A substring match failed both ways: `"aws/claude-opus-5" in
+    "anthropic:claude-opus-5"` is false, so a correctly-spelled model silently
+    got no rate and dropped out of the blend; and a short `wanted` like `"opus"`
+    matched whichever `opus` row dict iteration reached first.
+
+    `wanted` may be a bare model id or a full `provider:model` key.
+    """
     if not wanted:
         return None
-    w = wanted.lower()
+    target = canonical_rate_key(wanted) if ":" in wanted else canonical_model_id(wanted)
     for key, val in table.items():
-        if w in key.lower():
+        canon = canonical_rate_key(key)
+        if target in (canon, canon.partition(":")[2]):
             return key, val
     return None
 
@@ -229,18 +259,20 @@ def main() -> int:
     # Both CLIs run, so a run's blended rate is a mix of the two models'. Split
     # evenly: the observed per-CLI token split is close to even and the
     # difference is well inside the band width.
-    def blended_for(table: dict[str, dict]) -> tuple[float, list[str]]:
-        used, total, n = [], 0.0, 0
+    def blended_for(table: dict[str, dict]) -> tuple[float, list[str], list[str]]:
+        used, missing, total, n = [], [], 0.0, 0
         for wanted in (args.claude_model, args.codex_model):
             hit = pick_rate(table, wanted)
             if hit:
                 used.append(hit[0])
                 total += blended_rate(hit[1], mix)
                 n += 1
-        return (total / n if n else 0.0), used
+            else:
+                missing.append(wanted)
+        return (total / n if n else 0.0), used, missing
 
-    ext_rate, ext_keys = blended_for(external)
-    con_rate, con_keys = blended_for(contracted)
+    ext_rate, ext_keys, ext_missing = blended_for(external)
+    con_rate, con_keys, con_missing = blended_for(contracted)
 
     print("=" * 96)
     print("SPOTLIGHTS SCOPING ADVISOR")
@@ -255,7 +287,15 @@ def main() -> int:
         print(f"  blended list price    ${ext_rate * 1e6:.2f} / MTok   "
               f"(matched {', '.join(ext_keys)})")
     if con_rate:
-        print(f"  blended contracted    ${con_rate * 1e6:.2f} / MTok")
+        print(f"  blended contracted    ${con_rate * 1e6:.2f} / MTok   "
+              f"(matched {', '.join(con_keys)})")
+    # An unpriced model is not an error in the engine either -- it lands in
+    # cost.coverage.unpriced_models, contributes $0, and drags priced_token_share
+    # below 1.0. Say so here rather than quietly averaging over one model.
+    for label, missing in (("list", ext_missing), ("contracted", con_missing)):
+        if missing:
+            print(f"  !! no {label}-price rate row for {', '.join(missing)}: excluded "
+                  f"from the blend, so every {label} figure below is PARTIAL")
     print(f"\n  calibration: {cal['corpus']['runs_total']} runs / "
           f"{cal['corpus']['repos']} repos / "
           f"{cal['corpus']['engine_versions']} engine versions")
