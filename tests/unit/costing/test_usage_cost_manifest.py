@@ -914,6 +914,121 @@ def test_models_requested_finds_a_model_pinned_on_any_single_step() -> None:
     assert requested.codex == "pinned-codex"
 
 
+def _manager_input(**overrides: object):
+    """A minimal `SpotlightsManagerInput`, overridable per test."""
+    from pathlib import Path
+
+    from spotlights_engine.schemas.common import SpotlightContext
+    from spotlights_engine.schemas.pipeline import SpotlightsManagerInput
+
+    return SpotlightsManagerInput(
+        repo_path=Path("/tmp/repo"),
+        context=SpotlightContext(objective="o"),
+        **overrides,  # type: ignore[arg-type]
+    )
+
+
+def test_run_config_records_the_non_default_knobs_the_run_actually_used() -> None:
+    """The block exists so two result sets can be told apart after the fact.
+
+    Two runs on one target at the same module count were measured 3.1x apart in
+    tokens purely because one had deep research off, and nothing in either
+    manifest said so. `enable_deep_research` is the field that mattered, so it
+    is asserted explicitly rather than only as part of a bulk comparison.
+    """
+    from pathlib import Path
+
+    from spotlights_engine.agent_proposals import AgentProposalsConfig
+    from spotlights_engine.candidate_discovery import DiscoveryConfig
+    from spotlights_engine.proposal_from_finding_creator import ProposalFromFindingConfig
+    from spotlights_engine.spotlights_manager.api import SpotlightsManagerConfig
+    from spotlights_engine.spotlights_manager.orchestrator import _run_config
+
+    cfg = SpotlightsManagerConfig(
+        artifacts_dir=Path("/tmp/artifacts"),
+        output_folder=Path("/tmp/out"),
+        max_parallel_sessions=4,
+        discovery=DiscoveryConfig(num_review_iterations=1),
+        proposal_from_finding=ProposalFromFindingConfig(max_parallel_pairs=2),
+        agent_proposals=AgentProposalsConfig(max_parallel_candidates=3),
+    )
+    recorded = _run_config(
+        _manager_input(
+            max_findings_per_module=5,
+            include_candidate_hotspots=False,
+            enable_claude_search=True,
+            enable_deep_research=False,
+        ),
+        cfg,
+    )
+
+    assert recorded.enable_deep_research is False
+    assert recorded.review_iterations == 1
+    assert recorded.max_findings_per_module == 5
+    assert recorded.include_candidate_hotspots is False
+    assert recorded.enable_claude_search is True
+    assert recorded.max_parallel_sessions == 4
+    assert recorded.max_parallel_pairs == 2
+    assert recorded.max_parallel_candidates == 3
+
+
+def test_run_config_reports_step_field_defaults_not_zero_for_unset_configs() -> None:
+    """`cfg.discovery`/`proposal_from_finding`/`agent_proposals` are `| None`.
+
+    A `None` there does not mean "no parallelism" or "no review" — it means the
+    step falls back to its own field default and runs 3 review iterations, 5
+    pairs wide, 5 candidates wide. Recording 0 would misdescribe the run, which
+    is the same trap `_models_requested` avoids for step 2's Codex default.
+    """
+    from pathlib import Path
+
+    from spotlights_engine.spotlights_manager.api import SpotlightsManagerConfig
+    from spotlights_engine.spotlights_manager.orchestrator import _run_config
+
+    cfg = SpotlightsManagerConfig(
+        artifacts_dir=Path("/tmp/artifacts"), output_folder=Path("/tmp/out")
+    )
+    recorded = _run_config(_manager_input(), cfg)
+
+    assert recorded.review_iterations == 3
+    assert recorded.max_parallel_pairs == 5
+    assert recorded.max_parallel_candidates == 5
+    assert recorded.max_parallel_sessions == 1
+    # Engine defaults for the input-side knobs, recorded as such.
+    assert recorded.max_findings_per_module == 30
+    assert recorded.include_candidate_hotspots is True
+    assert recorded.enable_deep_research is True
+
+
+def test_run_manifest_leaves_run_config_null_when_the_caller_cannot_supply_it() -> None:
+    """Empty, not a block of zeros.
+
+    `RunManifestRunConfig`'s field defaults are zero/False, not the engine's real
+    defaults, so a default-constructed block would assert "this run used 0 review
+    iterations". A caller with nothing to record leaves it `None`, the same way
+    `external_cost` reads as `null` rather than $0.
+    """
+    manifest = build_run_manifest(
+        run_id="r",
+        date="2026-01-01T00:00:00Z",
+        objective="o",
+        provenance={},
+        config_fingerprint={},
+        records=[],
+        cost=compute_cost([], {}),
+        wall_clock_s=0.0,
+        candidates_path="",
+        num_candidates=0,
+        module_status={},
+        notes=[],
+    )
+    assert manifest.run_config is None
+    # What `write_run_manifest` actually lands on disk: it dumps without
+    # `exclude_none`, so the key is present and null rather than gone.
+    assert manifest.model_dump(mode="json")["run_config"] is None
+    assert "run_config" not in manifest.model_dump(exclude_none=True)
+
+
 def test_cost_block_matches_the_translation_build_run_manifest_performs() -> None:
     """`cost_block` is the extraction of an inline translation, so it must be
     exactly that translation — including the one field it deliberately drops.
