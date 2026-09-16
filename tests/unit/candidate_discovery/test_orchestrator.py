@@ -20,6 +20,7 @@ from spotlights_engine.candidate_discovery.api import (
     discover,
 )
 from spotlights_engine.candidate_discovery.errors import (
+    DiscoveryAgentFailureError,
     DiscoveryMutationError,
     DiscoverySetupError,
     DiscoveryValidationError,
@@ -316,6 +317,37 @@ def test_review_failure_salvages_earlier_candidates(repo_artifacts, monkeypatch)
     # The final artifact comes from the last *good* iteration, not the failed one.
     final = json.loads((artifacts / "candidates.json").read_text())
     assert [c["id"] for c in final["candidates"]] == ["cand-v1_foo-0001"]
+
+
+def test_contract_violation_stays_fatal_even_with_salvage_available(
+    repo_artifacts, monkeypatch
+):
+    """Salvage is for agents the environment killed, not agents that misbehave.
+
+    A payload that is well-formed JSON but the wrong shape is a reproducible
+    bug in the agent's output contract. Retrying it produced the same result,
+    so reporting DEGRADED with stale candidates would hide it - the module has
+    to fail even though there *is* something on disk to keep.
+    """
+    repo, artifacts = repo_artifacts
+    claude = FakeAgentRunner(
+        "claude_code",
+        responses=[_cands([("cand-0001", "src/v1/foo/x.py")])],
+    )
+    # Parses as JSON, so it reaches the model; `candidates` is missing, so it
+    # fails validation on both attempts.
+    wrong_shape = '{"module_qualified_name": "v1/foo"}'
+    codex = FakeAgentRunner("codex", responses=[wrong_shape, wrong_shape])
+    _install_runners(monkeypatch, claude, codex)
+
+    cfg = _make_config(repo, artifacts, num_reviews=2)
+    with pytest.raises(DiscoveryValidationError) as exc:
+        discover(_make_input(), config=cfg)
+
+    # Specifically *not* the salvageable subclass.
+    assert not isinstance(exc.value, DiscoveryAgentFailureError)
+    assert exc.value.context["iteration"] == 1
+    assert "schema validation failed" in str(exc.value)
 
 
 def test_bootstrap_failure_still_raises(repo_artifacts, monkeypatch):
