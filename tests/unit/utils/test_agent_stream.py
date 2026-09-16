@@ -35,6 +35,13 @@ CLAUDE_SERVER_ERROR_RETRY = (
 )
 CLAUDE_COMPACTING = b'{"type":"system","status":"compacting"}\n'
 
+
+# claude, on a failure no backoff can fix: 401 is absent from the retryable
+# status list on purpose.
+CLAUDE_AUTH_RETRY = (
+    b'{"type":"system","subtype":"api_retry","attempt":1,"max_retries":10,'
+    b'"error_status":401,"error":"authentication_error"}\n'
+)
 # The CLI retrying without knowing why: `error_status` is null and the reason is
 # the literal string "unknown". Verbatim from
 # cand-document_understanding_workflow-0007.claude.stdout.
@@ -121,12 +128,7 @@ def test_compaction_is_fatal():
 def test_auth_failure_is_fatal():
     # 401 is not in the retryable status list, so it must not be retried -- this
     # is the WSL misconfiguration that masquerades as a schema failure.
-    stream = (
-        b'{"type":"system","subtype":"api_retry","attempt":1,"max_retries":10,'
-        b'"error_status":401,"error":"authentication_error"}\n'
-    )
-    assert retry_class(stream) == "fatal"
-
+    assert retry_class(CLAUDE_AUTH_RETRY) == "fatal"
 
 
 def test_unknown_retry_reason_gets_the_benefit_of_the_doubt():
@@ -147,6 +149,42 @@ def test_unknown_reason_does_not_override_a_recorded_status():
         b'{"type":"system","subtype":"api_retry","attempt":1,"max_retries":10,'
         b'"error_status":401,"error":"unknown"}\n'
     )
+    assert retry_class(stream) == "fatal"
+
+
+def test_recovered_transient_does_not_rescue_a_trailing_auth_failure():
+    """A 429 the stream survived must not vouch for the 401 that killed it.
+
+    Found by review of the first Stage A commit. `retry_statuses` is cumulative,
+    so feeding the whole list to the verdict let the historical 429 match the
+    rate-limit pattern and return `retryable` -- retrying an auth failure
+    forever, which is precisely what the fatal rule exists to prevent. The
+    verdict reads the final retry event alone.
+    """
+    stream = CLAUDE_RATE_LIMIT_RETRY + CLAUDE_CLEAN_RESULT + CLAUDE_AUTH_RETRY
+    assert scan(stream)["retry_statuses"] == [429, 401]  # history is still kept
+    assert retry_class(stream) == "fatal"
+
+
+def test_an_earlier_auth_failure_does_not_poison_a_trailing_rate_limit():
+    """The converse: reading the tail must not mean "any fatal signal wins"."""
+    stream = CLAUDE_AUTH_RETRY + CLAUDE_CLEAN_RESULT + CLAUDE_RATE_LIMIT_RETRY
+    assert retry_class(stream) == "retryable"
+
+
+def test_a_stale_reason_does_not_decide_for_a_later_retry():
+    """`retry_reason` keeps the last reason it could read, for the human text.
+
+    The verdict cannot use that: here the trailing retry names no reason at all,
+    so the earlier "rate_limit" would be read as this failure's reason. Only the
+    tail event's own 401 may decide.
+    """
+    unnamed_401 = (
+        b'{"type":"system","subtype":"api_retry","attempt":2,"max_retries":10,'
+        b'"error_status":401}\n'
+    )
+    stream = CLAUDE_RATE_LIMIT_RETRY + CLAUDE_CLEAN_RESULT + unnamed_401
+    assert scan(stream)["retry_reason"] == "rate_limit"  # human text unchanged
     assert retry_class(stream) == "fatal"
 
 

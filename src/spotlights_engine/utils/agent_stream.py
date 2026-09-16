@@ -73,6 +73,15 @@ def scan(stdout: bytes) -> dict[str, object]:
     # off mid-flight. Track where each was last seen rather than merely whether.
     last_retry_i = -1
     last_clean_i = -1
+    # `retry_reason` below is the last reason we could *read*, which is what the
+    # human text wants. A verdict needs something stricter: the reason and status
+    # of the final retry event alone. Keeping the cumulative list and reusing it
+    # for the verdict let a recovered 429 earlier in the stream rescue a trailing
+    # 401 -- i.e. retry an auth failure forever, the exact outcome the fatal rule
+    # exists to prevent. So track the tail event separately, resetting both on
+    # every retry so nothing carries over from one that was survived.
+    last_retry_reason: str | None = None
+    last_retry_status: int | None = None
 
     for i, raw in enumerate(stdout.splitlines()):
         raw = raw.strip()
@@ -112,11 +121,16 @@ def scan(stdout: bytes) -> dict[str, object]:
                     api_retries += 1
                     last_retry_i = i
                     reason = event.get("error")
-                    if isinstance(reason, str) and reason:
+                    named = isinstance(reason, str) and bool(reason)
+                    if named:
                         found["retry_reason"] = reason
+                    last_retry_reason = reason if named else None
                     status = event.get("error_status")
                     if isinstance(status, int):
                         statuses.append(status)
+                        last_retry_status = status
+                    else:
+                        last_retry_status = None
                 if event.get("status") == "compacting":
                     found["compacting"] = True
 
@@ -124,6 +138,10 @@ def scan(stdout: bytes) -> dict[str, object]:
         found["api_retries"] = api_retries
     if statuses:
         found["retry_statuses"] = statuses
+    if last_retry_reason is not None:
+        found["last_retry_reason"] = last_retry_reason
+    if last_retry_status is not None:
+        found["last_retry_status"] = last_retry_status
     if api_retries and last_retry_i > last_clean_i:
         found["retries_at_tail"] = True
     return found
@@ -196,15 +214,15 @@ def retry_class(stdout: bytes, stderr: bytes = b"") -> RetryClass | None:
         if not found.get("retries_at_tail"):
             return None
         tail_parts: list[str] = []
-        reason = found.get("retry_reason")
+        reason = found.get("last_retry_reason")
         if (
             isinstance(reason, str)
             and reason.strip().lower() not in _UNINFORMATIVE_REASONS
         ):
             tail_parts.append(reason)
-        statuses = found.get("retry_statuses")
-        if statuses is not None:
-            tail_parts.append(str(statuses))
+        status = found.get("last_retry_status")
+        if status is not None:
+            tail_parts.append(str(status))
         tail = " ".join(tail_parts)
         verdict = _classify(tail)
         if verdict is not None:
