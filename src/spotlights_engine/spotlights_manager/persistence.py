@@ -306,6 +306,7 @@ def build_input_fingerprint(
     include_candidate_hotspots: bool = True,
     enable_claude_search: bool = False,
     enable_deep_research: bool = True,
+    skip_container_modules: bool = False,
 ) -> dict[str, Any]:
     fp: dict[str, Any] = {
         "repo_path": str(repo_path),
@@ -319,6 +320,12 @@ def build_input_fingerprint(
     # existed still resume; see design/disable_deep_research.md §6.
     if not enable_deep_research:
         fp["enable_deep_research"] = False
+    # Same reasoning, same shape: resuming with this flipped would mix policies
+    # -- modules the first run never discovered would be discovered now, under a
+    # manifest claiming a single policy. Omitted while off (the default) so run
+    # dirs created before the flag existed still resume.
+    if skip_container_modules:
+        fp["skip_container_modules"] = True
     return fp
 
 
