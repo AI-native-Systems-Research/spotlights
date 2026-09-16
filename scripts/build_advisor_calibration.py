@@ -173,7 +173,50 @@ def main() -> int:
     barren = [b for b in barren if b is not None]
 
     def tok_per_mod(rows: list[dict]) -> list[float]:
-        return [r["total_tokens"] / r["mods"] for r in rows if r.get("mods")]
+        # Some runs (an older artifact generation) left the claude-side tokens
+        # unattributed and so carry no run total. They still contribute their
+        # fan-out counts above; they cannot contribute a tokens-per-X figure.
+        return [r["total_tokens"] / r["mods"] for r in rows
+                if r.get("mods") and r.get("total_tokens")]
+
+    # --- what discovery review costs, measured within each run ---------------
+    # `review_iterations` is not recorded in these manifests but is exactly
+    # recoverable from the per-module discovery iteration count, and the cost is
+    # then measurable without a cross-repo comparison: iteration n=0 is the
+    # no-review cost, every later iteration is what review added.
+    rev_on = [r for r in drivers if r.get("review_iterations")]
+    # The token halves are only meaningful where the run's tokens were fully
+    # attributed. An older artifact generation left the claude side out, which
+    # makes disc_tokens_first a small residue and the ratio meaningless -- those
+    # runs still contribute a valid candidate count, which is not token-based.
+    rev_tok = [r for r in rev_on if r.get("total_tokens") and r.get("disc_tokens_first")]
+    review: dict[str, Any] = {
+        "recovered_from": (
+            "len(per_module_telemetry[*].discovery_iterations) - 1; uniform within "
+            "a run and perfectly bimodal across this corpus (--no-review or the "
+            "default 3 passes)"
+        ),
+        "runs_review_on": len(rev_on),
+        "runs_review_off": sum(1 for r in drivers
+                               if r.get("review_iterations") == 0),
+        "discovery_multiplier": band(
+            [(r["disc_tokens_first"] + r["disc_tokens_review"]) / r["disc_tokens_first"]
+             for r in rev_tok]
+        ),
+        "candidate_growth": band(
+            [r["candidates_found"] / r["candidates_first"]
+             for r in rev_on if r.get("candidates_first")]
+        ),
+        "discovery_share_review_on": band(
+            [r["disc_tokens"] / r["total_tokens"] for r in rev_tok]
+        ),
+        "meaning": (
+            "review is an alternating claude/codex debate over the candidate set. "
+            "It multiplies the discovery step by the multiplier above while growing "
+            "the final candidate count only slightly -- it mostly rewrites "
+            "candidates rather than adding them."
+        ),
+    }
 
     snapshot: dict[str, Any] = {
         "_note": (
@@ -189,10 +232,17 @@ def main() -> int:
             "runs_deep_research_off": len(no_dr),
             "repos": len(labels),
             "engine_versions": len({r.get("engine") for r in drivers}),
+            "runs_without_token_total": sum(
+                1 for r in drivers if not r.get("total_tokens")
+            ),
             "caveat": (
-                "review_iterations and max_findings_per_module are NOT recorded in "
-                "these manifests, so runs differing several-fold in cost are "
-                "indistinguishable here. This is the dominant source of band width."
+                "No run in this corpus records its CLI invocation. review_iterations "
+                "and deep-research on/off are recovered from telemetry (see the "
+                "'review' block); max_findings_per_module and debug-first-n-pairs are "
+                "recoverable only when they bound, as a plateau in max "
+                "pairs-per-module -- an unbound cap leaves no trace, though it also "
+                "costs nothing. Cross-repo variance (23x in tokens/module) remains "
+                "the dominant source of band width, not the unrecorded knobs."
             ),
         },
         "noise_floor": {
@@ -211,7 +261,18 @@ def main() -> int:
         "tokens_per_module": {
             "full_pipeline": band(tok_per_mod(full)),
             "deep_research_off": band(tok_per_mod(no_dr)),
+            # Split for visibility only. The advisor still anchors on
+            # full_pipeline: the review-on-and-deep-research-on cell holds too few
+            # token-bearing runs to anchor an estimate, and both are tiny scopes
+            # (8 and 1 modules) whose tokens/module is not representative.
+            "full_pipeline_review_on": band(
+                tok_per_mod([r for r in full if r.get("review_iterations")])
+            ),
+            "full_pipeline_review_off": band(
+                tok_per_mod([r for r in full if r.get("review_iterations") == 0])
+            ),
         },
+        "review": review,
         "fanout": {
             "candidates_per_module": band(
                 [r["candidates_found"] / r["mods"] for r in full if r.get("mods")]
@@ -225,7 +286,8 @@ def main() -> int:
         },
         "runtime": {
             "tokens_per_api_second": band(
-                [r["total_tokens"] / r["api_s"] for r in drivers if r.get("api_s")]
+                [r["total_tokens"] / r["api_s"] for r in drivers
+                 if r.get("api_s") and r.get("total_tokens")]
             ),
             "observed_concurrency": band(
                 [r["api_s"] / r["wall_s"] for r in drivers
@@ -240,11 +302,12 @@ def main() -> int:
                 "pairs": r["pairs"],
                 "total_tokens": r["total_tokens"],
                 "deep_research": bool(r.get("pairs")),
+                "review_iterations": r.get("review_iterations"),
                 "code_loc": (feats.get(r["run"]) or {}).get("scope", {}).get("own_code_loc"),
                 "api_s": r.get("api_s"),
                 "wall_s": r.get("wall_s"),
             }
-            for r in sorted(drivers, key=lambda x: -x["total_tokens"])
+            for r in sorted(drivers, key=lambda x: -(x["total_tokens"] or 0))
         ],
     }
 
@@ -254,6 +317,14 @@ def main() -> int:
     print(f"wrote {args.out}")
     print(f"\ncorpus: {len(drivers)} runs, {len(full)} full pipeline, "
           f"{len(no_dr)} with deep research off, {len(labels)} repos")
+    dm, cg = review["discovery_multiplier"], review["candidate_growth"]
+    if dm:
+        print(f"\nreview (recovered on {review['runs_review_on']} runs, "
+              f"off on {review['runs_review_off']}):")
+        print(f"  multiplies the discovery step by {dm['p50']:.2f}x "
+              f"(range {dm['min']:.2f}-{dm['max']:.2f}x, n={dm['n']})")
+        print(f"  grows the candidate count by     {cg['p50']:.2f}x "
+              f"(range {cg['min']:.2f}-{cg['max']:.2f}x)")
     print("\nstep shares (per-run distribution, local per-invocation records):")
     for k, b in sorted(step_bands.items(), key=lambda kv: -(kv[1].get("p50") or 0)):
         if b:

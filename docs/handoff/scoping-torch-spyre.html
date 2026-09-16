@@ -1,0 +1,704 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scoping torch-spyre</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --paper:   #eff3f5;
+    --surface: #ffffff;
+    --sunken:  #e4ebee;
+    --ink:     #111a21;
+    --ink-2:   #40525f;
+    --ink-3:   #6d818e;
+    --rule:    #ccd7dd;
+    --rule-2:  #dde5e9;
+    --signal:  #0d6d89;
+    --signal-w:#e3eff3;
+    --warn:    #9c5a10;
+    --warn-w:  #f6ecdc;
+    --good:    #2c6540;
+
+    --serif: "Newsreader", "Iowan Old Style", Georgia, serif;
+    --sans:  "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    --mono:  "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+
+    --col:  min(68ch, 100%);
+    --wide: min(1040px, 100%);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:   #0c1216;
+      --surface: #141d24;
+      --sunken:  #0a1015;
+      --ink:     #e5edf1;
+      --ink-2:   #a3b4bf;
+      --ink-3:   #7a8d99;
+      --rule:    #2a3941;
+      --rule-2:  #1e2b32;
+      --signal:  #5cc0da;
+      --signal-w:#123039;
+      --warn:    #dda354;
+      --warn-w:  #2f2415;
+      --good:    #6cb98a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:   #0c1216;
+    --surface: #141d24;
+    --sunken:  #0a1015;
+    --ink:     #e5edf1;
+    --ink-2:   #a3b4bf;
+    --ink-3:   #7a8d99;
+    --rule:    #2a3941;
+    --rule-2:  #1e2b32;
+    --signal:  #5cc0da;
+    --signal-w:#123039;
+    --warn:    #dda354;
+    --warn-w:  #2f2415;
+    --good:    #6cb98a;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16.5px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page { max-width: 1180px; margin: 0 auto; padding: 0 clamp(1rem, 4vw, 3.5rem) 6rem; }
+
+  section {
+    display: grid;
+    grid-template-columns: 8.5rem minmax(0, 1fr);
+    gap: 0 2.5rem;
+    padding: 2.75rem 0;
+    border-top: 1px solid var(--rule-2);
+  }
+  section > .rail {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    padding-top: 0.55rem;
+  }
+  section > .body { display: flex; flex-direction: column; gap: 1.25rem; min-width: 0; }
+  section > .body > * { margin: 0; }
+  .col  { max-width: var(--col); }
+  .wide { max-width: var(--wide); }
+
+  @media (max-width: 720px) {
+    section { grid-template-columns: minmax(0, 1fr); gap: 0.75rem; }
+    section > .rail { padding-top: 0; }
+  }
+
+  h1 {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: clamp(2.4rem, 6.4vw, 3.9rem);
+    line-height: 1.03;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    margin: 0;
+  }
+  h2 {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: clamp(1.5rem, 3.2vw, 1.95rem);
+    line-height: 1.18;
+    letter-spacing: -0.012em;
+    text-wrap: balance;
+  }
+  h3 { font-family: var(--sans); font-weight: 600; font-size: 0.94rem; }
+  p  { max-width: var(--col); }
+  a  { color: var(--signal); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  strong { font-weight: 600; }
+  code, .num { font-family: var(--mono); font-size: 0.88em; font-variant-numeric: tabular-nums; }
+  .lede {
+    font-family: var(--serif);
+    font-size: clamp(1.13rem, 2.2vw, 1.34rem);
+    line-height: 1.5;
+    color: var(--ink-2);
+    max-width: 48ch;
+  }
+  .fine { font-size: 0.845rem; line-height: 1.55; color: var(--ink-3); max-width: 72ch; }
+
+  :focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+  @media print {
+    body { background: #fff; color: #000; font-size: 10.5pt; }
+    section { break-inside: avoid; }
+  }
+
+  header.mast { padding: clamp(3rem, 8vw, 5.5rem) 0 2.75rem; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--signal);
+    margin: 0 0 1.35rem;
+  }
+  .mast .lede { margin: 1.5rem 0 0; }
+  .subject {
+    display: flex; flex-wrap: wrap; gap: 0.4rem 1.6rem;
+    margin: 2.25rem 0 0; padding-top: 1.1rem;
+    border-top: 1px solid var(--rule);
+    font-family: var(--mono); font-size: 0.78rem; color: var(--ink-3);
+  }
+  .subject b { color: var(--ink-2); font-weight: 500; }
+
+  .status {
+    display: grid; grid-template-columns: 9rem minmax(0, 1fr);
+    gap: 0.75rem 1.5rem; align-items: baseline;
+    margin: 1.9rem 0 0; padding: 1.05rem 0 0;
+    border-top: 1px solid var(--rule-2);
+    max-width: var(--wide);
+  }
+  .status dt {
+    font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--warn);
+  }
+  .status dd { margin: 0; font-size: 0.9rem; color: var(--ink-2); max-width: 74ch; }
+  @media (max-width: 620px) { .status { grid-template-columns: minmax(0,1fr); } }
+
+  .verdict {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 1px; background: var(--rule-2); border: 1px solid var(--rule-2);
+    margin-top: 2.5rem;
+  }
+  .verdict > div { background: var(--surface); padding: 1.4rem 1.5rem 1.5rem; }
+  .verdict dt {
+    font-family: var(--mono); font-size: 0.68rem; letter-spacing: 0.12em;
+    text-transform: uppercase; color: var(--ink-3); margin-bottom: 0.7rem;
+  }
+  .verdict dd {
+    margin: 0; font-family: var(--mono); font-size: 1.7rem; font-weight: 500;
+    line-height: 1.05; letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
+  }
+  .verdict dd small {
+    display: block; font-family: var(--sans); font-size: 0.82rem; font-weight: 400;
+    letter-spacing: 0; color: var(--ink-2); margin-top: 0.7rem; line-height: 1.45;
+  }
+  .verdict .accent dd { color: var(--signal); }
+  .verdict .caution dd { color: var(--warn); }
+
+  .tw { overflow-x: auto; max-width: var(--wide); }
+  table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+  th, td { text-align: left; padding: 0.6rem 1rem 0.6rem 0; white-space: nowrap; }
+  thead th {
+    font-family: var(--mono); font-size: 0.68rem; font-weight: 500;
+    letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-3);
+    border-bottom: 1px solid var(--rule); padding-bottom: 0.5rem;
+  }
+  tbody tr { border-bottom: 1px solid var(--rule-2); }
+  tbody tr:last-child { border-bottom: 0; }
+  td.n, th.n { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  td.name { white-space: normal; min-width: 14rem; }
+  td.note { white-space: normal; min-width: 16rem; }
+  tr.here { background: var(--signal-w); }
+  tr.here td { font-weight: 600; }
+  tr.here td:first-child { box-shadow: inset 3px 0 0 var(--signal); padding-left: 0.8rem; }
+  tr.dim td { color: var(--ink-3); }
+  caption {
+    caption-side: bottom; text-align: left; padding-top: 0.9rem;
+    font-size: 0.82rem; color: var(--ink-3); white-space: normal;
+  }
+
+  .chip {
+    display: inline-block; font-family: var(--mono); font-size: 0.68rem;
+    font-weight: 500; letter-spacing: 0.07em; text-transform: uppercase;
+    padding: 0.16rem 0.5rem; border-radius: 2px; white-space: nowrap;
+  }
+  .c-exact { color: var(--surface); background: var(--ink); border: 1px solid var(--ink); }
+  .c-meas  { color: var(--good); border: 1px solid var(--good); }
+  .c-deriv { color: var(--signal); border: 1px dashed var(--signal); }
+  .c-unval { color: var(--ink-3); border: 1px dotted var(--ink-3); }
+
+  figure.bands { max-width: var(--wide); margin: 0; }
+  .bandgrid { display: grid; grid-template-columns: 12.5rem minmax(0, 1fr); gap: 0.55rem 1.5rem; align-items: center; }
+  .bandgrid .lbl { font-size: 0.85rem; color: var(--ink-2); line-height: 1.3; }
+  .bandgrid .lbl b { display: block; font-weight: 600; color: var(--ink); }
+  .track {
+    position: relative; height: 2.9rem; background: var(--sunken);
+    border-left: 1px solid var(--rule); border-right: 1px solid var(--rule);
+  }
+  .track .tick { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--rule-2); }
+  .band {
+    position: absolute; top: 0.65rem; bottom: 0.65rem;
+    background: var(--signal-w); border: 1px solid var(--signal);
+  }
+  .band.wide-band { background: transparent; border-style: dashed; }
+  .zone {
+    position: absolute; top: 0.3rem; bottom: 0.3rem;
+    background: var(--warn-w); border-left: 2px solid var(--warn); border-right: 2px solid var(--warn);
+  }
+  .p50 { position: absolute; top: 0.65rem; bottom: 0.65rem; width: 2px; background: var(--signal); }
+  .axis { position: relative; height: 1.5rem; font-family: var(--mono); font-size: 0.7rem; color: var(--ink-3); }
+  .axis span { position: absolute; top: 0.25rem; transform: translateX(-50%); white-space: nowrap; }
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 0.4rem 1.5rem;
+    margin-top: 1.1rem; font-size: 0.8rem; color: var(--ink-2);
+  }
+  .legend i { display: inline-block; width: 1.6rem; height: 8px; vertical-align: 0.05em; margin-right: 0.5rem; }
+  .legend .k-band { background: var(--signal-w); box-shadow: 0 0 0 1px var(--signal) inset; }
+  .legend .k-zone { background: var(--warn-w); box-shadow: 0 0 0 1px var(--warn) inset; }
+
+  @media (max-width: 620px) {
+    .bandgrid { grid-template-columns: minmax(0,1fr); gap: 0.3rem; }
+    .bandgrid .lbl { margin-top: 0.9rem; }
+  }
+
+  pre.term {
+    max-width: var(--wide); overflow-x: auto; margin: 0;
+    padding: 1.15rem 1.3rem; background: var(--sunken);
+    border: 1px solid var(--rule-2); border-left: 3px solid var(--signal);
+    font-family: var(--mono); font-size: 0.8rem; line-height: 1.6;
+    color: var(--ink-2); white-space: pre; tab-size: 4;
+  }
+  pre.term b { color: var(--ink); font-weight: 600; }
+
+  .callout {
+    max-width: var(--wide); padding: 1.3rem 1.5rem;
+    background: var(--warn-w); border-left: 3px solid var(--warn);
+  }
+  .callout h3 { margin: 0 0 0.5rem; color: var(--warn); }
+  .callout p { margin: 0; max-width: 66ch; }
+  .callout p + p { margin-top: 0.7rem; }
+
+  ol.steps {
+    list-style: none; margin: 0; padding: 0; counter-reset: s;
+    display: flex; flex-direction: column; gap: 1.5rem; max-width: var(--col);
+  }
+  ol.steps li { counter-increment: s; display: grid; grid-template-columns: 2.3rem minmax(0,1fr); gap: 1rem; }
+  ol.steps li::before {
+    content: counter(s); font-family: var(--mono); font-size: 0.85rem;
+    font-weight: 600; color: var(--signal); padding-top: 0.13rem;
+  }
+  /* Both the label and the body sit in the content column; without an explicit
+     column the paragraph auto-places into the 2.3rem counter column and wraps
+     to one word per line. */
+  ol.steps b { grid-column: 2; font-size: 1rem; }
+  ol.steps p { grid-column: 2; margin: 0.35rem 0 0; }
+
+  footer {
+    border-top: 1px solid var(--rule); margin-top: 2rem; padding-top: 1.75rem;
+    display: flex; flex-direction: column; gap: 0.8rem;
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <header class="mast">
+    <p class="eyebrow">Spotlights &middot; scoping advisor &middot; cost estimate</p>
+    <h1>Scoping torch&#8209;spyre</h1>
+    <p class="lede">What a Spotlights run on the PyTorch Spyre backend would cost, what
+      to set, and how much of that figure to believe.</p>
+    <p class="subject">
+      <span>target <b>torch-spyre/torch-spyre</b></span>
+      <span>commit <b>ffa47c1f</b></span>
+      <span>Apache&nbsp;2.0</span>
+      <span><b>370</b> code files</span>
+      <span><b>80k</b> lines of product code</span>
+      <span><b>3</b> modules extracted</span>
+    </p>
+
+    <dl class="status">
+      <dt>Early work</dt>
+      <dd>This is an initial result, not a validated estimator. It is here to show what
+        the idea is &mdash; costing a run before you pay for it &mdash; and the numbers
+        should be read as an order of magnitude with a ceiling, not as a quote. The
+        accuracy we have measured so far is stated plainly below; it is not good, and
+        this report is written so you can see how far off it can be.</dd>
+      <dt>Cost to produce</dt>
+      <dd><strong>$1.35 at list price, $1.03 contracted.</strong> That is one real run of
+        the engine's module extractor &mdash; 628,246 tokens over 18 turns, 4.8 minutes
+        wall clock. Everything after that is local arithmetic against a stored
+        calibration and costs nothing. Pricing the run itself needed no analysis of the
+        repository.</dd>
+    </dl>
+
+    <dl class="verdict">
+      <div class="accent">
+        <dt>Start here</dt>
+        <dd>$12.69&ndash;$19.32<small>A discovery-only pass with
+          <code>--no-deep-research</code>. Well under an hour, and it shows you candidate
+          quality before you commit to the full pipeline.</small></dd>
+      </div>
+      <div>
+        <dt>Full run, best guess</dt>
+        <dd>$55&ndash;$116<small>The upper third of the honest band, because torch-spyre's
+          modules are unusually large. This is a judgement call from two near-neighbours,
+          not the tool's output &mdash; see the reality check.</small></dd>
+      </div>
+      <div class="caution">
+        <dt>Ceiling to set</dt>
+        <dd>--max-cost 116<small>The top of the honest band, enforced by the engine at
+          step boundaries. Use this rather than trusting the guess above.</small></dd>
+      </div>
+    </dl>
+  </header>
+
+  <section>
+    <div class="rail">The target</div>
+    <div class="body">
+      <h2>A good fit for the tool</h2>
+      <p><code>torch-spyre</code> is the PyTorch device-enablement layer for the IBM Spyre
+        accelerator &mdash; a C++ and Python codebase whose centre of gravity is
+        <code>_inductor</code>: compiler codegen, scratchpad allocation, and weight-stationary
+        scheduling. That is performance-critical code by construction, which is exactly the
+        material Spotlights is built to read.</p>
+      <p>It is also a <em>small</em> repository by the standards of this corpus: 80,000 lines
+        of product code, against RocksDB's 478,000 and vLLM's 470,000. That matters in both
+        directions, and the two effects pull against each other &mdash; few modules to pay
+        for, but unusually large ones.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail">Scope</div>
+    <div class="body">
+      <h2>What the extractor actually returned</h2>
+      <p>The advisor takes one input: the in-scope module count. That comes from step 1 of
+        the pipeline, which is a single repo-wide LLM pass. We ran it. It kept
+        <strong>three modules</strong>.</p>
+      <div class="tw">
+        <table>
+          <caption>Step 1 output, measured. Line counts are each module's own files, from
+            the checkout at <code>ffa47c1f</code>.</caption>
+          <thead>
+            <tr><th>Module</th><th class="n">Lines</th><th class="note">What the extractor called it</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="name"><code>torch_spyre/_inductor</code></td><td class="n">62,138</td>
+              <td class="note">TorchInductor backend for Spyre &mdash; scheduler, lowerings,
+                decompositions, codegen</td></tr>
+            <tr><td class="name"><code>torch_spyre/csrc</code></td><td class="n">10,758</td>
+              <td class="note">C++ extension built into <code>torch_spyre._C</code> &mdash;
+                device runtime, allocator, tensors</td></tr>
+            <tr><td class="name"><code>torch_spyre</code></td><td class="n">2,778</td>
+              <td class="note">Root package registering the Spyre device via
+                <code>PrivateUse1</code></td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div class="callout">
+        <h3>A cheap structural proxy got this badly wrong</h3>
+        <p>Before paying for step 1 we approximated the module count from directory
+          structure &mdash; count source directories above a size threshold. That method
+          returned <strong>7 to 10</strong> modules depending on the threshold, and would
+          have had us quote a ceiling of $270&ndash;$385 instead of $116. It over-counted
+          by a factor of 2 to 3.</p>
+        <p>The reason is that a module is a coherent unit of behaviour, not a directory
+          over a size threshold. The extractor folded the entire <code>_inductor</code>
+          subtree &mdash; <code>wsr</code>, <code>scratchpad</code>, <code>codegen</code>
+          and the rest &mdash; into one module, and dropped the small directories the
+          proxy had counted. <strong>$1.35 for step 1 is worth paying;</strong> guessing
+          the module count is the one shortcut that does not survive contact with the
+          real thing.</p>
+      </div>
+
+      <p>One consequence worth flagging before you run: <code>_inductor</code> is 78% of
+        the product code in a single module. Spotlights costs and reports per module, so
+        that one module will dominate both the bill and the findings, and there is no way
+        to buy a smaller slice of it through <code>--include</code>.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail">The output</div>
+    <div class="body">
+      <h2>The config ladder</h2>
+      <p>Each row is a setting you can pass, what it multiplies the bill by, and how firmly
+        that multiplier is established. Prices are today's blended rate for
+        <code>claude-opus-5</code> + <code>codex</code> at the measured token mix &mdash;
+        87% cache read, 10% cache write, 2% input, 1% output.</p>
+      <div class="tw">
+        <table>
+          <caption>torch-spyre at the extractor's 3 modules. The token range is the
+            observed spread of history, not a confidence interval.</caption>
+          <thead>
+            <tr>
+              <th>Setting</th><th class="n">Relative</th><th class="n">Tokens</th>
+              <th class="n">At list price</th><th>Basis</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="name"><code>--no-deep-research</code></td>
+              <td class="n">0.32&times;</td><td class="n">11&ndash;17M</td><td class="n">$12.69&ndash;$19.32</td>
+              <td><span class="chip c-meas">measured</span></td>
+            </tr>
+            <tr>
+              <td class="name"><code>--max-findings-per-module 5</code></td>
+              <td class="n">0.60&times;</td><td class="n">3&ndash;62M</td><td class="n">$2.99&ndash;$69.43</td>
+              <td><span class="chip c-deriv">derived</span></td>
+            </tr>
+            <tr>
+              <td class="name"><code>--max-findings-per-module 10</code></td>
+              <td class="n">0.83&times;</td><td class="n">4&ndash;86M</td><td class="n">$4.12&ndash;$95.61</td>
+              <td><span class="chip c-deriv">derived</span></td>
+            </tr>
+            <tr>
+              <td class="name"><code>--no-review</code></td>
+              <td class="n">0.86&times;</td><td class="n">4&ndash;89M</td><td class="n">$4.28&ndash;$99.37</td>
+              <td><span class="chip c-deriv">derived</span></td>
+            </tr>
+            <tr class="here">
+              <td class="name">default &mdash; no flags</td>
+              <td class="n">1.00&times;</td><td class="n">4&ndash;104M</td><td class="n">$4.98&ndash;$116</td>
+              <td><span class="chip c-meas">measured</span></td>
+            </tr>
+            <tr>
+              <td class="name"><code>--max-findings-per-module 20</code></td>
+              <td class="n">1.00&times;</td><td class="n">4&ndash;104M</td><td class="n">$4.98&ndash;$116</td>
+              <td><span class="chip c-deriv">derived</span></td>
+            </tr>
+            <tr>
+              <td class="name"><code>--enable-claude-search</code></td>
+              <td class="n">1.09&times;</td><td class="n">5&ndash;113M</td><td class="n">$5.44&ndash;$126</td>
+              <td><span class="chip c-unval">unvalidated</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>The labels are the point. <span class="chip c-meas">measured</span> means observed
+        on real runs with the setting as the only difference.
+        <span class="chip c-deriv">derived</span> means arithmetic on measured inputs.
+        <span class="chip c-unval">unvalidated</span> means the direction is known and the
+        magnitude is a guess &mdash; one row, flagged so nobody plans around it.</p>
+      <p>Two rows need reading carefully. <strong>Capping findings at 20 does nothing</strong>:
+        the observed yield is 14 findings per candidate, already under the cap, so the knob
+        is inert until pushed below the natural yield. And <strong>the
+        <code>--no-deep-research</code> band is not a subset of the default band</strong>
+        &mdash; its low end sits above the default's. That row is anchored on its own
+        measured runs with deep research off, of which there are only two, so its band is
+        narrow because the evidence is thin, not because the outcome is more certain.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail">Reality check</div>
+    <div class="body">
+      <h2>Where in that band to expect it</h2>
+      <p>A band from $5 to $116 is honest but not much use for a budget conversation. The
+        corpus can narrow it, informally. torch-spyre's three modules average <em>26,700
+        lines each</em> &mdash; against a corpus median nearer 2,800. Only RocksDB is
+        coarser, and it is the most expensive run we have.</p>
+      <div class="tw">
+        <table>
+          <caption>The corpus by module size, using the extractor's own module counts on
+            both sides so the comparison is like-for-like. Bigger modules have tended to
+            cost more each.</caption>
+          <thead>
+            <tr>
+              <th>Repository</th><th class="n">Modules</th><th class="n">Lines/module</th>
+              <th class="n">Tokens/module</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="dim"><td class="name">internal &mdash; scheduler</td><td class="n">11</td><td class="n">273</td><td class="n">1.5M</td></tr>
+            <tr class="dim"><td class="name">colpali</td><td class="n">15</td><td class="n">492</td><td class="n">5.8&ndash;6.6M</td></tr>
+            <tr class="dim"><td class="name">internal &mdash; document AI</td><td class="n">25</td><td class="n">2,831</td><td class="n">11.9M</td></tr>
+            <tr class="dim"><td class="name">internal &mdash; document AI</td><td class="n">31</td><td class="n">3,217</td><td class="n">5.8M</td></tr>
+            <tr class="dim"><td class="name">llm-d</td><td class="n">22</td><td class="n">5,054</td><td class="n">10.8M</td></tr>
+            <tr><td class="name">vLLM</td><td class="n">32</td><td class="n">14,687</td><td class="n">16.4M</td></tr>
+            <tr class="here"><td class="name">torch-spyre <em>(this estimate)</em></td><td class="n">3</td><td class="n">26,692</td><td class="n">16&ndash;35M?</td></tr>
+            <tr><td class="name">RocksDB</td><td class="n">8</td><td class="n">59,730</td><td class="n">34.5M</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Bracketing torch-spyre between vLLM and RocksDB gives 16&ndash;35M tokens per
+        module, so <strong>49&ndash;104M tokens, or roughly $55&ndash;$116</strong> for the
+        full pipeline. Note where that lands: the top third of the band, with its upper
+        edge essentially at the ceiling. If instead it behaves like the corpus median it
+        would be nearer <span class="num">20M</span> tokens and <span class="num">$22</span>.</p>
+
+      <figure class="bands">
+        <div class="bandgrid">
+          <div class="lbl"><b>What the tool says</b>3 modules, all it knows</div>
+          <div class="track">
+            <div class="tick" style="left:20.7%"></div>
+            <div class="tick" style="left:39.6%"></div>
+            <div class="tick" style="left:60.4%"></div>
+            <div class="tick" style="left:79.3%"></div>
+            <div class="band wide-band" style="left:7.0%; width:54.0%"></div>
+            <div class="p50" style="left:32.6%"></div>
+          </div>
+
+          <div class="lbl"><b>Where to plan</b>from the two nearest neighbours by module size</div>
+          <div class="track">
+            <div class="tick" style="left:20.7%"></div>
+            <div class="tick" style="left:39.6%"></div>
+            <div class="tick" style="left:60.4%"></div>
+            <div class="tick" style="left:79.3%"></div>
+            <div class="zone" style="left:48.1%; width:12.9%"></div>
+          </div>
+
+          <div></div>
+          <div class="axis">
+            <span style="left:0%">3M</span>
+            <span style="left:20.7%">10M</span>
+            <span style="left:39.6%">30M</span>
+            <span style="left:60.4%">100M</span>
+            <span style="left:79.3%">300M</span>
+            <span style="left:100%">1B</span>
+          </div>
+        </div>
+        <div class="legend">
+          <span><i class="k-band"></i>the advisor's band, and its midpoint</span>
+          <span><i class="k-zone"></i>nearest-neighbour expectation &mdash; weak evidence</span>
+        </div>
+      </figure>
+
+      <div class="callout">
+        <h3>How much weight this carries</h3>
+        <p>Not much, and it should be labelled that way in the meeting. The
+          size-to-cost relationship is a rank correlation of <span class="num">0.53</span>
+          over 14 runs &mdash; a real signal, far from a model. It would sit at
+          <span class="chip c-unval">unvalidated</span> on the ladder above. Treat
+          $55&ndash;$116 as the number to plan against and <code>--max-cost 116</code> as
+          the number that protects you if it is wrong.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail">Accuracy</div>
+    <div class="body">
+      <h2>How often this is wrong, measured</h2>
+      <p>The advisor was backtested by removing each repository from the calibration in turn
+        and re-estimating it. That is the fair test, and the results are unflattering on
+        purpose:</p>
+      <div class="tw">
+        <table>
+          <thead>
+            <tr><th>Band construction</th><th class="n">Coverage</th><th class="n">Width</th><th class="n">Midpoint error</th></tr>
+          </thead>
+          <tbody>
+            <tr class="here"><td class="name">observed min&ndash;max <em>(shipped)</em></td><td class="n">83%</td><td class="n">23.2&times;</td><td class="n">80% median</td></tr>
+            <tr><td class="name">p10&ndash;p90</td><td class="n">58%</td><td class="n">5.3&times;</td><td class="n">80% median</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>The wide band earns its width: it contained 10 of 12 held-out runs. The narrow one
+        looks more useful and contained only 7, which is worse than being vague. RocksDB is
+        the clearest miss &mdash; held out, the advisor predicted 25&ndash;113M tokens and
+        the truth was 276M.</p>
+      <p>The reason is not a modelling failure to be fixed. Tokens per module spans
+        23&times; across repositories, and the module count &mdash; the only input &mdash;
+        cannot narrow that. Even five identical replicate runs of one repository varied by
+        7.7%. So the tool is built to rank settings, which it does well, and to refuse to
+        forecast a price, which it cannot.</p>
+      <p class="fine">Calibration: 18 runs, 8 repositories, 6 engine versions. Eight
+        repositories is not many, and this is the part that should improve fastest as we
+        accumulate runs with their configuration recorded.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail">Recommendation</div>
+    <div class="body">
+      <h2>What to actually do</h2>
+      <ol class="steps">
+        <li>
+          <b>Set the ceiling before the first run.</b>
+          <p><code>--max-cost 116</code>. Note it is enforced at step boundaries, not as a
+            hard cap &mdash; a measured run with <code>--max-cost 15</code> finished at
+            $20.20 because the last step started while there was still headroom. Size it
+            below your real limit.</p>
+        </li>
+        <li>
+          <b>Buy a cheap look first.</b>
+          <p>Run with <code>--no-deep-research</code> &mdash; $13&ndash;$19 and well under
+            an hour. Read the candidates. If they are weak on this codebase you have
+            learned that for a sixth of the price. Note this is not "candidates only":
+            step 5 still runs on every candidate at roughly $0.86 each, which is where
+            most of that money goes.</p>
+        </li>
+        <li>
+          <b>Expect <code>_inductor</code> to be the whole story.</b>
+          <p>One of the three modules holds 78% of the product code. Excluding the other
+            two would save little and lose the device-registration and C++ runtime paths,
+            so scope everything &mdash; but read the report expecting the findings to
+            concentrate in one place.</p>
+        </li>
+        <li>
+          <b>Plan for the clock as well as the bill.</b>
+          <p>At 3 modules, expect 1&ndash;25 hours of API time, which is 0.2&ndash;4.6
+            hours of wall clock at the historical median concurrency of 5.4&times;.
+            Concurrency is yours to set; the corpus has run as high as 13.6&times;.</p>
+        </li>
+        <li>
+          <b>Re-use the extraction.</b>
+          <p>Step 1 has already been paid for. Copying
+            <code>project_tree.json</code> and <code>extractor_invocation.json</code> into
+            a fresh run's artifacts directory makes the orchestrator recover them from
+            disk, so no later run on this commit needs to pay the $1.35 again.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail">Reproduce</div>
+    <div class="body">
+      <h2>One paid step, then free arithmetic</h2>
+      <p>The first command is step 1 of the real pipeline &mdash; it is what produced the
+        module count above, and it is the only thing on this page that cost money. The
+        second makes no API call at all.</p>
+      <pre class="term"><b>$ spotlights-engine --repo ./torch-spyre --max-cost 0.01 \
+      --artifacts-dir ~/runs/torch-spyre/artifacts</b>
+
+17:37:25  extractor: start
+17:42:25  extractor: complete in 287.2s <b>— kept 3 modules</b>
+          628,246 tokens · 18 turns · 165.6s API · <b>$1.35 list / $1.03 contracted</b>
+
+<b>$ python scripts/advisor.py --modules 3</b>
+
+  blended list price    $1.12 / MTok
+  blended contracted    $0.85 / MTok
+  calibration: 18 runs / 8 repos / 6 engine versions
+
+  config                  rel      tokens range     list price range
+  --no-deep-research    0.32x     11M -     17M     $12.69 - $19.32
+  default               1.00x      4M -    104M       $4.98 - $116</pre>
+      <p class="fine">The <code>--max-cost 0.01</code> stops the run at the first step
+        boundary after extraction, which is how step 1 was bought without paying for
+        discovery. The calibration stores <em>tokens</em>, never dollars &mdash; pricing is
+        a rate-table lookup applied at estimate time, so a contract change does not
+        invalidate the history. At the contracted rate of $0.85/MTok rather than list,
+        every figure on this page falls by about 24%: the $55&ndash;$116 planning number
+        becomes $42&ndash;$88.</p>
+
+      <footer>
+        <p class="fine">Repository measured at commit
+          <code>ffa47c1f06b94d000de90d4e93a3afb0727ae9f0</code>. Module count is the
+          engine's own step-1 output, not an approximation. Extraction ran on
+          <code>claude-opus-4-8</code> and was priced from its token counts against the
+          engine's rate tables; the CLI's self-reported figure agreed to the cent.
+          Backtest: leave-one-repository-out over 12 runs, 83% coverage at the shipped
+          band width.</p>
+      </footer>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

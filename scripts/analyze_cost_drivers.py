@@ -64,6 +64,12 @@ def run_structure(result: dict, manifest: dict) -> dict:
         "disc_tokens": 0,
         "disc_api_s": 0.0,
         "candidates_found": 0,
+        # Discovery split into the first pass and the review passes that follow
+        # it. Review is an alternating claude/codex debate, so the two halves are
+        # billed at different rates and are worth keeping apart.
+        "disc_tokens_first": 0,
+        "disc_tokens_review": 0,
+        "candidates_first": 0,
         "pairs": 0,
         "proposal_api_s": 0.0,
         "agent_prop_calls": 0,
@@ -76,17 +82,33 @@ def run_structure(result: dict, manifest: dict) -> dict:
         # the majority of spend -- so they are the exclude-recommendation case.
         "productive_modules": 0,
     }
+    iter_counts: list[int] = []
     for mod, t in pmt.items():
         if mod not in billed:
             continue
         out["modules_with_telemetry"] += 1
-        for it in t.get("discovery_iterations") or []:
+        iters = t.get("discovery_iterations") or []
+        for it in iters:
             out["disc_calls"] += 1
-            out["disc_tokens"] += sum(int(it.get(b) or 0) for b in BUCKETS)
+            tok = sum(int(it.get(b) or 0) for b in BUCKETS)
+            out["disc_tokens"] += tok
             out["disc_api_s"] += float(it.get("api_time_s") or 0)
-            out["candidates_found"] += int(it.get("candidate_count") or 0)
+            if int(it.get("n") or 0) == 0:
+                out["disc_tokens_first"] += tok
+                out["candidates_first"] += int(it.get("candidate_count") or 0)
+            else:
+                out["disc_tokens_review"] += tok
             if "[1m]" in (it.get("model") or ""):
                 out["long_context_calls"] += 1
+        # `candidate_count` is the RUNNING TOTAL after an iteration, not that
+        # iteration's own yield -- a module reads 9, 13, 13, 16 with `added`
+        # explaining each step. Summing it across iterations multiplied every
+        # review-enabled run's candidate count by ~4x. Take the last iteration
+        # instead; `candidates_in_report` below cross-checks the result.
+        if iters:
+            out["candidates_found"] += int(iters[-1].get("candidate_count") or 0)
+            iter_counts.append(len(iters))
+
         pairs = _durations(t.get("proposal_from_finding_per_pair_durations_s"))
         out["pairs"] += len(pairs)
         out["proposal_api_s"] += sum(pairs)
@@ -96,6 +118,13 @@ def run_structure(result: dict, manifest: dict) -> dict:
         out["agent_prop_calls"] += len(cands)
         out["agent_prop_api_s"] += sum(cands)
         out["deep_research_s"] += float(t.get("deep_research_duration_s") or 0)
+
+    # The engine never recorded --review-iterations in these runs, but it is
+    # exactly recoverable: one discovery iteration per module means --no-review,
+    # four means the default 3 review passes. Uniform within a run.
+    out["review_iterations"] = (max(iter_counts) - 1) if iter_counts else None
+    rep_c = (result.get("report") or {}).get("candidates")
+    out["candidates_in_report"] = len(rep_c) if isinstance(rep_c, list) else None
 
     outs = manifest.get("outputs") or {}
     out["num_candidates"] = outs.get("num_candidates") or 0
@@ -150,43 +179,91 @@ def main() -> int:
     for res in sorted(args.paper_runs.glob("**/result.json")):
         name = str(res.parent.relative_to(args.paper_runs)).replace("\\", "/")
         man_p = res.parent / "run_manifest.json"
-        if not man_p.exists():
-            continue
-        man = _load(man_p)
-        if not man.get("total_tokens"):
-            continue
+        # A run whose manifest is missing (or reports zero tokens) still carries
+        # full per-module telemetry, so it can inform the fan-out counts that do
+        # not need a token total. Keep it with total_tokens=None and let each
+        # token-dependent analysis below filter it out, rather than discarding
+        # the run's structure entirely.
+        man = _load(man_p) if man_p.exists() else {}
         fe = feats.get(name) or {}
         s = run_structure(_load(res), man)
         s.update(
             run=name,
             repo=fe.get("repo", name.split("/")[0]),
             engine=fe.get("engine_sha") or "?",
-            total_tokens=man["total_tokens"],
-            mods=fe.get("n_modules_billed") or 0,
+            total_tokens=man.get("total_tokens") or None,
+            mods=fe.get("n_modules_billed") or s["modules_with_telemetry"] or 0,
             loc=(fe.get("scope") or {}).get("own_code_loc") or 0,
             wall_s=(man.get("timing") or {}).get("wall_clock_s"),
             api_s=(man.get("timing") or {}).get("api_time_s"),
         )
-        rows.append(s)
+        # Probe runs abort before any module is analyzed, so they carry no
+        # telemetry and no structure to learn from.
+        if s["modules_with_telemetry"]:
+            rows.append(s)
 
-    print(f"{len(rows)} runs with tokens + telemetry\n")
+    # Runs without a token total inform the fan-out counts but cannot appear in
+    # any tokens-per-X statistic, so every such analysis below uses `tokrows`.
+    tokrows = [r for r in rows if r.get("total_tokens")]
+    print(f"{len(rows)} runs with telemetry, {len(tokrows)} of them with a token total\n")
     print("=" * 128)
     print("PIPELINE FAN-OUT PER RUN")
     print("=" * 128)
     hdr = (
-        f"{'run':<44}{'eng':<9}{'mods':>5}{'disc':>6}{'cands':>7}{'pairs':>7}"
-        f"{'aprop':>7}{'tokens':>9}{'tok/mod':>9}{'tok/pair':>10}{'[1m]':>6}"
+        f"{'run':<40}{'eng':<9}{'rev':>4}{'mods':>5}{'disc':>6}{'cands':>7}{'rep':>6}"
+        f"{'pairs':>7}{'aprop':>7}{'tokens':>9}{'tok/mod':>9}{'tok/pair':>10}{'[1m]':>6}"
     )
     print(hdr)
     print("-" * 128)
-    for r in sorted(rows, key=lambda x: -x["total_tokens"]):
-        tpp = r["total_tokens"] / r["pairs"] if r["pairs"] else 0
+    for r in sorted(rows, key=lambda x: -(x["total_tokens"] or 0)):
+        tok = r["total_tokens"] or 0
+        tpp = tok / r["pairs"] if r["pairs"] else 0
+        rep = r["candidates_in_report"]
+        # `rep` is the final report's candidate count. It must equal `cands`; a
+        # mismatch means the running-total semantics were mishandled again.
+        flag = "" if rep in (None, r["candidates_found"]) else "!"
         print(
-            f"{r['run'][:43]:<44}{r['engine']:<9}{r['mods']:>5}{r['disc_calls']:>6}"
-            f"{r['candidates_found']:>7}{r['pairs']:>7}{r['agent_prop_calls']:>7}"
-            f"{r['total_tokens'] / 1e6:>8.1f}M{r['total_tokens'] / max(r['mods'], 1) / 1e6:>8.1f}M"
+            f"{r['run'][:39]:<40}{r['engine']:<9}"
+            f"{('?' if r['review_iterations'] is None else r['review_iterations']):>4}"
+            f"{r['mods']:>5}{r['disc_calls']:>6}"
+            f"{r['candidates_found']:>7}{(str(rep) + flag if rep is not None else '-'):>6}"
+            f"{r['pairs']:>7}{r['agent_prop_calls']:>7}"
+            f"{tok / 1e6:>8.1f}M{tok / max(r['mods'], 1) / 1e6:>8.1f}M"
             f"{tpp / 1e6:>9.2f}M{r['long_context_calls']:>6}"
         )
+
+    # ---------------------------------------------------- the review multiplier
+    # This is the knob the advisor previously had to flag as unvalidated. It is
+    # measurable within a single run: the first discovery pass is the no-review
+    # cost, everything after it is what review added.
+    print("\n" + "=" * 128)
+    print("WHAT DOES --review-iterations COST?   (within-run, so no cross-repo noise)")
+    print("=" * 128)
+    print(f"{'run':<40}{'rev':>4}{'first Mtok':>12}{'review Mtok':>13}"
+          f"{'disc x':>8}{'cands first':>12}{'cands final':>12}{'cand x':>8}"
+          f"{'disc share':>12}")
+    print("-" * 128)
+    rev_rows = [r for r in tokrows if r.get("review_iterations")]
+    for r in sorted(rev_rows, key=lambda x: -(x["total_tokens"] or 0)):
+        first, extra = r["disc_tokens_first"], r["disc_tokens_review"]
+        mult = (first + extra) / first if first else 0
+        cmult = r["candidates_found"] / r["candidates_first"] if r["candidates_first"] else 0
+        share = r["disc_tokens"] / r["total_tokens"]
+        print(f"{r['run'][:39]:<40}{r['review_iterations']:>4}{first / 1e6:>12.1f}"
+              f"{extra / 1e6:>13.1f}{mult:>7.2f}x{r['candidates_first']:>12}"
+              f"{r['candidates_found']:>12}{cmult:>7.2f}x{100 * share:>11.1f}%")
+    if rev_rows:
+        mults = [(r["disc_tokens_first"] + r["disc_tokens_review"]) / r["disc_tokens_first"]
+                 for r in rev_rows if r["disc_tokens_first"]]
+        cmults = [r["candidates_found"] / r["candidates_first"]
+                  for r in rev_rows if r["candidates_first"]]
+        print(f"\n  review multiplies the discovery step by "
+              f"{statistics.median(mults):.2f}x  (range {min(mults):.2f}-{max(mults):.2f}x, "
+              f"n={len(mults)})")
+        print(f"  and grows the candidate count by {statistics.median(cmults):.2f}x  "
+              f"(range {min(cmults):.2f}-{max(cmults):.2f}x)")
+        print("  -> review mostly REWRITES candidates rather than adding them: the")
+        print("     `modified` lists cover nearly every existing candidate each pass.")
 
     print("\n" + "=" * 128)
     print("HOW WELL DOES EACH COUNT TRACK TOTAL TOKENS?")
@@ -195,10 +272,10 @@ def main() -> int:
     print("-" * 128)
     for pred in ("mods", "loc", "disc_calls", "candidates_found", "pairs",
                  "agent_prop_calls", "disc_tokens", "num_candidates"):
-        xs = [float(r[pred]) for r in rows]
-        ys = [float(r["total_tokens"]) for r in rows]
+        xs = [float(r[pred]) for r in tokrows]
+        ys = [float(r["total_tokens"]) for r in tokrows]
         rho = spearman(xs, ys)
-        med, lo, hi, cv = cv_of_ratio(rows, "total_tokens", pred)
+        med, lo, hi, cv = cv_of_ratio(tokrows, "total_tokens", pred)
         ratio = hi / lo if lo else 0
         unit = 1e6
         print(
@@ -211,19 +288,21 @@ def main() -> int:
     print("\n" + "=" * 128)
     print("WHERE DO THE PAIRS COME FROM?")
     print("=" * 128)
-    print(f"{'run':<44}{'cands':>7}{'pairs':>7}{'pairs/cand':>12}{'pairs/mod':>11}{'cands/mod':>11}")
+    print(f"{'run':<40}{'rev':>4}{'cands':>7}{'pairs':>7}{'pairs/cand':>12}{'pairs/mod':>11}{'cands/mod':>11}")
     print("-" * 128)
     for r in sorted(rows, key=lambda x: -x["pairs"]):
         pc = r["pairs"] / r["candidates_found"] if r["candidates_found"] else 0
         print(
-            f"{r['run'][:43]:<44}{r['candidates_found']:>7}{r['pairs']:>7}{pc:>12.1f}"
+            f"{r['run'][:39]:<40}"
+            f"{('?' if r['review_iterations'] is None else r['review_iterations']):>4}"
+            f"{r['candidates_found']:>7}{r['pairs']:>7}{pc:>12.1f}"
             f"{r['pairs'] / max(r['mods'], 1):>11.1f}{r['candidates_found'] / max(r['mods'], 1):>11.1f}"
         )
 
     print("\n" + "=" * 128)
     print("IS THE CHEAP FRONT A PROXY FOR THE WHOLE RUN?")
     print("=" * 128)
-    med, lo, hi, cv = cv_of_ratio(rows, "total_tokens", "disc_tokens")
+    med, lo, hi, cv = cv_of_ratio(tokrows, "total_tokens", "disc_tokens")
     print(f"  total_tokens / discovery_tokens:  median {med:.1f}x   range {lo:.1f}-{hi:.1f}x   CV {cv:.0f}%")
     print("  -> discovery is step 2 of 5; if this multiplier is stable, measuring it")
     print("     on a real repo predicts the rest without running the expensive steps.")
@@ -233,14 +312,14 @@ def main() -> int:
     print("=" * 128)
     print(f"{'run':<44}{'wall_h':>8}{'api_h':>8}{'conc':>7}{'tok/api_s':>11}")
     print("-" * 128)
-    for r in sorted(rows, key=lambda x: -(x["api_s"] or 0)):
+    for r in sorted(tokrows, key=lambda x: -(x["api_s"] or 0)):
         w, a = r["wall_s"], r["api_s"]
         print(
             f"{r['run'][:43]:<44}{(w or 0) / 3600:>8.1f}{(a or 0) / 3600:>8.1f}"
             f"{(a / w if w and a else 0):>7.1f}{(r['total_tokens'] / a if a else 0):>11,.0f}"
         )
     med, lo, hi, cv = cv_of_ratio(
-        [r for r in rows if r.get("api_s")], "total_tokens", "api_s"
+        [r for r in tokrows if r.get("api_s")], "total_tokens", "api_s"
     )
     print(f"\n  tokens per API-second: median {med:,.0f}  range {lo:,.0f}-{hi:,.0f}  CV {cv:.0f}%")
 

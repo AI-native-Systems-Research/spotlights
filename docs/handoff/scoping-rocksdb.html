@@ -1,0 +1,749 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scoping RocksDB</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500;6..72,600&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --paper:   #eff3f5;
+    --surface: #ffffff;
+    --sunken:  #e4ebee;
+    --ink:     #111a21;
+    --ink-2:   #40525f;
+    --ink-3:   #6d818e;
+    --rule:    #ccd7dd;
+    --rule-2:  #dde5e9;
+    --signal:  #0d6d89;
+    --signal-w:#e3eff3;
+    --warn:    #9c5a10;
+    --warn-w:  #f6ecdc;
+    --good:    #2c6540;
+
+    --serif: "Newsreader", "Iowan Old Style", Georgia, serif;
+    --sans:  "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+    --mono:  "IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+
+    --col:  min(68ch, 100%);
+    --wide: min(1040px, 100%);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:   #0c1216;
+      --surface: #141d24;
+      --sunken:  #0a1015;
+      --ink:     #e5edf1;
+      --ink-2:   #a3b4bf;
+      --ink-3:   #7a8d99;
+      --rule:    #2a3941;
+      --rule-2:  #1e2b32;
+      --signal:  #5cc0da;
+      --signal-w:#123039;
+      --warn:    #dda354;
+      --warn-w:  #2f2415;
+      --good:    #6cb98a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:   #0c1216;
+    --surface: #141d24;
+    --sunken:  #0a1015;
+    --ink:     #e5edf1;
+    --ink-2:   #a3b4bf;
+    --ink-3:   #7a8d99;
+    --rule:    #2a3941;
+    --rule-2:  #1e2b32;
+    --signal:  #5cc0da;
+    --signal-w:#123039;
+    --warn:    #dda354;
+    --warn-w:  #2f2415;
+    --good:    #6cb98a;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16.5px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ---------------------------------------------------- page grid */
+  .page {
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 0 clamp(1rem, 4vw, 3.5rem) 6rem;
+  }
+
+  section {
+    display: grid;
+    grid-template-columns: 8.5rem minmax(0, 1fr);
+    gap: 0 2.5rem;
+    padding: 2.75rem 0;
+    border-top: 1px solid var(--rule-2);
+  }
+  section > .rail {
+    font-family: var(--mono);
+    font-size: 0.7rem;
+    font-weight: 500;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    padding-top: 0.55rem;
+  }
+  section > .body { display: flex; flex-direction: column; gap: 1.25rem; min-width: 0; }
+  section > .body > * { margin: 0; }
+  .col  { max-width: var(--col); }
+  .wide { max-width: var(--wide); }
+
+  @media (max-width: 720px) {
+    section { grid-template-columns: minmax(0, 1fr); gap: 0.75rem; }
+    section > .rail { padding-top: 0; }
+  }
+
+  /* ---------------------------------------------------- type */
+  h1 {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: clamp(2.6rem, 7vw, 4.1rem);
+    line-height: 1.03;
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    margin: 0;
+  }
+  h2 {
+    font-family: var(--serif);
+    font-weight: 500;
+    font-size: clamp(1.5rem, 3.2vw, 1.95rem);
+    line-height: 1.18;
+    letter-spacing: -0.012em;
+    text-wrap: balance;
+  }
+  h3 {
+    font-family: var(--sans);
+    font-weight: 600;
+    font-size: 0.94rem;
+    letter-spacing: 0.005em;
+  }
+  p  { max-width: var(--col); }
+  a  { color: var(--signal); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+  strong { font-weight: 600; }
+  em { font-style: italic; }
+  code, .num {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    font-variant-numeric: tabular-nums;
+  }
+  .lede {
+    font-family: var(--serif);
+    font-size: clamp(1.13rem, 2.2vw, 1.34rem);
+    line-height: 1.5;
+    color: var(--ink-2);
+    max-width: 46ch;
+  }
+  .fine { font-size: 0.845rem; line-height: 1.55; color: var(--ink-3); max-width: 72ch; }
+
+  :focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+  @media print {
+    body { background: #fff; color: #000; font-size: 10.5pt; }
+    section { break-inside: avoid; }
+  }
+
+  /* ---------------------------------------------------- masthead */
+  header.mast { padding: clamp(3rem, 8vw, 5.5rem) 0 2.75rem; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    font-weight: 500;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--signal);
+    margin: 0 0 1.35rem;
+  }
+  .mast .lede { margin: 1.5rem 0 0; }
+  .subject {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1.6rem;
+    margin: 2.25rem 0 0;
+    padding-top: 1.1rem;
+    border-top: 1px solid var(--rule);
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--ink-3);
+  }
+  .subject b { color: var(--ink-2); font-weight: 500; }
+
+  /* ---------------------------------------------------- status note */
+  .status {
+    display: grid;
+    grid-template-columns: 9rem minmax(0, 1fr);
+    gap: 0.75rem 1.5rem;
+    align-items: baseline;
+    margin: 1.9rem 0 0;
+    padding: 1.05rem 0 0;
+    border-top: 1px solid var(--rule-2);
+    max-width: var(--wide);
+  }
+  .status dt {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--warn);
+  }
+  .status dd { margin: 0; font-size: 0.9rem; color: var(--ink-2); max-width: 74ch; }
+  @media (max-width: 620px) { .status { grid-template-columns: minmax(0,1fr); } }
+
+  /* ---------------------------------------------------- verdict strip */
+  .verdict {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 1px;
+    background: var(--rule-2);
+    border: 1px solid var(--rule-2);
+    margin-top: 2.5rem;
+  }
+  .verdict > div { background: var(--surface); padding: 1.4rem 1.5rem 1.5rem; }
+  .verdict dt {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin-bottom: 0.7rem;
+  }
+  .verdict dd {
+    margin: 0;
+    font-family: var(--mono);
+    font-size: 1.85rem;
+    font-weight: 500;
+    line-height: 1;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .verdict dd small {
+    display: block;
+    font-family: var(--sans);
+    font-size: 0.82rem;
+    font-weight: 400;
+    letter-spacing: 0;
+    color: var(--ink-2);
+    margin-top: 0.7rem;
+    line-height: 1.45;
+  }
+  .verdict .accent dd { color: var(--signal); }
+  .verdict .caution dd { color: var(--warn); }
+
+  /* ---------------------------------------------------- tables */
+  .tw { overflow-x: auto; max-width: var(--wide); }
+  table { border-collapse: collapse; width: 100%; font-size: 0.9rem; }
+  th, td { text-align: left; padding: 0.6rem 1rem 0.6rem 0; white-space: nowrap; }
+  thead th {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    font-weight: 500;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    border-bottom: 1px solid var(--rule);
+    padding-bottom: 0.5rem;
+  }
+  tbody tr { border-bottom: 1px solid var(--rule-2); }
+  tbody tr:last-child { border-bottom: 0; }
+  td.n, th.n { text-align: right; font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  td.name { white-space: normal; min-width: 15rem; }
+  tr.here { background: var(--signal-w); }
+  tr.here td { font-weight: 600; }
+  tr.here td:first-child { box-shadow: inset 3px 0 0 var(--signal); padding-left: 0.8rem; }
+  caption {
+    caption-side: bottom;
+    text-align: left;
+    padding-top: 0.9rem;
+    font-size: 0.82rem;
+    color: var(--ink-3);
+    white-space: normal;
+  }
+
+  /* ---------------------------------------------------- confidence chips */
+  .chip {
+    display: inline-block;
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    font-weight: 500;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    padding: 0.16rem 0.5rem;
+    border-radius: 2px;
+    white-space: nowrap;
+  }
+  /* the four steps of the ladder, encoded as decreasing solidity */
+  .c-exact   { color: var(--surface); background: var(--ink); border: 1px solid var(--ink); }
+  .c-meas    { color: var(--good); border: 1px solid var(--good); }
+  .c-deriv   { color: var(--signal); border: 1px dashed var(--signal); }
+  .c-unval   { color: var(--ink-3); border: 1px dotted var(--ink-3); }
+
+  .scale { display: flex; flex-direction: column; gap: 0.85rem; max-width: var(--col); }
+  .scale > div { display: grid; grid-template-columns: 7.5rem minmax(0,1fr); gap: 1rem; align-items: baseline; }
+  .scale p { font-size: 0.88rem; margin: 0; }
+
+  /* ---------------------------------------------------- band chart */
+  figure.bands { max-width: var(--wide); margin: 0; }
+  .bandgrid { display: grid; grid-template-columns: 12.5rem minmax(0, 1fr); gap: 0.55rem 1.5rem; align-items: center; }
+  .bandgrid .lbl { font-size: 0.85rem; color: var(--ink-2); line-height: 1.3; }
+  .bandgrid .lbl b { display: block; font-weight: 600; color: var(--ink); }
+  .track {
+    position: relative;
+    height: 2.9rem;
+    background: var(--sunken);
+    border-left: 1px solid var(--rule);
+    border-right: 1px solid var(--rule);
+  }
+  .track .tick {
+    position: absolute; top: 0; bottom: 0; width: 1px;
+    background: var(--rule-2);
+  }
+  .band {
+    position: absolute; top: 0.65rem; bottom: 0.65rem;
+    background: var(--signal-w);
+    border: 1px solid var(--signal);
+  }
+  .band.wide-band { background: transparent; border-style: dashed; }
+  .p50 { position: absolute; top: 0.65rem; bottom: 0.65rem; width: 2px; background: var(--signal); }
+  .actual {
+    position: absolute; top: -0.35rem; bottom: -0.35rem; width: 2px;
+    background: var(--warn);
+  }
+  .actual::after {
+    content: "";
+    position: absolute; left: -3px; top: -3px;
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--warn);
+  }
+  .axis { position: relative; height: 1.5rem; font-family: var(--mono); font-size: 0.7rem; color: var(--ink-3); }
+  .axis span { position: absolute; top: 0.25rem; transform: translateX(-50%); white-space: nowrap; }
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 0.4rem 1.5rem;
+    margin-top: 1.1rem; font-size: 0.8rem; color: var(--ink-2);
+  }
+  .legend i { display: inline-block; width: 1.6rem; height: 0; vertical-align: 0.22em; margin-right: 0.5rem; }
+  .legend .k-band { border-top: 8px solid var(--signal-w); box-shadow: 0 0 0 1px var(--signal) inset; height: 8px; }
+  .legend .k-dash { border-top: 1px dashed var(--signal); }
+  .legend .k-act  { border-top: 3px solid var(--warn); }
+
+  @media (max-width: 620px) {
+    .bandgrid { grid-template-columns: minmax(0,1fr); gap: 0.3rem; }
+    .bandgrid .lbl { margin-top: 0.9rem; }
+  }
+
+  /* ---------------------------------------------------- terminal block */
+  pre.term {
+    max-width: var(--wide);
+    overflow-x: auto;
+    margin: 0;
+    padding: 1.15rem 1.3rem;
+    background: var(--sunken);
+    border: 1px solid var(--rule-2);
+    border-left: 3px solid var(--signal);
+    font-family: var(--mono);
+    font-size: 0.8rem;
+    line-height: 1.6;
+    color: var(--ink-2);
+    white-space: pre;
+    tab-size: 4;
+  }
+  pre.term b { color: var(--ink); font-weight: 600; }
+
+  /* ---------------------------------------------------- callout */
+  .callout {
+    max-width: var(--wide);
+    padding: 1.3rem 1.5rem;
+    background: var(--warn-w);
+    border-left: 3px solid var(--warn);
+  }
+  .callout h3 { margin: 0 0 0.5rem; color: var(--warn); }
+  .callout p { margin: 0; max-width: 66ch; }
+
+  /* ---------------------------------------------------- numbered steps */
+  ol.steps { list-style: none; margin: 0; padding: 0; counter-reset: s; display: flex; flex-direction: column; gap: 1.5rem; max-width: var(--col); }
+  ol.steps li { counter-increment: s; display: grid; grid-template-columns: 2.3rem minmax(0,1fr); gap: 1rem; }
+  ol.steps li::before {
+    content: counter(s);
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--signal);
+    padding-top: 0.13rem;
+  }
+  /* Both the label and the body sit in the content column; without an explicit
+     column the paragraph auto-places into the 2.3rem counter column and wraps
+     to one word per line. */
+  ol.steps b { grid-column: 2; font-size: 1rem; }
+  ol.steps p { grid-column: 2; margin: 0.35rem 0 0; }
+
+  ul.plain { margin: 0; padding-left: 1.15rem; max-width: var(--col); }
+  ul.plain li { margin-bottom: 0.5rem; }
+
+  footer {
+    border-top: 1px solid var(--rule);
+    margin-top: 2rem;
+    padding-top: 1.75rem;
+    display: flex; flex-direction: column; gap: 0.8rem;
+  }
+</style>
+</head>
+<body>
+
+<div class="page">
+
+  <header class="mast">
+    <p class="eyebrow">Spotlights &middot; scoping advisor &middot; worked example</p>
+    <h1>Scoping RocksDB</h1>
+    <p class="lede">Before you spend a few hundred dollars analysing a repository, this
+      tells you what the knobs are worth &mdash; and refuses to pretend it can quote you
+      a price.</p>
+    <p class="subject">
+      <span>target <b>facebook/rocksdb</b></span>
+      <span>commit <b>abeebd9630</b></span>
+      <span><b>2,308</b> files</span>
+      <span><b>961k</b> lines of code</span>
+      <span><b>29</b> modules in tree</span>
+    </p>
+
+    <dl class="status">
+      <dt>Early work</dt>
+      <dd>This is an initial result, not a validated estimator. It is here to show
+        what the idea is &mdash; costing a run before you pay for it &mdash; and the
+        numbers should be read as an order of magnitude with a ceiling, not as a quote.
+        The accuracy we have measured so far is stated plainly below; it is not good,
+        and this report is written so you can see exactly how far off it can be.</dd>
+      <dt>Cost to produce</dt>
+      <dd><strong>$0.00 in new spend.</strong> The advisor itself makes no API calls &mdash;
+        it is arithmetic against a stored calibration, a few seconds of local CPU. Its one
+        input, the module count, does normally cost money: step 1 of the pipeline is a
+        repo-wide LLM pass, around $1.35 at list price. Here it came free because RocksDB
+        has already been run, so the extraction was recovered from those artifacts. On a
+        repository we have not run, budget that dollar and a half.</dd>
+    </dl>
+
+    <dl class="verdict">
+      <div class="accent">
+        <dt>Best-evidenced lever</dt>
+        <dd>0.32&times;<small>Skip deep research on the first pass. Predicted 0.28&times;
+          from step shares, measured 0.32&times; on a real pair of runs.</small></dd>
+      </div>
+      <div>
+        <dt>The one hard number</dt>
+        <dd>--max-cost 308<small>A ceiling the engine enforces. Everything else on this
+          page is an estimate; this is a guarantee.</small></dd>
+      </div>
+      <div class="caution">
+        <dt>Typical error on the price</dt>
+        <dd>&plusmn;80%<small>Measured by holding each repository out of the calibration
+          in turn. This is why the tool quotes ratios, not forecasts.</small></dd>
+      </div>
+    </dl>
+  </header>
+
+  <section>
+    <div class="rail">The question</div>
+    <div class="body">
+      <h2>&ldquo;What will this cost, and which settings should I use?&rdquo;</h2>
+      <p>Spotlights reads a codebase and proposes performance findings. It is a five-step
+        pipeline of agent calls, and a full run on a large repository costs real money and
+        most of a working day. Every engineer who has been handed the tool asks the same
+        two questions before they start, and until now the honest answer was a shrug.</p>
+      <p>The advisor answers them from 18 historical runs across 8 repositories. It does
+        <em>not</em> work by predicting a number. It works by ranking the settings you can
+        change, showing what each is worth relative to the default, and labelling how
+        firmly each of those figures is established.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail">Scope</div>
+    <div class="body">
+      <h2>What goes in</h2>
+      <p>The only input is the module count. RocksDB's tree yields 29 modules; the run we
+        have on record kept 8 of them &mdash; the storage engine's hot path, and about half
+        the repository's code.</p>
+      <div class="tw">
+        <table>
+          <caption>The 8 modules in scope, from the recorded run. 477,842 lines of own
+            code, 636 files.</caption>
+          <thead>
+            <tr><th>Module</th><th class="n">Lines of code</th><th>Why it is in scope</th></tr>
+          </thead>
+          <tbody>
+            <tr><td class="name"><code>db</code></td><td class="n">269,082</td><td>Write path, recovery, versions</td></tr>
+            <tr><td class="name"><code>util</code></td><td class="n">50,122</td><td>Comparators, checksums, threading</td></tr>
+            <tr><td class="name"><code>db/compaction</code></td><td class="n">36,760</td><td>The dominant background cost</td></tr>
+            <tr><td class="name"><code>table/block_based</code></td><td class="n">32,955</td><td>Block cache, filters, index</td></tr>
+            <tr><td class="name"><code>table</code></td><td class="n">32,441</td><td>SST format and readers</td></tr>
+            <tr><td class="name"><code>db/db_impl</code></td><td class="n">30,321</td><td>The public API surface</td></tr>
+            <tr><td class="name"><code>cache</code></td><td class="n">18,674</td><td>LRU and clock cache</td></tr>
+            <tr><td class="name"><code>memtable</code></td><td class="n">7,487</td><td>Skiplist, the read/write boundary</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p class="fine">Lines of code are shown for orientation only. They are a
+        <em>bad</em> cost predictor &mdash; tokens per thousand lines varies 24&times; across
+        the corpus and runs <em>inversely</em> with repository size, because an agent reads
+        a bounded slice of a module however large the module is.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail">The output</div>
+    <div class="body">
+      <h2>The config ladder</h2>
+      <p>This is the whole product. Each row is a setting you can pass, what it multiplies
+        the bill by, and how well that multiplier is established. Prices are today's
+        blended rate for <code>claude-opus-5</code> + <code>codex</code> at the measured
+        token mix &mdash; 87% cache read, 10% cache write, 2% input, 1% output.</p>
+      <div class="tw">
+        <table>
+          <caption>RocksDB at 8 modules. The token range is the observed spread of
+            history, not a confidence interval.</caption>
+          <thead>
+            <tr>
+              <th>Setting</th>
+              <th class="n">Relative</th>
+              <th class="n">Tokens</th>
+              <th class="n">At list price</th>
+              <th>Basis</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="name"><code>--no-deep-research</code></td>
+              <td class="n">0.32&times;</td><td class="n">30&ndash;46M</td><td class="n">$34&ndash;$52</td>
+              <td><span class="chip c-meas">measured</span></td>
+            </tr>
+            <tr>
+              <td class="name"><code>--max-findings-per-module 5</code></td>
+              <td class="n">0.60&times;</td><td class="n">7&ndash;166M</td><td class="n">$8&ndash;$185</td>
+              <td><span class="chip c-deriv">derived</span></td>
+            </tr>
+            <tr>
+              <td class="name"><code>--max-findings-per-module 10</code></td>
+              <td class="n">0.83&times;</td><td class="n">10&ndash;228M</td><td class="n">$11&ndash;$255</td>
+              <td><span class="chip c-deriv">derived</span></td>
+            </tr>
+            <tr>
+              <td class="name"><code>--no-review</code></td>
+              <td class="n">0.86&times;</td><td class="n">10&ndash;237M</td><td class="n">$11&ndash;$265</td>
+              <td><span class="chip c-deriv">derived</span></td>
+            </tr>
+            <tr class="here">
+              <td class="name">default &mdash; no flags</td>
+              <td class="n">1.00&times;</td><td class="n">12&ndash;276M</td><td class="n">$13&ndash;$308</td>
+              <td><span class="chip c-meas">measured</span></td>
+            </tr>
+            <tr>
+              <td class="name"><code>--max-findings-per-module 20</code></td>
+              <td class="n">1.00&times;</td><td class="n">12&ndash;276M</td><td class="n">$13&ndash;$308</td>
+              <td><span class="chip c-deriv">derived</span></td>
+            </tr>
+            <tr>
+              <td class="name"><code>--enable-claude-search</code></td>
+              <td class="n">1.09&times;</td><td class="n">13&ndash;301M</td><td class="n">$15&ndash;$337</td>
+              <td><span class="chip c-unval">unvalidated</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>Two rows are worth reading twice. <strong>Capping findings at 20 does nothing</strong>
+        &mdash; the observed yield is 14 findings per candidate, already under the cap, so
+        the knob is inert until you push it below the natural yield. And
+        <strong><code>--no-review</code> saves only 14%</strong>, which is far less than
+        people assume when they hear that review triples a step.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail">Provenance</div>
+    <div class="body">
+      <h2>Every number carries its receipt</h2>
+      <p>The labels are not decoration. They are the reason the tool can be trusted where
+        it is strong and discounted where it is weak, and they form a real ladder from
+        arithmetic fact down to educated guess.</p>
+      <div class="scale">
+        <div>
+          <span class="chip c-exact">exact</span>
+          <p>A table lookup with no error at all. Switching models changes the price by a
+            known ratio.</p>
+        </div>
+        <div>
+          <span class="chip c-meas">measured</span>
+          <p>Observed directly, on real runs, with the setting as the only difference.
+            Skipping deep research is the one lever with a clean A/B behind it.</p>
+        </div>
+        <div>
+          <span class="chip c-deriv">derived</span>
+          <p>Arithmetic on measured inputs. <code>--no-review</code> sits here: review was
+            measured to multiply the 17% discovery step by 2.64&times; while growing the
+            candidate count only 1.05&times;, and the 0.86&times; falls out of those two
+            figures.</p>
+        </div>
+        <div>
+          <span class="chip c-unval">unvalidated</span>
+          <p>Direction is known, magnitude is a guess. Only one row is left in this state,
+            and it is labelled so nobody plans around it.</p>
+        </div>
+      </div>
+      <p class="fine">Until recently <code>--no-review</code> was also unvalidated, because
+        no historical run recorded whether review was on. It turned out to be recoverable
+        from the telemetry &mdash; the number of discovery passes per module gives it away
+        exactly &mdash; which moved the row up a rung and removed the need for a paid
+        experiment.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail">The honest test</div>
+    <div class="body">
+      <h2>Where it gets RocksDB wrong</h2>
+      <p>The recorded run cost <strong>276.0M tokens</strong>. Compare that against what
+        the advisor would have told you, and the distinction that matters becomes visible.</p>
+
+      <figure class="bands">
+        <div class="bandgrid">
+          <div class="lbl"><b>As shipped</b>RocksDB is in the calibration</div>
+          <div class="track">
+            <div class="tick" style="left:23.9%"></div>
+            <div class="tick" style="left:50%"></div>
+            <div class="tick" style="left:73.9%"></div>
+            <div class="band wide-band" style="left:4.0%; width:68.0%"></div>
+            <div class="actual" style="left:72.0%"></div>
+          </div>
+
+          <div class="lbl"><b>Held out</b>RocksDB removed from the calibration &mdash; the fair test</div>
+          <div class="track">
+            <div class="tick" style="left:23.9%"></div>
+            <div class="tick" style="left:50%"></div>
+            <div class="tick" style="left:73.9%"></div>
+            <div class="band" style="left:19.9%; width:32.7%"></div>
+            <div class="p50" style="left:36.2%"></div>
+            <div class="actual" style="left:72.0%"></div>
+          </div>
+
+          <div></div>
+          <div class="axis">
+            <span style="left:0%">10M</span>
+            <span style="left:23.9%">30M</span>
+            <span style="left:50%">100M</span>
+            <span style="left:73.9%">300M</span>
+            <span style="left:100%">1B</span>
+          </div>
+        </div>
+        <div class="legend">
+          <span><i class="k-band"></i>estimate band</span>
+          <span><i class="k-dash"></i>band inflated by RocksDB's own data</span>
+          <span><i class="k-act"></i>what the run actually cost &mdash; 276M</span>
+        </div>
+      </figure>
+
+      <div class="callout">
+        <h3>Read the top bar with suspicion</h3>
+        <p>As shipped, the actual cost lands exactly on the edge of the band &mdash; which
+          looks like a triumph and is nearly meaningless. RocksDB <em>is</em> the most
+          expensive repository in the corpus at 34.5M tokens per module, so it is the value
+          that sets that edge. The band contains the run because the run helped draw it.</p>
+      </div>
+
+      <p>The lower bar is the real test. With RocksDB held out, the advisor predicts
+        <span class="num">25&ndash;113M</span> tokens with a midpoint of
+        <span class="num">53M</span>. The truth was <span class="num">276M</span> &mdash;
+        <strong>2.4&times; above the top of the band</strong>, an 81% error on the midpoint.
+        Doing this for all 12 held-out runs gives 58% coverage on the narrow band and 83% on
+        the widest one, with a median error of 80%.</p>
+      <p>This is not a bug to be fixed by better modelling. Tokens per module spans
+        23&times; across repositories, so the module count &mdash; the only input &mdash;
+        simply cannot narrow it. A five-run replicate test puts the floor at 7.7% variation
+        even when nothing changes. The advisor is built to say so out loud rather than
+        quote a tidy figure it cannot support.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail">Recommendation</div>
+    <div class="body">
+      <h2>What to actually do with RocksDB</h2>
+      <ol class="steps">
+        <li>
+          <b>Set the ceiling first.</b>
+          <p>Run with <code>--max-cost 308</code>. The engine enforces it and stops. This
+            is the only number on the page that is a promise rather than an estimate, and
+            it makes the width of the band survivable.</p>
+        </li>
+        <li>
+          <b>Buy information cheaply before buying depth.</b>
+          <p>Start with <code>--no-deep-research</code> &mdash; roughly $34&ndash;$52 and
+            under an hour of wall clock. You see the candidate quality for a third of the
+            price, then re-run the full pipeline on only the modules that looked
+            worthwhile.</p>
+        </li>
+        <li>
+          <b>Leave the findings cap alone; consider dropping review.</b>
+          <p>At 20 the cap is inert. <code>--no-review</code> is a real 14% saving but it
+            costs you candidate quality, and on this evidence that is a poor trade unless
+            you are cost-bound.</p>
+        </li>
+        <li>
+          <b>Expect the clock, not just the bill.</b>
+          <p>The recorded run took 9.3 hours of wall clock against 30.8 hours of API time
+            &mdash; only 3.3&times; effective concurrency. Concurrency is yours to choose,
+            and the corpus has run as high as 13.6&times;.</p>
+        </li>
+      </ol>
+      <p class="fine">For reference, the recorded run produced 109 candidates and 1,137
+        candidate&ndash;finding pairs across all 8 modules, with no module coming up
+        empty.</p>
+    </div>
+  </section>
+
+  <section>
+    <div class="rail">Reproduce</div>
+    <div class="body">
+      <h2>Running it yourself</h2>
+      <p>The advisor is a single script over a committed calibration snapshot. It makes no
+        API calls and costs nothing to run.</p>
+      <pre class="term"><b>$ python scripts/advisor.py --modules 8</b>
+
+SPOTLIGHTS SCOPING ADVISOR
+  in-scope modules      8
+  models                claude=claude-opus-5  codex=codex
+  token mix             87% cache read, 10% cache write, 2% input, 1% output
+  blended list price    $1.12 / MTok
+  blended contracted    $0.85 / MTok
+  calibration: 18 runs / 8 repos / 6 engine versions</pre>
+      <p class="fine">The calibration stores <em>tokens</em>, never dollars &mdash; pricing
+        is a rate-table lookup applied at estimate time, so a contract change does not
+        invalidate the history. Pass <code>--exclude</code> to model dropping modules,
+        <code>--claude-model</code> / <code>--codex-model</code> to reprice, and
+        <code>--band p10p90</code> for the narrower band if you are willing to accept 58%
+        coverage.</p>
+
+      <footer>
+        <p class="fine">Calibration: 18 runs, 8 repositories, 6 engine versions. Bands are
+          the observed min&ndash;max spread, backtested leave-one-repository-out at 83%
+          coverage. Figures on this page are drawn from
+          <code>artifacts/advisor_calibration.json</code> and the RocksDB run at commit
+          <code>abeebd9630</code>.</p>
+      </footer>
+    </div>
+  </section>
+
+</div>
+</body>
+</html>

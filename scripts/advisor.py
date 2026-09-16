@@ -198,16 +198,42 @@ def build_ladder(cal: dict[str, Any]) -> list[Row]:
         )
 
     rows.append(Row("default", "(no flags)", 1.0, "the anchor band itself", "measured"))
-    rows.append(
-        Row(
-            "no discovery review",
-            "--no-review",
-            1.0 - disc / 2,
-            f"halves the {100 * disc:.0f}% discovery step; knock-on to steps 4/5 "
-            f"unknown (fewer candidates found)",
-            "unvalidated",
+    # --no-review. The setting is not recorded in any historical manifest, but it
+    # is exactly recoverable from the per-module discovery iteration count, which
+    # makes its cost measurable WITHIN each run -- no cross-repo noise. Two
+    # components: the discovery step shrinks by the measured multiplier, and the
+    # candidate count shrinks by the measured growth factor, which scales the two
+    # per-candidate steps downstream.
+    rev = cal.get("review") or {}
+    rev_mult, rev_growth = rev.get("discovery_multiplier"), rev.get("candidate_growth")
+    if rev_mult and rev_growth:
+        aprop = (steps.get("agent_proposals") or {}).get("p50") or 0.0
+        per_cand = prop + aprop
+        disc_band = steps["candidate_discovery"]
+
+        def no_review(mult: float, growth: float, share: float) -> float:
+            return 1.0 - share * (1 - 1 / mult) - per_cand * (1 - 1 / growth)
+
+        f_mid = no_review(rev_mult["p50"], rev_growth["p50"], disc)
+        # Widest saving: the largest discovery multiplier and the largest
+        # candidate growth. Narrowest: a run where review NET-REMOVED candidates,
+        # so switching it off leaves more downstream work than it saves.
+        f_a = no_review(rev_mult["max"], rev_growth["max"], disc_band["max"])
+        f_b = no_review(rev_mult["min"], rev_growth["min"], disc_band["min"])
+        rows.append(
+            Row(
+                "no discovery review",
+                "--no-review",
+                f_mid,
+                f"measured within-run: review multiplies the {100 * disc:.0f}% "
+                f"discovery step {rev_mult['p50']:.2f}x (n={rev_mult['n']}) while "
+                f"growing candidates only {rev_growth['p50']:.2f}x (n="
+                f"{rev_growth['n']}), which scales the {100 * per_cand:.0f}% "
+                f"per-candidate steps. Range {min(f_a, f_b):.2f}-{max(f_a, f_b):.2f}x; "
+                f"assumes findings-per-candidate is unchanged by review",
+                "derived",
+            )
         )
-    )
     rows.append(
         Row(
             "deep research on both CLIs",
@@ -381,12 +407,13 @@ def main() -> int:
     print("  2. Start with --no-deep-research to see candidate quality cheaply,")
     print("     then re-run the full pipeline on the modules that looked useful.")
     print("     This is the best-evidenced lever: predicted 0.28x, measured 0.32x.")
-    print("  3. The range above is wide -- backtested honestly, it has to be. Two")
-    print("     reasons: this corpus does not record --review-iterations or")
-    print("     --max-findings-per-module (runs differing 3x in cost look identical),")
-    print("     and tokens per module spans 23x across repos, so your module count")
-    print("     barely narrows it. Use the ratios to choose a config, --max-cost to")
-    print("     bound the bill, and do not treat the absolute range as a forecast.")
+    print("  3. The range above is wide -- backtested honestly, it has to be. The")
+    print("     reason is cross-repo variance, not missing config: tokens per module")
+    print("     spans 23x across repos, so your module count barely narrows it.")
+    print("     (--review-iterations and deep-research on/off were recovered from")
+    print("     telemetry, so the ladder no longer guesses at them.) Use the ratios")
+    print("     to choose a config, --max-cost to bound the bill, and do not treat")
+    print("     the absolute range as a forecast.")
     return 0
 
 

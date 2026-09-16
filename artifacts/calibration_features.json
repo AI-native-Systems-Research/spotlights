@@ -1,0 +1,6492 @@
+[
+  {
+    "run": "colpali-fleet/18a",
+    "repo": "colpali",
+    "commit": "b34c38815d",
+    "clone_ok": true,
+    "total_tokens": 92744677,
+    "wall_s": 17863.08622140065,
+    "api_s": 101265.34609081443,
+    "engine_sha": "afe348c3",
+    "n_modules_billed": 14,
+    "n_modules_in_tree": 17,
+    "unmatched_modules": [],
+    "scope": {
+      "own_files": 77,
+      "own_loc": 6785,
+      "own_bytes": 261390,
+      "own_code_files": 77,
+      "own_code_loc": 6785,
+      "own_doc_loc": 0,
+      "own_cfg_loc": 0,
+      "rec_files": 77,
+      "rec_loc": 6785,
+      "rec_bytes": 261390,
+      "rec_code_files": 77,
+      "rec_code_loc": 6785,
+      "rec_doc_loc": 0,
+      "rec_cfg_loc": 0
+    },
+    "repo_total": {
+      "files": 170,
+      "loc": 15359,
+      "bytes": 666624,
+      "code_files": 130,
+      "code_loc": 12761,
+      "doc_loc": 790,
+      "cfg_loc": 1577
+    },
+    "modules": [
+      {
+        "qn": "colpali_engine/collators",
+        "path": "colpali_engine/collators",
+        "recursive": {
+          "files": 2,
+          "loc": 128,
+          "bytes": 5537,
+          "code_files": 2,
+          "code_loc": 128,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 2,
+          "loc": 128,
+          "bytes": 5537,
+          "code_files": 2,
+          "code_loc": 128,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/compression",
+        "path": "colpali_engine/compression",
+        "recursive": {
+          "files": 5,
+          "loc": 408,
+          "bytes": 16276,
+          "code_files": 5,
+          "code_loc": 408,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 5,
+          "loc": 408,
+          "bytes": 16276,
+          "code_files": 5,
+          "code_loc": 408,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/data",
+        "path": "colpali_engine/data",
+        "recursive": {
+          "files": 3,
+          "loc": 271,
+          "bytes": 9801,
+          "code_files": 3,
+          "code_loc": 271,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 3,
+          "loc": 271,
+          "bytes": 9801,
+          "code_files": 3,
+          "code_loc": 271,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/interpretability",
+        "path": "colpali_engine/interpretability",
+        "recursive": {
+          "files": 3,
+          "loc": 273,
+          "bytes": 9921,
+          "code_files": 3,
+          "code_loc": 273,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 3,
+          "loc": 273,
+          "bytes": 9921,
+          "code_files": 3,
+          "code_loc": 273,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/loss",
+        "path": "colpali_engine/loss",
+        "recursive": {
+          "files": 3,
+          "loc": 899,
+          "bytes": 34246,
+          "code_files": 3,
+          "code_loc": 899,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 3,
+          "loc": 899,
+          "bytes": 34246,
+          "code_files": 3,
+          "code_loc": 899,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/gemma3",
+        "path": "colpali_engine/models/gemma3",
+        "recursive": {
+          "files": 7,
+          "loc": 630,
+          "bytes": 22283,
+          "code_files": 7,
+          "code_loc": 630,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 630,
+          "bytes": 22283,
+          "code_files": 7,
+          "code_loc": 630,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/idefics3",
+        "path": "colpali_engine/models/idefics3",
+        "recursive": {
+          "files": 7,
+          "loc": 276,
+          "bytes": 9360,
+          "code_files": 7,
+          "code_loc": 276,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 276,
+          "bytes": 9360,
+          "code_files": 7,
+          "code_loc": 276,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/modernvbert",
+        "path": "colpali_engine/models/modernvbert",
+        "recursive": {
+          "files": 9,
+          "loc": 1079,
+          "bytes": 46534,
+          "code_files": 9,
+          "code_loc": 1079,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 9,
+          "loc": 1079,
+          "bytes": 46534,
+          "code_files": 9,
+          "code_loc": 1079,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/paligemma",
+        "path": "colpali_engine/models/paligemma",
+        "recursive": {
+          "files": 7,
+          "loc": 417,
+          "bytes": 16788,
+          "code_files": 7,
+          "code_loc": 417,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 417,
+          "bytes": 16788,
+          "code_files": 7,
+          "code_loc": 417,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/qwen2",
+        "path": "colpali_engine/models/qwen2",
+        "recursive": {
+          "files": 7,
+          "loc": 366,
+          "bytes": 13458,
+          "code_files": 7,
+          "code_loc": 366,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 366,
+          "bytes": 13458,
+          "code_files": 7,
+          "code_loc": 366,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/qwen2_5",
+        "path": "colpali_engine/models/qwen2_5",
+        "recursive": {
+          "files": 7,
+          "loc": 372,
+          "bytes": 13947,
+          "code_files": 7,
+          "code_loc": 372,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 372,
+          "bytes": 13947,
+          "code_files": 7,
+          "code_loc": 372,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/qwen3",
+        "path": "colpali_engine/models/qwen3",
+        "recursive": {
+          "files": 7,
+          "loc": 415,
+          "bytes": 14973,
+          "code_files": 7,
+          "code_loc": 415,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 415,
+          "bytes": 14973,
+          "code_files": 7,
+          "code_loc": 415,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/qwen_omni",
+        "path": "colpali_engine/models/qwen_omni",
+        "recursive": {
+          "files": 4,
+          "loc": 338,
+          "bytes": 13190,
+          "code_files": 4,
+          "code_loc": 338,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 4,
+          "loc": 338,
+          "bytes": 13190,
+          "code_files": 4,
+          "code_loc": 338,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/utils",
+        "path": "colpali_engine/utils",
+        "recursive": {
+          "files": 6,
+          "loc": 913,
+          "bytes": 35076,
+          "code_files": 6,
+          "code_loc": 913,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 6,
+          "loc": 913,
+          "bytes": 35076,
+          "code_files": 6,
+          "code_loc": 913,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      }
+    ]
+  },
+  {
+    "run": "colpali-fleet/18b",
+    "repo": "colpali",
+    "commit": "b34c38815d",
+    "clone_ok": true,
+    "total_tokens": 91375701,
+    "wall_s": 17830.373397810385,
+    "api_s": 95938.93687598211,
+    "engine_sha": "afe348c3",
+    "n_modules_billed": 15,
+    "n_modules_in_tree": 18,
+    "unmatched_modules": [],
+    "scope": {
+      "own_files": 80,
+      "own_loc": 7386,
+      "own_bytes": 287730,
+      "own_code_files": 80,
+      "own_code_loc": 7386,
+      "own_doc_loc": 0,
+      "own_cfg_loc": 0,
+      "rec_files": 80,
+      "rec_loc": 7386,
+      "rec_bytes": 287730,
+      "rec_code_files": 80,
+      "rec_code_loc": 7386,
+      "rec_doc_loc": 0,
+      "rec_cfg_loc": 0
+    },
+    "repo_total": {
+      "files": 170,
+      "loc": 15359,
+      "bytes": 666624,
+      "code_files": 130,
+      "code_loc": 12761,
+      "doc_loc": 790,
+      "cfg_loc": 1577
+    },
+    "modules": [
+      {
+        "qn": "colpali_engine/collators",
+        "path": "colpali_engine/collators",
+        "recursive": {
+          "files": 2,
+          "loc": 128,
+          "bytes": 5537,
+          "code_files": 2,
+          "code_loc": 128,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 2,
+          "loc": 128,
+          "bytes": 5537,
+          "code_files": 2,
+          "code_loc": 128,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/compression/token_pooling",
+        "path": "colpali_engine/compression/token_pooling",
+        "recursive": {
+          "files": 4,
+          "loc": 402,
+          "bytes": 16148,
+          "code_files": 4,
+          "code_loc": 402,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 4,
+          "loc": 402,
+          "bytes": 16148,
+          "code_files": 4,
+          "code_loc": 402,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/data",
+        "path": "colpali_engine/data",
+        "recursive": {
+          "files": 3,
+          "loc": 271,
+          "bytes": 9801,
+          "code_files": 3,
+          "code_loc": 271,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 3,
+          "loc": 271,
+          "bytes": 9801,
+          "code_files": 3,
+          "code_loc": 271,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/interpretability",
+        "path": "colpali_engine/interpretability",
+        "recursive": {
+          "files": 3,
+          "loc": 273,
+          "bytes": 9921,
+          "code_files": 3,
+          "code_loc": 273,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 3,
+          "loc": 273,
+          "bytes": 9921,
+          "code_files": 3,
+          "code_loc": 273,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/loss",
+        "path": "colpali_engine/loss",
+        "recursive": {
+          "files": 3,
+          "loc": 899,
+          "bytes": 34246,
+          "code_files": 3,
+          "code_loc": 899,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 3,
+          "loc": 899,
+          "bytes": 34246,
+          "code_files": 3,
+          "code_loc": 899,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/gemma3",
+        "path": "colpali_engine/models/gemma3",
+        "recursive": {
+          "files": 7,
+          "loc": 630,
+          "bytes": 22283,
+          "code_files": 7,
+          "code_loc": 630,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 630,
+          "bytes": 22283,
+          "code_files": 7,
+          "code_loc": 630,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/idefics3",
+        "path": "colpali_engine/models/idefics3",
+        "recursive": {
+          "files": 7,
+          "loc": 276,
+          "bytes": 9360,
+          "code_files": 7,
+          "code_loc": 276,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 276,
+          "bytes": 9360,
+          "code_files": 7,
+          "code_loc": 276,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/modernvbert",
+        "path": "colpali_engine/models/modernvbert",
+        "recursive": {
+          "files": 9,
+          "loc": 1079,
+          "bytes": 46534,
+          "code_files": 9,
+          "code_loc": 1079,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 9,
+          "loc": 1079,
+          "bytes": 46534,
+          "code_files": 9,
+          "code_loc": 1079,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/paligemma",
+        "path": "colpali_engine/models/paligemma",
+        "recursive": {
+          "files": 7,
+          "loc": 417,
+          "bytes": 16788,
+          "code_files": 7,
+          "code_loc": 417,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 417,
+          "bytes": 16788,
+          "code_files": 7,
+          "code_loc": 417,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/qwen2",
+        "path": "colpali_engine/models/qwen2",
+        "recursive": {
+          "files": 7,
+          "loc": 366,
+          "bytes": 13458,
+          "code_files": 7,
+          "code_loc": 366,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 366,
+          "bytes": 13458,
+          "code_files": 7,
+          "code_loc": 366,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/qwen2_5",
+        "path": "colpali_engine/models/qwen2_5",
+        "recursive": {
+          "files": 7,
+          "loc": 372,
+          "bytes": 13947,
+          "code_files": 7,
+          "code_loc": 372,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 372,
+          "bytes": 13947,
+          "code_files": 7,
+          "code_loc": 372,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/qwen3",
+        "path": "colpali_engine/models/qwen3",
+        "recursive": {
+          "files": 7,
+          "loc": 415,
+          "bytes": 14973,
+          "code_files": 7,
+          "code_loc": 415,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 415,
+          "bytes": 14973,
+          "code_files": 7,
+          "code_loc": 415,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/qwen_omni",
+        "path": "colpali_engine/models/qwen_omni",
+        "recursive": {
+          "files": 4,
+          "loc": 338,
+          "bytes": 13190,
+          "code_files": 4,
+          "code_loc": 338,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 4,
+          "loc": 338,
+          "bytes": 13190,
+          "code_files": 4,
+          "code_loc": 338,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/trainer",
+        "path": "colpali_engine/trainer",
+        "recursive": {
+          "files": 4,
+          "loc": 607,
+          "bytes": 26468,
+          "code_files": 4,
+          "code_loc": 607,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 4,
+          "loc": 607,
+          "bytes": 26468,
+          "code_files": 4,
+          "code_loc": 607,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/utils",
+        "path": "colpali_engine/utils",
+        "recursive": {
+          "files": 6,
+          "loc": 913,
+          "bytes": 35076,
+          "code_files": 6,
+          "code_loc": 913,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 6,
+          "loc": 913,
+          "bytes": 35076,
+          "code_files": 6,
+          "code_loc": 913,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      }
+    ]
+  },
+  {
+    "run": "colpali-fleet/18c",
+    "repo": "colpali",
+    "commit": "b34c38815d",
+    "clone_ok": true,
+    "total_tokens": 99661148,
+    "wall_s": 18319.815719770268,
+    "api_s": 101539.1614791197,
+    "engine_sha": "afe348c3",
+    "n_modules_billed": 15,
+    "n_modules_in_tree": 16,
+    "unmatched_modules": [],
+    "scope": {
+      "own_files": 81,
+      "own_loc": 7392,
+      "own_bytes": 287858,
+      "own_code_files": 81,
+      "own_code_loc": 7392,
+      "own_doc_loc": 0,
+      "own_cfg_loc": 0,
+      "rec_files": 81,
+      "rec_loc": 7392,
+      "rec_bytes": 287858,
+      "rec_code_files": 81,
+      "rec_code_loc": 7392,
+      "rec_doc_loc": 0,
+      "rec_cfg_loc": 0
+    },
+    "repo_total": {
+      "files": 170,
+      "loc": 15359,
+      "bytes": 666624,
+      "code_files": 130,
+      "code_loc": 12761,
+      "doc_loc": 790,
+      "cfg_loc": 1577
+    },
+    "modules": [
+      {
+        "qn": "colpali_engine/collators",
+        "path": "colpali_engine/collators",
+        "recursive": {
+          "files": 2,
+          "loc": 128,
+          "bytes": 5537,
+          "code_files": 2,
+          "code_loc": 128,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 2,
+          "loc": 128,
+          "bytes": 5537,
+          "code_files": 2,
+          "code_loc": 128,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/compression",
+        "path": "colpali_engine/compression",
+        "recursive": {
+          "files": 5,
+          "loc": 408,
+          "bytes": 16276,
+          "code_files": 5,
+          "code_loc": 408,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 5,
+          "loc": 408,
+          "bytes": 16276,
+          "code_files": 5,
+          "code_loc": 408,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/data",
+        "path": "colpali_engine/data",
+        "recursive": {
+          "files": 3,
+          "loc": 271,
+          "bytes": 9801,
+          "code_files": 3,
+          "code_loc": 271,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 3,
+          "loc": 271,
+          "bytes": 9801,
+          "code_files": 3,
+          "code_loc": 271,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/interpretability",
+        "path": "colpali_engine/interpretability",
+        "recursive": {
+          "files": 3,
+          "loc": 273,
+          "bytes": 9921,
+          "code_files": 3,
+          "code_loc": 273,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 3,
+          "loc": 273,
+          "bytes": 9921,
+          "code_files": 3,
+          "code_loc": 273,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/loss",
+        "path": "colpali_engine/loss",
+        "recursive": {
+          "files": 3,
+          "loc": 899,
+          "bytes": 34246,
+          "code_files": 3,
+          "code_loc": 899,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 3,
+          "loc": 899,
+          "bytes": 34246,
+          "code_files": 3,
+          "code_loc": 899,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/gemma3",
+        "path": "colpali_engine/models/gemma3",
+        "recursive": {
+          "files": 7,
+          "loc": 630,
+          "bytes": 22283,
+          "code_files": 7,
+          "code_loc": 630,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 630,
+          "bytes": 22283,
+          "code_files": 7,
+          "code_loc": 630,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/idefics3",
+        "path": "colpali_engine/models/idefics3",
+        "recursive": {
+          "files": 7,
+          "loc": 276,
+          "bytes": 9360,
+          "code_files": 7,
+          "code_loc": 276,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 276,
+          "bytes": 9360,
+          "code_files": 7,
+          "code_loc": 276,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/modernvbert",
+        "path": "colpali_engine/models/modernvbert",
+        "recursive": {
+          "files": 9,
+          "loc": 1079,
+          "bytes": 46534,
+          "code_files": 9,
+          "code_loc": 1079,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 9,
+          "loc": 1079,
+          "bytes": 46534,
+          "code_files": 9,
+          "code_loc": 1079,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/paligemma",
+        "path": "colpali_engine/models/paligemma",
+        "recursive": {
+          "files": 7,
+          "loc": 417,
+          "bytes": 16788,
+          "code_files": 7,
+          "code_loc": 417,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 417,
+          "bytes": 16788,
+          "code_files": 7,
+          "code_loc": 417,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/qwen2",
+        "path": "colpali_engine/models/qwen2",
+        "recursive": {
+          "files": 7,
+          "loc": 366,
+          "bytes": 13458,
+          "code_files": 7,
+          "code_loc": 366,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 366,
+          "bytes": 13458,
+          "code_files": 7,
+          "code_loc": 366,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/qwen2_5",
+        "path": "colpali_engine/models/qwen2_5",
+        "recursive": {
+          "files": 7,
+          "loc": 372,
+          "bytes": 13947,
+          "code_files": 7,
+          "code_loc": 372,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 372,
+          "bytes": 13947,
+          "code_files": 7,
+          "code_loc": 372,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/qwen3",
+        "path": "colpali_engine/models/qwen3",
+        "recursive": {
+          "files": 7,
+          "loc": 415,
+          "bytes": 14973,
+          "code_files": 7,
+          "code_loc": 415,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 415,
+          "bytes": 14973,
+          "code_files": 7,
+          "code_loc": 415,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/qwen_omni",
+        "path": "colpali_engine/models/qwen_omni",
+        "recursive": {
+          "files": 4,
+          "loc": 338,
+          "bytes": 13190,
+          "code_files": 4,
+          "code_loc": 338,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 4,
+          "loc": 338,
+          "bytes": 13190,
+          "code_files": 4,
+          "code_loc": 338,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/trainer",
+        "path": "colpali_engine/trainer",
+        "recursive": {
+          "files": 4,
+          "loc": 607,
+          "bytes": 26468,
+          "code_files": 4,
+          "code_loc": 607,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 4,
+          "loc": 607,
+          "bytes": 26468,
+          "code_files": 4,
+          "code_loc": 607,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/utils",
+        "path": "colpali_engine/utils",
+        "recursive": {
+          "files": 6,
+          "loc": 913,
+          "bytes": 35076,
+          "code_files": 6,
+          "code_loc": 913,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 6,
+          "loc": 913,
+          "bytes": 35076,
+          "code_files": 6,
+          "code_loc": 913,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      }
+    ]
+  },
+  {
+    "run": "colpali-fleet/18d",
+    "repo": "colpali",
+    "commit": "b34c38815d",
+    "clone_ok": true,
+    "total_tokens": 83842786,
+    "wall_s": 18397.774839674123,
+    "api_s": 91733.23622494939,
+    "engine_sha": "afe348c3",
+    "n_modules_billed": 15,
+    "n_modules_in_tree": 18,
+    "unmatched_modules": [],
+    "scope": {
+      "own_files": 80,
+      "own_loc": 7386,
+      "own_bytes": 287730,
+      "own_code_files": 80,
+      "own_code_loc": 7386,
+      "own_doc_loc": 0,
+      "own_cfg_loc": 0,
+      "rec_files": 80,
+      "rec_loc": 7386,
+      "rec_bytes": 287730,
+      "rec_code_files": 80,
+      "rec_code_loc": 7386,
+      "rec_doc_loc": 0,
+      "rec_cfg_loc": 0
+    },
+    "repo_total": {
+      "files": 170,
+      "loc": 15359,
+      "bytes": 666624,
+      "code_files": 130,
+      "code_loc": 12761,
+      "doc_loc": 790,
+      "cfg_loc": 1577
+    },
+    "modules": [
+      {
+        "qn": "colpali_engine/collators",
+        "path": "colpali_engine/collators",
+        "recursive": {
+          "files": 2,
+          "loc": 128,
+          "bytes": 5537,
+          "code_files": 2,
+          "code_loc": 128,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 2,
+          "loc": 128,
+          "bytes": 5537,
+          "code_files": 2,
+          "code_loc": 128,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/compression/token_pooling",
+        "path": "colpali_engine/compression/token_pooling",
+        "recursive": {
+          "files": 4,
+          "loc": 402,
+          "bytes": 16148,
+          "code_files": 4,
+          "code_loc": 402,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 4,
+          "loc": 402,
+          "bytes": 16148,
+          "code_files": 4,
+          "code_loc": 402,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/data",
+        "path": "colpali_engine/data",
+        "recursive": {
+          "files": 3,
+          "loc": 271,
+          "bytes": 9801,
+          "code_files": 3,
+          "code_loc": 271,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 3,
+          "loc": 271,
+          "bytes": 9801,
+          "code_files": 3,
+          "code_loc": 271,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/interpretability",
+        "path": "colpali_engine/interpretability",
+        "recursive": {
+          "files": 3,
+          "loc": 273,
+          "bytes": 9921,
+          "code_files": 3,
+          "code_loc": 273,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 3,
+          "loc": 273,
+          "bytes": 9921,
+          "code_files": 3,
+          "code_loc": 273,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/loss",
+        "path": "colpali_engine/loss",
+        "recursive": {
+          "files": 3,
+          "loc": 899,
+          "bytes": 34246,
+          "code_files": 3,
+          "code_loc": 899,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 3,
+          "loc": 899,
+          "bytes": 34246,
+          "code_files": 3,
+          "code_loc": 899,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/gemma3",
+        "path": "colpali_engine/models/gemma3",
+        "recursive": {
+          "files": 7,
+          "loc": 630,
+          "bytes": 22283,
+          "code_files": 7,
+          "code_loc": 630,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 630,
+          "bytes": 22283,
+          "code_files": 7,
+          "code_loc": 630,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/idefics3",
+        "path": "colpali_engine/models/idefics3",
+        "recursive": {
+          "files": 7,
+          "loc": 276,
+          "bytes": 9360,
+          "code_files": 7,
+          "code_loc": 276,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 276,
+          "bytes": 9360,
+          "code_files": 7,
+          "code_loc": 276,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/modernvbert",
+        "path": "colpali_engine/models/modernvbert",
+        "recursive": {
+          "files": 9,
+          "loc": 1079,
+          "bytes": 46534,
+          "code_files": 9,
+          "code_loc": 1079,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 9,
+          "loc": 1079,
+          "bytes": 46534,
+          "code_files": 9,
+          "code_loc": 1079,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/paligemma",
+        "path": "colpali_engine/models/paligemma",
+        "recursive": {
+          "files": 7,
+          "loc": 417,
+          "bytes": 16788,
+          "code_files": 7,
+          "code_loc": 417,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 417,
+          "bytes": 16788,
+          "code_files": 7,
+          "code_loc": 417,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/qwen2",
+        "path": "colpali_engine/models/qwen2",
+        "recursive": {
+          "files": 7,
+          "loc": 366,
+          "bytes": 13458,
+          "code_files": 7,
+          "code_loc": 366,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 366,
+          "bytes": 13458,
+          "code_files": 7,
+          "code_loc": 366,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/qwen2_5",
+        "path": "colpali_engine/models/qwen2_5",
+        "recursive": {
+          "files": 7,
+          "loc": 372,
+          "bytes": 13947,
+          "code_files": 7,
+          "code_loc": 372,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 372,
+          "bytes": 13947,
+          "code_files": 7,
+          "code_loc": 372,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/qwen3",
+        "path": "colpali_engine/models/qwen3",
+        "recursive": {
+          "files": 7,
+          "loc": 415,
+          "bytes": 14973,
+          "code_files": 7,
+          "code_loc": 415,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 415,
+          "bytes": 14973,
+          "code_files": 7,
+          "code_loc": 415,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/qwen_omni",
+        "path": "colpali_engine/models/qwen_omni",
+        "recursive": {
+          "files": 4,
+          "loc": 338,
+          "bytes": 13190,
+          "code_files": 4,
+          "code_loc": 338,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 4,
+          "loc": 338,
+          "bytes": 13190,
+          "code_files": 4,
+          "code_loc": 338,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/trainer",
+        "path": "colpali_engine/trainer",
+        "recursive": {
+          "files": 4,
+          "loc": 607,
+          "bytes": 26468,
+          "code_files": 4,
+          "code_loc": 607,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 4,
+          "loc": 607,
+          "bytes": 26468,
+          "code_files": 4,
+          "code_loc": 607,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/utils",
+        "path": "colpali_engine/utils",
+        "recursive": {
+          "files": 6,
+          "loc": 913,
+          "bytes": 35076,
+          "code_files": 6,
+          "code_loc": 913,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 6,
+          "loc": 913,
+          "bytes": 35076,
+          "code_files": 6,
+          "code_loc": 913,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      }
+    ]
+  },
+  {
+    "run": "colpali-fleet/18e",
+    "repo": "colpali",
+    "commit": "b34c38815d",
+    "clone_ok": true,
+    "total_tokens": 97787870,
+    "wall_s": 19072.36821543984,
+    "api_s": 102149.74267696943,
+    "engine_sha": "afe348c3",
+    "n_modules_billed": 15,
+    "n_modules_in_tree": 16,
+    "unmatched_modules": [],
+    "scope": {
+      "own_files": 81,
+      "own_loc": 7392,
+      "own_bytes": 287858,
+      "own_code_files": 81,
+      "own_code_loc": 7392,
+      "own_doc_loc": 0,
+      "own_cfg_loc": 0,
+      "rec_files": 81,
+      "rec_loc": 7392,
+      "rec_bytes": 287858,
+      "rec_code_files": 81,
+      "rec_code_loc": 7392,
+      "rec_doc_loc": 0,
+      "rec_cfg_loc": 0
+    },
+    "repo_total": {
+      "files": 170,
+      "loc": 15359,
+      "bytes": 666624,
+      "code_files": 130,
+      "code_loc": 12761,
+      "doc_loc": 790,
+      "cfg_loc": 1577
+    },
+    "modules": [
+      {
+        "qn": "colpali_engine/collators",
+        "path": "colpali_engine/collators",
+        "recursive": {
+          "files": 2,
+          "loc": 128,
+          "bytes": 5537,
+          "code_files": 2,
+          "code_loc": 128,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 2,
+          "loc": 128,
+          "bytes": 5537,
+          "code_files": 2,
+          "code_loc": 128,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/compression",
+        "path": "colpali_engine/compression",
+        "recursive": {
+          "files": 5,
+          "loc": 408,
+          "bytes": 16276,
+          "code_files": 5,
+          "code_loc": 408,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 5,
+          "loc": 408,
+          "bytes": 16276,
+          "code_files": 5,
+          "code_loc": 408,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/data",
+        "path": "colpali_engine/data",
+        "recursive": {
+          "files": 3,
+          "loc": 271,
+          "bytes": 9801,
+          "code_files": 3,
+          "code_loc": 271,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 3,
+          "loc": 271,
+          "bytes": 9801,
+          "code_files": 3,
+          "code_loc": 271,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/interpretability",
+        "path": "colpali_engine/interpretability",
+        "recursive": {
+          "files": 3,
+          "loc": 273,
+          "bytes": 9921,
+          "code_files": 3,
+          "code_loc": 273,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 3,
+          "loc": 273,
+          "bytes": 9921,
+          "code_files": 3,
+          "code_loc": 273,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/loss",
+        "path": "colpali_engine/loss",
+        "recursive": {
+          "files": 3,
+          "loc": 899,
+          "bytes": 34246,
+          "code_files": 3,
+          "code_loc": 899,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 3,
+          "loc": 899,
+          "bytes": 34246,
+          "code_files": 3,
+          "code_loc": 899,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/gemma3",
+        "path": "colpali_engine/models/gemma3",
+        "recursive": {
+          "files": 7,
+          "loc": 630,
+          "bytes": 22283,
+          "code_files": 7,
+          "code_loc": 630,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 630,
+          "bytes": 22283,
+          "code_files": 7,
+          "code_loc": 630,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/idefics3",
+        "path": "colpali_engine/models/idefics3",
+        "recursive": {
+          "files": 7,
+          "loc": 276,
+          "bytes": 9360,
+          "code_files": 7,
+          "code_loc": 276,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 276,
+          "bytes": 9360,
+          "code_files": 7,
+          "code_loc": 276,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/modernvbert",
+        "path": "colpali_engine/models/modernvbert",
+        "recursive": {
+          "files": 9,
+          "loc": 1079,
+          "bytes": 46534,
+          "code_files": 9,
+          "code_loc": 1079,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 9,
+          "loc": 1079,
+          "bytes": 46534,
+          "code_files": 9,
+          "code_loc": 1079,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/paligemma",
+        "path": "colpali_engine/models/paligemma",
+        "recursive": {
+          "files": 7,
+          "loc": 417,
+          "bytes": 16788,
+          "code_files": 7,
+          "code_loc": 417,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 417,
+          "bytes": 16788,
+          "code_files": 7,
+          "code_loc": 417,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/qwen2",
+        "path": "colpali_engine/models/qwen2",
+        "recursive": {
+          "files": 7,
+          "loc": 366,
+          "bytes": 13458,
+          "code_files": 7,
+          "code_loc": 366,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 366,
+          "bytes": 13458,
+          "code_files": 7,
+          "code_loc": 366,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/qwen2_5",
+        "path": "colpali_engine/models/qwen2_5",
+        "recursive": {
+          "files": 7,
+          "loc": 372,
+          "bytes": 13947,
+          "code_files": 7,
+          "code_loc": 372,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 372,
+          "bytes": 13947,
+          "code_files": 7,
+          "code_loc": 372,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/qwen3",
+        "path": "colpali_engine/models/qwen3",
+        "recursive": {
+          "files": 7,
+          "loc": 415,
+          "bytes": 14973,
+          "code_files": 7,
+          "code_loc": 415,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 415,
+          "bytes": 14973,
+          "code_files": 7,
+          "code_loc": 415,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/models/qwen_omni",
+        "path": "colpali_engine/models/qwen_omni",
+        "recursive": {
+          "files": 4,
+          "loc": 338,
+          "bytes": 13190,
+          "code_files": 4,
+          "code_loc": 338,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 4,
+          "loc": 338,
+          "bytes": 13190,
+          "code_files": 4,
+          "code_loc": 338,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/trainer",
+        "path": "colpali_engine/trainer",
+        "recursive": {
+          "files": 4,
+          "loc": 607,
+          "bytes": 26468,
+          "code_files": 4,
+          "code_loc": 607,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 4,
+          "loc": 607,
+          "bytes": 26468,
+          "code_files": 4,
+          "code_loc": 607,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "colpali_engine/utils",
+        "path": "colpali_engine/utils",
+        "recursive": {
+          "files": 6,
+          "loc": 913,
+          "bytes": 35076,
+          "code_files": 6,
+          "code_loc": 913,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 6,
+          "loc": 913,
+          "bytes": 35076,
+          "code_files": 6,
+          "code_loc": 913,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      }
+    ]
+  },
+  {
+    "run": "iocr/page-latency-2026-08-18-idanfr",
+    "repo": "iocr",
+    "commit": "1915b8f99e",
+    "clone_ok": true,
+    "total_tokens": 296532614,
+    "wall_s": 17996.476166041044,
+    "api_s": 132795.8788436742,
+    "engine_sha": "afe348c3",
+    "n_modules_billed": 25,
+    "n_modules_in_tree": 45,
+    "unmatched_modules": [],
+    "scope": {
+      "own_files": 392,
+      "own_loc": 1024357,
+      "own_bytes": 45584725,
+      "own_code_files": 310,
+      "own_code_loc": 70779,
+      "own_doc_loc": 917955,
+      "own_cfg_loc": 2275,
+      "rec_files": 717,
+      "rec_loc": 1111073,
+      "rec_bytes": 77574396,
+      "rec_code_files": 547,
+      "rec_code_loc": 156552,
+      "rec_doc_loc": 918655,
+      "rec_cfg_loc": 2484
+    },
+    "repo_total": {
+      "files": 701,
+      "loc": 1085441,
+      "bytes": 53421468,
+      "code_files": 527,
+      "code_loc": 98797,
+      "doc_loc": 918643,
+      "cfg_loc": 33433
+    },
+    "modules": [
+      {
+        "qn": "hrl_ocr/api",
+        "path": "hrl_ocr/api",
+        "recursive": {
+          "files": 5,
+          "loc": 597,
+          "bytes": 33202,
+          "code_files": 5,
+          "code_loc": 597,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 5,
+          "loc": 597,
+          "bytes": 33202,
+          "code_files": 5,
+          "code_loc": 597,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/common_utils",
+        "path": "hrl_ocr/common_utils",
+        "recursive": {
+          "files": 44,
+          "loc": 5694,
+          "bytes": 13074324,
+          "code_files": 39,
+          "code_loc": 5592,
+          "doc_loc": 0,
+          "cfg_loc": 102
+        },
+        "own": {
+          "files": 41,
+          "loc": 5080,
+          "bytes": 13047682,
+          "code_files": 36,
+          "code_loc": 4978,
+          "doc_loc": 0,
+          "cfg_loc": 102
+        },
+        "nested_modules": 1
+      },
+      {
+        "qn": "hrl_ocr/common_utils/img_utils",
+        "path": "hrl_ocr/common_utils/img_utils",
+        "recursive": {
+          "files": 3,
+          "loc": 614,
+          "bytes": 26642,
+          "code_files": 3,
+          "code_loc": 614,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 3,
+          "loc": 614,
+          "bytes": 26642,
+          "code_files": 3,
+          "code_loc": 614,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models",
+        "path": "hrl_ocr/models",
+        "recursive": {
+          "files": 242,
+          "loc": 1005823,
+          "bytes": 31966656,
+          "code_files": 185,
+          "code_loc": 54407,
+          "doc_loc": 917955,
+          "cfg_loc": 123
+        },
+        "own": {
+          "files": 57,
+          "loc": 957407,
+          "bytes": 15755565,
+          "code_files": 45,
+          "code_loc": 6759,
+          "doc_loc": 917316,
+          "cfg_loc": 18
+        },
+        "nested_modules": 13
+      },
+      {
+        "qn": "hrl_ocr/models/block_structure",
+        "path": "hrl_ocr/models/block_structure",
+        "recursive": {
+          "files": 7,
+          "loc": 2645,
+          "bytes": 127626,
+          "code_files": 7,
+          "code_loc": 2645,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 2645,
+          "bytes": 127626,
+          "code_files": 7,
+          "code_loc": 2645,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/common_words_correction",
+        "path": "hrl_ocr/models/common_words_correction",
+        "recursive": {
+          "files": 9,
+          "loc": 791,
+          "bytes": 20989,
+          "code_files": 3,
+          "code_loc": 364,
+          "doc_loc": 427,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 9,
+          "loc": 791,
+          "bytes": 20989,
+          "code_files": 3,
+          "code_loc": 364,
+          "doc_loc": 427,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/dates_correction",
+        "path": "hrl_ocr/models/dates_correction",
+        "recursive": {
+          "files": 5,
+          "loc": 672,
+          "bytes": 27276,
+          "code_files": 5,
+          "code_loc": 672,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 5,
+          "loc": 672,
+          "bytes": 27276,
+          "code_files": 5,
+          "code_loc": 672,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/detection/craft",
+        "path": "hrl_ocr/models/detection/craft",
+        "recursive": {
+          "files": 11,
+          "loc": 1027,
+          "bytes": 40003,
+          "code_files": 8,
+          "code_loc": 899,
+          "doc_loc": 109,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 11,
+          "loc": 1027,
+          "bytes": 40003,
+          "code_files": 8,
+          "code_loc": 899,
+          "doc_loc": 109,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/detection/text_detection_model_v2",
+        "path": "hrl_ocr/models/detection/text_detection_model_v2",
+        "recursive": {
+          "files": 111,
+          "loc": 36323,
+          "bytes": 15701721,
+          "code_files": 76,
+          "code_loc": 36128,
+          "doc_loc": 103,
+          "cfg_loc": 87
+        },
+        "own": {
+          "files": 18,
+          "loc": 1559,
+          "bytes": 53598,
+          "code_files": 15,
+          "code_loc": 1425,
+          "doc_loc": 42,
+          "cfg_loc": 87
+        },
+        "nested_modules": 2
+      },
+      {
+        "qn": "hrl_ocr/models/detection/text_detection_model_v2/dataset",
+        "path": "hrl_ocr/models/detection/text_detection_model_v2/dataset",
+        "recursive": {
+          "files": 19,
+          "loc": 5696,
+          "bytes": 195375,
+          "code_files": 18,
+          "code_loc": 5637,
+          "doc_loc": 59,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 19,
+          "loc": 5696,
+          "bytes": 195375,
+          "code_files": 18,
+          "code_loc": 5637,
+          "doc_loc": 59,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/detection/text_detection_model_v2/models",
+        "path": "hrl_ocr/models/detection/text_detection_model_v2/models",
+        "recursive": {
+          "files": 74,
+          "loc": 29068,
+          "bytes": 15452748,
+          "code_files": 43,
+          "code_loc": 29066,
+          "doc_loc": 2,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 74,
+          "loc": 29068,
+          "bytes": 15452748,
+          "code_files": 43,
+          "code_loc": 29066,
+          "doc_loc": 2,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/detection/word_unet_v2",
+        "path": "hrl_ocr/models/detection/word_unet_v2",
+        "recursive": {
+          "files": 11,
+          "loc": 1516,
+          "bytes": 63078,
+          "code_files": 11,
+          "code_loc": 1516,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 11,
+          "loc": 1516,
+          "bytes": 63078,
+          "code_files": 11,
+          "code_loc": 1516,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/fonts_style_recognition",
+        "path": "hrl_ocr/models/fonts_style_recognition",
+        "recursive": {
+          "files": 4,
+          "loc": 845,
+          "bytes": 41335,
+          "code_files": 4,
+          "code_loc": 845,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 4,
+          "loc": 845,
+          "bytes": 41335,
+          "code_files": 4,
+          "code_loc": 845,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/handwriting_detection",
+        "path": "hrl_ocr/models/handwriting_detection",
+        "recursive": {
+          "files": 4,
+          "loc": 309,
+          "bytes": 13032,
+          "code_files": 4,
+          "code_loc": 309,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 4,
+          "loc": 309,
+          "bytes": 13032,
+          "code_files": 4,
+          "code_loc": 309,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/image_localization",
+        "path": "hrl_ocr/models/image_localization",
+        "recursive": {
+          "files": 4,
+          "loc": 614,
+          "bytes": 23139,
+          "code_files": 4,
+          "code_loc": 614,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 4,
+          "loc": 614,
+          "bytes": 23139,
+          "code_files": 4,
+          "code_loc": 614,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/script_recognition",
+        "path": "hrl_ocr/models/script_recognition",
+        "recursive": {
+          "files": 14,
+          "loc": 2614,
+          "bytes": 110488,
+          "code_files": 13,
+          "code_loc": 2596,
+          "doc_loc": 0,
+          "cfg_loc": 18
+        },
+        "own": {
+          "files": 14,
+          "loc": 2614,
+          "bytes": 110488,
+          "code_files": 13,
+          "code_loc": 2596,
+          "doc_loc": 0,
+          "cfg_loc": 18
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/skew_correction",
+        "path": "hrl_ocr/models/skew_correction",
+        "recursive": {
+          "files": 5,
+          "loc": 1060,
+          "bytes": 42404,
+          "code_files": 5,
+          "code_loc": 1060,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 5,
+          "loc": 1060,
+          "bytes": 42404,
+          "code_files": 5,
+          "code_loc": 1060,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/pipeline/glue_components",
+        "path": "hrl_ocr/pipeline/glue_components",
+        "recursive": {
+          "files": 33,
+          "loc": 5020,
+          "bytes": 208367,
+          "code_files": 33,
+          "code_loc": 5020,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 33,
+          "loc": 5020,
+          "bytes": 208367,
+          "code_files": 33,
+          "code_loc": 5020,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/pipeline/ibm_ocr",
+        "path": "hrl_ocr/pipeline/ibm_ocr",
+        "recursive": {
+          "files": 33,
+          "loc": 4347,
+          "bytes": 182845,
+          "code_files": 23,
+          "code_loc": 2841,
+          "doc_loc": 0,
+          "cfg_loc": 1501
+        },
+        "own": {
+          "files": 16,
+          "loc": 3080,
+          "bytes": 139614,
+          "code_files": 10,
+          "code_loc": 1610,
+          "doc_loc": 0,
+          "cfg_loc": 1470
+        },
+        "nested_modules": 2
+      },
+      {
+        "qn": "hrl_ocr/pipeline/ibm_ocr/flask_server",
+        "path": "hrl_ocr/pipeline/ibm_ocr/flask_server",
+        "recursive": {
+          "files": 7,
+          "loc": 399,
+          "bytes": 14036,
+          "code_files": 6,
+          "code_loc": 368,
+          "doc_loc": 0,
+          "cfg_loc": 31
+        },
+        "own": {
+          "files": 7,
+          "loc": 399,
+          "bytes": 14036,
+          "code_files": 6,
+          "code_loc": 368,
+          "doc_loc": 0,
+          "cfg_loc": 31
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/pipeline/ibm_ocr/grpc_server",
+        "path": "hrl_ocr/pipeline/ibm_ocr/grpc_server",
+        "recursive": {
+          "files": 10,
+          "loc": 868,
+          "bytes": 29195,
+          "code_files": 7,
+          "code_loc": 863,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 10,
+          "loc": 868,
+          "bytes": 29195,
+          "code_files": 7,
+          "code_loc": 863,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/pipeline/str",
+        "path": "hrl_ocr/pipeline/str",
+        "recursive": {
+          "files": 35,
+          "loc": 2876,
+          "bytes": 119331,
+          "code_files": 25,
+          "code_loc": 2322,
+          "doc_loc": 0,
+          "cfg_loc": 549
+        },
+        "own": {
+          "files": 8,
+          "loc": 1221,
+          "bytes": 58747,
+          "code_files": 5,
+          "code_loc": 745,
+          "doc_loc": 0,
+          "cfg_loc": 476
+        },
+        "nested_modules": 3
+      },
+      {
+        "qn": "hrl_ocr/pipeline/str/flask_server",
+        "path": "hrl_ocr/pipeline/str/flask_server",
+        "recursive": {
+          "files": 9,
+          "loc": 516,
+          "bytes": 20289,
+          "code_files": 7,
+          "code_loc": 491,
+          "doc_loc": 0,
+          "cfg_loc": 25
+        },
+        "own": {
+          "files": 9,
+          "loc": 516,
+          "bytes": 20289,
+          "code_files": 7,
+          "code_loc": 491,
+          "doc_loc": 0,
+          "cfg_loc": 25
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/pipeline/str/grpc_server",
+        "path": "hrl_ocr/pipeline/str/grpc_server",
+        "recursive": {
+          "files": 11,
+          "loc": 929,
+          "bytes": 33127,
+          "code_files": 8,
+          "code_loc": 924,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 11,
+          "loc": 929,
+          "bytes": 33127,
+          "code_files": 8,
+          "code_loc": 924,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/pipeline/str/ibm_str_util",
+        "path": "hrl_ocr/pipeline/str/ibm_str_util",
+        "recursive": {
+          "files": 7,
+          "loc": 210,
+          "bytes": 7168,
+          "code_files": 5,
+          "code_loc": 162,
+          "doc_loc": 0,
+          "cfg_loc": 48
+        },
+        "own": {
+          "files": 7,
+          "loc": 210,
+          "bytes": 7168,
+          "code_files": 5,
+          "code_loc": 162,
+          "doc_loc": 0,
+          "cfg_loc": 48
+        },
+        "nested_modules": 0
+      }
+    ]
+  },
+  {
+    "run": "iocr/page_latency-2026-08-19-ophir-new-module-extractor",
+    "repo": "iocr",
+    "commit": "641b9806fc",
+    "clone_ok": true,
+    "total_tokens": 94670583,
+    "wall_s": 15515.001530291978,
+    "api_s": 69856.06806737329,
+    "engine_sha": "fd3dfdaa",
+    "n_modules_billed": 25,
+    "n_modules_in_tree": 30,
+    "unmatched_modules": [],
+    "scope": {
+      "own_files": 428,
+      "own_loc": 1032488,
+      "own_bytes": 43411819,
+      "own_code_files": 339,
+      "own_code_loc": 78612,
+      "own_doc_loc": 917981,
+      "own_cfg_loc": 2446,
+      "rec_files": 718,
+      "rec_loc": 1122166,
+      "rec_bytes": 70552815,
+      "rec_code_files": 552,
+      "rec_code_loc": 167502,
+      "rec_doc_loc": 918622,
+      "rec_cfg_loc": 2569
+    },
+    "repo_total": {
+      "files": 707,
+      "loc": 1090577,
+      "bytes": 51110937,
+      "code_files": 533,
+      "code_loc": 103772,
+      "doc_loc": 918641,
+      "cfg_loc": 33581
+    },
+    "modules": [
+      {
+        "qn": "document_understanding_utils",
+        "path": "document_understanding_utils",
+        "recursive": {
+          "files": 13,
+          "loc": 2093,
+          "bytes": 95127,
+          "code_files": 13,
+          "code_loc": 2093,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 13,
+          "loc": 2093,
+          "bytes": 95127,
+          "code_files": 13,
+          "code_loc": 2093,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "document_understanding_workflow",
+        "path": "document_understanding_workflow",
+        "recursive": {
+          "files": 9,
+          "loc": 781,
+          "bytes": 32084,
+          "code_files": 5,
+          "code_loc": 608,
+          "doc_loc": 26,
+          "cfg_loc": 46
+        },
+        "own": {
+          "files": 9,
+          "loc": 781,
+          "bytes": 32084,
+          "code_files": 5,
+          "code_loc": 608,
+          "doc_loc": 26,
+          "cfg_loc": 46
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/api",
+        "path": "hrl_ocr/api",
+        "recursive": {
+          "files": 5,
+          "loc": 597,
+          "bytes": 33202,
+          "code_files": 5,
+          "code_loc": 597,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 5,
+          "loc": 597,
+          "bytes": 33202,
+          "code_files": 5,
+          "code_loc": 597,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/common_utils",
+        "path": "hrl_ocr/common_utils",
+        "recursive": {
+          "files": 44,
+          "loc": 5728,
+          "bytes": 13075813,
+          "code_files": 39,
+          "code_loc": 5626,
+          "doc_loc": 0,
+          "cfg_loc": 102
+        },
+        "own": {
+          "files": 44,
+          "loc": 5728,
+          "bytes": 13075813,
+          "code_files": 39,
+          "code_loc": 5626,
+          "doc_loc": 0,
+          "cfg_loc": 102
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models",
+        "path": "hrl_ocr/models",
+        "recursive": {
+          "files": 243,
+          "loc": 1009386,
+          "bytes": 29592352,
+          "code_files": 186,
+          "code_loc": 57970,
+          "doc_loc": 917955,
+          "cfg_loc": 123
+        },
+        "own": {
+          "files": 27,
+          "loc": 952143,
+          "bytes": 15521780,
+          "code_files": 16,
+          "code_loc": 1513,
+          "doc_loc": 917316,
+          "cfg_loc": 0
+        },
+        "nested_modules": 15
+      },
+      {
+        "qn": "hrl_ocr/models/block_structure",
+        "path": "hrl_ocr/models/block_structure",
+        "recursive": {
+          "files": 7,
+          "loc": 2645,
+          "bytes": 127626,
+          "code_files": 7,
+          "code_loc": 2645,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 2645,
+          "bytes": 127626,
+          "code_files": 7,
+          "code_loc": 2645,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/common_words_correction",
+        "path": "hrl_ocr/models/common_words_correction",
+        "recursive": {
+          "files": 9,
+          "loc": 791,
+          "bytes": 20989,
+          "code_files": 3,
+          "code_loc": 364,
+          "doc_loc": 427,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 9,
+          "loc": 791,
+          "bytes": 20989,
+          "code_files": 3,
+          "code_loc": 364,
+          "doc_loc": 427,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/dates_correction",
+        "path": "hrl_ocr/models/dates_correction",
+        "recursive": {
+          "files": 5,
+          "loc": 672,
+          "bytes": 27276,
+          "code_files": 5,
+          "code_loc": 672,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 5,
+          "loc": 672,
+          "bytes": 27276,
+          "code_files": 5,
+          "code_loc": 672,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/detection/craft",
+        "path": "hrl_ocr/models/detection/craft",
+        "recursive": {
+          "files": 11,
+          "loc": 1027,
+          "bytes": 40003,
+          "code_files": 8,
+          "code_loc": 899,
+          "doc_loc": 109,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 11,
+          "loc": 1027,
+          "bytes": 40003,
+          "code_files": 8,
+          "code_loc": 899,
+          "doc_loc": 109,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/detection/text_detection_model_v2",
+        "path": "hrl_ocr/models/detection/text_detection_model_v2",
+        "recursive": {
+          "files": 112,
+          "loc": 39800,
+          "bytes": 13324029,
+          "code_files": 77,
+          "code_loc": 39605,
+          "doc_loc": 103,
+          "cfg_loc": 87
+        },
+        "own": {
+          "files": 38,
+          "loc": 7365,
+          "bytes": 253605,
+          "code_files": 34,
+          "code_loc": 7172,
+          "doc_loc": 101,
+          "cfg_loc": 87
+        },
+        "nested_modules": 1
+      },
+      {
+        "qn": "hrl_ocr/models/detection/text_detection_model_v2/models",
+        "path": "hrl_ocr/models/detection/text_detection_model_v2/models",
+        "recursive": {
+          "files": 74,
+          "loc": 32435,
+          "bytes": 13070424,
+          "code_files": 43,
+          "code_loc": 32433,
+          "doc_loc": 2,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 74,
+          "loc": 32435,
+          "bytes": 13070424,
+          "code_files": 43,
+          "code_loc": 32433,
+          "doc_loc": 2,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/detection/word_unet_v2",
+        "path": "hrl_ocr/models/detection/word_unet_v2",
+        "recursive": {
+          "files": 11,
+          "loc": 1516,
+          "bytes": 63078,
+          "code_files": 11,
+          "code_loc": 1516,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 11,
+          "loc": 1516,
+          "bytes": 63078,
+          "code_files": 11,
+          "code_loc": 1516,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/fonts_recognition",
+        "path": "hrl_ocr/models/fonts_recognition",
+        "recursive": {
+          "files": 7,
+          "loc": 772,
+          "bytes": 37371,
+          "code_files": 7,
+          "code_loc": 772,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 772,
+          "bytes": 37371,
+          "code_files": 7,
+          "code_loc": 772,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/fonts_style_recognition",
+        "path": "hrl_ocr/models/fonts_style_recognition",
+        "recursive": {
+          "files": 4,
+          "loc": 845,
+          "bytes": 41335,
+          "code_files": 4,
+          "code_loc": 845,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 4,
+          "loc": 845,
+          "bytes": 41335,
+          "code_files": 4,
+          "code_loc": 845,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/handwriting_detection",
+        "path": "hrl_ocr/models/handwriting_detection",
+        "recursive": {
+          "files": 4,
+          "loc": 309,
+          "bytes": 13032,
+          "code_files": 4,
+          "code_loc": 309,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 4,
+          "loc": 309,
+          "bytes": 13032,
+          "code_files": 4,
+          "code_loc": 309,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/image_localization",
+        "path": "hrl_ocr/models/image_localization",
+        "recursive": {
+          "files": 4,
+          "loc": 614,
+          "bytes": 23139,
+          "code_files": 4,
+          "code_loc": 614,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 4,
+          "loc": 614,
+          "bytes": 23139,
+          "code_files": 4,
+          "code_loc": 614,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/recognition/ai_hwr",
+        "path": "hrl_ocr/models/recognition/ai_hwr",
+        "recursive": {
+          "files": 5,
+          "loc": 389,
+          "bytes": 16713,
+          "code_files": 5,
+          "code_loc": 389,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 5,
+          "loc": 389,
+          "bytes": 16713,
+          "code_files": 5,
+          "code_loc": 389,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/recognition/ssocr",
+        "path": "hrl_ocr/models/recognition/ssocr",
+        "recursive": {
+          "files": 19,
+          "loc": 4196,
+          "bytes": 183469,
+          "code_files": 18,
+          "code_loc": 4178,
+          "doc_loc": 0,
+          "cfg_loc": 18
+        },
+        "own": {
+          "files": 19,
+          "loc": 4196,
+          "bytes": 183469,
+          "code_files": 18,
+          "code_loc": 4178,
+          "doc_loc": 0,
+          "cfg_loc": 18
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/script_recognition/ssocr",
+        "path": "hrl_ocr/models/script_recognition/ssocr",
+        "recursive": {
+          "files": 13,
+          "loc": 2604,
+          "bytes": 109951,
+          "code_files": 12,
+          "code_loc": 2586,
+          "doc_loc": 0,
+          "cfg_loc": 18
+        },
+        "own": {
+          "files": 13,
+          "loc": 2604,
+          "bytes": 109951,
+          "code_files": 12,
+          "code_loc": 2586,
+          "doc_loc": 0,
+          "cfg_loc": 18
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/skew_correction",
+        "path": "hrl_ocr/models/skew_correction",
+        "recursive": {
+          "files": 5,
+          "loc": 1063,
+          "bytes": 42561,
+          "code_files": 5,
+          "code_loc": 1063,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 5,
+          "loc": 1063,
+          "bytes": 42561,
+          "code_files": 5,
+          "code_loc": 1063,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/oneconversion_utils",
+        "path": "hrl_ocr/oneconversion_utils",
+        "recursive": {
+          "files": 5,
+          "loc": 1039,
+          "bytes": 44600,
+          "code_files": 3,
+          "code_loc": 983,
+          "doc_loc": 0,
+          "cfg_loc": 56
+        },
+        "own": {
+          "files": 5,
+          "loc": 1039,
+          "bytes": 44600,
+          "code_files": 3,
+          "code_loc": 983,
+          "doc_loc": 0,
+          "cfg_loc": 56
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/pipeline/glue_components",
+        "path": "hrl_ocr/pipeline/glue_components",
+        "recursive": {
+          "files": 33,
+          "loc": 5028,
+          "bytes": 209127,
+          "code_files": 33,
+          "code_loc": 5028,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 33,
+          "loc": 5028,
+          "bytes": 209127,
+          "code_files": 33,
+          "code_loc": 5028,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/pipeline/ibm_ocr",
+        "path": "hrl_ocr/pipeline/ibm_ocr",
+        "recursive": {
+          "files": 33,
+          "loc": 4397,
+          "bytes": 185817,
+          "code_files": 23,
+          "code_loc": 2857,
+          "doc_loc": 0,
+          "cfg_loc": 1535
+        },
+        "own": {
+          "files": 33,
+          "loc": 4397,
+          "bytes": 185817,
+          "code_files": 23,
+          "code_loc": 2857,
+          "doc_loc": 0,
+          "cfg_loc": 1535
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/pipeline/str",
+        "path": "hrl_ocr/pipeline/str",
+        "recursive": {
+          "files": 35,
+          "loc": 2876,
+          "bytes": 119330,
+          "code_files": 25,
+          "code_loc": 2322,
+          "doc_loc": 0,
+          "cfg_loc": 549
+        },
+        "own": {
+          "files": 35,
+          "loc": 2876,
+          "bytes": 119330,
+          "code_files": 25,
+          "code_loc": 2322,
+          "doc_loc": 0,
+          "cfg_loc": 549
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/tooling",
+        "path": "hrl_ocr/tooling",
+        "recursive": {
+          "files": 8,
+          "loc": 563,
+          "bytes": 24367,
+          "code_files": 7,
+          "code_loc": 528,
+          "doc_loc": 0,
+          "cfg_loc": 35
+        },
+        "own": {
+          "files": 8,
+          "loc": 563,
+          "bytes": 24367,
+          "code_files": 7,
+          "code_loc": 528,
+          "doc_loc": 0,
+          "cfg_loc": 35
+        },
+        "nested_modules": 0
+      }
+    ]
+  },
+  {
+    "run": "iocr/dam-output-2026-03-31-orit/spotlights-out",
+    "repo": "iocr",
+    "commit": "fa9358617b",
+    "clone_ok": true,
+    "total_tokens": 178774910,
+    "wall_s": 37229.108004855996,
+    "api_s": 79808.48989007801,
+    "engine_sha": "",
+    "n_modules_billed": 31,
+    "n_modules_in_tree": 36,
+    "unmatched_modules": [],
+    "scope": {
+      "own_files": 641,
+      "own_loc": 1082653,
+      "own_bytes": 50719366,
+      "own_code_files": 498,
+      "own_code_loc": 99718,
+      "own_doc_loc": 918396,
+      "own_cfg_loc": 31090,
+      "rec_files": 1405,
+      "rec_loc": 2233180,
+      "rec_bytes": 134162240,
+      "rec_code_files": 1061,
+      "rec_code_loc": 295721,
+      "rec_doc_loc": 1836994,
+      "rec_cfg_loc": 33634
+    },
+    "repo_total": {
+      "files": 815,
+      "loc": 1096525,
+      "bytes": 95334656,
+      "code_files": 544,
+      "code_loc": 107596,
+      "doc_loc": 920465,
+      "cfg_loc": 33880
+    },
+    "modules": [
+      {
+        "qn": "document_understanding_utils",
+        "path": "document_understanding_utils",
+        "recursive": {
+          "files": 13,
+          "loc": 2093,
+          "bytes": 95127,
+          "code_files": 13,
+          "code_loc": 2093,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 13,
+          "loc": 2093,
+          "bytes": 95127,
+          "code_files": 13,
+          "code_loc": 2093,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "document_understanding_workflow",
+        "path": "document_understanding_workflow",
+        "recursive": {
+          "files": 9,
+          "loc": 781,
+          "bytes": 32084,
+          "code_files": 5,
+          "code_loc": 608,
+          "doc_loc": 26,
+          "cfg_loc": 46
+        },
+        "own": {
+          "files": 9,
+          "loc": 781,
+          "bytes": 32084,
+          "code_files": 5,
+          "code_loc": 608,
+          "doc_loc": 26,
+          "cfg_loc": 46
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr",
+        "path": "hrl_ocr",
+        "recursive": {
+          "files": 619,
+          "loc": 1079779,
+          "bytes": 50592155,
+          "code_files": 480,
+          "code_loc": 97017,
+          "doc_loc": 918370,
+          "cfg_loc": 31044
+        },
+        "own": {
+          "files": 221,
+          "loc": 50728,
+          "bytes": 7331914,
+          "code_files": 166,
+          "code_loc": 21634,
+          "doc_loc": 415,
+          "cfg_loc": 28679
+        },
+        "nested_modules": 28
+      },
+      {
+        "qn": "hrl_ocr/api",
+        "path": "hrl_ocr/api",
+        "recursive": {
+          "files": 5,
+          "loc": 597,
+          "bytes": 33202,
+          "code_files": 5,
+          "code_loc": 597,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 5,
+          "loc": 597,
+          "bytes": 33202,
+          "code_files": 5,
+          "code_loc": 597,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/common_utils",
+        "path": "hrl_ocr/common_utils",
+        "recursive": {
+          "files": 44,
+          "loc": 5728,
+          "bytes": 13075813,
+          "code_files": 39,
+          "code_loc": 5626,
+          "doc_loc": 0,
+          "cfg_loc": 102
+        },
+        "own": {
+          "files": 44,
+          "loc": 5728,
+          "bytes": 13075813,
+          "code_files": 39,
+          "code_loc": 5626,
+          "doc_loc": 0,
+          "cfg_loc": 102
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models",
+        "path": "hrl_ocr/models",
+        "recursive": {
+          "files": 243,
+          "loc": 1009386,
+          "bytes": 29592352,
+          "code_files": 186,
+          "code_loc": 57970,
+          "doc_loc": 917955,
+          "cfg_loc": 123
+        },
+        "own": {
+          "files": 27,
+          "loc": 952143,
+          "bytes": 15521780,
+          "code_files": 16,
+          "code_loc": 1513,
+          "doc_loc": 917316,
+          "cfg_loc": 0
+        },
+        "nested_modules": 17
+      },
+      {
+        "qn": "hrl_ocr/models/block_structure",
+        "path": "hrl_ocr/models/block_structure",
+        "recursive": {
+          "files": 7,
+          "loc": 2645,
+          "bytes": 127626,
+          "code_files": 7,
+          "code_loc": 2645,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 2645,
+          "bytes": 127626,
+          "code_files": 7,
+          "code_loc": 2645,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/common_words_correction",
+        "path": "hrl_ocr/models/common_words_correction",
+        "recursive": {
+          "files": 9,
+          "loc": 791,
+          "bytes": 20989,
+          "code_files": 3,
+          "code_loc": 364,
+          "doc_loc": 427,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 9,
+          "loc": 791,
+          "bytes": 20989,
+          "code_files": 3,
+          "code_loc": 364,
+          "doc_loc": 427,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/dates_correction",
+        "path": "hrl_ocr/models/dates_correction",
+        "recursive": {
+          "files": 5,
+          "loc": 672,
+          "bytes": 27276,
+          "code_files": 5,
+          "code_loc": 672,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 5,
+          "loc": 672,
+          "bytes": 27276,
+          "code_files": 5,
+          "code_loc": 672,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/detection/craft",
+        "path": "hrl_ocr/models/detection/craft",
+        "recursive": {
+          "files": 11,
+          "loc": 1027,
+          "bytes": 40003,
+          "code_files": 8,
+          "code_loc": 899,
+          "doc_loc": 109,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 11,
+          "loc": 1027,
+          "bytes": 40003,
+          "code_files": 8,
+          "code_loc": 899,
+          "doc_loc": 109,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/detection/text_detection_model_v2",
+        "path": "hrl_ocr/models/detection/text_detection_model_v2",
+        "recursive": {
+          "files": 112,
+          "loc": 39800,
+          "bytes": 13324029,
+          "code_files": 77,
+          "code_loc": 39605,
+          "doc_loc": 103,
+          "cfg_loc": 87
+        },
+        "own": {
+          "files": 38,
+          "loc": 7365,
+          "bytes": 253605,
+          "code_files": 34,
+          "code_loc": 7172,
+          "doc_loc": 101,
+          "cfg_loc": 87
+        },
+        "nested_modules": 3
+      },
+      {
+        "qn": "hrl_ocr/models/detection/text_detection_model_v2/models",
+        "path": "hrl_ocr/models/detection/text_detection_model_v2/models",
+        "recursive": {
+          "files": 74,
+          "loc": 32435,
+          "bytes": 13070424,
+          "code_files": 43,
+          "code_loc": 32433,
+          "doc_loc": 2,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 35,
+          "loc": 3349,
+          "bytes": 125434,
+          "code_files": 35,
+          "code_loc": 3349,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 2
+      },
+      {
+        "qn": "hrl_ocr/models/detection/text_detection_model_v2/models/post_processing/pa",
+        "path": "hrl_ocr/models/detection/text_detection_model_v2/models/post_processing/pa",
+        "recursive": {
+          "files": 21,
+          "loc": 15150,
+          "bytes": 7570218,
+          "code_files": 4,
+          "code_loc": 15149,
+          "doc_loc": 1,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 21,
+          "loc": 15150,
+          "bytes": 7570218,
+          "code_files": 4,
+          "code_loc": 15149,
+          "doc_loc": 1,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/detection/text_detection_model_v2/models/post_processing/pse",
+        "path": "hrl_ocr/models/detection/text_detection_model_v2/models/post_processing/pse",
+        "recursive": {
+          "files": 18,
+          "loc": 13936,
+          "bytes": 5374772,
+          "code_files": 4,
+          "code_loc": 13935,
+          "doc_loc": 1,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 18,
+          "loc": 13936,
+          "bytes": 5374772,
+          "code_files": 4,
+          "code_loc": 13935,
+          "doc_loc": 1,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/detection/word_unet_v2",
+        "path": "hrl_ocr/models/detection/word_unet_v2",
+        "recursive": {
+          "files": 11,
+          "loc": 1516,
+          "bytes": 63078,
+          "code_files": 11,
+          "code_loc": 1516,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 11,
+          "loc": 1516,
+          "bytes": 63078,
+          "code_files": 11,
+          "code_loc": 1516,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/fonts_recognition",
+        "path": "hrl_ocr/models/fonts_recognition",
+        "recursive": {
+          "files": 7,
+          "loc": 772,
+          "bytes": 37371,
+          "code_files": 7,
+          "code_loc": 772,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 772,
+          "bytes": 37371,
+          "code_files": 7,
+          "code_loc": 772,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/fonts_style_recognition",
+        "path": "hrl_ocr/models/fonts_style_recognition",
+        "recursive": {
+          "files": 4,
+          "loc": 845,
+          "bytes": 41335,
+          "code_files": 4,
+          "code_loc": 845,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 4,
+          "loc": 845,
+          "bytes": 41335,
+          "code_files": 4,
+          "code_loc": 845,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/handwriting_detection",
+        "path": "hrl_ocr/models/handwriting_detection",
+        "recursive": {
+          "files": 4,
+          "loc": 309,
+          "bytes": 13032,
+          "code_files": 4,
+          "code_loc": 309,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 4,
+          "loc": 309,
+          "bytes": 13032,
+          "code_files": 4,
+          "code_loc": 309,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/image_localization",
+        "path": "hrl_ocr/models/image_localization",
+        "recursive": {
+          "files": 4,
+          "loc": 614,
+          "bytes": 23139,
+          "code_files": 4,
+          "code_loc": 614,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 4,
+          "loc": 614,
+          "bytes": 23139,
+          "code_files": 4,
+          "code_loc": 614,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/recognition/ai_hwr",
+        "path": "hrl_ocr/models/recognition/ai_hwr",
+        "recursive": {
+          "files": 5,
+          "loc": 389,
+          "bytes": 16713,
+          "code_files": 5,
+          "code_loc": 389,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 5,
+          "loc": 389,
+          "bytes": 16713,
+          "code_files": 5,
+          "code_loc": 389,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/recognition/ssocr",
+        "path": "hrl_ocr/models/recognition/ssocr",
+        "recursive": {
+          "files": 19,
+          "loc": 4196,
+          "bytes": 183469,
+          "code_files": 18,
+          "code_loc": 4178,
+          "doc_loc": 0,
+          "cfg_loc": 18
+        },
+        "own": {
+          "files": 19,
+          "loc": 4196,
+          "bytes": 183469,
+          "code_files": 18,
+          "code_loc": 4178,
+          "doc_loc": 0,
+          "cfg_loc": 18
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/script_recognition/ssocr",
+        "path": "hrl_ocr/models/script_recognition/ssocr",
+        "recursive": {
+          "files": 13,
+          "loc": 2604,
+          "bytes": 109951,
+          "code_files": 12,
+          "code_loc": 2586,
+          "doc_loc": 0,
+          "cfg_loc": 18
+        },
+        "own": {
+          "files": 13,
+          "loc": 2604,
+          "bytes": 109951,
+          "code_files": 12,
+          "code_loc": 2586,
+          "doc_loc": 0,
+          "cfg_loc": 18
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/models/skew_correction",
+        "path": "hrl_ocr/models/skew_correction",
+        "recursive": {
+          "files": 5,
+          "loc": 1063,
+          "bytes": 42561,
+          "code_files": 5,
+          "code_loc": 1063,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 5,
+          "loc": 1063,
+          "bytes": 42561,
+          "code_files": 5,
+          "code_loc": 1063,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/oneconversion_utils",
+        "path": "hrl_ocr/oneconversion_utils",
+        "recursive": {
+          "files": 5,
+          "loc": 1039,
+          "bytes": 44600,
+          "code_files": 3,
+          "code_loc": 983,
+          "doc_loc": 0,
+          "cfg_loc": 56
+        },
+        "own": {
+          "files": 5,
+          "loc": 1039,
+          "bytes": 44600,
+          "code_files": 3,
+          "code_loc": 983,
+          "doc_loc": 0,
+          "cfg_loc": 56
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/pipeline/glue_components",
+        "path": "hrl_ocr/pipeline/glue_components",
+        "recursive": {
+          "files": 33,
+          "loc": 5028,
+          "bytes": 209127,
+          "code_files": 33,
+          "code_loc": 5028,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 33,
+          "loc": 5028,
+          "bytes": 209127,
+          "code_files": 33,
+          "code_loc": 5028,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/pipeline/ibm_ocr",
+        "path": "hrl_ocr/pipeline/ibm_ocr",
+        "recursive": {
+          "files": 33,
+          "loc": 4397,
+          "bytes": 185817,
+          "code_files": 23,
+          "code_loc": 2857,
+          "doc_loc": 0,
+          "cfg_loc": 1535
+        },
+        "own": {
+          "files": 16,
+          "loc": 3130,
+          "bytes": 142586,
+          "code_files": 10,
+          "code_loc": 1626,
+          "doc_loc": 0,
+          "cfg_loc": 1504
+        },
+        "nested_modules": 2
+      },
+      {
+        "qn": "hrl_ocr/pipeline/ibm_ocr/flask_server",
+        "path": "hrl_ocr/pipeline/ibm_ocr/flask_server",
+        "recursive": {
+          "files": 7,
+          "loc": 399,
+          "bytes": 14036,
+          "code_files": 6,
+          "code_loc": 368,
+          "doc_loc": 0,
+          "cfg_loc": 31
+        },
+        "own": {
+          "files": 7,
+          "loc": 399,
+          "bytes": 14036,
+          "code_files": 6,
+          "code_loc": 368,
+          "doc_loc": 0,
+          "cfg_loc": 31
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/pipeline/ibm_ocr/grpc_server",
+        "path": "hrl_ocr/pipeline/ibm_ocr/grpc_server",
+        "recursive": {
+          "files": 10,
+          "loc": 868,
+          "bytes": 29195,
+          "code_files": 7,
+          "code_loc": 863,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 10,
+          "loc": 868,
+          "bytes": 29195,
+          "code_files": 7,
+          "code_loc": 863,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/pipeline/str",
+        "path": "hrl_ocr/pipeline/str",
+        "recursive": {
+          "files": 35,
+          "loc": 2876,
+          "bytes": 119330,
+          "code_files": 25,
+          "code_loc": 2322,
+          "doc_loc": 0,
+          "cfg_loc": 549
+        },
+        "own": {
+          "files": 15,
+          "loc": 1431,
+          "bytes": 65914,
+          "code_files": 10,
+          "code_loc": 907,
+          "doc_loc": 0,
+          "cfg_loc": 524
+        },
+        "nested_modules": 2
+      },
+      {
+        "qn": "hrl_ocr/pipeline/str/flask_server",
+        "path": "hrl_ocr/pipeline/str/flask_server",
+        "recursive": {
+          "files": 9,
+          "loc": 516,
+          "bytes": 20289,
+          "code_files": 7,
+          "code_loc": 491,
+          "doc_loc": 0,
+          "cfg_loc": 25
+        },
+        "own": {
+          "files": 9,
+          "loc": 516,
+          "bytes": 20289,
+          "code_files": 7,
+          "code_loc": 491,
+          "doc_loc": 0,
+          "cfg_loc": 25
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "hrl_ocr/pipeline/str/grpc_server",
+        "path": "hrl_ocr/pipeline/str/grpc_server",
+        "recursive": {
+          "files": 11,
+          "loc": 929,
+          "bytes": 33127,
+          "code_files": 8,
+          "code_loc": 924,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 11,
+          "loc": 929,
+          "bytes": 33127,
+          "code_files": 8,
+          "code_loc": 924,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      }
+    ]
+  },
+  {
+    "run": "llmd",
+    "repo": "llm-d-router",
+    "commit": "5f4e762f34",
+    "clone_ok": true,
+    "total_tokens": 238495812,
+    "wall_s": 12152.240655228496,
+    "api_s": 153241.48677518484,
+    "engine_sha": "94173ca7",
+    "n_modules_billed": 22,
+    "n_modules_in_tree": 32,
+    "unmatched_modules": [],
+    "scope": {
+      "own_files": 606,
+      "own_loc": 117545,
+      "own_bytes": 4337330,
+      "own_code_files": 480,
+      "own_code_loc": 111197,
+      "own_doc_loc": 4244,
+      "own_cfg_loc": 49,
+      "rec_files": 1243,
+      "rec_loc": 228795,
+      "rec_bytes": 8414342,
+      "rec_code_files": 987,
+      "rec_code_loc": 214702,
+      "rec_doc_loc": 11845,
+      "rec_cfg_loc": 147
+    },
+    "repo_total": {
+      "files": 1053,
+      "loc": 182465,
+      "bytes": 8247139,
+      "code_files": 635,
+      "code_loc": 136169,
+      "doc_loc": 8945,
+      "cfg_loc": 32705
+    },
+    "modules": [
+      {
+        "qn": "cmd/epp",
+        "path": "cmd/epp",
+        "recursive": {
+          "files": 8,
+          "loc": 1920,
+          "bytes": 77350,
+          "code_files": 8,
+          "code_loc": 1920,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 8,
+          "loc": 1920,
+          "bytes": 77350,
+          "code_files": 8,
+          "code_loc": 1920,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "pkg/common/envoy",
+        "path": "pkg/common/envoy",
+        "recursive": {
+          "files": 10,
+          "loc": 1028,
+          "bytes": 29055,
+          "code_files": 10,
+          "code_loc": 1028,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 10,
+          "loc": 1028,
+          "bytes": 29055,
+          "code_files": 10,
+          "code_loc": 1028,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "pkg/common/observability",
+        "path": "pkg/common/observability",
+        "recursive": {
+          "files": 9,
+          "loc": 802,
+          "bytes": 23021,
+          "code_files": 9,
+          "code_loc": 802,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 9,
+          "loc": 802,
+          "bytes": 23021,
+          "code_files": 9,
+          "code_loc": 802,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "pkg/epp/config",
+        "path": "pkg/epp/config",
+        "recursive": {
+          "files": 9,
+          "loc": 3695,
+          "bytes": 123508,
+          "code_files": 9,
+          "code_loc": 3695,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 9,
+          "loc": 3695,
+          "bytes": 123508,
+          "code_files": 9,
+          "code_loc": 3695,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "pkg/epp/datalayer",
+        "path": "pkg/epp/datalayer",
+        "recursive": {
+          "files": 19,
+          "loc": 3650,
+          "bytes": 119483,
+          "code_files": 19,
+          "code_loc": 3650,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 19,
+          "loc": 3650,
+          "bytes": 119483,
+          "code_files": 19,
+          "code_loc": 3650,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "pkg/epp/datastore",
+        "path": "pkg/epp/datastore",
+        "recursive": {
+          "files": 4,
+          "loc": 2325,
+          "bytes": 75582,
+          "code_files": 4,
+          "code_loc": 2325,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 4,
+          "loc": 2325,
+          "bytes": 75582,
+          "code_files": 4,
+          "code_loc": 2325,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "pkg/epp/flowcontrol/controller",
+        "path": "pkg/epp/flowcontrol/controller",
+        "recursive": {
+          "files": 10,
+          "loc": 4369,
+          "bytes": 161589,
+          "code_files": 10,
+          "code_loc": 4369,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 10,
+          "loc": 4369,
+          "bytes": 161589,
+          "code_files": 10,
+          "code_loc": 4369,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "pkg/epp/flowcontrol/eviction",
+        "path": "pkg/epp/flowcontrol/eviction",
+        "recursive": {
+          "files": 8,
+          "loc": 1414,
+          "bytes": 42996,
+          "code_files": 8,
+          "code_loc": 1414,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 8,
+          "loc": 1414,
+          "bytes": 42996,
+          "code_files": 8,
+          "code_loc": 1414,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "pkg/epp/flowcontrol/framework",
+        "path": "pkg/epp/flowcontrol/framework",
+        "recursive": {
+          "files": 6,
+          "loc": 1639,
+          "bytes": 57336,
+          "code_files": 6,
+          "code_loc": 1639,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 6,
+          "loc": 1639,
+          "bytes": 57336,
+          "code_files": 6,
+          "code_loc": 1639,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "pkg/epp/flowcontrol/registry",
+        "path": "pkg/epp/flowcontrol/registry",
+        "recursive": {
+          "files": 12,
+          "loc": 5052,
+          "bytes": 178584,
+          "code_files": 12,
+          "code_loc": 5052,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 12,
+          "loc": 5052,
+          "bytes": 178584,
+          "code_files": 12,
+          "code_loc": 5052,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "pkg/epp/framework",
+        "path": "pkg/epp/framework",
+        "recursive": {
+          "files": 379,
+          "loc": 65225,
+          "bytes": 2358341,
+          "code_files": 304,
+          "code_loc": 60971,
+          "doc_loc": 4182,
+          "cfg_loc": 49
+        },
+        "own": {
+          "files": 2,
+          "loc": 216,
+          "bytes": 5822,
+          "code_files": 2,
+          "code_loc": 216,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 5
+      },
+      {
+        "qn": "pkg/epp/framework/interface",
+        "path": "pkg/epp/framework/interface",
+        "recursive": {
+          "files": 45,
+          "loc": 5412,
+          "bytes": 177422,
+          "code_files": 45,
+          "code_loc": 5412,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 45,
+          "loc": 5412,
+          "bytes": 177422,
+          "code_files": 45,
+          "code_loc": 5412,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "pkg/epp/framework/plugins",
+        "path": "pkg/epp/framework/plugins",
+        "recursive": {
+          "files": 332,
+          "loc": 59597,
+          "bytes": 2175097,
+          "code_files": 257,
+          "code_loc": 55343,
+          "doc_loc": 4182,
+          "cfg_loc": 49
+        },
+        "own": {
+          "files": 72,
+          "loc": 13356,
+          "bytes": 450604,
+          "code_files": 52,
+          "code_loc": 12593,
+          "doc_loc": 763,
+          "cfg_loc": 0
+        },
+        "nested_modules": 3
+      },
+      {
+        "qn": "pkg/epp/framework/plugins/datalayer",
+        "path": "pkg/epp/framework/plugins/datalayer",
+        "recursive": {
+          "files": 56,
+          "loc": 6971,
+          "bytes": 220237,
+          "code_files": 44,
+          "code_loc": 6384,
+          "doc_loc": 587,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 56,
+          "loc": 6971,
+          "bytes": 220237,
+          "code_files": 44,
+          "code_loc": 6384,
+          "doc_loc": 587,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "pkg/epp/framework/plugins/requestcontrol",
+        "path": "pkg/epp/framework/plugins/requestcontrol",
+        "recursive": {
+          "files": 98,
+          "loc": 23134,
+          "bytes": 936487,
+          "code_files": 81,
+          "code_loc": 21825,
+          "doc_loc": 1237,
+          "cfg_loc": 49
+        },
+        "own": {
+          "files": 98,
+          "loc": 23134,
+          "bytes": 936487,
+          "code_files": 81,
+          "code_loc": 21825,
+          "doc_loc": 1237,
+          "cfg_loc": 49
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "pkg/epp/framework/plugins/scheduling",
+        "path": "pkg/epp/framework/plugins/scheduling",
+        "recursive": {
+          "files": 106,
+          "loc": 16136,
+          "bytes": 567769,
+          "code_files": 80,
+          "code_loc": 14541,
+          "doc_loc": 1595,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 106,
+          "loc": 16136,
+          "bytes": 567769,
+          "code_files": 80,
+          "code_loc": 14541,
+          "doc_loc": 1595,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "pkg/epp/handlers",
+        "path": "pkg/epp/handlers",
+        "recursive": {
+          "files": 8,
+          "loc": 2376,
+          "bytes": 84497,
+          "code_files": 8,
+          "code_loc": 2376,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 8,
+          "loc": 2376,
+          "bytes": 84497,
+          "code_files": 8,
+          "code_loc": 2376,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "pkg/epp/metrics",
+        "path": "pkg/epp/metrics",
+        "recursive": {
+          "files": 57,
+          "loc": 5005,
+          "bytes": 340891,
+          "code_files": 7,
+          "code_loc": 2973,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 57,
+          "loc": 5005,
+          "bytes": 340891,
+          "code_files": 7,
+          "code_loc": 2973,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "pkg/epp/requestcontrol",
+        "path": "pkg/epp/requestcontrol",
+        "recursive": {
+          "files": 9,
+          "loc": 4455,
+          "bytes": 153747,
+          "code_files": 9,
+          "code_loc": 4455,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 9,
+          "loc": 4455,
+          "bytes": 153747,
+          "code_files": 9,
+          "code_loc": 4455,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "pkg/epp/scheduling",
+        "path": "pkg/epp/scheduling",
+        "recursive": {
+          "files": 7,
+          "loc": 1327,
+          "bytes": 47474,
+          "code_files": 7,
+          "code_loc": 1327,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 1327,
+          "bytes": 47474,
+          "code_files": 7,
+          "code_loc": 1327,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "pkg/epp/server",
+        "path": "pkg/epp/server",
+        "recursive": {
+          "files": 12,
+          "loc": 2263,
+          "bytes": 80953,
+          "code_files": 12,
+          "code_loc": 2263,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 12,
+          "loc": 2263,
+          "bytes": 80953,
+          "code_files": 12,
+          "code_loc": 2263,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "pkg/sidecar",
+        "path": "pkg/sidecar",
+        "recursive": {
+          "files": 39,
+          "loc": 11000,
+          "bytes": 382923,
+          "code_files": 38,
+          "code_loc": 10938,
+          "doc_loc": 62,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 39,
+          "loc": 11000,
+          "bytes": 382923,
+          "code_files": 38,
+          "code_loc": 10938,
+          "doc_loc": 62,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      }
+    ]
+  },
+  {
+    "run": "wva-lsf",
+    "repo": "llm-d-workload-variant-autoscaler",
+    "commit": "cc0ce3ed70",
+    "clone_ok": true,
+    "total_tokens": 77731672,
+    "wall_s": 10602.380974989384,
+    "api_s": 101238.04,
+    "engine_sha": "585b21aa",
+    "n_modules_billed": 25,
+    "n_modules_in_tree": 39,
+    "unmatched_modules": [],
+    "scope": {
+      "own_files": 246,
+      "own_loc": 63396,
+      "own_bytes": 2081008,
+      "own_code_files": 245,
+      "own_code_loc": 63349,
+      "own_doc_loc": 47,
+      "own_cfg_loc": 0,
+      "rec_files": 347,
+      "rec_loc": 91359,
+      "rec_bytes": 3079312,
+      "rec_code_files": 346,
+      "rec_code_loc": 91312,
+      "rec_doc_loc": 47,
+      "rec_cfg_loc": 0
+    },
+    "repo_total": {
+      "files": 571,
+      "loc": 120059,
+      "bytes": 4869225,
+      "code_files": 368,
+      "code_loc": 86877,
+      "doc_loc": 16341,
+      "cfg_loc": 14571
+    },
+    "modules": [
+      {
+        "qn": "cmd",
+        "path": "cmd",
+        "recursive": {
+          "files": 1,
+          "loc": 642,
+          "bytes": 25925,
+          "code_files": 1,
+          "code_loc": 642,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 1,
+          "loc": 642,
+          "bytes": 25925,
+          "code_files": 1,
+          "code_loc": 642,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "internal/collector",
+        "path": "internal/collector",
+        "recursive": {
+          "files": 39,
+          "loc": 8401,
+          "bytes": 296786,
+          "code_files": 39,
+          "code_loc": 8401,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 6,
+          "loc": 2737,
+          "bytes": 99163,
+          "code_files": 6,
+          "code_loc": 2737,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 3
+      },
+      {
+        "qn": "internal/collector/locator",
+        "path": "internal/collector/locator",
+        "recursive": {
+          "files": 6,
+          "loc": 1050,
+          "bytes": 37378,
+          "code_files": 6,
+          "code_loc": 1050,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 6,
+          "loc": 1050,
+          "bytes": 37378,
+          "code_files": 6,
+          "code_loc": 1050,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "internal/collector/registration",
+        "path": "internal/collector/registration",
+        "recursive": {
+          "files": 11,
+          "loc": 1473,
+          "bytes": 68929,
+          "code_files": 11,
+          "code_loc": 1473,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 11,
+          "loc": 1473,
+          "bytes": 68929,
+          "code_files": 11,
+          "code_loc": 1473,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "internal/collector/source",
+        "path": "internal/collector/source",
+        "recursive": {
+          "files": 16,
+          "loc": 3141,
+          "bytes": 91316,
+          "code_files": 16,
+          "code_loc": 3141,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 16,
+          "loc": 3141,
+          "bytes": 91316,
+          "code_files": 16,
+          "code_loc": 3141,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "internal/config",
+        "path": "internal/config",
+        "recursive": {
+          "files": 12,
+          "loc": 3448,
+          "bytes": 115923,
+          "code_files": 12,
+          "code_loc": 3448,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 12,
+          "loc": 3448,
+          "bytes": 115923,
+          "code_files": 12,
+          "code_loc": 3448,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "internal/controller",
+        "path": "internal/controller",
+        "recursive": {
+          "files": 21,
+          "loc": 3295,
+          "bytes": 118105,
+          "code_files": 21,
+          "code_loc": 3295,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 21,
+          "loc": 3295,
+          "bytes": 118105,
+          "code_files": 21,
+          "code_loc": 3295,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "internal/coordinator",
+        "path": "internal/coordinator",
+        "recursive": {
+          "files": 7,
+          "loc": 1428,
+          "bytes": 45282,
+          "code_files": 7,
+          "code_loc": 1428,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 5,
+          "loc": 844,
+          "bytes": 24474,
+          "code_files": 5,
+          "code_loc": 844,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 1
+      },
+      {
+        "qn": "internal/coordinator/plugins",
+        "path": "internal/coordinator/plugins",
+        "recursive": {
+          "files": 2,
+          "loc": 584,
+          "bytes": 20808,
+          "code_files": 2,
+          "code_loc": 584,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 2,
+          "loc": 584,
+          "bytes": 20808,
+          "code_files": 2,
+          "code_loc": 584,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "internal/datastore",
+        "path": "internal/datastore",
+        "recursive": {
+          "files": 2,
+          "loc": 462,
+          "bytes": 14868,
+          "code_files": 2,
+          "code_loc": 462,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 2,
+          "loc": 462,
+          "bytes": 14868,
+          "code_files": 2,
+          "code_loc": 462,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "internal/discovery",
+        "path": "internal/discovery",
+        "recursive": {
+          "files": 4,
+          "loc": 1204,
+          "bytes": 36884,
+          "code_files": 4,
+          "code_loc": 1204,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 4,
+          "loc": 1204,
+          "bytes": 36884,
+          "code_files": 4,
+          "code_loc": 1204,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "internal/engines",
+        "path": "internal/engines",
+        "recursive": {
+          "files": 87,
+          "loc": 24475,
+          "bytes": 864218,
+          "code_files": 87,
+          "code_loc": 24475,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 21,
+          "loc": 2760,
+          "bytes": 84345,
+          "code_files": 21,
+          "code_loc": 2760,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 5
+      },
+      {
+        "qn": "internal/engines/analyzers/saturation_v2",
+        "path": "internal/engines/analyzers/saturation_v2",
+        "recursive": {
+          "files": 13,
+          "loc": 3877,
+          "bytes": 136796,
+          "code_files": 13,
+          "code_loc": 3877,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 13,
+          "loc": 3877,
+          "bytes": 136796,
+          "code_files": 13,
+          "code_loc": 3877,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "internal/engines/analyzers/throughput",
+        "path": "internal/engines/analyzers/throughput",
+        "recursive": {
+          "files": 13,
+          "loc": 3978,
+          "bytes": 152195,
+          "code_files": 13,
+          "code_loc": 3978,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 13,
+          "loc": 3978,
+          "bytes": 152195,
+          "code_files": 13,
+          "code_loc": 3978,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "internal/engines/pipeline",
+        "path": "internal/engines/pipeline",
+        "recursive": {
+          "files": 18,
+          "loc": 6496,
+          "bytes": 227128,
+          "code_files": 18,
+          "code_loc": 6496,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 18,
+          "loc": 6496,
+          "bytes": 227128,
+          "code_files": 18,
+          "code_loc": 6496,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "internal/engines/saturation",
+        "path": "internal/engines/saturation",
+        "recursive": {
+          "files": 19,
+          "loc": 6126,
+          "bytes": 221091,
+          "code_files": 19,
+          "code_loc": 6126,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 19,
+          "loc": 6126,
+          "bytes": 221091,
+          "code_files": 19,
+          "code_loc": 6126,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "internal/engines/scalefromzero",
+        "path": "internal/engines/scalefromzero",
+        "recursive": {
+          "files": 3,
+          "loc": 1238,
+          "bytes": 42663,
+          "code_files": 3,
+          "code_loc": 1238,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 3,
+          "loc": 1238,
+          "bytes": 42663,
+          "code_files": 3,
+          "code_loc": 1238,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "internal/inferenceengine",
+        "path": "internal/inferenceengine",
+        "recursive": {
+          "files": 2,
+          "loc": 235,
+          "bytes": 7585,
+          "code_files": 2,
+          "code_loc": 235,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 2,
+          "loc": 235,
+          "bytes": 7585,
+          "code_files": 2,
+          "code_loc": 235,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "internal/interfaces",
+        "path": "internal/interfaces",
+        "recursive": {
+          "files": 9,
+          "loc": 985,
+          "bytes": 39312,
+          "code_files": 9,
+          "code_loc": 985,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 9,
+          "loc": 985,
+          "bytes": 39312,
+          "code_files": 9,
+          "code_loc": 985,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "internal/saturation",
+        "path": "internal/saturation",
+        "recursive": {
+          "files": 3,
+          "loc": 1030,
+          "bytes": 36610,
+          "code_files": 3,
+          "code_loc": 1030,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 3,
+          "loc": 1030,
+          "bytes": 36610,
+          "code_files": 3,
+          "code_loc": 1030,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "internal/utils",
+        "path": "internal/utils",
+        "recursive": {
+          "files": 28,
+          "loc": 5897,
+          "bytes": 172913,
+          "code_files": 28,
+          "code_loc": 5897,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 28,
+          "loc": 5897,
+          "bytes": 172913,
+          "code_files": 28,
+          "code_loc": 5897,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "pkg/analyzer",
+        "path": "pkg/analyzer",
+        "recursive": {
+          "files": 9,
+          "loc": 2638,
+          "bytes": 68264,
+          "code_files": 8,
+          "code_loc": 2591,
+          "doc_loc": 47,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 9,
+          "loc": 2638,
+          "bytes": 68264,
+          "code_files": 8,
+          "code_loc": 2591,
+          "doc_loc": 47,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "pkg/config",
+        "path": "pkg/config",
+        "recursive": {
+          "files": 4,
+          "loc": 342,
+          "bytes": 10874,
+          "code_files": 4,
+          "code_loc": 342,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 4,
+          "loc": 342,
+          "bytes": 10874,
+          "code_files": 4,
+          "code_loc": 342,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "pkg/core",
+        "path": "pkg/core",
+        "recursive": {
+          "files": 12,
+          "loc": 5677,
+          "bytes": 142399,
+          "code_files": 12,
+          "code_loc": 5677,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 12,
+          "loc": 5677,
+          "bytes": 142399,
+          "code_files": 12,
+          "code_loc": 5677,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "pkg/solver",
+        "path": "pkg/solver",
+        "recursive": {
+          "files": 6,
+          "loc": 3237,
+          "bytes": 85060,
+          "code_files": 6,
+          "code_loc": 3237,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 6,
+          "loc": 3237,
+          "bytes": 85060,
+          "code_files": 6,
+          "code_loc": 3237,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      }
+    ]
+  },
+  {
+    "run": "py-inference-scheduler-lsf",
+    "repo": "py-inference-scheduler",
+    "commit": "e760a63079",
+    "clone_ok": true,
+    "total_tokens": 16350018,
+    "wall_s": 4505.748169453815,
+    "api_s": 24306.916613568097,
+    "engine_sha": "585b21aa",
+    "n_modules_billed": 11,
+    "n_modules_in_tree": 18,
+    "unmatched_modules": [],
+    "scope": {
+      "own_files": 44,
+      "own_loc": 3647,
+      "own_bytes": 138279,
+      "own_code_files": 37,
+      "own_code_loc": 3006,
+      "own_doc_loc": 446,
+      "own_cfg_loc": 195,
+      "rec_files": 48,
+      "rec_loc": 3803,
+      "rec_bytes": 144606,
+      "rec_code_files": 41,
+      "rec_code_loc": 3162,
+      "rec_doc_loc": 446,
+      "rec_cfg_loc": 195
+    },
+    "repo_total": {
+      "files": 92,
+      "loc": 13865,
+      "bytes": 2381111,
+      "code_files": 70,
+      "code_loc": 4709,
+      "doc_loc": 825,
+      "cfg_loc": 568
+    },
+    "modules": [
+      {
+        "qn": "datalayer/metrics",
+        "path": "datalayer/metrics",
+        "recursive": {
+          "files": 9,
+          "loc": 345,
+          "bytes": 13297,
+          "code_files": 9,
+          "code_loc": 345,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 5,
+          "loc": 189,
+          "bytes": 6970,
+          "code_files": 5,
+          "code_loc": 189,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 1
+      },
+      {
+        "qn": "datalayer/metrics/verl",
+        "path": "datalayer/metrics/verl",
+        "recursive": {
+          "files": 4,
+          "loc": 156,
+          "bytes": 6327,
+          "code_files": 4,
+          "code_loc": 156,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 4,
+          "loc": 156,
+          "bytes": 6327,
+          "code_files": 4,
+          "code_loc": 156,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "integration/rayserve",
+        "path": "integration/rayserve",
+        "recursive": {
+          "files": 2,
+          "loc": 406,
+          "bytes": 14915,
+          "code_files": 2,
+          "code_loc": 406,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 2,
+          "loc": 406,
+          "bytes": 14915,
+          "code_files": 2,
+          "code_loc": 406,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "integration/slime",
+        "path": "integration/slime",
+        "recursive": {
+          "files": 6,
+          "loc": 453,
+          "bytes": 19765,
+          "code_files": 3,
+          "code_loc": 251,
+          "doc_loc": 187,
+          "cfg_loc": 15
+        },
+        "own": {
+          "files": 6,
+          "loc": 453,
+          "bytes": 19765,
+          "code_files": 3,
+          "code_loc": 251,
+          "doc_loc": 187,
+          "cfg_loc": 15
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "integration/verl",
+        "path": "integration/verl",
+        "recursive": {
+          "files": 8,
+          "loc": 778,
+          "bytes": 34391,
+          "code_files": 4,
+          "code_loc": 339,
+          "doc_loc": 259,
+          "cfg_loc": 180
+        },
+        "own": {
+          "files": 8,
+          "loc": 778,
+          "bytes": 34391,
+          "code_files": 4,
+          "code_loc": 339,
+          "doc_loc": 259,
+          "cfg_loc": 180
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "scheduling/core",
+        "path": "scheduling/core",
+        "recursive": {
+          "files": 3,
+          "loc": 279,
+          "bytes": 10209,
+          "code_files": 3,
+          "code_loc": 279,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 3,
+          "loc": 279,
+          "bytes": 10209,
+          "code_files": 3,
+          "code_loc": 279,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "scheduling/framework",
+        "path": "scheduling/framework",
+        "recursive": {
+          "files": 5,
+          "loc": 498,
+          "bytes": 15605,
+          "code_files": 5,
+          "code_loc": 498,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 5,
+          "loc": 498,
+          "bytes": 15605,
+          "code_files": 5,
+          "code_loc": 498,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "scheduling/plugins/flow_control",
+        "path": "scheduling/plugins/flow_control",
+        "recursive": {
+          "files": 2,
+          "loc": 193,
+          "bytes": 7506,
+          "code_files": 2,
+          "code_loc": 193,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 2,
+          "loc": 193,
+          "bytes": 7506,
+          "code_files": 2,
+          "code_loc": 193,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "scheduling/plugins/handlers",
+        "path": "scheduling/plugins/handlers",
+        "recursive": {
+          "files": 2,
+          "loc": 97,
+          "bytes": 3156,
+          "code_files": 2,
+          "code_loc": 97,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 2,
+          "loc": 97,
+          "bytes": 3156,
+          "code_files": 2,
+          "code_loc": 97,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "scheduling/plugins/pickers",
+        "path": "scheduling/plugins/pickers",
+        "recursive": {
+          "files": 2,
+          "loc": 78,
+          "bytes": 2418,
+          "code_files": 2,
+          "code_loc": 78,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 2,
+          "loc": 78,
+          "bytes": 2418,
+          "code_files": 2,
+          "code_loc": 78,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "scheduling/plugins/scorers",
+        "path": "scheduling/plugins/scorers",
+        "recursive": {
+          "files": 5,
+          "loc": 520,
+          "bytes": 17017,
+          "code_files": 5,
+          "code_loc": 520,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 5,
+          "loc": 520,
+          "bytes": 17017,
+          "code_files": 5,
+          "code_loc": 520,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      }
+    ]
+  },
+  {
+    "run": "qiskit/raw1/spotlights-out-circuit",
+    "repo": "qiskit",
+    "commit": "",
+    "clone_ok": false,
+    "total_tokens": 0,
+    "wall_s": null,
+    "api_s": null,
+    "engine_sha": "",
+    "n_modules_billed": 22,
+    "n_modules_in_tree": 34,
+    "unmatched_modules": [],
+    "scope": {},
+    "repo_total": {},
+    "modules": []
+  },
+  {
+    "run": "qiskit/raw1/spotlights-out-peak",
+    "repo": "qiskit",
+    "commit": "",
+    "clone_ok": false,
+    "total_tokens": 0,
+    "wall_s": null,
+    "api_s": null,
+    "engine_sha": "",
+    "n_modules_billed": 35,
+    "n_modules_in_tree": 49,
+    "unmatched_modules": [],
+    "scope": {},
+    "repo_total": {},
+    "modules": []
+  },
+  {
+    "run": "qiskit/raw1/spotlights-out-transpilation",
+    "repo": "qiskit",
+    "commit": "",
+    "clone_ok": false,
+    "total_tokens": 0,
+    "wall_s": null,
+    "api_s": null,
+    "engine_sha": "",
+    "n_modules_billed": 31,
+    "n_modules_in_tree": 41,
+    "unmatched_modules": [],
+    "scope": {},
+    "repo_total": {},
+    "modules": []
+  },
+  {
+    "run": "qiskit/raw1/spotlights-out-two-qubit",
+    "repo": "qiskit",
+    "commit": "",
+    "clone_ok": false,
+    "total_tokens": 0,
+    "wall_s": null,
+    "api_s": null,
+    "engine_sha": "",
+    "n_modules_billed": 40,
+    "n_modules_in_tree": 66,
+    "unmatched_modules": [],
+    "scope": {},
+    "repo_total": {},
+    "modules": []
+  },
+  {
+    "run": "rocksdb/_probe_rocksdb",
+    "repo": "rocksdb",
+    "commit": "abeebd9630",
+    "clone_ok": true,
+    "total_tokens": 0,
+    "wall_s": 360.5717827000001,
+    "api_s": 0.0,
+    "engine_sha": "b042245a",
+    "n_modules_billed": 0,
+    "n_modules_in_tree": 29,
+    "unmatched_modules": [],
+    "scope": {},
+    "repo_total": {
+      "files": 2308,
+      "loc": 1035976,
+      "bytes": 49051816,
+      "code_files": 1824,
+      "code_loc": 960875,
+      "doc_loc": 15057,
+      "cfg_loc": 14537
+    },
+    "modules": []
+  },
+  {
+    "run": "rocksdb/rocksdb-unhinted",
+    "repo": "rocksdb",
+    "commit": "abeebd9630",
+    "clone_ok": true,
+    "total_tokens": 276030246,
+    "wall_s": 33390.046457000004,
+    "api_s": 110810.7568928,
+    "engine_sha": "b042245a",
+    "n_modules_billed": 8,
+    "n_modules_in_tree": 29,
+    "unmatched_modules": [],
+    "scope": {
+      "own_files": 638,
+      "own_loc": 478677,
+      "own_bytes": 17810192,
+      "own_code_files": 636,
+      "own_code_loc": 477842,
+      "own_doc_loc": 0,
+      "own_cfg_loc": 0,
+      "rec_files": 755,
+      "rec_loc": 578713,
+      "rec_bytes": 21774392,
+      "rec_code_files": 753,
+      "rec_code_loc": 577878,
+      "rec_doc_loc": 0,
+      "rec_cfg_loc": 0
+    },
+    "repo_total": {
+      "files": 2308,
+      "loc": 1035976,
+      "bytes": 49051816,
+      "code_files": 1824,
+      "code_loc": 960875,
+      "doc_loc": 15057,
+      "cfg_loc": 14537
+    },
+    "modules": [
+      {
+        "qn": "cache",
+        "path": "cache",
+        "recursive": {
+          "files": 33,
+          "loc": 18674,
+          "bytes": 719589,
+          "code_files": 33,
+          "code_loc": 18674,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 33,
+          "loc": 18674,
+          "bytes": 719589,
+          "code_files": 33,
+          "code_loc": 18674,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "db",
+        "path": "db",
+        "recursive": {
+          "files": 324,
+          "loc": 336163,
+          "bytes": 12486371,
+          "code_files": 324,
+          "code_loc": 336163,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 272,
+          "loc": 269082,
+          "bytes": 9824272,
+          "code_files": 272,
+          "code_loc": 269082,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 2
+      },
+      {
+        "qn": "db/compaction",
+        "path": "db/compaction",
+        "recursive": {
+          "files": 32,
+          "loc": 36760,
+          "bytes": 1471617,
+          "code_files": 32,
+          "code_loc": 36760,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 32,
+          "loc": 36760,
+          "bytes": 1471617,
+          "code_files": 32,
+          "code_loc": 36760,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "db/db_impl",
+        "path": "db/db_impl",
+        "recursive": {
+          "files": 20,
+          "loc": 30321,
+          "bytes": 1190482,
+          "code_files": 20,
+          "code_loc": 30321,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 20,
+          "loc": 30321,
+          "bytes": 1190482,
+          "code_files": 20,
+          "code_loc": 30321,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "memtable",
+        "path": "memtable",
+        "recursive": {
+          "files": 15,
+          "loc": 7487,
+          "bytes": 256575,
+          "code_files": 15,
+          "code_loc": 7487,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 15,
+          "loc": 7487,
+          "bytes": 256575,
+          "code_files": 15,
+          "code_loc": 7487,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "table",
+        "path": "table",
+        "recursive": {
+          "files": 134,
+          "loc": 65396,
+          "bytes": 2525491,
+          "code_files": 134,
+          "code_loc": 65396,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 69,
+          "loc": 32441,
+          "bytes": 1223390,
+          "code_files": 69,
+          "code_loc": 32441,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 1
+      },
+      {
+        "qn": "table/block_based",
+        "path": "table/block_based",
+        "recursive": {
+          "files": 65,
+          "loc": 32955,
+          "bytes": 1302101,
+          "code_files": 65,
+          "code_loc": 32955,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 65,
+          "loc": 32955,
+          "bytes": 1302101,
+          "code_files": 65,
+          "code_loc": 32955,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "util",
+        "path": "util",
+        "recursive": {
+          "files": 132,
+          "loc": 50957,
+          "bytes": 1822166,
+          "code_files": 130,
+          "code_loc": 50122,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 132,
+          "loc": 50957,
+          "bytes": 1822166,
+          "code_files": 130,
+          "code_loc": 50122,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      }
+    ]
+  },
+  {
+    "run": "vllm",
+    "repo": "vllm",
+    "commit": "bcf2be9612",
+    "clone_ok": true,
+    "total_tokens": 524536169,
+    "wall_s": 23386.11564142257,
+    "api_s": 319171.3573737404,
+    "engine_sha": "94173ca7",
+    "n_modules_billed": 32,
+    "n_modules_in_tree": 34,
+    "unmatched_modules": [],
+    "scope": {
+      "own_files": 1765,
+      "own_loc": 547684,
+      "own_bytes": 20851892,
+      "own_code_files": 1225,
+      "own_code_loc": 469994,
+      "own_doc_loc": 96,
+      "own_cfg_loc": 77409,
+      "rec_files": 3799,
+      "rec_loc": 1123540,
+      "rec_bytes": 39721310,
+      "rec_code_files": 2204,
+      "rec_code_loc": 890998,
+      "rec_doc_loc": 106,
+      "rec_cfg_loc": 232227
+    },
+    "repo_total": {
+      "files": 4285,
+      "loc": 1111014,
+      "bytes": 65349213,
+      "code_files": 3048,
+      "code_loc": 940129,
+      "doc_loc": 36497,
+      "cfg_loc": 124942
+    },
+    "modules": [
+      {
+        "qn": "vllm/compilation",
+        "path": "vllm/compilation",
+        "recursive": {
+          "files": 34,
+          "loc": 10256,
+          "bytes": 384803,
+          "code_files": 34,
+          "code_loc": 10256,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 34,
+          "loc": 10256,
+          "bytes": 384803,
+          "code_files": 34,
+          "code_loc": 10256,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "vllm/config",
+        "path": "vllm/config",
+        "recursive": {
+          "files": 26,
+          "loc": 9788,
+          "bytes": 404899,
+          "code_files": 26,
+          "code_loc": 9788,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 26,
+          "loc": 9788,
+          "bytes": 404899,
+          "code_files": 26,
+          "code_loc": 9788,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "vllm/distributed",
+        "path": "vllm/distributed",
+        "recursive": {
+          "files": 84,
+          "loc": 33025,
+          "bytes": 1385945,
+          "code_files": 82,
+          "code_loc": 32996,
+          "doc_loc": 29,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 57,
+          "loc": 23493,
+          "bytes": 1025803,
+          "code_files": 55,
+          "code_loc": 23464,
+          "doc_loc": 29,
+          "cfg_loc": 0
+        },
+        "nested_modules": 2
+      },
+      {
+        "qn": "vllm/distributed/device_communicators",
+        "path": "vllm/distributed/device_communicators",
+        "recursive": {
+          "files": 19,
+          "loc": 6975,
+          "bytes": 258424,
+          "code_files": 19,
+          "code_loc": 6975,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 19,
+          "loc": 6975,
+          "bytes": 258424,
+          "code_files": 19,
+          "code_loc": 6975,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "vllm/distributed/eplb",
+        "path": "vllm/distributed/eplb",
+        "recursive": {
+          "files": 8,
+          "loc": 2557,
+          "bytes": 101718,
+          "code_files": 8,
+          "code_loc": 2557,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 8,
+          "loc": 2557,
+          "bytes": 101718,
+          "code_files": 8,
+          "code_loc": 2557,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "vllm/engine",
+        "path": "vllm/engine",
+        "recursive": {
+          "files": 5,
+          "loc": 2553,
+          "bytes": 103841,
+          "code_files": 5,
+          "code_loc": 2553,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 5,
+          "loc": 2553,
+          "bytes": 103841,
+          "code_files": 5,
+          "code_loc": 2553,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "vllm/entrypoints",
+        "path": "vllm/entrypoints",
+        "recursive": {
+          "files": 146,
+          "loc": 31502,
+          "bytes": 2849750,
+          "code_files": 145,
+          "code_loc": 31499,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 82,
+          "loc": 13524,
+          "bytes": 2170126,
+          "code_files": 81,
+          "code_loc": 13521,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 2
+      },
+      {
+        "qn": "vllm/entrypoints/cli",
+        "path": "vllm/entrypoints/cli",
+        "recursive": {
+          "files": 17,
+          "loc": 1188,
+          "bytes": 39424,
+          "code_files": 17,
+          "code_loc": 1188,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 17,
+          "loc": 1188,
+          "bytes": 39424,
+          "code_files": 17,
+          "code_loc": 1188,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "vllm/entrypoints/openai",
+        "path": "vllm/entrypoints/openai",
+        "recursive": {
+          "files": 47,
+          "loc": 16790,
+          "bytes": 640200,
+          "code_files": 47,
+          "code_loc": 16790,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 47,
+          "loc": 16790,
+          "bytes": 640200,
+          "code_files": 47,
+          "code_loc": 16790,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "vllm/inputs",
+        "path": "vllm/inputs",
+        "recursive": {
+          "files": 4,
+          "loc": 782,
+          "bytes": 22888,
+          "code_files": 4,
+          "code_loc": 782,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 4,
+          "loc": 782,
+          "bytes": 22888,
+          "code_files": 4,
+          "code_loc": 782,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "vllm/lora",
+        "path": "vllm/lora",
+        "recursive": {
+          "files": 43,
+          "loc": 11864,
+          "bytes": 399862,
+          "code_files": 42,
+          "code_loc": 11804,
+          "doc_loc": 60,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 43,
+          "loc": 11864,
+          "bytes": 399862,
+          "code_files": 42,
+          "code_loc": 11804,
+          "doc_loc": 60,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "vllm/model_executor",
+        "path": "vllm/model_executor",
+        "recursive": {
+          "files": 1083,
+          "loc": 339385,
+          "bytes": 11170486,
+          "code_files": 556,
+          "code_loc": 261961,
+          "doc_loc": 3,
+          "cfg_loc": 77409
+        },
+        "own": {
+          "files": 35,
+          "loc": 5802,
+          "bytes": 206794,
+          "code_files": 35,
+          "code_loc": 5802,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 6
+      },
+      {
+        "qn": "vllm/model_executor/layers",
+        "path": "vllm/model_executor/layers",
+        "recursive": {
+          "files": 761,
+          "loc": 158323,
+          "bytes": 4591635,
+          "code_files": 234,
+          "code_loc": 80899,
+          "doc_loc": 3,
+          "cfg_loc": 77409
+        },
+        "own": {
+          "files": 80,
+          "loc": 22769,
+          "bytes": 780580,
+          "code_files": 80,
+          "code_loc": 22769,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 3
+      },
+      {
+        "qn": "vllm/model_executor/layers/attention",
+        "path": "vllm/model_executor/layers/attention",
+        "recursive": {
+          "files": 9,
+          "loc": 4693,
+          "bytes": 176024,
+          "code_files": 9,
+          "code_loc": 4693,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 9,
+          "loc": 4693,
+          "bytes": 176024,
+          "code_files": 9,
+          "code_loc": 4693,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "vllm/model_executor/layers/fused_moe",
+        "path": "vllm/model_executor/layers/fused_moe",
+        "recursive": {
+          "files": 372,
+          "loc": 71393,
+          "bytes": 1891353,
+          "code_files": 64,
+          "code_loc": 23848,
+          "doc_loc": 0,
+          "cfg_loc": 47533
+        },
+        "own": {
+          "files": 372,
+          "loc": 71393,
+          "bytes": 1891353,
+          "code_files": 64,
+          "code_loc": 23848,
+          "doc_loc": 0,
+          "cfg_loc": 47533
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "vllm/model_executor/layers/quantization",
+        "path": "vllm/model_executor/layers/quantization",
+        "recursive": {
+          "files": 300,
+          "loc": 59468,
+          "bytes": 1743678,
+          "code_files": 81,
+          "code_loc": 29589,
+          "doc_loc": 3,
+          "cfg_loc": 29876
+        },
+        "own": {
+          "files": 300,
+          "loc": 59468,
+          "bytes": 1743678,
+          "code_files": 81,
+          "code_loc": 29589,
+          "doc_loc": 3,
+          "cfg_loc": 29876
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "vllm/model_executor/model_loader",
+        "path": "vllm/model_executor/model_loader",
+        "recursive": {
+          "files": 20,
+          "loc": 5538,
+          "bytes": 213431,
+          "code_files": 20,
+          "code_loc": 5538,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 20,
+          "loc": 5538,
+          "bytes": 213431,
+          "code_files": 20,
+          "code_loc": 5538,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "vllm/model_executor/models",
+        "path": "vllm/model_executor/models",
+        "recursive": {
+          "files": 267,
+          "loc": 169722,
+          "bytes": 6158626,
+          "code_files": 267,
+          "code_loc": 169722,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 267,
+          "loc": 169722,
+          "bytes": 6158626,
+          "code_files": 267,
+          "code_loc": 169722,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "vllm/multimodal",
+        "path": "vllm/multimodal",
+        "recursive": {
+          "files": 23,
+          "loc": 8819,
+          "bytes": 290309,
+          "code_files": 23,
+          "code_loc": 8819,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 23,
+          "loc": 8819,
+          "bytes": 290309,
+          "code_files": 23,
+          "code_loc": 8819,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "vllm/platforms",
+        "path": "vllm/platforms",
+        "recursive": {
+          "files": 8,
+          "loc": 3544,
+          "bytes": 125534,
+          "code_files": 8,
+          "code_loc": 3544,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 8,
+          "loc": 3544,
+          "bytes": 125534,
+          "code_files": 8,
+          "code_loc": 3544,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "vllm/transformers_utils",
+        "path": "vllm/transformers_utils",
+        "recursive": {
+          "files": 85,
+          "loc": 14153,
+          "bytes": 554959,
+          "code_files": 77,
+          "code_loc": 13983,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 85,
+          "loc": 14153,
+          "bytes": 554959,
+          "code_files": 77,
+          "code_loc": 13983,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "vllm/v1",
+        "path": "vllm/v1",
+        "recursive": {
+          "files": 224,
+          "loc": 82013,
+          "bytes": 3158616,
+          "code_files": 223,
+          "code_loc": 82009,
+          "doc_loc": 4,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 10,
+          "loc": 2804,
+          "bytes": 103711,
+          "code_files": 10,
+          "code_loc": 2804,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 10
+      },
+      {
+        "qn": "vllm/v1/attention",
+        "path": "vllm/v1/attention",
+        "recursive": {
+          "files": 53,
+          "loc": 22586,
+          "bytes": 807368,
+          "code_files": 53,
+          "code_loc": 22586,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 53,
+          "loc": 22586,
+          "bytes": 807368,
+          "code_files": 53,
+          "code_loc": 22586,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "vllm/v1/core",
+        "path": "vllm/v1/core",
+        "recursive": {
+          "files": 15,
+          "loc": 8086,
+          "bytes": 334920,
+          "code_files": 15,
+          "code_loc": 8086,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 15,
+          "loc": 8086,
+          "bytes": 334920,
+          "code_files": 15,
+          "code_loc": 8086,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "vllm/v1/engine",
+        "path": "vllm/v1/engine",
+        "recursive": {
+          "files": 13,
+          "loc": 9038,
+          "bytes": 357359,
+          "code_files": 13,
+          "code_loc": 9038,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 13,
+          "loc": 9038,
+          "bytes": 357359,
+          "code_files": 13,
+          "code_loc": 9038,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "vllm/v1/executor",
+        "path": "vllm/v1/executor",
+        "recursive": {
+          "files": 7,
+          "loc": 2727,
+          "bytes": 109493,
+          "code_files": 7,
+          "code_loc": 2727,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 2727,
+          "bytes": 109493,
+          "code_files": 7,
+          "code_loc": 2727,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "vllm/v1/kv_offload",
+        "path": "vllm/v1/kv_offload",
+        "recursive": {
+          "files": 15,
+          "loc": 1639,
+          "bytes": 60001,
+          "code_files": 15,
+          "code_loc": 1639,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 15,
+          "loc": 1639,
+          "bytes": 60001,
+          "code_files": 15,
+          "code_loc": 1639,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "vllm/v1/metrics",
+        "path": "vllm/v1/metrics",
+        "recursive": {
+          "files": 7,
+          "loc": 3731,
+          "bytes": 131732,
+          "code_files": 7,
+          "code_loc": 3731,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 7,
+          "loc": 3731,
+          "bytes": 131732,
+          "code_files": 7,
+          "code_loc": 3731,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "vllm/v1/sample",
+        "path": "vllm/v1/sample",
+        "recursive": {
+          "files": 14,
+          "loc": 3753,
+          "bytes": 148825,
+          "code_files": 14,
+          "code_loc": 3753,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 14,
+          "loc": 3753,
+          "bytes": 148825,
+          "code_files": 14,
+          "code_loc": 3753,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "vllm/v1/spec_decode",
+        "path": "vllm/v1/spec_decode",
+        "recursive": {
+          "files": 11,
+          "loc": 4066,
+          "bytes": 168937,
+          "code_files": 11,
+          "code_loc": 4066,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 11,
+          "loc": 4066,
+          "bytes": 168937,
+          "code_files": 11,
+          "code_loc": 4066,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "vllm/v1/structured_output",
+        "path": "vllm/v1/structured_output",
+        "recursive": {
+          "files": 8,
+          "loc": 2176,
+          "bytes": 79575,
+          "code_files": 8,
+          "code_loc": 2176,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 8,
+          "loc": 2176,
+          "bytes": 79575,
+          "code_files": 8,
+          "code_loc": 2176,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      },
+      {
+        "qn": "vllm/v1/worker",
+        "path": "vllm/v1/worker",
+        "recursive": {
+          "files": 71,
+          "loc": 21407,
+          "bytes": 856695,
+          "code_files": 70,
+          "code_loc": 21403,
+          "doc_loc": 4,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 71,
+          "loc": 21407,
+          "bytes": 856695,
+          "code_files": 70,
+          "code_loc": 21403,
+          "doc_loc": 4,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      }
+    ]
+  },
+  {
+    "run": "vllm-kv-offload-evolve/spotlights-out-kv-offload",
+    "repo": "vllm",
+    "commit": "bcf2be9612",
+    "clone_ok": true,
+    "total_tokens": 14126712,
+    "wall_s": 5660.0551596660225,
+    "api_s": 9515.681316751012,
+    "engine_sha": "94173ca7",
+    "n_modules_billed": 1,
+    "n_modules_in_tree": 100,
+    "unmatched_modules": [],
+    "scope": {
+      "own_files": 15,
+      "own_loc": 1639,
+      "own_bytes": 60001,
+      "own_code_files": 15,
+      "own_code_loc": 1639,
+      "own_doc_loc": 0,
+      "own_cfg_loc": 0,
+      "rec_files": 15,
+      "rec_loc": 1639,
+      "rec_bytes": 60001,
+      "rec_code_files": 15,
+      "rec_code_loc": 1639,
+      "rec_doc_loc": 0,
+      "rec_cfg_loc": 0
+    },
+    "repo_total": {
+      "files": 4285,
+      "loc": 1111014,
+      "bytes": 65349213,
+      "code_files": 3048,
+      "code_loc": 940129,
+      "doc_loc": 36497,
+      "cfg_loc": 124942
+    },
+    "modules": [
+      {
+        "qn": "vllm/v1/kv_offload",
+        "path": "vllm/v1/kv_offload",
+        "recursive": {
+          "files": 15,
+          "loc": 1639,
+          "bytes": 60001,
+          "code_files": 15,
+          "code_loc": 1639,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "own": {
+          "files": 15,
+          "loc": 1639,
+          "bytes": 60001,
+          "code_files": 15,
+          "code_loc": 1639,
+          "doc_loc": 0,
+          "cfg_loc": 0
+        },
+        "nested_modules": 0
+      }
+    ]
+  }
+]

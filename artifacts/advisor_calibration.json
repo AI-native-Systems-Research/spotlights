@@ -1,12 +1,13 @@
 {
   "_note": "Calibration for the Spotlights scoping advisor. Stores TOKENS, never dollars: pricing is a rate-table lookup applied at estimate time. Bands are p10/p50/p90 -- absolute point prediction was tested and failed (47% median, 345% worst error), so the advisor quotes ranges and relative multipliers only.",
   "corpus": {
-    "runs_total": 14,
-    "runs_full_pipeline": 12,
+    "runs_total": 18,
+    "runs_full_pipeline": 16,
     "runs_deep_research_off": 2,
-    "repos": 7,
+    "repos": 8,
     "engine_versions": 6,
-    "caveat": "review_iterations and max_findings_per_module are NOT recorded in these manifests, so runs differing several-fold in cost are indistinguishable here. This is the dominant source of band width."
+    "runs_without_token_total": 4,
+    "caveat": "No run in this corpus records its CLI invocation. review_iterations and deep-research on/off are recovered from telemetry (see the 'review' block); max_findings_per_module and debug-first-n-pairs are recoverable only when they bound, as a plateau in max pairs-per-module -- an unbound cap leaves no trace, though it also costs nothing. Cross-repo variance (23x in tokens/module) remains the dominant source of band width, not the unrecorded knobs."
   },
   "noise_floor": {
     "cv_pct": 7.7,
@@ -110,32 +111,78 @@
       "min": 3786823.32,
       "max": 5766932.580645162,
       "n": 2
+    },
+    "full_pipeline_review_on": {
+      "p10": 16164418.875,
+      "p50": 24315246.375,
+      "p90": 32466073.875,
+      "min": 14126712.0,
+      "max": 34503780.75,
+      "n": 2
+    },
+    "full_pipeline_review_off": {
+      "p10": 2946976.719272727,
+      "p50": 6571905.55952381,
+      "p90": 12314349.632125,
+      "min": 1486365.2727272727,
+      "max": 16391755.28125,
+      "n": 10
     }
+  },
+  "review": {
+    "recovered_from": "len(per_module_telemetry[*].discovery_iterations) - 1; uniform within a run and perfectly bimodal across this corpus (--no-review or the default 3 passes)",
+    "runs_review_on": 8,
+    "runs_review_off": 10,
+    "discovery_multiplier": {
+      "p10": 2.420058743540823,
+      "p50": 2.644606740362427,
+      "p90": 2.7657088650803434,
+      "min": 2.3343190874733106,
+      "max": 2.807114575960561,
+      "n": 4
+    },
+    "candidate_growth": {
+      "p10": 0.9197037889889051,
+      "p50": 1.0536764705882353,
+      "p90": 1.4024193548387096,
+      "min": 0.9039145907473309,
+      "max": 1.7580645161290323,
+      "n": 8
+    },
+    "discovery_share_review_on": {
+      "p10": 0.18586088834188633,
+      "p50": 0.28305918253586243,
+      "p90": 0.42276533288692675,
+      "min": 0.17248116715441394,
+      "max": 0.4543627067131512,
+      "n": 4
+    },
+    "meaning": "review is an alternating claude/codex debate over the candidate set. It multiplies the discovery step by the multiplier above while growing the final candidate count only slightly -- it mostly rewrites candidates rather than adding them."
   },
   "fanout": {
     "candidates_per_module": {
-      "p10": 3.413333333333333,
-      "p50": 4.033333333333333,
-      "p90": 35.015625000000014,
+      "p10": 3.466666666666667,
+      "p50": 5.452727272727273,
+      "p90": 9.078125,
       "min": 2.909090909090909,
-      "max": 42.625,
-      "n": 12
+      "max": 13.625,
+      "n": 16
     },
     "pairs_per_candidate": {
-      "p10": 2.7018521376755675,
-      "p50": 16.230188679245284,
-      "p90": 17.401142857142858,
+      "p10": 6.0736958934517205,
+      "p50": 14.03984912736804,
+      "p90": 17.365714285714287,
       "min": 1.3125,
       "max": 17.60655737704918,
-      "n": 12
+      "n": 16
     },
     "pairs_per_module": {
-      "p10": 18.648000000000003,
-      "p50": 67.90952380952382,
-      "p90": 136.703125,
+      "p10": 31.96,
+      "p50": 75.36818181818182,
+      "p90": 124.19707661290323,
       "min": 3.8181818181818183,
       "max": 142.125,
-      "n": 12
+      "n": 16
     }
   },
   "runtime": {
@@ -164,6 +211,7 @@
       "pairs": 4505,
       "total_tokens": 524536169,
       "deep_research": true,
+      "review_iterations": 0,
       "code_loc": 469994,
       "api_s": 319171.3573737404,
       "wall_s": 23386.11564142257
@@ -175,6 +223,7 @@
       "pairs": 1215,
       "total_tokens": 296532614,
       "deep_research": true,
+      "review_iterations": 0,
       "code_loc": 70779,
       "api_s": 132795.8788436742,
       "wall_s": 17996.476166041044
@@ -182,10 +231,11 @@
     {
       "repo": "rocksdb",
       "mods": 8,
-      "candidates": 341,
+      "candidates": 109,
       "pairs": 1137,
       "total_tokens": 276030246,
       "deep_research": true,
+      "review_iterations": 3,
       "code_loc": 477842,
       "api_s": 110810.7568928,
       "wall_s": 33390.046457000004
@@ -197,6 +247,7 @@
       "pairs": 1741,
       "total_tokens": 238495812,
       "deep_research": true,
+      "review_iterations": 0,
       "code_loc": 111197,
       "api_s": 153241.48677518484,
       "wall_s": 12152.240655228496
@@ -204,10 +255,11 @@
     {
       "repo": "internal-1",
       "mods": 31,
-      "candidates": 802,
+      "candidates": 215,
       "pairs": 0,
       "total_tokens": 178774910,
       "deep_research": false,
+      "review_iterations": 3,
       "code_loc": 99718,
       "api_s": 79808.48989007801,
       "wall_s": 37229.108004855996
@@ -219,6 +271,7 @@
       "pairs": 1074,
       "total_tokens": 99661148,
       "deep_research": true,
+      "review_iterations": 0,
       "code_loc": 7392,
       "api_s": 101539.1614791197,
       "wall_s": 18319.815719770268
@@ -230,6 +283,7 @@
       "pairs": 998,
       "total_tokens": 97787870,
       "deep_research": true,
+      "review_iterations": 0,
       "code_loc": 7392,
       "api_s": 102149.74267696943,
       "wall_s": 19072.36821543984
@@ -237,10 +291,11 @@
     {
       "repo": "internal-1",
       "mods": 25,
-      "candidates": 476,
+      "candidates": 126,
       "pairs": 0,
       "total_tokens": 94670583,
       "deep_research": false,
+      "review_iterations": 3,
       "code_loc": 78612,
       "api_s": 69856.06806737329,
       "wall_s": 15515.001530291978
@@ -252,6 +307,7 @@
       "pairs": 970,
       "total_tokens": 92744677,
       "deep_research": true,
+      "review_iterations": 0,
       "code_loc": 6785,
       "api_s": 101265.34609081443,
       "wall_s": 17863.08622140065
@@ -263,6 +319,7 @@
       "pairs": 924,
       "total_tokens": 91375701,
       "deep_research": true,
+      "review_iterations": 0,
       "code_loc": 7386,
       "api_s": 95938.93687598211,
       "wall_s": 17830.373397810385
@@ -274,6 +331,7 @@
       "pairs": 830,
       "total_tokens": 83842786,
       "deep_research": true,
+      "review_iterations": 0,
       "code_loc": 7386,
       "api_s": 91733.23622494939,
       "wall_s": 18397.774839674123
@@ -285,6 +343,7 @@
       "pairs": 383,
       "total_tokens": 77731672,
       "deep_research": true,
+      "review_iterations": 0,
       "code_loc": 63349,
       "api_s": 101238.04,
       "wall_s": 10602.380974989384
@@ -296,6 +355,7 @@
       "pairs": 42,
       "total_tokens": 16350018,
       "deep_research": true,
+      "review_iterations": 0,
       "code_loc": 3006,
       "api_s": 24306.916613568097,
       "wall_s": 4505.748169453815
@@ -303,13 +363,62 @@
     {
       "repo": "vllm",
       "mods": 1,
-      "candidates": 38,
+      "candidates": 10,
       "pairs": 100,
       "total_tokens": 14126712,
       "deep_research": true,
+      "review_iterations": 3,
       "code_loc": 1639,
       "api_s": 9515.681316751012,
       "wall_s": 5660.0551596660225
+    },
+    {
+      "repo": "qiskit",
+      "mods": 22,
+      "candidates": 167,
+      "pairs": 2321,
+      "total_tokens": null,
+      "deep_research": true,
+      "review_iterations": 3,
+      "code_loc": null,
+      "api_s": null,
+      "wall_s": null
+    },
+    {
+      "repo": "qiskit",
+      "mods": 35,
+      "candidates": 254,
+      "pairs": 3275,
+      "total_tokens": null,
+      "deep_research": true,
+      "review_iterations": 3,
+      "code_loc": null,
+      "api_s": null,
+      "wall_s": null
+    },
+    {
+      "repo": "qiskit",
+      "mods": 31,
+      "candidates": 252,
+      "pairs": 3336,
+      "total_tokens": null,
+      "deep_research": true,
+      "review_iterations": 3,
+      "code_loc": null,
+      "api_s": null,
+      "wall_s": null
+    },
+    {
+      "repo": "qiskit",
+      "mods": 40,
+      "candidates": 281,
+      "pairs": 3985,
+      "total_tokens": null,
+      "deep_research": true,
+      "review_iterations": 3,
+      "code_loc": null,
+      "api_s": null,
+      "wall_s": null
     }
   ]
 }

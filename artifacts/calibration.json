@@ -1,0 +1,33 @@
+{
+  "_note": "Aggregate calibration measured from historical runs. Tokens, not dollars: pricing is a rate-table lookup applied at estimate time.",
+  "per_unit_token_rates": {
+    "agent_proposals": 491934.0183486239,
+    "candidate_discovery": 4957118.0,
+    "module_deep_research": 4457080.0,
+    "proposal_from_finding_creator": 111342.04326923077
+  },
+  "step_units": {
+    "candidate_discovery": "mods",
+    "module_deep_research": "mods",
+    "deep_research": "mods",
+    "agent_proposals": "candidates",
+    "proposal_from_finding_creator": "pairs"
+  },
+  "scale_factor": 0.34723187656412935,
+  "fanout": {
+    "candidates_per_module_median": 4.033333333333333,
+    "pairs_per_candidate_median": 16.230188679245284
+  },
+  "backtest": {
+    "with_probe": {
+      "median_ape": 52.581585801854565,
+      "worst_ape": 163.53725956863386
+    },
+    "without_probe": {
+      "median_ape": 46.981312230805614,
+      "worst_ape": 344.78490458707245
+    },
+    "n_runs": 12,
+    "method": "leave-one-repo-out over the paper corpus"
+  }
+}
