@@ -25,6 +25,7 @@ from spotlights_engine.costing.usage import (
     claude_usage_from_payload,
     codex_usage_from_stream,
 )
+from spotlights_engine.utils.agent_stream import describe as _diagnose
 
 if TYPE_CHECKING:  # pragma: no cover
     from spotlights_engine.candidate_discovery.api import DiscoveryConfig
@@ -180,78 +181,6 @@ def _append_streams(
         if is_retry:
             fh.write(_RETRY_SEPARATOR)
         fh.write(stderr or b"")
-
-
-# Terminal-failure signatures we know how to name. `parse_last_message` can only
-# report that `last_message.json` is missing, which is what a 429 storm, a
-# context-window compaction, and a genuinely malformed reply all look like from
-# the outside — the run that produced "schema parse failed twice" for all eight
-# failed modules was in fact eight rate limits. The real terminal event is in the
-# raw stream, so scan it and say so.
-def _scan_stream_events(stdout: bytes) -> dict[str, object]:
-    found: dict[str, object] = {}
-    api_retries = 0
-    for raw in stdout.splitlines():
-        raw = raw.strip()
-        if not raw or not raw.startswith(b"{"):
-            continue
-        try:
-            obj = json.loads(raw)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(obj, dict):
-            continue
-        # codex --json nests some events under "msg"; claude does not.
-        for event in (obj, obj.get("msg")):
-            if not isinstance(event, dict):
-                continue
-            etype = event.get("type")
-            if etype == "error":
-                message = event.get("message")
-                if isinstance(message, str) and message:
-                    found["hard_error"] = message
-            elif etype == "turn.failed":
-                err = event.get("error")
-                message = err.get("message") if isinstance(err, dict) else err
-                if isinstance(message, str) and message:
-                    found["hard_error"] = message
-            elif etype == "result" and event.get("is_error"):
-                found["result_error"] = str(
-                    event.get("result") or event.get("subtype") or "unspecified"
-                )
-            elif etype == "system":
-                if event.get("subtype") == "api_retry":
-                    api_retries += 1
-                    reason = event.get("error")
-                    if isinstance(reason, str) and reason:
-                        found["retry_reason"] = reason
-                if event.get("status") == "compacting":
-                    found["compacting"] = True
-    if api_retries:
-        found["api_retries"] = api_retries
-    return found
-
-
-def _diagnose(stdout: bytes, stderr: bytes = b"") -> str | None:
-    """Best-effort one-line explanation of why an agent produced no output."""
-    found = _scan_stream_events(stdout)
-    parts: list[str] = []
-    if isinstance(found.get("hard_error"), str):
-        parts.append(f"agent reported: {found['hard_error']}")
-    elif isinstance(found.get("result_error"), str):
-        parts.append(f"agent result was an error: {found['result_error']}")
-    retries = found.get("api_retries")
-    if isinstance(retries, int):
-        reason = found.get("retry_reason")
-        suffix = f" (last: {reason})" if isinstance(reason, str) else ""
-        parts.append(f"{retries} API retries in stream{suffix}")
-    if found.get("compacting"):
-        parts.append("stream hit context compaction before finishing")
-    if not parts:
-        tail = stderr[-300:].decode("utf-8", "replace").strip()
-        if tail:
-            parts.append(f"stderr tail: {tail!r}")
-    return "; ".join(parts) or None
 
 
 def _diagnose_iter_dir(iter_dir: Path) -> str | None:
