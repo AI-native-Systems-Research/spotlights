@@ -138,28 +138,32 @@ lost to timeouts against 316 seconds spent waiting on purpose, a factor of 57.**
 The CLIs retry fast, shallow, and then hand back a stream that says `rate_limit`
 while the caller reports a timeout. That is the whole failure mode.
 
-**Stage C — long jittered backoff, driven by `retry_class` from fix 4.** Opt-in
-(`agent_retry_attempts=1`), with `.attempt<N>` stream preservation, and
-timeout-retry only where the stream carries rate-limit evidence. The sizing now
-comes from data rather than guesswork: to be worth anything a retry has to wait
-far longer than the ~0.6 s the CLI already tried, and the spikes here ran for
-minutes.
+### The proposal: engine-level backoff
 
-**Stage B — global concurrency gate plus launch stagger. Demoted.** Still a
-reasonable thing to own for cost control and for runs far larger than this one,
-but this run gives it no supporting evidence, so it should not be sold as the fix
-for rate limits. If it is built, it should be measured against a run that
-deliberately pushes concurrency well past 6.
+**Long jittered backoff, driven by `retry_class` from fix 4.** Opt-in
+(`agent_retry_attempts=1`), with `.attempt<N>` stream preservation so a retried
+call keeps the evidence of why it was retried, and timeout-retry only where the
+stream carries rate-limit evidence — a genuinely slow call must not be relaunched
+just for being slow.
 
-### Trade-offs that remain
+The sizing comes from the numbers above rather than from guesswork: to be worth
+anything a retry has to wait far longer than the ~0.6 s the CLI already tried, and
+the rate-limit spikes on this run persisted for minutes. Recorded by value in
+`run_manifest.json`'s `run_config`, as the existing knobs are, so every run states
+the policy that produced it.
 
+This is the only change proposed. A global concurrency cap and a launch stagger
+were the earlier proposal and are **not** proposed: the section above is the
+measurement that withdrew them.
+
+### Trade-offs
+
+- **Wall-clock.** Backoff makes a bad run *longer* — that is the trade, and the
+  reason it ships opt-in and gets measured before any default changes.
 - **A shared ceiling.** The flat per-call tax and the simultaneous multi-module
-  spikes both suggest the limit was not ours alone to spend. Retrying longer
-  rides that out; launching more slowly does not obviously help.
-- **Wall-clock.** Stage C makes a bad run *longer* — that is the trade, and the
-  reason it ships opt-in and gets measured.
-- **Quota exhaustion is immune to both.** No backoff inside a run can fix an
-  account out of budget, which is why fix 4 classifies it `fatal` rather than
-  `retryable`.
+  spikes both suggest the limit was not ours alone to spend. Waiting longer rides
+  that out; it does not raise the ceiling.
+- **Quota exhaustion is immune to it.** No backoff inside a run can fix an account
+  out of budget, which is why fix 4 classifies it `fatal` rather than `retryable`.
 
-Stage C is designed and specced. Neither stage is built.
+Designed, not built.
