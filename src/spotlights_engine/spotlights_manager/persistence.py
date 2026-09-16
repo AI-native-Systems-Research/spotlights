@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from spotlights_engine.agent_proposals import AgentProposalsConfig
 from spotlights_engine.candidate_discovery.api import (
     DiscoveryConfig,
+    DiscoveryTruncation,
     IterationTelemetry,
 )
 from spotlights_engine.costing.records import UsageRecord, UsageStep
@@ -246,6 +247,7 @@ class LoadedModuleState:
     discovery_telemetry: list[IterationTelemetry]
     discovery_total_duration_s: float | None
     discovery_total_cost_usd: float | None
+    discovery_truncation: DiscoveryTruncation | None
     deep_research: ModuleDeepResearchOutput | None
     deep_research_duration_s: float | None
     proposal_from_finding: ProposalFromFindingCreatorOutput | None
@@ -452,6 +454,7 @@ def read_module_state(module_paths: ModulePaths) -> LoadedModuleState:
     discovery_telemetry: list[IterationTelemetry] = []
     discovery_total_duration_s: float | None = None
     discovery_total_cost_usd: float | None = None
+    discovery_truncation: DiscoveryTruncation | None = None
     if module_paths.discovery_telemetry_path.exists():
         payload = json.loads(
             module_paths.discovery_telemetry_path.read_text(encoding="utf-8")
@@ -462,6 +465,9 @@ def read_module_state(module_paths: ModulePaths) -> LoadedModuleState:
         ]
         discovery_total_duration_s = payload.get("total_duration_s")
         discovery_total_cost_usd = payload.get("total_cost_usd")
+        raw_truncation = payload.get("truncated_by")
+        if isinstance(raw_truncation, dict):
+            discovery_truncation = DiscoveryTruncation.model_validate(raw_truncation)
 
     deep_research: ModuleDeepResearchOutput | None = None
     deep_research_duration_s: float | None = None
@@ -528,6 +534,7 @@ def read_module_state(module_paths: ModulePaths) -> LoadedModuleState:
         discovery_telemetry=discovery_telemetry,
         discovery_total_duration_s=discovery_total_duration_s,
         discovery_total_cost_usd=discovery_total_cost_usd,
+        discovery_truncation=discovery_truncation,
         deep_research=deep_research,
         deep_research_duration_s=deep_research_duration_s,
         proposal_from_finding=proposal_from_finding,
@@ -558,11 +565,17 @@ def write_discovery_telemetry(
     iterations: list[IterationTelemetry],
     total_duration_s: float,
     total_cost_usd: float | None,
+    truncated_by: DiscoveryTruncation | None = None,
 ) -> None:
     payload = {
         "iterations": [it.model_dump(mode="json") for it in iterations],
         "total_duration_s": total_duration_s,
         "total_cost_usd": total_cost_usd,
+        # Persisted so a resume still knows the module was refined fewer times
+        # than configured, and keeps reporting DEGRADED rather than SUCCEEDED.
+        "truncated_by": (
+            truncated_by.model_dump(mode="json") if truncated_by is not None else None
+        ),
     }
     _atomic_write_json(module_paths.discovery_telemetry_path, payload)
 
