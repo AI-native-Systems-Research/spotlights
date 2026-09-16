@@ -61,40 +61,105 @@ four wrappers hold 9, 9, 9 and 18 non-blank lines and the smallest non-wrapper m
   run: fixes 1–4 change only text on the failure path, so a healthy run proves no regression
   and nothing more.
 
-## What is still missing: the burst
+## Was it our own burst? Measured against the archive: no
 
-**None of the five fixes reduces the load we put on the API.** They make failures honest and
-far less destructive; the number of agent CLI sessions the engine fires, and when, is
-unchanged. Fix 1 slightly *increases* load, because candidates that used to be discarded now
-carry on into steps 4 and 5.
+**This section replaces an earlier claim in this document that the engine's own
+unpaced concurrency produced the 429s. That claim was not supported by the run's
+artifacts, and the artifacts were sufficient to test it.**
 
-Today each step limits its own parallelism — `max_parallel_sessions`,
-`max_parallel_pairs`, `max_parallel_candidates` — but there is **no cap on the total number
-of agent CLI sessions in flight** across the six launch sites, and **no stagger**: whatever
-is scheduled together hits the API in the same instant. That is what produces the 429s.
+The test became possible because claude's stream events carry a wall-clock
+`"timestamp"`. That is the only per-call clock in the archive — `run_manifest.json`
+holds aggregates only, this run predates `a32fb4a` so its `run_config` is empty,
+`manifest.json` carries no times, and all 30 module `status.json` files share a
+single plan-time `started_at` (a module window is queue wait *plus* work, and
+reading it as concurrency overstates it by 5.5x). Timestamping each stream instead
+gives a real interval for all 77 claude sessions and the exact moment of every
+rate limit. Reproduce with:
 
-### Proposal
+```
+python scripts/analyze_stream_timeline.py <artifacts>/spotlights_manager
+```
 
-**Stage B — stop creating the burst.** One global concurrency gate across all six agent-CLI
-launch sites, plus a launch stagger, both shipping opt-in
-(`max_concurrent_agent_calls=None`, `agent_launch_stagger_s=0.0`) so nothing changes until
-we ask for it. Recorded by value in `run_manifest.json`'s `run_config`, as the existing
-parallelism knobs are, so every run states the policy that produced it.
+### What the streams prove
 
-**Stage C — recover from the 429s that still land.** Long jittered backoff, driven by
-`retry_class` from fix 4. This is needed because both CLIs already retry *fast* (claude backs
-off ~562 ms) and *shallow* (10 attempts) before reporting failure — far too short for a real
-rate-limit window, which is why a `retryable` verdict is only actionable by a caller prepared
-to wait much longer. Also opt-in (`agent_retry_attempts=1`), with `.attempt<N>` stream
-preservation, and timeout-retry only where there is rate-limit evidence in the stream.
+Rate limiting was pervasive, and worse than the failure counts suggested:
 
-### Trade-offs to decide before making either default
+| Measurement | Value |
+|---|---|
+| claude `429 rate_limit` retry events | **149** |
+| codex streams that gave up at `429` | **22** |
+| `502 server_error` retries | 8 |
+| claude calls that hit at least one 429 | **43 of 77 = 56%** |
 
-- **Wall-clock.** Lower concurrency means longer runs. That is the whole trade, and the
-  reason both stages ship opt-in and get measured first.
-- **A shared ceiling.** If the rate limit is account-wide and something else is consuming it,
-  pacing our own run only helps so far.
-- **Quota exhaustion is immune to both.** No backoff inside a run can fix an account that is
-  out of budget, which is why fix 4 classifies it `fatal` rather than `retryable`.
+### What they disprove
 
-Both stages are designed and specced. Neither is built.
+The engine's real pacing was **mean 2.9 concurrent claude sessions, median 3,
+max 6** — not a burst. And four independent tests all fail to link our own
+concurrency to the rate limits:
+
+| Test | Result |
+|---|---|
+| corr(calls in flight, 429 count) per time bucket | **+0.20** at 2-min and 5-min resolution |
+| Peers in flight when a call launched | 429-hit **2.60** vs clean **2.74** — *wrong direction*, p=0.71 |
+| Other calls launched within ±30/60/120/300s | null at every window (p=0.36–0.91) |
+| Dose-response, 429s per call by concurrency | **flat and non-monotonic**: 1.90 at 2–3 peers, 2.29 at 3–4, 1.60 at 4–5, 1.86 at 5+ |
+
+Two further observations point the same way. The per-call rate limit rate is a
+roughly constant tax of 0.9–1.9 per in-flight call in *every* 40-minute window of
+the run, rather than something concentrated at peaks. And the busiest window of
+the whole run — 8–9 calls in flight around +165 min — took **zero** rate limits,
+while each of the five biggest 429 spikes struck **3–5 different modules
+simultaneously**. Many modules throttled at the same instant, independent of how
+many calls we had running, is the signature of a shared ceiling we were not
+setting.
+
+**The honest limit of this result.** It shows no *marginal* effect anywhere in the
+1–6 concurrent-session range we actually operated in. It cannot show what would
+happen at 1, because this run never went there. So the claim that is dead is
+"pacing our own launches would have prevented these 429s"; a cap set anywhere in
+the range we already occupied, and a launch stagger, would have changed nothing
+here.
+
+## What the evidence does support: recover from the 429s, do not try to out-pace them
+
+The actionable gap is not how many calls we launch — it is that neither CLI waits
+long enough to survive a rate-limit window:
+
+| Measurement | Value |
+|---|---|
+| Retry events across the whole run | 169 |
+| Median backoff between attempts | **601 ms** |
+| Longest single backoff observed | 32.7 s |
+| **Total time every CLI spent backing off, whole 4.3-hour run** | **316 s** |
+| Deepest retry attempt reached | 7 (of `max_retries` 10) |
+
+Against that, 30 step-5 candidates each burned the full 600 s wall — **5 hours
+lost to timeouts against 316 seconds spent waiting on purpose, a factor of 57.**
+The CLIs retry fast, shallow, and then hand back a stream that says `rate_limit`
+while the caller reports a timeout. That is the whole failure mode.
+
+**Stage C — long jittered backoff, driven by `retry_class` from fix 4.** Opt-in
+(`agent_retry_attempts=1`), with `.attempt<N>` stream preservation, and
+timeout-retry only where the stream carries rate-limit evidence. The sizing now
+comes from data rather than guesswork: to be worth anything a retry has to wait
+far longer than the ~0.6 s the CLI already tried, and the spikes here ran for
+minutes.
+
+**Stage B — global concurrency gate plus launch stagger. Demoted.** Still a
+reasonable thing to own for cost control and for runs far larger than this one,
+but this run gives it no supporting evidence, so it should not be sold as the fix
+for rate limits. If it is built, it should be measured against a run that
+deliberately pushes concurrency well past 6.
+
+### Trade-offs that remain
+
+- **A shared ceiling.** The flat per-call tax and the simultaneous multi-module
+  spikes both suggest the limit was not ours alone to spend. Retrying longer
+  rides that out; launching more slowly does not obviously help.
+- **Wall-clock.** Stage C makes a bad run *longer* — that is the trade, and the
+  reason it ships opt-in and gets measured.
+- **Quota exhaustion is immune to both.** No backoff inside a run can fix an
+  account out of budget, which is why fix 4 classifies it `fatal` rather than
+  `retryable`.
+
+Stage C is designed and specced. Neither stage is built.
