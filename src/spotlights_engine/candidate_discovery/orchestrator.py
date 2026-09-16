@@ -242,6 +242,10 @@ class Orchestrator:
 
         schema_retries = 0
         last_exc: Exception | None = None
+        # An attempt the environment cut off makes the whole iteration
+        # salvageable; only a run where *every* attempt broke the output
+        # contract stays fatal.
+        saw_environmental = False
         iter_start = time.monotonic()
 
         for attempt in (0, 1):
@@ -261,7 +265,19 @@ class Orchestrator:
                 try:
                     agent_parsed = AgentCandidates.model_validate_json(payload_json)
                 except ValidationError as e:
-                    raise _SchemaParseError(f"schema validation failed: {e}") from e
+                    # `parse_last_message` has already established that the
+                    # payload is well-formed JSON, so a failure here is the
+                    # agent emitting the wrong shape - deterministic, and not
+                    # something a salvage should paper over. Re-check anyway
+                    # (pydantic reports a syntax problem as `json_invalid`) so
+                    # a future runner that forwards raw text cannot turn
+                    # truncated output into a fatal contract error.
+                    syntax = any(
+                        err.get("type") == "json_invalid" for err in e.errors()
+                    )
+                    raise _SchemaParseError(
+                        f"schema validation failed: {e}", contract=not syntax
+                    ) from e
                 # Promote bare agent ids to the prefixed schema form here, at the
                 # construction boundary (D3): the rest of the loop — validator,
                 # integrity check, telemetry, persistence — operates on final
@@ -310,12 +326,20 @@ class Orchestrator:
                 raise
             except _SchemaParseError as e:
                 last_exc = e
+                saw_environmental = saw_environmental or not e.contract
                 if attempt == 1:
                     break
                 schema_retries += 1
                 continue
 
-        raise DiscoveryAgentFailureError(
+        # A contract break is the agent's fault and reproducible, so it keeps
+        # failing the module; anything environmental is salvageable (§6.2).
+        error_cls = (
+            DiscoveryAgentFailureError
+            if saw_environmental or last_exc is None
+            else DiscoveryValidationError
+        )
+        raise error_cls(
             "schema parse failed twice",
             iteration=n,
             agent=agent.name,

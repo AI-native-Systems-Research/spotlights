@@ -57,7 +57,19 @@ class _SchemaParseError(Exception):
 
     Raised by `AgentRunner.invoke` (timeout / nonzero exit) and by
     `AgentRunner.parse_last_message` (missing / empty / non-JSON output).
+
+    `contract` separates the two reasons an attempt can fail, because they
+    have opposite consequences once both attempts are spent: an agent that
+    breaks the output contract is a deterministic bug that must stay fatal,
+    while an agent the environment cut off (rate limit, timeout, context
+    exhaustion) leaves the earlier iterations perfectly valid and so is
+    salvageable. Everything raised from this module is environmental, hence
+    the default.
     """
+
+    def __init__(self, message: str = "", *, contract: bool = False) -> None:
+        super().__init__(message)
+        self.contract = contract
 
 
 _RETRY_SEPARATOR = b"\n--- retry separator ---\n"
