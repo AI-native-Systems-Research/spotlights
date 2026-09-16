@@ -31,6 +31,7 @@ from spotlights_engine.candidate_discovery import (
     DiscoveryConfig,
     DiscoveryMutationError,
     DiscoverySetupError,
+    DiscoveryTruncation,
     DiscoveryValidationError,
     discover,
 )
@@ -199,18 +200,42 @@ def _issue(
     )
 
 
+def _discovery_issues(truncation: DiscoveryTruncation | None) -> list[StepIssue]:
+    """Render a salvaged discovery truncation as one recoverable step-2 issue.
+
+    A truncated module has real candidates, so it is not FAILED; but it got
+    fewer refinement passes than configured, so it is not SUCCEEDED either.
+    Recoverable, so a resume can redo step 2 and reach a clean SUCCEEDED.
+    """
+    if truncation is None:
+        return []
+    return [
+        _issue(
+            "candidate_discovery",
+            f"discovery truncated at iteration {truncation.iteration} "
+            f"({truncation.agent}) after {truncation.completed_iterations} "
+            f"completed iteration(s); kept those candidates. "
+            f"cause: {truncation.cause or truncation.error}",
+            severity="warning",
+            recoverable=True,
+        )
+    ]
+
+
 def _final_status(
     research: ModuleDeepResearchOutput,
     proposals: ProposalFromFindingCreatorOutput | None,
     agent_output: AgentProposalsOutput | None = None,
+    discovery_issues: list[StepIssue] | None = None,
 ) -> ModuleRunStatus:
-    """Translate combined step-3 + step-4 + step-5 issues into the module status.
+    """Translate combined step-2 + step-3 + step-4 + step-5 issues into the status.
 
     - any `recoverable=False` issue -> `FAILED`
     - any issue at all (all recoverable) -> `DEGRADED`
     - no issues -> `SUCCEEDED`
     """
-    issues: list[StepIssue] = list(research.issues)
+    issues: list[StepIssue] = list(discovery_issues or [])
+    issues.extend(research.issues)
     if proposals is not None:
         issues.extend(proposals.issues)
     if agent_output is not None:
@@ -827,8 +852,8 @@ async def _do_step2(
     cfg: SpotlightsManagerConfig,
     module_paths: ModulePaths,
     segment: str,
-) -> tuple[Candidates, list, float, float | None]:
-    """Returns (candidates, iterations, total_duration_s, total_cost_usd).
+) -> tuple[Candidates, list, float, float | None, DiscoveryTruncation | None]:
+    """Returns (candidates, iterations, total_duration_s, total_cost_usd, truncation).
 
     `segment` is the module id segment (D3): discovery promotes each agent-local
     `cand-NNNN` to `cand-<segment>-NNNN` while building schema `Candidate`s, so
@@ -848,6 +873,7 @@ async def _do_step2(
         list(result.iterations),
         result.total_duration_s,
         result.total_cost_usd,
+        result.truncated_by,
     )
 
 
@@ -1128,6 +1154,7 @@ async def _run_module(
 
         # ------------------------- step 2 -----------------------------------
         candidates: Candidates | None = state.candidates
+        truncation: DiscoveryTruncation | None = state.discovery_truncation
         if plan.redo_step2:
             P.clear_discovery_artifacts(
                 module_paths, session_index=session_index
@@ -1151,7 +1178,7 @@ async def _run_module(
 
             _log.info("[%s] discovery: start", qn)
             try:
-                candidates, iters, dur, cost = await _do_step2(
+                candidates, iters, dur, cost, truncation = await _do_step2(
                     qn=qn,
                     tree=tree,
                     mgr_input=mgr_input,
@@ -1204,7 +1231,9 @@ async def _run_module(
             # `Candidate`s (and the telemetry id lists match), so the candidates
             # and iterations are globally-unique by construction — no rebase.
             P.write_candidates(module_paths, candidates)
-            P.write_discovery_telemetry(module_paths, iters, dur, cost)
+            P.write_discovery_telemetry(
+                module_paths, iters, dur, cost, truncated_by=truncation
+            )
             _write_discovery_usage_records(
                 module_paths=module_paths,
                 qn=qn,
@@ -1213,11 +1242,17 @@ async def _run_module(
             )
             cost_str = f" ${cost:.2f}" if cost is not None else ""
             _log.info(
-                "[%s] discovery: complete in %.1fs — %d candidates%s",
+                "[%s] discovery: complete in %.1fs — %d candidates%s%s",
                 qn,
                 dur,
                 len(candidates.candidates),
                 cost_str,
+                (
+                    f" (TRUNCATED at iteration {truncation.iteration}: "
+                    f"{truncation.cause or truncation.error})"
+                    if truncation is not None
+                    else ""
+                ),
             )
             cp = _now_checkpoint(
                 qn=qn,
@@ -1703,8 +1738,14 @@ async def _run_module(
             agent_output = state.agent_proposals
 
         # ------------------------- finalize ---------------------------------
-        final_status = _final_status(research_output, proposal_output, agent_output)
-        combined_issues: list[StepIssue] = list(research_output.issues)
+        discovery_issues = _discovery_issues(truncation)
+        final_status = _final_status(
+            research_output,
+            proposal_output,
+            agent_output,
+            discovery_issues=discovery_issues,
+        )
+        combined_issues: list[StepIssue] = [*discovery_issues, *research_output.issues]
         if proposal_output is not None:
             combined_issues.extend(proposal_output.issues)
         if agent_output is not None:

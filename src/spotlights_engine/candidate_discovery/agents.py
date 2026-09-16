@@ -129,7 +129,7 @@ class AgentRunner(ABC):
             stderr = exc.stderr or b""
             _append_streams(stdout_path, stderr_path, stdout, stderr, is_retry)
             raise _SchemaParseError(
-                f"agent {self.name} timed out after {duration:.1f}s"
+                _explain(f"agent {self.name} timed out after {duration:.1f}s", iter_dir)
             ) from exc
 
         _append_streams(stdout_path, stderr_path, completed.stdout, completed.stderr, is_retry)
@@ -137,9 +137,11 @@ class AgentRunner(ABC):
         if completed.returncode != 0:
             stdout_tail = (completed.stdout or b"")[-500:].decode("utf-8", "replace")
             stderr_tail = (completed.stderr or b"")[-500:].decode("utf-8", "replace")
+            diagnosis = _diagnose(completed.stdout or b"", completed.stderr or b"")
             raise _SchemaParseError(
                 f"agent {self.name} exit={completed.returncode}: "
-                f"stderr={stderr_tail!r} stdout={stdout_tail!r}"
+                + (f"{diagnosis}; " if diagnosis else "")
+                + f"stderr={stderr_tail!r} stdout={stdout_tail!r}"
             )
 
         return self._parse_invocation_metadata(completed.stdout, iter_dir, start)
@@ -166,6 +168,95 @@ def _append_streams(
         if is_retry:
             fh.write(_RETRY_SEPARATOR)
         fh.write(stderr or b"")
+
+
+# Terminal-failure signatures we know how to name. `parse_last_message` can only
+# report that `last_message.json` is missing, which is what a 429 storm, a
+# context-window compaction, and a genuinely malformed reply all look like from
+# the outside — the run that produced "schema parse failed twice" for all eight
+# failed modules was in fact eight rate limits. The real terminal event is in the
+# raw stream, so scan it and say so.
+def _scan_stream_events(stdout: bytes) -> dict[str, object]:
+    found: dict[str, object] = {}
+    api_retries = 0
+    for raw in stdout.splitlines():
+        raw = raw.strip()
+        if not raw or not raw.startswith(b"{"):
+            continue
+        try:
+            obj = json.loads(raw)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        # codex --json nests some events under "msg"; claude does not.
+        for event in (obj, obj.get("msg")):
+            if not isinstance(event, dict):
+                continue
+            etype = event.get("type")
+            if etype == "error":
+                message = event.get("message")
+                if isinstance(message, str) and message:
+                    found["hard_error"] = message
+            elif etype == "turn.failed":
+                err = event.get("error")
+                message = err.get("message") if isinstance(err, dict) else err
+                if isinstance(message, str) and message:
+                    found["hard_error"] = message
+            elif etype == "result" and event.get("is_error"):
+                found["result_error"] = str(
+                    event.get("result") or event.get("subtype") or "unspecified"
+                )
+            elif etype == "system":
+                if event.get("subtype") == "api_retry":
+                    api_retries += 1
+                    reason = event.get("error")
+                    if isinstance(reason, str) and reason:
+                        found["retry_reason"] = reason
+                if event.get("status") == "compacting":
+                    found["compacting"] = True
+    if api_retries:
+        found["api_retries"] = api_retries
+    return found
+
+
+def _diagnose(stdout: bytes, stderr: bytes = b"") -> str | None:
+    """Best-effort one-line explanation of why an agent produced no output."""
+    found = _scan_stream_events(stdout)
+    parts: list[str] = []
+    if isinstance(found.get("hard_error"), str):
+        parts.append(f"agent reported: {found['hard_error']}")
+    elif isinstance(found.get("result_error"), str):
+        parts.append(f"agent result was an error: {found['result_error']}")
+    retries = found.get("api_retries")
+    if isinstance(retries, int):
+        reason = found.get("retry_reason")
+        suffix = f" (last: {reason})" if isinstance(reason, str) else ""
+        parts.append(f"{retries} API retries in stream{suffix}")
+    if found.get("compacting"):
+        parts.append("stream hit context compaction before finishing")
+    if not parts:
+        tail = stderr[-300:].decode("utf-8", "replace").strip()
+        if tail:
+            parts.append(f"stderr tail: {tail!r}")
+    return "; ".join(parts) or None
+
+
+def _diagnose_iter_dir(iter_dir: Path) -> str | None:
+    """`_diagnose` over the persisted raw streams for an iteration directory."""
+    def _read(name: str) -> bytes:
+        path = iter_dir / name
+        try:
+            return path.read_bytes()
+        except OSError:
+            return b""
+
+    return _diagnose(_read("raw_stdout.log"), _read("raw_stderr.log"))
+
+
+def _explain(message: str, iter_dir: Path) -> str:
+    diagnosis = _diagnose_iter_dir(iter_dir)
+    return f"{message}; {diagnosis}" if diagnosis else message
 
 
 class ClaudeRunner(AgentRunner):
@@ -210,7 +301,9 @@ class ClaudeRunner(AgentRunner):
         result_event = self._extract_result_event(stdout)
         if result_event is None:
             last_message_path.write_text("", encoding="utf-8")
-            raise _SchemaParseError("claude stream-json had no terminal result event")
+            raise _SchemaParseError(
+                _explain("claude stream-json had no terminal result event", iter_dir)
+            )
 
         message_text = self._final_message_text(result_event)
         last_message_path.write_text(message_text, encoding="utf-8")
@@ -270,10 +363,10 @@ class ClaudeRunner(AgentRunner):
     def parse_last_message(self, iter_dir: Path) -> str:
         path = iter_dir / "last_message.json"
         if not path.exists():
-            raise _SchemaParseError("claude last_message.json missing")
+            raise _SchemaParseError(_explain("claude last_message.json missing", iter_dir))
         text = path.read_text(encoding="utf-8")
         if not text.strip():
-            raise _SchemaParseError("claude last_message.json empty")
+            raise _SchemaParseError(_explain("claude last_message.json empty", iter_dir))
         try:
             json.loads(text)
         except json.JSONDecodeError as e:
@@ -355,10 +448,10 @@ class CodexRunner(AgentRunner):
     def parse_last_message(self, iter_dir: Path) -> str:
         path = iter_dir / "last_message.json"
         if not path.exists():
-            raise _SchemaParseError("codex last_message.json missing")
+            raise _SchemaParseError(_explain("codex last_message.json missing", iter_dir))
         text = path.read_text(encoding="utf-8")
         if not text.strip():
-            raise _SchemaParseError("codex last_message.json empty")
+            raise _SchemaParseError(_explain("codex last_message.json empty", iter_dir))
         try:
             json.loads(text)
         except json.JSONDecodeError as e:

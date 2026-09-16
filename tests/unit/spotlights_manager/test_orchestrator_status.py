@@ -6,7 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from spotlights_engine.candidate_discovery import DiscoverySetupError
+from spotlights_engine.candidate_discovery import (
+    DiscoverySetupError,
+    DiscoveryTruncation,
+)
 from spotlights_engine.schemas.common import StepIssue
 from spotlights_engine.spotlights_manager import (
     ModuleFilter,
@@ -106,6 +109,107 @@ def test_skipped_when_no_candidates(monkeypatch, repo: Path, artifacts: Path) ->
     assert mr.status == "SKIPPED"
     assert mr.findings == []
     assert research_called["n"] == 0
+
+
+def _truncation() -> DiscoveryTruncation:
+    return DiscoveryTruncation(
+        iteration=3,
+        agent="codex",
+        error="DiscoveryAgentFailureError",
+        cause=(
+            "schema parse failed twice (iteration=3, agent=codex, cause=codex "
+            "last_message.json missing; agent reported: exceeded retry limit, "
+            "last status: 429 Too Many Requests)"
+        ),
+        completed_iterations=3,
+    )
+
+
+def test_degraded_when_discovery_truncated(
+    monkeypatch, repo: Path, artifacts: Path
+) -> None:
+    """A salvaged discovery keeps its candidates and reports DEGRADED, not FAILED.
+
+    Regression guard for the IOCR run: eight modules were marked FAILED with
+    zero candidates because a rate limit hit their last refinement iteration.
+    """
+    tree = make_tree()
+    _patch_extractor(monkeypatch, tree)
+    monkeypatch.setattr(
+        orch,
+        "discover",
+        lambda inp, *, config: make_discovery_result(
+            inp.module_qualified_name, truncated_by=_truncation()
+        ),
+    )
+    monkeypatch.setattr(
+        orch,
+        "research_module",
+        lambda inp, options=None, **_kw: make_research_output(n_findings=2),
+    )
+    patch_proposal_from_finding(monkeypatch, orch)
+    patch_agent_proposals(monkeypatch, orch)
+
+    cfg = SpotlightsManagerConfig(
+        artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
+    )
+    result = run_with_telemetry(make_input(repo), config=cfg)
+
+    mr = result.module_runs["v1/kv_offload"]
+    assert mr.status == "DEGRADED"
+    # The candidates are kept, and the pipeline ran on them.
+    assert mr.candidates is not None and len(mr.candidates.candidates) == 1
+    assert len(mr.findings) == 2
+    # The issue names the real cause and is recoverable, so a resume can retry.
+    issues = [i for i in mr.issues if i.step == "candidate_discovery"]
+    assert len(issues) == 1
+    assert issues[0].recoverable is True
+    assert "429" in issues[0].message
+    assert "iteration 3" in issues[0].message
+
+
+def test_discovery_truncation_persists_for_resume(
+    monkeypatch, repo: Path, artifacts: Path
+) -> None:
+    """The truncation lands in the telemetry sidecar and reloads from it."""
+    import json
+
+    from spotlights_engine.spotlights_manager import persistence as P
+
+    tree = make_tree()
+    _patch_extractor(monkeypatch, tree)
+    monkeypatch.setattr(
+        orch,
+        "discover",
+        lambda inp, *, config: make_discovery_result(
+            inp.module_qualified_name, truncated_by=_truncation()
+        ),
+    )
+    monkeypatch.setattr(
+        orch,
+        "research_module",
+        lambda inp, options=None, **_kw: make_research_output(n_findings=1),
+    )
+    patch_proposal_from_finding(monkeypatch, orch)
+    patch_agent_proposals(monkeypatch, orch)
+
+    cfg = SpotlightsManagerConfig(
+        artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
+    )
+    run_with_telemetry(make_input(repo), config=cfg)
+
+    module_paths = P.ManagerPaths(artifacts).for_module("v1/kv_offload")
+    payload = json.loads(module_paths.discovery_telemetry_path.read_text())
+    assert payload["truncated_by"]["iteration"] == 3
+    assert payload["truncated_by"]["agent"] == "codex"
+
+    reloaded = P.read_module_state(module_paths)
+    assert reloaded.discovery_truncation is not None
+    assert reloaded.discovery_truncation.completed_iterations == 3
 
 
 def test_degraded_on_recoverable_issue(monkeypatch, repo: Path, artifacts: Path) -> None:

@@ -281,7 +281,12 @@ def test_schema_parse_retry_succeeds(repo_artifacts, monkeypatch):
     assert result.iterations[1].schema_retries == 1
 
 
-def test_schema_parse_retry_fails_twice(repo_artifacts, monkeypatch):
+def test_review_failure_salvages_earlier_candidates(repo_artifacts, monkeypatch):
+    """A dead review agent truncates the loop; it must not delete what was found.
+
+    Regression guard for the IOCR run, where a rate limit in the last iteration
+    threw away every candidate the earlier iterations had produced.
+    """
     repo, artifacts = repo_artifacts
     claude = FakeAgentRunner(
         "claude_code",
@@ -296,9 +301,63 @@ def test_schema_parse_retry_fails_twice(repo_artifacts, monkeypatch):
     _install_runners(monkeypatch, claude, codex)
 
     cfg = _make_config(repo, artifacts, num_reviews=2)
+    result = discover(_make_input(), config=cfg)
+
+    # The bootstrap candidate survives.
+    assert [c.id for c in result.candidates.candidates] == ["cand-v1_foo-0001"]
+    # ...and the truncation is reported rather than swallowed.
+    assert result.truncated_by is not None
+    assert result.truncated_by.iteration == 1
+    assert result.truncated_by.agent == "codex"
+    assert result.truncated_by.error == "DiscoveryAgentFailureError"
+    assert result.truncated_by.completed_iterations == 1
+    # Only the bootstrap telemetry exists — the failed iteration produced none.
+    assert len(result.iterations) == 1
+    # The final artifact comes from the last *good* iteration, not the failed one.
+    final = json.loads((artifacts / "candidates.json").read_text())
+    assert [c["id"] for c in final["candidates"]] == ["cand-v1_foo-0001"]
+
+
+def test_bootstrap_failure_still_raises(repo_artifacts, monkeypatch):
+    """Nothing to salvage → the module must fail, never be reported as empty."""
+    repo, artifacts = repo_artifacts
+    claude = FakeAgentRunner("claude_code", responses=["bad-1", "bad-2"])
+    codex = FakeAgentRunner("codex", responses=[])
+    _install_runners(monkeypatch, claude, codex)
+
+    cfg = _make_config(repo, artifacts, num_reviews=2)
     with pytest.raises(DiscoveryValidationError) as exc:
         discover(_make_input(), config=cfg)
-    assert exc.value.context["iteration"] == 1
+    assert exc.value.context["iteration"] == 0
+
+
+def test_truncation_absent_on_clean_run(repo_artifacts, monkeypatch):
+    repo, artifacts = repo_artifacts
+    claude = FakeAgentRunner(
+        "claude_code", responses=[_cands([("cand-0001", "src/v1/foo/x.py")])]
+    )
+    codex = FakeAgentRunner("codex", responses=[])
+    _install_runners(monkeypatch, claude, codex)
+
+    result = _run(repo, artifacts, num_reviews=0)
+
+    assert result.truncated_by is None
+
+
+def test_agent_failure_error_message_carries_cause(repo_artifacts, monkeypatch):
+    """`str(e)` is what the manager persists — it must name the real reason."""
+    repo, artifacts = repo_artifacts
+    claude = FakeAgentRunner("claude_code", responses=["bad-1", "bad-2"])
+    codex = FakeAgentRunner("codex", responses=[])
+    _install_runners(monkeypatch, claude, codex)
+
+    cfg = _make_config(repo, artifacts, num_reviews=0)
+    with pytest.raises(DiscoveryValidationError) as exc:
+        discover(_make_input(), config=cfg)
+    rendered = str(exc.value)
+    assert "iteration=0" in rendered
+    assert "agent=claude_code" in rendered
+    assert "cause=" in rendered
 
 
 def test_mutation_guard_fires(repo_artifacts, monkeypatch):
