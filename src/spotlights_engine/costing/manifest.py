@@ -46,6 +46,14 @@ class RunManifestSpotlights(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     commit_sha: str = ""
+    # The *producing pipeline family*, not a record of which steps ran. A run
+    # launched with `--no-deep-research` is still a deep-research-pipeline run
+    # and still says `"deep-research"` here; what records the skipped step is
+    # `run_config.enable_deep_research`. Reading this field as "step 3 ran" and
+    # seeing it beside `enable_deep_research: false` looks like a contradiction
+    # and is not one -- I filed that bug against myself once already. Same
+    # meaning as `schemas.pipeline.RunInfo.pipeline`, whose `Literal` spells the
+    # family out: `deep_research` or `signal`.
     pipeline: str = "deep-research"
     config: dict[str, Any] = Field(default_factory=dict)
 
