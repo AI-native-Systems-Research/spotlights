@@ -148,6 +148,7 @@ class RunManifestRunConfig(BaseModel):
     include_candidate_hotspots: bool = False
     enable_claude_search: bool = False
     enable_deep_research: bool = False
+    skip_container_modules: bool = False
     max_parallel_sessions: int = 0
     max_parallel_pairs: int = 0
     max_parallel_candidates: int = 0

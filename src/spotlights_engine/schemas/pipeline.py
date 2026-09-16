@@ -163,6 +163,12 @@ class SpotlightsManagerInput(BaseModel):
     # manager substitutes an empty ModuleDeepResearchOutput and step 4 takes
     # its zero-findings short-circuit.
     enable_deep_research: bool = True
+    # True -> a parent module whose own content is package plumbing is marked
+    # SKIPPED before step 2 instead of paying a discovery pass to analyze an
+    # `__init__.py`. Off by default: it changes which modules get analyzed, and
+    # the saving is only ever a routing node whose submodules are targets in
+    # their own right. See `spotlights_manager.filters.container_module_reason`.
+    skip_container_modules: bool = False
     continue_on_module_failure: bool = True
 
 

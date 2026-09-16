@@ -226,6 +226,20 @@ def _build_argparser() -> argparse.ArgumentParser:
     )
 
     p.add_argument(
+        "--skip-container-modules",
+        dest="skip_container_modules",
+        action="store_true",
+        help=(
+            "Mark a parent module SKIPPED without running step 2 when its own "
+            "content is package plumbing only (an `__init__.py` and nothing "
+            "else) and its code lives in submodules, which are analyzed as "
+            "targets in their own right. Saves one discovery pass per such "
+            "module — four of the 30 modules on the IOCR tree. Default: off, "
+            "so every module in the tree is discovered."
+        ),
+    )
+
+    p.add_argument(
         "--no-deep-research",
         dest="enable_deep_research",
         action="store_false",
@@ -423,6 +437,7 @@ def _build_input(args: argparse.Namespace) -> SpotlightsManagerInput:
     input_kwargs["include_candidate_hotspots"] = args.include_candidate_hotspots
     input_kwargs["enable_claude_search"] = args.enable_claude_search
     input_kwargs["enable_deep_research"] = args.enable_deep_research
+    input_kwargs["skip_container_modules"] = args.skip_container_modules
     return SpotlightsManagerInput(**input_kwargs)
 
 

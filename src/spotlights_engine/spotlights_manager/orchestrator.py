@@ -91,7 +91,10 @@ from spotlights_engine.spotlights_manager.errors import (
     ManagerSetupError,
     ResumeMismatchError,
 )
-from spotlights_engine.spotlights_manager.filters import apply_filter
+from spotlights_engine.spotlights_manager.filters import (
+    apply_filter,
+    container_module_reason,
+)
 from spotlights_engine.spotlights_manager.persistence import (
     LoadedModuleState,
     ManagerPaths,
@@ -337,6 +340,7 @@ def _run_config(
         include_candidate_hotspots=input.include_candidate_hotspots,
         enable_claude_search=input.enable_claude_search,
         enable_deep_research=input.enable_deep_research,
+        skip_container_modules=input.skip_container_modules,
         max_parallel_sessions=cfg.max_parallel_sessions,
         max_parallel_pairs=proposal.max_parallel_pairs,
         max_parallel_candidates=agent_proposals.max_parallel_candidates,
@@ -1136,6 +1140,34 @@ async def _run_module(
             manifest=manifest,
         )
 
+    # A pure routing container costs a full discovery pass to analyze an
+    # `__init__.py`; skip it before it takes a session slot. Persist the empty
+    # candidate set as well as the status: `_plan_module` reads a SKIPPED
+    # checkpoint *with* zero candidates as settled, and one without them as
+    # "step 2 never finished" -- so writing status alone would re-run discovery
+    # on the next resume and quietly undo the saving.
+    if plan.redo_step2 and mgr_input.skip_container_modules:
+        module = tree.resolve(qn)
+        reason = (
+            container_module_reason(module, mgr_input.repo_path)
+            if module is not None
+            else None
+        )
+        if reason is not None:
+            P.write_candidates(
+                module_paths, Candidates(module_qualified_name=qn, candidates=[])
+            )
+            cp = _now_checkpoint(
+                qn=qn,
+                status="SKIPPED",
+                last_step="candidate_discovery",
+                started_at=plan.started_at,
+            )
+            P.write_checkpoint(module_paths, cp)
+            await _update_module_in_manifest(paths, manifest, manifest_lock, qn, cp)
+            _log.info("[%s] SKIPPED before discovery: %s", qn, reason)
+            return cp
+
     async with sem:
         if (
             cancel_event is not None
@@ -1913,6 +1945,7 @@ async def _run_async(
         include_candidate_hotspots=input.include_candidate_hotspots,
         enable_claude_search=input.enable_claude_search,
         enable_deep_research=input.enable_deep_research,
+        skip_container_modules=input.skip_container_modules,
     )
     config_fp = P.build_config_fingerprint(
         module_filter=config.module_filter,
