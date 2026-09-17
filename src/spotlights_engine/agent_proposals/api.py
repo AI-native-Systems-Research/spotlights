@@ -56,6 +56,13 @@ from spotlights_engine.schemas.pipeline import (
 )
 from spotlights_engine.schemas.proposal import Proposal
 from spotlights_engine.schemas.proposals import AgentProposal
+from spotlights_engine.utils.agent_retry import (
+    DEFAULT_ATTEMPTS,
+    DEFAULT_BASE_S,
+    DEFAULT_MAX_S,
+    RetryPolicy,
+    should_retry,
+)
 from spotlights_engine.utils.id_helpers import slug_for
 from spotlights_engine.utils.schema_compat import mint_proposal_ids
 
@@ -95,6 +102,20 @@ class AgentProposalsConfig(BaseModel):
 
     claude_agent_name: str = Field(default="claude", min_length=1)
     codex_agent_name: str = Field(default="codex", min_length=1)
+
+    # Relaunch a rate-limited agent call. Default 1 = no retry = today's exact
+    # behaviour; see `utils/agent_retry.py` for where the sizing comes from.
+    agent_retry_attempts: int = Field(default=DEFAULT_ATTEMPTS, ge=1, le=10)
+    agent_retry_base_s: float = Field(default=DEFAULT_BASE_S, gt=0)
+    agent_retry_max_s: float = Field(default=DEFAULT_MAX_S, gt=0)
+
+    @property
+    def retry_policy(self) -> RetryPolicy:
+        return RetryPolicy(
+            attempts=self.agent_retry_attempts,
+            base_s=self.agent_retry_base_s,
+            max_s=max(self.agent_retry_max_s, self.agent_retry_base_s),
+        )
 
 
 class AgentProposalsResult(BaseModel):
@@ -244,6 +265,61 @@ def _persist_candidate_debug(
                 pass
 
 
+async def _launch_with_retry(
+    *,
+    config: AgentProposalsConfig,
+    candidate_id: str,
+    pass_label: str,
+    runner: object,
+    kwargs: dict[str, object],
+) -> CandidateAgentRunResult:
+    """Launch an agent call, relaunching it if a rate limit is what killed it.
+
+    With the default `attempts=1` this makes exactly one call and the loop below
+    exits on its first pass, so a run that has not opted in follows today's code
+    path and cannot be slowed down by this.
+
+    Every superseded attempt keeps its stream under
+    `<candidate>.<pass>.attempt<N>.stdout`, because the whole reason step 5 was
+    misdiagnosed for a day is that the evidence of *why* a call died was not on
+    disk. Retrying without preserving it would recreate that hole: a call that
+    was rate limited three times and then succeeded would look like a clean call.
+    """
+    policy = config.retry_policy
+    attempt = 1
+    while True:
+        run_result: CandidateAgentRunResult = await asyncio.to_thread(
+            runner, **kwargs  # type: ignore[arg-type]
+        )
+        if run_result.error is None or not should_retry(
+            run_result.stdout or b"",
+            run_result.stderr or b"",
+            policy=policy,
+            attempt=attempt,
+        ):
+            return run_result
+
+        # Keep the losing attempt's evidence before the next one overwrites it.
+        _persist_candidate_debug(
+            config=config,
+            candidate_id=candidate_id,
+            pass_label=f"{pass_label}.attempt{attempt}",
+            run_result=run_result,
+        )
+        attempt += 1
+        delay = policy.delay_s(attempt)
+        _log.warning(
+            "retrying %s for candidate_id=%s after %.0fs (attempt %d of %d): %s",
+            pass_label,
+            candidate_id,
+            delay,
+            attempt,
+            policy.attempts,
+            run_result.error,
+        )
+        await asyncio.sleep(delay)
+
+
 async def _run_claude_pass(
     *,
     candidate: Candidate,
@@ -273,15 +349,20 @@ async def _run_claude_pass(
         model_kwargs = (
             {"claude_model": config.claude_model} if config.claude_model else {}
         )
-        run_result = await asyncio.to_thread(
-            runner,
+        run_result = await _launch_with_retry(
+            config=config,
             candidate_id=candidate.id,
-            prompt=prompt,
-            schema_text=schema_text,
-            repo_path=config.repo_path,
-            max_turns=config.claude_max_turns,
-            wallclock_s=config.claude_wallclock_s,
-            **model_kwargs,
+            pass_label=_CLAUDE_PASS,
+            runner=runner,
+            kwargs=dict(
+                candidate_id=candidate.id,
+                prompt=prompt,
+                schema_text=schema_text,
+                repo_path=config.repo_path,
+                max_turns=config.claude_max_turns,
+                wallclock_s=config.claude_wallclock_s,
+                **model_kwargs,
+            ),
         )
     except Exception as exc:  # noqa: BLE001
         duration = time.monotonic() - run_start
@@ -365,17 +446,22 @@ async def _run_codex_pass(
 
     run_start = time.monotonic()
     try:
-        run_result = await asyncio.to_thread(
-            runner,
+        run_result = await _launch_with_retry(
+            config=config,
             candidate_id=candidate.id,
-            prompt=prompt,
-            schema_text=schema_text,
-            repo_path=config.repo_path,
-            wallclock_s=config.codex_wallclock_s,
-            last_message_path=last_message_path,
-            schema_path=schema_path,
-            codex_model=config.codex_model,
-            codex_reasoning_effort=config.codex_reasoning_effort,
+            pass_label=_CODEX_PASS,
+            runner=runner,
+            kwargs=dict(
+                candidate_id=candidate.id,
+                prompt=prompt,
+                schema_text=schema_text,
+                repo_path=config.repo_path,
+                wallclock_s=config.codex_wallclock_s,
+                last_message_path=last_message_path,
+                schema_path=schema_path,
+                codex_model=config.codex_model,
+                codex_reasoning_effort=config.codex_reasoning_effort,
+            ),
         )
     except Exception as exc:  # noqa: BLE001
         duration = time.monotonic() - run_start

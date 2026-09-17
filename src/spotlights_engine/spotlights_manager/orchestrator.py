@@ -344,6 +344,9 @@ def _run_config(
         max_parallel_sessions=cfg.max_parallel_sessions,
         max_parallel_pairs=proposal.max_parallel_pairs,
         max_parallel_candidates=agent_proposals.max_parallel_candidates,
+        agent_retry_attempts=agent_proposals.agent_retry_attempts,
+        agent_retry_base_s=agent_proposals.agent_retry_base_s,
+        agent_retry_max_s=agent_proposals.agent_retry_max_s,
     )
 
 
