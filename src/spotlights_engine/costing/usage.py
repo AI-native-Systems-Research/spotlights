@@ -200,10 +200,55 @@ def codex_usage_from_stream(stdout: bytes | str) -> AgentUsage | None:
     )
 
 
+def _add_optional(a: float | None, b: float | None) -> float | None:
+    """Sum two optional numbers, staying `None` only when both are."""
+    if a is None:
+        return b
+    if b is None:
+        return a
+    return a + b
+
+
+def merge_agent_usage(
+    earlier: AgentUsage | None, later: AgentUsage | None
+) -> AgentUsage | None:
+    """Add up the usage of two invocations that produced one result.
+
+    Needed by the step-5 retry: an attempt that died of a rate limit has usually
+    already paid for tokens -- a timed-out claude call carries the usage parsed
+    out of its partial stream, and codex emits `token_count` events before it
+    gives up -- so returning only the winning attempt's usage would bill the run
+    for less than it spent. Cost under-reporting is the one error class this
+    codebase cannot tolerate silently, since the figure is quoted to people.
+
+    Counters add. `model` takes the first one named, on the assumption that
+    retrying a call does not change the model under it. `api_time_s` and
+    `cli_reported_cost_usd` add across whichever attempts reported them, and stay
+    `None` only when nobody did -- distinguishing "no time spent" from "the CLI
+    never said", which the rate table depends on.
+    """
+    if earlier is None:
+        return later
+    if later is None:
+        return earlier
+    return AgentUsage(
+        input=earlier.input + later.input,
+        output=earlier.output + later.output,
+        cache_read=earlier.cache_read + later.cache_read,
+        cache_create=earlier.cache_create + later.cache_create,
+        model=earlier.model or later.model,
+        api_time_s=_add_optional(earlier.api_time_s, later.api_time_s),
+        cli_reported_cost_usd=_add_optional(
+            earlier.cli_reported_cost_usd, later.cli_reported_cost_usd
+        ),
+    )
+
+
 __all__ = [
     "AgentUsage",
     "CliUsage",
     "claude_usage_from_payload",
     "claude_usage_from_stream",
     "codex_usage_from_stream",
+    "merge_agent_usage",
 ]
