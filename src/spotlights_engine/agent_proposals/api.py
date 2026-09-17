@@ -354,6 +354,11 @@ async def _launch_with_retry(
         )
         attempt += 1
         delay = policy.delay_s(attempt)
+        # Waiting is the point of the retry, so the wait is part of what the
+        # candidate cost in wall-clock. Left out, a run that deliberately sat
+        # out two rate limits reports the same duration as one that never had
+        # to, and the manifest cannot show the backoff happening at all.
+        carried_s += delay
         _log.warning(
             "retrying %s for candidate_id=%s after %.0fs (attempt %d of %d): %s",
             pass_label,

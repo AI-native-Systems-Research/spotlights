@@ -22,6 +22,7 @@ from spotlights_engine.agent_proposals import (
 )
 from spotlights_engine.agent_proposals.claude_exec import CandidateAgentRunResult
 from spotlights_engine.costing.usage import AgentUsage
+from spotlights_engine.utils.agent_retry import RetryPolicy
 from spotlights_engine.utils.schema_compat import proposals_from
 from tests.unit.agent_proposals._fakes import (
     fake_codex_runner_factory,
@@ -252,6 +253,27 @@ def test_time_spent_on_superseded_attempts_is_still_reported(
         _paying_claude_runner([RATE_LIMITED, RATE_LIMITED], calls=calls),
     )
     assert result.per_candidate_durations_s[CAND]["claude"] >= 15.0
+
+
+def test_the_wait_between_attempts_is_part_of_the_reported_time(
+    monkeypatch, repo: Path, artifacts: Path
+) -> None:
+    """Time spent sleeping off a rate limit is time the run spent.
+
+    Full jitter makes the real delay unpredictable, so pin it. Without the
+    wait, a candidate that sat out two rate limits reports only the three
+    launches' own milliseconds and the backoff is invisible in the manifest.
+    """
+    monkeypatch.setattr(RetryPolicy, "delay_s", lambda self, attempt: 0.25)
+    calls: list[int] = []
+    result = _run(
+        make_input(n_candidates=1),
+        _cfg(repo, artifacts, agent_retry_attempts=3),
+        _claude_runner([RATE_LIMITED, RATE_LIMITED], calls=calls),
+    )
+    assert len(calls) == 3
+    # 3 launches of 0.001s each, plus the two 0.25s waits between them.
+    assert result.per_candidate_durations_s[CAND]["claude"] >= 0.5
 
 
 def test_a_call_that_needed_no_retry_is_returned_untouched(

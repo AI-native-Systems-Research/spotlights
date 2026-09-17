@@ -151,9 +151,12 @@ def describe(stdout: bytes, stderr: bytes = b"") -> str | None:
     """Best-effort one-line explanation of why an agent produced no output."""
     found = scan(stdout)
     parts: list[str] = []
+    # Both, not one or the other: `retry_class` joins the two when it judges,
+    # so a message that reported only the first could blame a context overflow
+    # for a permanent failure the result event attributes to quota.
     if isinstance(found.get("hard_error"), str):
         parts.append(f"agent reported: {found['hard_error']}")
-    elif isinstance(found.get("result_error"), str):
+    if isinstance(found.get("result_error"), str):
         parts.append(f"agent result was an error: {found['result_error']}")
     retries = found.get("api_retries")
     if isinstance(retries, int):

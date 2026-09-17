@@ -73,6 +73,26 @@ def test_describe_names_the_hard_error():
     )
 
 
+def test_describe_keeps_both_a_hard_error_and_a_failed_result():
+    """`retry_class` weighs both, so the human message has to carry both.
+
+    A stream that reported one failure and then ended on a different one used
+    to lose the second: the verdict could be `fatal` on the quota evidence in
+    the result event while `status.json` blamed the context overflow alone --
+    an operator would go looking for a prompt-size bug instead of a bill.
+    """
+    stream = (
+        b'{"type":"error","message":"context_too_long"}\n'
+        b'{"type":"result","is_error":true,"result":"You have hit your usage '
+        b'limit. Try again at Jul 1st, 2026 12:00 AM"}\n'
+    )
+    text = describe(stream)
+    assert text is not None
+    assert "context_too_long" in text
+    assert "usage limit" in text
+    assert retry_class(stream) == "fatal"
+
+
 def test_describe_counts_retries_and_names_the_last_reason():
     stream = CLAUDE_RATE_LIMIT_RETRY * 3
     assert describe(stream) == "3 API retries in stream (last: rate_limit)"
