@@ -84,11 +84,11 @@ def scan(stdout: bytes) -> dict[str, object]:
     last_retry_status: int | None = None
 
     for i, raw in enumerate(stdout.splitlines()):
-        raw = raw.strip()
-        if not raw or not raw.startswith(b"{"):
+        line = raw.strip()
+        if not line or not line.startswith(b"{"):
             continue
         try:
-            obj = json.loads(raw)
+            obj = json.loads(line)
         except json.JSONDecodeError:
             continue
         if not isinstance(obj, dict):

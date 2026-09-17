@@ -332,18 +332,26 @@ class Orchestrator:
                 schema_retries += 1
                 continue
 
+        # Reaching here means both attempts failed, and every route out of the
+        # loop to this point runs through `except _SchemaParseError`, which
+        # records the exception. Assert it rather than carrying a fallback for
+        # the impossible case: a silent one would have to guess a class, and
+        # either guess is a lie -- environmental salvages a module that may
+        # have broken the contract, and a contract error makes a transient
+        # failure permanent.
+        assert last_exc is not None
         # A contract break is the agent's fault and reproducible, so it keeps
         # failing the module; anything environmental is salvageable (§6.2).
         error_cls = (
             DiscoveryAgentFailureError
-            if saw_environmental or last_exc is None
+            if saw_environmental
             else DiscoveryValidationError
         )
         raise error_cls(
             "schema parse failed twice",
             iteration=n,
             agent=agent.name,
-            cause=str(last_exc) if last_exc else None,
+            cause=str(last_exc),
         ) from last_exc
 
     def _check_qualified_name(self, parsed: Candidates, n: int, agent: str) -> None:
