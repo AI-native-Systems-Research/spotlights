@@ -15,10 +15,11 @@ import asyncio
 import json
 import logging
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from spotlights_engine.agent_proposals.agent_schema import (
     build_per_candidate_schema_text,
@@ -47,7 +48,11 @@ from spotlights_engine.agent_proposals.prompts import (
 from spotlights_engine.agent_proposals.validation import (
     parse_candidate_payload,
 )
-from spotlights_engine.costing.usage import CliUsage
+from spotlights_engine.costing.usage import (
+    AgentUsage,
+    CliUsage,
+    merge_agent_usage,
+)
 from spotlights_engine.schemas.candidate import Candidate, Candidates
 from spotlights_engine.schemas.common import StepIssue
 from spotlights_engine.schemas.pipeline import (
@@ -109,12 +114,30 @@ class AgentProposalsConfig(BaseModel):
     agent_retry_base_s: float = Field(default=DEFAULT_BASE_S, gt=0)
     agent_retry_max_s: float = Field(default=DEFAULT_MAX_S, gt=0)
 
+    @model_validator(mode="after")
+    def _retry_delays_must_be_coherent(self) -> AgentProposalsConfig:
+        """A cap below the base delay is a typo, not an instruction.
+
+        The alternative -- quietly raising the cap to the base, which is what this
+        did first -- makes the run wait longer than it was told to while
+        `run_manifest.json` still records the smaller number it was given. A knob
+        recorded by value has to be the knob that ran, so this refuses instead.
+        """
+        if self.agent_retry_max_s < self.agent_retry_base_s:
+            raise ValueError(
+                "agent_retry_max_s "
+                f"({self.agent_retry_max_s:g}) is below agent_retry_base_s "
+                f"({self.agent_retry_base_s:g}): the cap cannot be shorter than "
+                "the first delay it caps"
+            )
+        return self
+
     @property
     def retry_policy(self) -> RetryPolicy:
         return RetryPolicy(
             attempts=self.agent_retry_attempts,
             base_s=self.agent_retry_base_s,
-            max_s=max(self.agent_retry_max_s, self.agent_retry_base_s),
+            max_s=self.agent_retry_max_s,
         )
 
 
@@ -284,9 +307,19 @@ async def _launch_with_retry(
     misdiagnosed for a day is that the evidence of *why* a call died was not on
     disk. Retrying without preserving it would recreate that hole: a call that
     was rate limited three times and then succeeded would look like a clean call.
+
+    The result returned is the last attempt's, with two fields made cumulative:
+    `usage` sums every attempt (a rate-limited or timed-out call has usually
+    already paid for tokens) and `duration_s` sums every attempt plus the time
+    slept between them. The caller builds this candidate's usage record and
+    timing from the one result it gets back, so both have to describe the whole
+    sequence or the run under-reports what it spent.
     """
     policy = config.retry_policy
     attempt = 1
+    # What the superseded attempts already cost, in tokens and in seconds.
+    carried_usage: AgentUsage | None = None
+    carried_s = 0.0
     while True:
         run_result: CandidateAgentRunResult = await asyncio.to_thread(
             runner, **kwargs  # type: ignore[arg-type]
@@ -297,7 +330,20 @@ async def _launch_with_retry(
             policy=policy,
             attempt=attempt,
         ):
-            return run_result
+            if carried_usage is None and carried_s == 0.0:
+                return run_result
+            return replace(
+                run_result,
+                usage=merge_agent_usage(carried_usage, run_result.usage),
+                duration_s=carried_s + run_result.duration_s,
+            )
+
+        # A losing attempt still spent money and time. Carry both forward: the
+        # caller turns this one result into the candidate's usage record, so
+        # anything left behind here is under-reported cost and under-reported
+        # wall-clock in `run_manifest.json`.
+        carried_usage = merge_agent_usage(carried_usage, run_result.usage)
+        carried_s += run_result.duration_s
 
         # Keep the losing attempt's evidence before the next one overwrites it.
         _persist_candidate_debug(
