@@ -1,6 +1,6 @@
 # Rate-limit failures on the IOCR run — cause, fixes, and what's still missing
 
-Branch: `yevgeny/spotlights-errors` (5 commits, `5f31334`..`147afae`)
+Branch: `yevgeny/spotlights-errors` (11 commits, `5f31334`..`01ce381`)
 Reference run: `page_latency-2026-08-19-ophir-new-module-extractor` — 30 modules, $123.60,
 3 SUCCEEDED / 14 DEGRADED / 8 FAILED / 5 SKIPPED
 
@@ -161,9 +161,13 @@ was fresh input and output**; the rest was discounted cache reads (codex alone
 served 82% of its 11.9M input tokens from cache). A sustained 29k/min of fresh
 tokens is not a load that troubles any plausible limit.
 
-A live check of the gateway agrees. `scripts/ratelimit_probe.py` ramped
-1 → 2 → 4 → 8 genuinely concurrent requests on a midday workday: **15 calls,
-zero refusals, and not one rate-limit header on any response.** `retry-after`,
+A live check of the gateway agrees, and it went ten times higher than the
+archived run ever did. `scripts/ratelimit_probe.py` ramped
+1 → 2 → 4 → 8 → 16 → 32 → 64 genuinely concurrent requests at 14:48 IDT on a
+Thursday: **127 calls, 127 successes, zero refusals, and not one rate-limit
+header on any response, for $0.0063.** The archived run peaked at 6 concurrent.
+Request concurrency is not the constraint at any level we can reach from here.
+`retry-after`,
 `x-ratelimit-*` and `anthropic-ratelimit-*` are absent everywhere — the gateway
 never states a limit or a wait, so any backoff we build has to be sized by
 measurement rather than read off the wire. The key's budget headroom also rules
@@ -209,23 +213,51 @@ lost to timeouts against 316 seconds spent waiting on purpose, a factor of 57.**
 The CLIs retry fast, shallow, and then hand back a stream that says `rate_limit`
 while the caller reports a timeout. That is the whole failure mode.
 
-### The proposal: engine-level backoff
+### What was built for it: engine-level backoff (`01ce381`)
 
 **Long jittered backoff, driven by `retry_class` from fix 4.** Opt-in
-(`agent_retry_attempts=1`), with `.attempt<N>` stream preservation so a retried
+(`--agent-retry-attempts 1`), with `.attempt<N>` stream preservation so a retried
 call keeps the evidence of why it was retried, and timeout-retry only where the
 stream carries rate-limit evidence — a genuinely slow call must not be relaunched
 just for being slow.
 
+| Piece | Where |
+|---|---|
+| Policy: attempts, `base_s` 30, `max_s` 300, `delay_s()` = `uniform(0, min(max_s, base_s · 2^(n−2)))` | **new** `utils/agent_retry.py` |
+| Driver: `_launch_with_retry`, wrapping both step-5 passes | `agent_proposals/api.py` |
+| Knobs: `--agent-retry-attempts` / `--agent-retry-base-s` / `--agent-retry-max-s` | `cli.py` → `AgentProposalsConfig` |
+| Recorded by value, so a run states the policy that produced it | `costing/manifest.py`, `orchestrator.py` |
+| Three keys kept **out** of the resume fingerprint while attempts == 1 | `spotlights_manager/persistence.py` |
+
+Two choices worth defending. **Full jitter, not a fixed delay**: parallel
+candidates throttled by the same event would otherwise all come back at the same
+instant and rebuild the burst. **The fingerprint exclusion**: `attempts=1` means
+"behave exactly as before", so it has to *hash* exactly as before, or three new
+keys at their defaults would make every half-finished run directory already on
+disk fail `--resume` with `ResumeMismatchError` for a feature it never used. That
+trap has been sprung here before; the precedent followed is the codebase's own
+`_OPTIONAL_MODEL_FIELDS`. Turning the retry **on** does move the hash, which is
+correct — it changes how an agent call is made.
+
+Verified by 28 new unit tests (18 policy, 5 driver, 5 CLI/fingerprint), the
+driver ones exercising the real backoff path including jitter at millisecond
+delays rather than patching it out. Full `tests/unit` at the known baseline of 7
+pre-existing failures; `ruff` clean on every touched file. The strongest of them
+asserts that three attempts against a permanently rate-limited stream make
+exactly three calls and leave `.attempt1`, `.attempt2` and the final stream all
+on disk.
+
 The sizing comes from the numbers above rather than from guesswork: to be worth
 anything a retry has to wait far longer than the ~0.6 s the CLI already tried, and
-the rate-limit spikes on this run persisted for minutes. Recorded by value in
-`run_manifest.json`'s `run_config`, as the existing knobs are, so every run states
-the policy that produced it.
+the rate-limit spikes on this run persisted for minutes. 30 s is ~50x the 601 ms
+median the CLIs already tried and failed with; the cap is 300 s because the spikes
+lasted minutes, not hours. Recorded by value in `run_manifest.json`, as the
+existing knobs are, so every run states the policy that produced it.
 
-This is the only change proposed. A global concurrency cap and a launch stagger
-were the earlier proposal and are **not** proposed: the two sections above are
-the measurement that withdrew them.
+This is the only behavioural change made. A global concurrency cap and a launch
+stagger were the earlier proposal and are **not** built: the two sections above
+are the measurement that withdrew them, and the 64-concurrent probe closed the
+one gap they might still have been hiding in.
 
 ### Trade-offs
 
@@ -245,19 +277,34 @@ the measurement that withdrew them.
 Two things the archive cannot show, both cheap, and both about finding the ceiling
 rather than explaining the run:
 
-1. **Where the wall is.** `scripts/ratelimit_probe.py` ramps to 64 concurrent and
-   records every response header. Run it at several times of day with `--label`.
-   A knee that sits at the same place every time is a limit attached to our key,
-   and pacing would fix it; a knee that wanders is a ceiling shared with the rest
-   of the team, and only waiting helps. A full ramp costs a couple of cents — a
-   call with `max_tokens: 1` measured $0.00005.
+1. **Where the wall is.** *Half done.* One ramp to 64 concurrent has been run
+   (14:48 IDT Thursday) and found no wall at all, so there is no knee yet to
+   compare against. The comparison is still open: run
+   `scripts/ratelimit_probe.py --label <when>` at several times of day. A knee
+   that sits at the same place every time is a limit attached to our key, and
+   pacing would fix it; a knee that wanders is a ceiling shared with the rest of
+   the team, and only waiting helps. A full ramp costs a couple of cents — 127
+   calls measured $0.0063.
 2. **Whether backoff actually recovers.** That needs one real 429 from any source,
    not a reproduction of 19 Aug. Push hard enough to draw refusals, then show a
    long jittered wait gets through where the CLI's own ~0.6 s does not. This is
-   the test that validates the proposal above, and it is the only one that can.
+   the test that validates the retry above, and it is the only one that can — the
+   unit tests prove the retry does what it is told, not that waiting works. 127
+   concurrent-ramped calls drew no refusal at all, so provoking one is harder than
+   it sounds, which is itself consistent with the archived 429s having needed a
+   neighbour on the shared gateway to be busy at the same time.
 
 Neither needs administrative access, which is just as well: our key is confined to
 `llm_api_routes`, so there is no path to the limit value, the retry-after policy,
 or the gateway's traffic log for 19 Aug from where we stand.
 
-Designed, not built.
+### Also still open
+
+- Retry at the **step-2** discovery launch site. Fix 1 salvages a truncated
+  discovery pass; it does not retry one, and all 8 module failures were 429s there.
+- Folding `modules_extractor::api_failure_reason` into the shared classifier, so
+  one table describes every agent-CLI failure in the engine rather than two.
+- Turning the retry on by default, which needs the recovery evidence above plus a
+  measured wall-clock cost on a run that actually hits trouble.
+
+Built and tested, opt-in, unproven against a live refusal.
