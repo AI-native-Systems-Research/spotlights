@@ -7,8 +7,10 @@ from pathlib import Path
 import pytest
 
 from spotlights_engine.candidate_discovery import (
+    DiscoveryAgentFailureError,
     DiscoverySetupError,
     DiscoveryTruncation,
+    DiscoveryValidationError,
 )
 from spotlights_engine.schemas.common import StepIssue
 from spotlights_engine.spotlights_manager import (
@@ -383,6 +385,85 @@ def test_step2_exception_marks_failed_retryable(
     assert mr.status == "FAILED"
     assert mr.candidates is None
     assert any(iss.recoverable for iss in mr.issues)
+
+
+def _run_with_discovery_raising(
+    monkeypatch, repo: Path, artifacts: Path, exc: Exception
+):
+    """Run one module whose step 2 dies, and hand back its checkpoint."""
+    from spotlights_engine.spotlights_manager import persistence as P
+
+    tree = make_tree()
+    _patch_extractor(monkeypatch, tree)
+
+    def _boom(inp, *, config):
+        raise exc
+
+    monkeypatch.setattr(orch, "discover", _boom)
+
+    cfg = SpotlightsManagerConfig(
+        artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
+        module_filter=ModuleFilter(include=["v1/kv_offload"]),
+    )
+    result = run_with_telemetry(make_input(repo), config=cfg)
+    module_paths = P.ManagerPaths(artifacts).for_module("v1/kv_offload")
+    checkpoint = P.ModuleCheckpoint.model_validate_json(
+        module_paths.status_path.read_text(encoding="utf-8")
+    )
+    return result, checkpoint
+
+
+def test_an_unsalvageable_rate_limit_stays_retryable(
+    monkeypatch, repo: Path, artifacts: Path
+) -> None:
+    """A 429 in a bootstrap pass must not cost the module permanently.
+
+    `DiscoveryAgentFailureError` subclasses `DiscoveryValidationError` so older
+    handlers keep working, which makes it easy to file an environmental failure
+    as a contract violation. If that happens the checkpoint records
+    `retryable=False`, `_plan_module` returns `skip=True` for it, and no
+    `--resume` will ever try the module again -- the transient becomes permanent.
+    The salvage path in the discovery orchestrator cannot cover this case: with
+    no earlier iteration to keep, it re-raises.
+    """
+    result, cp = _run_with_discovery_raising(
+        monkeypatch,
+        repo,
+        artifacts,
+        DiscoveryAgentFailureError(
+            "schema parse failed twice",
+            iteration=0,
+            agent="claude_code",
+            cause="exceeded retry limit, last status: 429 Too Many Requests",
+        ),
+    )
+
+    assert cp.status == "FAILED"
+    assert cp.retryable is True
+    assert "429" in (cp.error or "")
+    mr = result.module_runs["v1/kv_offload"]
+    assert mr.status == "FAILED"
+    assert all(iss.recoverable for iss in mr.issues)
+
+
+def test_a_contract_violation_is_still_not_retryable(
+    monkeypatch, repo: Path, artifacts: Path
+) -> None:
+    """The other half: nothing a rerun can do about a malformed payload.
+
+    Retrying it would spend a module's discovery budget to reach the same wall,
+    so the distinction the subclass draws has to survive in both directions.
+    """
+    _, cp = _run_with_discovery_raising(
+        monkeypatch,
+        repo,
+        artifacts,
+        DiscoveryValidationError("candidate ids are not unique", iteration=2),
+    )
+
+    assert cp.status == "FAILED"
+    assert cp.retryable is False
 
 
 def test_fail_fast_writes_retryable_checkpoint_for_not_started_module(

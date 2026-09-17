@@ -28,6 +28,7 @@ from spotlights_engine.agent_proposals import (
     create_agent_proposals_with_telemetry,
 )
 from spotlights_engine.candidate_discovery import (
+    DiscoveryAgentFailureError,
     DiscoveryConfig,
     DiscoveryMutationError,
     DiscoverySetupError,
@@ -1222,7 +1223,20 @@ async def _run_module(
                     segment=segment,
                 )
             except Exception as e:  # noqa: BLE001
-                if isinstance(
+                if isinstance(e, DiscoveryAgentFailureError):
+                    # Environmental, not a contract violation: a rate limit or a
+                    # timeout killed the agent, and the module deserves another
+                    # attempt. This branch has to come first -- the class is a
+                    # subclass of `DiscoveryValidationError`, so the next branch
+                    # would file it as unfixable, and `_plan_module` skips a
+                    # `FAILED` module with `retryable=False` for good. A 429 in a
+                    # bootstrap pass would then cost the module permanently,
+                    # which is the outcome this whole area exists to prevent.
+                    # Only reachable when the orchestrator could not salvage
+                    # earlier iterations (bootstrap failure, or no prior
+                    # candidates); a salvageable run reports DEGRADED instead.
+                    retryable = True
+                elif isinstance(
                     e, (DiscoverySetupError, DiscoveryValidationError, ValueError)
                 ):
                     retryable = False
