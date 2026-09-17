@@ -15,8 +15,7 @@ token throughput predicts the refusals -- correlation is negative at every bucke
 width, the minutes that took a 429 were *lighter* than the minutes that did not
 (209,545 vs 244,189 tok/min), and a live ramp to 64 genuinely concurrent requests
 against the same gateway drew no refusal at all. So the engine cannot out-pace
-these 429s by launching fewer calls; it can only outlast them. See
-`docs/handoff/rate-limit-failures.md`.
+these 429s by launching fewer calls; it can only outlast them.
 
 Sizing, from those numbers rather than from taste
 ------------------------------------------------

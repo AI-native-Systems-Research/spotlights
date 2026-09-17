@@ -163,8 +163,7 @@ def _build_argparser() -> argparse.ArgumentParser:
         help=(
             "Total attempts per step-5 agent call when the agent's own stream says "
             "the call died of a rate limit or a transient server error. 1 (the "
-            "default) means no engine-level retry, exactly as before. See "
-            "docs/handoff/rate-limit-failures.md."
+            "default) means no engine-level retry, exactly as before."
         ),
     )
     p.add_argument(

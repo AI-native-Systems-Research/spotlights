@@ -5,8 +5,6 @@ Two properties, and the second is the one that breaks silently: the engine's
 values would make every half-finished run directory on disk fail to resume for a
 feature it never used. `persistence._RETRY_FIELDS` keeps them out of the hash
 while the retry is off; this file is what notices if that stops working.
-
-See docs/handoff/rate-limit-failures.md for why the retry exists at all.
 """
 
 from __future__ import annotations

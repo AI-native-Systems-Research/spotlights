@@ -164,7 +164,7 @@ class RunManifestRunConfig(BaseModel):
     # the retry was off, which is the default -- recorded either way, because a
     # run that took 3 hours instead of 1 needs to say whether it was waiting on
     # purpose. The archived IOCR run had no such row and its 429s were reported
-    # as timeouts; see docs/handoff/rate-limit-failures.md.
+    # as timeouts.
     agent_retry_attempts: int = 0
     agent_retry_base_s: float = 0.0
     agent_retry_max_s: float = 0.0
