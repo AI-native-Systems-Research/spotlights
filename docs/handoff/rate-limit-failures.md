@@ -1,6 +1,6 @@
 # Rate-limit failures on the IOCR run — cause, fixes, and what's still missing
 
-Branch: `yevgeny/spotlights-errors` (11 commits, `5f31334`..`01ce381`)
+Branch: `yevgeny/spotlights-errors` (14 commits, `5f31334`..`7bef023`)
 Reference run: `page_latency-2026-08-19-ophir-new-module-extractor` — 30 modules, $123.60,
 3 SUCCEEDED / 14 DEGRADED / 8 FAILED / 5 SKIPPED
 
