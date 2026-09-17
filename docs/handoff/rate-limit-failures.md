@@ -63,9 +63,11 @@ four wrappers hold 9, 9, 9 and 18 non-blank lines and the smallest non-wrapper m
 
 ## Was it our own burst? Measured against the archive: no
 
-**This section replaces an earlier claim in this document that the engine's own
-unpaced concurrency produced the 429s. That claim was not supported by the run's
-artifacts, and the artifacts were sufficient to test it.**
+**These two sections replace an earlier claim in this document that the engine's
+own unpaced concurrency produced the 429s. That claim was not supported by the
+run's artifacts, and the artifacts were sufficient to test it — first by call
+count, then, when call count turned out to be the wrong unit, by token
+throughput. Both come back null.**
 
 The test became possible because claude's stream events carry a wall-clock
 `"timestamp"`. That is the only per-call clock in the archive — `run_manifest.json`
@@ -113,12 +115,81 @@ simultaneously**. Many modules throttled at the same instant, independent of how
 many calls we had running, is the signature of a shared ceiling we were not
 setting.
 
-**The honest limit of this result.** It shows no *marginal* effect anywhere in the
-1–6 concurrent-session range we actually operated in. It cannot show what would
-happen at 1, because this run never went there. So the claim that is dead is
-"pacing our own launches would have prevented these 429s"; a cap set anywhere in
-the range we already occupied, and a launch stagger, would have changed nothing
-here.
+## The retest that mattered: tokens, not calls
+
+Everything above counts *calls*. That is the wrong unit twice over, and both
+faults had to be fixed before the result could be trusted:
+
+1. **Rate limits are priced in tokens.** This run moved ~53.7M tokens in 4.3
+   hours, ~208k/min sustained. A call count says nothing about that.
+2. **Codex streams carry no `"timestamp"`**, so 80 codex sessions — averaging
+   189k input tokens each — were invisible to the session-count timeline
+   entirely. Half the run's traffic was never in the measurement.
+
+`candidate_discovery/iterations.jsonl` closes both gaps: it records every
+iteration's agent, `duration_s` and full token breakdown, and iterations run
+strictly in sequence inside a module. So the claude iterations, which do carry
+timestamps, anchor the codex ones — place the anchored iteration on the clock,
+then walk the sequence forwards and backwards by `duration_s`. That puts **100
+iterations across 26 modules on the wall clock, 48 of them codex sessions the
+earlier analysis could not see**, against the 128 timestamped 429s. Reproduce
+with:
+
+```
+python scripts/analyze_token_timeline.py <artifacts>/spotlights_manager
+```
+
+The token hypothesis fails in the same direction as the call-count one:
+
+| Bucket | corr(all tokens, 429s) | corr(fresh tokens, 429s) | corr(call count, 429s) |
+|---|---|---|---|
+| 1 min | −0.087 | −0.165 | −0.084 |
+| 2 min | −0.105 | −0.180 | −0.084 |
+| 5 min | −0.178 | −0.295 | −0.209 |
+| 10 min | −0.127 | −0.339 | −0.238 |
+
+Dose-response on tokens is as flat as it was on calls — 0.61, 0.81, 0.49, 0.62,
+0.50 rate limits per minute across quintiles running from 98k to 400k tok/min.
+Minutes that contained a 429 were *lighter* than minutes that did not:
+**209,545 vs 244,189 tok/min, a ratio of 0.86x.** And the four heaviest
+token-minutes of the entire run — up to **570,042 tok/min** — took **zero** rate
+limits between them. A ceiling anywhere near our own load would have bitten
+exactly there.
+
+One more figure points the same way. Of that ~236k tokens/min, only **~29k/min
+was fresh input and output**; the rest was discounted cache reads (codex alone
+served 82% of its 11.9M input tokens from cache). A sustained 29k/min of fresh
+tokens is not a load that troubles any plausible limit.
+
+A live check of the gateway agrees. `scripts/ratelimit_probe.py` ramped
+1 → 2 → 4 → 8 genuinely concurrent requests on a midday workday: **15 calls,
+zero refusals, and not one rate-limit header on any response.** `retry-after`,
+`x-ratelimit-*` and `anthropic-ratelimit-*` are absent everywhere — the gateway
+never states a limit or a wait, so any backoff we build has to be sized by
+measurement rather than read off the wire. The key's budget headroom also rules
+quota exhaustion out, and the key itself is confined to `llm_api_routes`, so
+`/key/info` returns 403 and no administrative answer is available to us at all.
+
+**The honest limits of this result.** Three, and none of them rescues the burst
+claim:
+
+- **Reverse causality.** Being throttled makes you push *fewer* tokens, because
+  you are waiting. That partly explains the negative sign, and it could mask a
+  real positive effect. A clean test needs *offered* load; the artifacts record
+  only *delivered* load.
+- **Placement is unverified.** Every module had exactly one timestamped anchor,
+  so there was no second anchor to check the sequence assumption against. Codex
+  placement could drift by minutes.
+- **Tokens are spread evenly across each iteration's `duration_s`**, which
+  smooths real peaks — tokens actually move during `api_time_s` only. So any
+  correlation found here is a floor, not a ceiling.
+
+What is dead is the claim that pacing our own launches would have prevented
+these 429s. It is dead on both yardsticks — call count and token throughput —
+and now across both CLIs. A cap set anywhere in the 1–6 concurrent range we
+already occupied, and a launch stagger, would have changed nothing here. What
+the run cannot show is what happens at a concurrency well above 6 or a token
+rate well above 570k/min, because it never went there.
 
 ## What the evidence does support: recover from the 429s, do not try to out-pace them
 
@@ -153,17 +224,40 @@ the rate-limit spikes on this run persisted for minutes. Recorded by value in
 the policy that produced it.
 
 This is the only change proposed. A global concurrency cap and a launch stagger
-were the earlier proposal and are **not** proposed: the section above is the
-measurement that withdrew them.
+were the earlier proposal and are **not** proposed: the two sections above are
+the measurement that withdrew them.
 
 ### Trade-offs
 
 - **Wall-clock.** Backoff makes a bad run *longer* — that is the trade, and the
   reason it ships opt-in and gets measured before any default changes.
-- **A shared ceiling.** The flat per-call tax and the simultaneous multi-module
-  spikes both suggest the limit was not ours alone to spend. Waiting longer rides
-  that out; it does not raise the ceiling.
+- **A shared ceiling.** The flat per-call tax, the simultaneous multi-module
+  spikes, and the 570k-token minute that took no refusals at all point the same
+  way: the limit was not ours alone to spend. The whole team shares this gateway,
+  each with their own key, and a ceiling shared with other people moves as they
+  start and stop working — which is exactly what a load-independent 429 rate
+  looks like. Waiting longer rides that out; it does not raise the ceiling.
 - **Quota exhaustion is immune to it.** No backoff inside a run can fix an account
   out of budget, which is why fix 4 classifies it `fatal` rather than `retryable`.
+
+### What would still settle it
+
+Two things the archive cannot show, both cheap, and both about finding the ceiling
+rather than explaining the run:
+
+1. **Where the wall is.** `scripts/ratelimit_probe.py` ramps to 64 concurrent and
+   records every response header. Run it at several times of day with `--label`.
+   A knee that sits at the same place every time is a limit attached to our key,
+   and pacing would fix it; a knee that wanders is a ceiling shared with the rest
+   of the team, and only waiting helps. A full ramp costs a couple of cents — a
+   call with `max_tokens: 1` measured $0.00005.
+2. **Whether backoff actually recovers.** That needs one real 429 from any source,
+   not a reproduction of 19 Aug. Push hard enough to draw refusals, then show a
+   long jittered wait gets through where the CLI's own ~0.6 s does not. This is
+   the test that validates the proposal above, and it is the only one that can.
+
+Neither needs administrative access, which is just as well: our key is confined to
+`llm_api_routes`, so there is no path to the limit value, the retry-after policy,
+or the gateway's traffic log for 19 Aug from where we stand.
 
 Designed, not built.
