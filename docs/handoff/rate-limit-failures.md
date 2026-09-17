@@ -239,7 +239,15 @@ trap has been sprung here before; the precedent followed is the codebase's own
 `_OPTIONAL_MODEL_FIELDS`. Turning the retry **on** does move the hash, which is
 correct — it changes how an agent call is made.
 
-Verified by 28 new unit tests (18 policy, 5 driver, 5 CLI/fingerprint), the
+Reviewed by `codex exec review`, which found two real defects, both fixed in
+`dc5e7af8`: a superseded attempt was losing its usage (so a retried candidate
+under-billed the run -- a timed-out call has already paid for the tokens in its
+partial stream) and its duration; and the policy silently raised a cap set below
+the base delay, running a wait the manifest did not record. That is the second
+time a Codex review on this branch has caught a real defect the tests did not.
+
+Verified by 42 new unit tests (18 policy, 9 driver, 5 CLI/fingerprint, 5 usage
+merge, plus the earlier stream-classifier set), the
 driver ones exercising the real backoff path including jitter at millisecond
 delays rather than patching it out. Full `tests/unit` at the known baseline of 7
 pre-existing failures; `ruff` clean on every touched file. The strongest of them
