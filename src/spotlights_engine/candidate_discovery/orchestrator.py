@@ -30,9 +30,11 @@ from spotlights_engine.candidate_discovery.agents import (
 from spotlights_engine.candidate_discovery.api import (
     DiscoveryConfig,
     DiscoveryResult,
+    DiscoveryTruncation,
     IterationTelemetry,
 )
 from spotlights_engine.candidate_discovery.errors import (
+    DiscoveryAgentFailureError,
     DiscoveryMutationError,
     DiscoverySetupError,
     DiscoveryValidationError,
@@ -119,6 +121,11 @@ class Orchestrator:
         self._iterations: list[IterationTelemetry] = []
         self._iterations_fh = None
         self._last_iter_dir: Path | None = None
+        # `_last_iter_dir` is assigned before the attempt runs, so after a
+        # failure it points at a directory with no `candidates.json`. The final
+        # artifact must come from the last iteration that actually produced one.
+        self._last_good_iter_dir: Path | None = None
+        self._truncation: DiscoveryTruncation | None = None
 
     def run(self) -> DiscoveryResult:
         run_start = time.monotonic()
@@ -137,34 +144,66 @@ class Orchestrator:
                     repo_context_markdown=self._config.repo_context_markdown,
                     spotlight_context=self._input.context,
                 )
+                # A bootstrap failure leaves nothing to salvage, so it stays
+                # fatal — outside the try below.
                 boot = self._run_iteration(n=0, agent=claude, prompt=boot_prompt)
                 self._record(boot)
 
-                for n in range(1, self._config.num_review_iterations + 1):
-                    agent = review_agents[(n - 1) % 2]
-                    # The review prompt speaks the agent-local bare id space:
-                    # render the prior candidates with their bare ids and pass
-                    # the bare high-water mark, so the agent contract stays
-                    # `cand-NNNN` (D3 option A).
-                    prev_json = self._to_bare_json(self._prev_post_drop)  # type: ignore[arg-type]
-                    removed_json = self._removed_pool_bare_json()
-                    review_prompt = prompts.render_review(
-                        self._input.module_qualified_name,
-                        self._module,
-                        prev_json,
-                        _bare_id(self._max_seen_counter),
-                        removed_candidates_json=removed_json,
-                        repo_context_markdown=self._config.repo_context_markdown,
-                        spotlight_context=self._input.context,
+                try:
+                    self._run_review_loop(review_agents)
+                except DiscoveryAgentFailureError as e:
+                    # An agent that dies of a rate limit in a *refinement* pass
+                    # does not invalidate what the earlier passes found. Keep
+                    # those candidates and record the truncation; the old
+                    # behaviour discarded 88 of 214 candidates (41%) across the
+                    # IOCR run, including 11 valid ones from a module whose only
+                    # fault was a 429 in its last iteration.
+                    if self._prev_post_drop is None or not self._prev_post_drop.candidates:
+                        raise
+                    self._truncation = DiscoveryTruncation(
+                        iteration=int(e.context.get("iteration") or 0),
+                        agent=str(e.context.get("agent") or "unknown"),
+                        error=type(e).__name__,
+                        cause=str(e),
+                        completed_iterations=len(self._iterations),
                     )
-                    out = self._run_iteration(n=n, agent=agent, prompt=review_prompt)
-                    self._record(out)
+                    _log.warning(
+                        "[%s] discovery: iteration %d (%s) failed — keeping %d "
+                        "candidates from %d completed iterations (%s)",
+                        self._input.module_qualified_name,
+                        self._truncation.iteration,
+                        self._truncation.agent,
+                        len(self._prev_post_drop.candidates),
+                        self._truncation.completed_iterations,
+                        self._truncation.cause,
+                    )
 
                 self._copy_final()
         finally:
             duration = time.monotonic() - run_start
 
         return self._finalize(total_duration_s=duration)
+
+    def _run_review_loop(self, review_agents: list[AgentRunner]) -> None:
+        for n in range(1, self._config.num_review_iterations + 1):
+            agent = review_agents[(n - 1) % 2]
+            # The review prompt speaks the agent-local bare id space:
+            # render the prior candidates with their bare ids and pass
+            # the bare high-water mark, so the agent contract stays
+            # `cand-NNNN` (D3 option A).
+            prev_json = self._to_bare_json(self._prev_post_drop)  # type: ignore[arg-type]
+            removed_json = self._removed_pool_bare_json()
+            review_prompt = prompts.render_review(
+                self._input.module_qualified_name,
+                self._module,
+                prev_json,
+                _bare_id(self._max_seen_counter),
+                removed_candidates_json=removed_json,
+                repo_context_markdown=self._config.repo_context_markdown,
+                spotlight_context=self._input.context,
+            )
+            out = self._run_iteration(n=n, agent=agent, prompt=review_prompt)
+            self._record(out)
 
     def _mint_run_dir(self) -> None:
         # Hand the agents the discovery-only schema (no `state`,
@@ -203,6 +242,10 @@ class Orchestrator:
 
         schema_retries = 0
         last_exc: Exception | None = None
+        # An attempt the environment cut off makes the whole iteration
+        # salvageable; only a run where *every* attempt broke the output
+        # contract stays fatal.
+        saw_environmental = False
         iter_start = time.monotonic()
 
         for attempt in (0, 1):
@@ -222,7 +265,19 @@ class Orchestrator:
                 try:
                     agent_parsed = AgentCandidates.model_validate_json(payload_json)
                 except ValidationError as e:
-                    raise _SchemaParseError(f"schema validation failed: {e}") from e
+                    # `parse_last_message` has already established that the
+                    # payload is well-formed JSON, so a failure here is the
+                    # agent emitting the wrong shape - deterministic, and not
+                    # something a salvage should paper over. Re-check anyway
+                    # (pydantic reports a syntax problem as `json_invalid`) so
+                    # a future runner that forwards raw text cannot turn
+                    # truncated output into a fatal contract error.
+                    syntax = any(
+                        err.get("type") == "json_invalid" for err in e.errors()
+                    )
+                    raise _SchemaParseError(
+                        f"schema validation failed: {e}", contract=not syntax
+                    ) from e
                 # Promote bare agent ids to the prefixed schema form here, at the
                 # construction boundary (D3): the rest of the loop — validator,
                 # integrity check, telemetry, persistence — operates on final
@@ -254,6 +309,7 @@ class Orchestrator:
                         encoding="utf-8",
                     )
 
+                self._last_good_iter_dir = iter_dir
                 return _IterOutcome(
                     raw=parsed,
                     candidates=normalized,
@@ -270,16 +326,32 @@ class Orchestrator:
                 raise
             except _SchemaParseError as e:
                 last_exc = e
+                saw_environmental = saw_environmental or not e.contract
                 if attempt == 1:
                     break
                 schema_retries += 1
                 continue
 
-        raise DiscoveryValidationError(
+        # Reaching here means both attempts failed, and every route out of the
+        # loop to this point runs through `except _SchemaParseError`, which
+        # records the exception. Assert it rather than carrying a fallback for
+        # the impossible case: a silent one would have to guess a class, and
+        # either guess is a lie -- environmental salvages a module that may
+        # have broken the contract, and a contract error makes a transient
+        # failure permanent.
+        assert last_exc is not None
+        # A contract break is the agent's fault and reproducible, so it keeps
+        # failing the module; anything environmental is salvageable (§6.2).
+        error_cls = (
+            DiscoveryAgentFailureError
+            if saw_environmental
+            else DiscoveryValidationError
+        )
+        raise error_cls(
             "schema parse failed twice",
             iteration=n,
             agent=agent.name,
-            cause=str(last_exc) if last_exc else None,
+            cause=str(last_exc),
         ) from last_exc
 
     def _check_qualified_name(self, parsed: Candidates, n: int, agent: str) -> None:
@@ -441,8 +513,8 @@ class Orchestrator:
         )
 
     def _copy_final(self) -> None:
-        assert self._last_iter_dir is not None
-        src = self._last_iter_dir / "candidates.json"
+        assert self._last_good_iter_dir is not None
+        src = self._last_good_iter_dir / "candidates.json"
         dst = layout.final_artifact(self._config.artifacts_dir)
         dst.write_bytes(src.read_bytes())
 
@@ -455,6 +527,7 @@ class Orchestrator:
             iterations=list(self._iterations),
             total_duration_s=total_duration_s,
             total_cost_usd=total_cost,
+            truncated_by=self._truncation,
         )
 
 

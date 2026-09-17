@@ -19,21 +19,25 @@ from __future__ import annotations
 from spotlights_engine.candidate_discovery.api import (
     DiscoveryConfig,
     DiscoveryResult,
+    DiscoveryTruncation,
     IterationTelemetry,
     discover,
     discover_candidates,
 )
 from spotlights_engine.candidate_discovery.errors import (
+    DiscoveryAgentFailureError,
     DiscoveryMutationError,
     DiscoverySetupError,
     DiscoveryValidationError,
 )
 
 __all__ = [
+    "DiscoveryAgentFailureError",
     "DiscoveryConfig",
     "DiscoveryMutationError",
     "DiscoveryResult",
     "DiscoverySetupError",
+    "DiscoveryTruncation",
     "DiscoveryValidationError",
     "IterationTelemetry",
     "discover",

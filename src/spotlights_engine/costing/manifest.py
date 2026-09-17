@@ -46,6 +46,14 @@ class RunManifestSpotlights(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     commit_sha: str = ""
+    # The *producing pipeline family*, not a record of which steps ran. A run
+    # launched with `--no-deep-research` is still a deep-research-pipeline run
+    # and still says `"deep-research"` here; what records the skipped step is
+    # `run_config.enable_deep_research`. Reading this field as "step 3 ran" and
+    # seeing it beside `enable_deep_research: false` looks like a contradiction
+    # and is not one -- I filed that bug against myself once already. Same
+    # meaning as `schemas.pipeline.RunInfo.pipeline`, whose `Literal` spells the
+    # family out: `deep_research` or `signal`.
     pipeline: str = "deep-research"
     config: dict[str, Any] = Field(default_factory=dict)
 
@@ -148,9 +156,18 @@ class RunManifestRunConfig(BaseModel):
     include_candidate_hotspots: bool = False
     enable_claude_search: bool = False
     enable_deep_research: bool = False
+    skip_container_modules: bool = False
     max_parallel_sessions: int = 0
     max_parallel_pairs: int = 0
     max_parallel_candidates: int = 0
+    # How long the engine was willing to wait out a rate limit. 1 attempt means
+    # the retry was off, which is the default -- recorded either way, because a
+    # run that took 3 hours instead of 1 needs to say whether it was waiting on
+    # purpose. The archived IOCR run had no such row and its 429s were reported
+    # as timeouts.
+    agent_retry_attempts: int = 0
+    agent_retry_base_s: float = 0.0
+    agent_retry_max_s: float = 0.0
 
 
 class RunManifest(BaseModel):

@@ -7,6 +7,7 @@ from pathlib import Path
 from spotlights_engine.agent_proposals.api import AgentProposalsResult
 from spotlights_engine.candidate_discovery.api import (
     DiscoveryResult,
+    DiscoveryTruncation,
     IterationTelemetry,
 )
 from spotlights_engine.modules_extractor.agent import ExtractionInvocation
@@ -161,12 +162,18 @@ def make_iteration_telemetry(n: int = 0) -> IterationTelemetry:
     )
 
 
-def make_discovery_result(qn: str, n_candidates: int = 1) -> DiscoveryResult:
+def make_discovery_result(
+    qn: str,
+    n_candidates: int = 1,
+    *,
+    truncated_by: DiscoveryTruncation | None = None,
+) -> DiscoveryResult:
     return DiscoveryResult(
         candidates=make_candidates(qn, n=n_candidates),
         iterations=[make_iteration_telemetry()],
         total_duration_s=0.1,
         total_cost_usd=None,
+        truncated_by=truncated_by,
     )
 
 

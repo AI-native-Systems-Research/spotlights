@@ -157,6 +157,34 @@ def _build_argparser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--agent-retry-attempts",
+        type=int,
+        default=None,
+        help=(
+            "Total attempts per step-5 agent call when the agent's own stream says "
+            "the call died of a rate limit or a transient server error. 1 (the "
+            "default) means no engine-level retry, exactly as before."
+        ),
+    )
+    p.add_argument(
+        "--agent-retry-base-s",
+        type=float,
+        default=None,
+        help=(
+            "First retry's backoff ceiling in seconds, doubling per attempt with "
+            "full jitter. Default: AgentProposalsConfig default (30)."
+        ),
+    )
+    p.add_argument(
+        "--agent-retry-max-s",
+        type=float,
+        default=None,
+        help=(
+            "Cap on the backoff ceiling in seconds. "
+            "Default: AgentProposalsConfig default (300)."
+        ),
+    )
+    p.add_argument(
         "--max-findings-per-module",
         type=int,
         default=None,
@@ -222,6 +250,20 @@ def _build_argparser() -> argparse.ArgumentParser:
         help=(
             "Also run the Claude runner in step 3 (module_deep_research). "
             "Default: off — step 3 runs Codex only."
+        ),
+    )
+
+    p.add_argument(
+        "--skip-container-modules",
+        dest="skip_container_modules",
+        action="store_true",
+        help=(
+            "Mark a parent module SKIPPED without running step 2 when its own "
+            "content is package plumbing only (an `__init__.py` and nothing "
+            "else) and its code lives in submodules, which are analyzed as "
+            "targets in their own right. Saves one discovery pass per such "
+            "module — four of the 30 modules on the IOCR tree. Default: off, "
+            "so every module in the tree is discovered."
         ),
     )
 
@@ -423,6 +465,7 @@ def _build_input(args: argparse.Namespace) -> SpotlightsManagerInput:
     input_kwargs["include_candidate_hotspots"] = args.include_candidate_hotspots
     input_kwargs["enable_claude_search"] = args.enable_claude_search
     input_kwargs["enable_deep_research"] = args.enable_deep_research
+    input_kwargs["skip_container_modules"] = args.skip_container_modules
     return SpotlightsManagerInput(**input_kwargs)
 
 
@@ -532,6 +575,15 @@ def _build_config(args: argparse.Namespace) -> SpotlightsManagerConfig:
         agent_kwargs["max_parallel_candidates"] = args.max_parallel_candidates
     if args.debug_first_n_candidates is not None:
         agent_kwargs["debug_first_n_candidates"] = args.debug_first_n_candidates
+    # Left out of agent_kwargs when unset, so a run that never asks for the retry
+    # builds the identical config -- and the identical resume fingerprint -- it
+    # built before these flags existed.
+    if args.agent_retry_attempts is not None:
+        agent_kwargs["agent_retry_attempts"] = args.agent_retry_attempts
+    if args.agent_retry_base_s is not None:
+        agent_kwargs["agent_retry_base_s"] = args.agent_retry_base_s
+    if args.agent_retry_max_s is not None:
+        agent_kwargs["agent_retry_max_s"] = args.agent_retry_max_s
     if claude_model:
         agent_kwargs["claude_model"] = claude_model
     if codex_model:

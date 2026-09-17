@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
+from pathlib import Path, PurePosixPath
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from spotlights_engine.schemas.project import Module
 
 _log = logging.getLogger(__name__)
 
@@ -112,4 +115,74 @@ def apply_filter(
     return selected
 
 
-__all__ = ["ModuleFilter", "apply_filter"]
+# A module is pipelined on its own merits alongside its submodules, so a pure
+# routing node is a target too: `hrl_ocr/models/detection`, whose entire own
+# content is a 9-line `__init__.py` re-exporting three submodules, pays a full
+# discovery pass to analyze nothing. Every candidate it could produce has to
+# live in one of its *own* files -- `candidate_discovery.Validator` drops
+# anything inside a submodule -- and those files are import plumbing.
+_PLUMBING_FILENAMES = frozenset({"__init__.py"})
+
+# A guard, not the discriminator. Containers are selected on the shape of their
+# own files (all `__init__.py`); this bound exists only to rescue the rare
+# `__init__.py` that carries real implementation instead of re-exports. Measured
+# on the IOCR tree (30 modules): the four containers hold 9, 9, 9 and 18
+# non-blank lines, the smallest non-container module holds 96. Any value in that
+# gap selects the same four, so the number is deliberately generous rather than
+# tuned.
+_PLUMBING_MAX_NONBLANK_LINES = 50
+
+
+def container_module_reason(module: Module, repo_path: Path) -> str | None:
+    """Why `module` cannot produce a candidate of its own, or None if it can.
+
+    Returns a human reason suitable for a log line and a `SKIPPED` status, so a
+    run says *why* a module was never discovered rather than silently omitting
+    it.
+
+    Submodules are required deliberately. The skipped content is not lost: it is
+    analyzed as those submodules' own targets. A *leaf* module with one small
+    file is the opposite case -- small, but possibly the whole point of the repo
+    -- and is never reported here.
+
+    Returns None whenever the answer is not certain: an unreadable own file, or
+    own files that are not all package plumbing. Discovery is the expensive but
+    correct fallback, so ambiguity resolves toward spending the money.
+    """
+    if not module.submodules:
+        return None
+
+    sub_prefixes = [s.path.rstrip("/") + "/" for s in module.submodules]
+    own = [
+        f.path
+        for f in module.main_files
+        if not any(f.path.startswith(prefix) for prefix in sub_prefixes)
+    ]
+    if not own:
+        return (
+            f"no files of its own -- every main_file belongs to one of its "
+            f"{len(module.submodules)} submodules, which are audited separately"
+        )
+
+    if {PurePosixPath(p).name for p in own} - _PLUMBING_FILENAMES:
+        return None
+
+    nonblank = 0
+    for rel in own:
+        try:
+            text = (repo_path / rel).read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            # Cannot judge what we cannot read; let discovery decide.
+            return None
+        nonblank += sum(1 for line in text.splitlines() if line.strip())
+    if nonblank >= _PLUMBING_MAX_NONBLANK_LINES:
+        return None
+
+    return (
+        f"own content is package plumbing only ({', '.join(sorted(own))}, "
+        f"{nonblank} non-blank lines); the code lives in "
+        f"{len(module.submodules)} submodules, which are audited separately"
+    )
+
+
+__all__ = ["ModuleFilter", "apply_filter", "container_module_reason"]
