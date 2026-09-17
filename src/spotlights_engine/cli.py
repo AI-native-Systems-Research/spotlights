@@ -157,6 +157,35 @@ def _build_argparser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
+        "--agent-retry-attempts",
+        type=int,
+        default=None,
+        help=(
+            "Total attempts per step-5 agent call when the agent's own stream says "
+            "the call died of a rate limit or a transient server error. 1 (the "
+            "default) means no engine-level retry, exactly as before. See "
+            "docs/handoff/rate-limit-failures.md."
+        ),
+    )
+    p.add_argument(
+        "--agent-retry-base-s",
+        type=float,
+        default=None,
+        help=(
+            "First retry's backoff ceiling in seconds, doubling per attempt with "
+            "full jitter. Default: AgentProposalsConfig default (30)."
+        ),
+    )
+    p.add_argument(
+        "--agent-retry-max-s",
+        type=float,
+        default=None,
+        help=(
+            "Cap on the backoff ceiling in seconds. "
+            "Default: AgentProposalsConfig default (300)."
+        ),
+    )
+    p.add_argument(
         "--max-findings-per-module",
         type=int,
         default=None,
@@ -547,6 +576,15 @@ def _build_config(args: argparse.Namespace) -> SpotlightsManagerConfig:
         agent_kwargs["max_parallel_candidates"] = args.max_parallel_candidates
     if args.debug_first_n_candidates is not None:
         agent_kwargs["debug_first_n_candidates"] = args.debug_first_n_candidates
+    # Left out of agent_kwargs when unset, so a run that never asks for the retry
+    # builds the identical config -- and the identical resume fingerprint -- it
+    # built before these flags existed.
+    if args.agent_retry_attempts is not None:
+        agent_kwargs["agent_retry_attempts"] = args.agent_retry_attempts
+    if args.agent_retry_base_s is not None:
+        agent_kwargs["agent_retry_base_s"] = args.agent_retry_base_s
+    if args.agent_retry_max_s is not None:
+        agent_kwargs["agent_retry_max_s"] = args.agent_retry_max_s
     if claude_model:
         agent_kwargs["claude_model"] = claude_model
     if codex_model:

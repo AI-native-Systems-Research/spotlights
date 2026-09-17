@@ -278,13 +278,24 @@ def _stable_hash(payload: Any) -> str:
 #: `enable_deep_research` omission in `build_input_fingerprint`.
 _OPTIONAL_MODEL_FIELDS = ("claude_model",)
 
+#: Agent-retry fields, omitted from the fingerprint while the retry is switched
+#: off. Identical reasoning to `_OPTIONAL_MODEL_FIELDS`, and the same trap: these
+#: arrived long after run dirs existed in the wild, and hashing three new keys
+#: would make every half-finished run fail `--resume` with a `ResumeMismatchError`
+#: for a feature it never used. `agent_retry_attempts=1` means "behave exactly as
+#: before", so it must hash exactly as before. Turning the retry *on* changes how
+#: an agent call is made and does invalidate resume, which is the point.
+_RETRY_FIELDS = ("agent_retry_attempts", "agent_retry_base_s", "agent_retry_max_s")
+_RETRY_OFF_ATTEMPTS = 1
+
 
 def hash_pydantic_excluding(model: BaseModel | None, *, exclude: set[str]) -> str:
     """Stable hash of a pydantic model with selected fields excluded.
 
     Used for `config_fingerprint` so that changing manager-owned path fields
     (`artifacts_dir`, `repo_path`) doesn't trigger a spurious resume mismatch.
-    Unset model-selection fields are excluded too; see `_OPTIONAL_MODEL_FIELDS`.
+    Unset model-selection fields are excluded too, as are the agent-retry fields
+    while the retry is off; see `_OPTIONAL_MODEL_FIELDS` and `_RETRY_FIELDS`.
     """
     if model is None:
         return _stable_hash(None)
@@ -293,7 +304,15 @@ def hash_pydantic_excluding(model: BaseModel | None, *, exclude: set[str]) -> st
         for field in _OPTIONAL_MODEL_FIELDS
         if getattr(model, field, None) is None
     }
-    payload = model.model_dump(mode="json", exclude=exclude | unset_models)
+    retry_off = (
+        set(_RETRY_FIELDS)
+        if getattr(model, "agent_retry_attempts", _RETRY_OFF_ATTEMPTS)
+        == _RETRY_OFF_ATTEMPTS
+        else set()
+    )
+    payload = model.model_dump(
+        mode="json", exclude=exclude | unset_models | retry_off
+    )
     return _stable_hash(payload)
 
 
