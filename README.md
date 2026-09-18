@@ -113,8 +113,15 @@ For LiteLLM gateway config, picking which model each CLI runs on, and a quick re
 
 | Command | Purpose |
 |---|---|
-| `spotlights-engine` | Main engine: structural map → candidates → proposals. Subcommands: `doctor`, `init`, `prep-evolve`, `apply`. |
+| `spotlights-engine` | Main engine: structural map → candidates → proposals. Subcommands: `doctor`, `init`, `prep-evolve`, `apply`, `report`. |
 | `signal-pipeline` | Telemetry-driven discovery (**preview**) — a separate entry point. |
+
+`spotlights-engine report <run-dir>` renders a finished run into one
+self-contained `experiment.html` beside its `result.json` — inlined CSS and JS,
+no external assets, every chart paired with a table view, openable offline by
+double-clicking. Only `result.json` is required; the run manifest, a
+`sorted/` ranking and the `evolve/` and `apply/` trees are folded in when
+present. Pass `-o` to write somewhere else.
 
 ## Skills
 

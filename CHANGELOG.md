@@ -15,6 +15,7 @@ The first end-to-end version: point it at a repo and a goal, get a ranked, brows
 - **Cost tracking** — `run_manifest.json` records provenance, token usage, and price.
 - **`prep-evolve`** — packages a chosen candidate as a ready-to-run bundle for an external evolver (skydiscover, coral, nous).
 - **`apply`** — one Claude Code session turns a candidate into a reviewable patch.
+- **`report`** — renders a finished run directory into one self-contained `experiment.html`: inlined CSS/JS, no external assets, every chart paired with a table view. Folds in the ranking, evolve and apply artifacts when they exist.
 
 ### Skills
 
