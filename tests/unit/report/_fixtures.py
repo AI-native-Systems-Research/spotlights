@@ -63,10 +63,17 @@ def minimal_result() -> dict[str, Any]:
 
 
 def minimal_ranking() -> dict[str, Any]:
-    """A `sorted/` overlay that deliberately inverts the unranked impact order.
+    """A `sorted/` overlay whose rank order contradicts the impact order.
 
-    cand-0002 is the low-impact one, so ranking it first proves the rows really
-    are reordered by the overlay rather than by impact.
+    cand-0002 ranks first while carrying the *worse* overlay impact (`low`
+    against cand-0001's `medium`), so the unranked impact sort would put
+    cand-0001 first. Only a real rank sort produces [0002, 0001] — that is what
+    makes the ordering assertion in `test_load.py` discriminating. Giving the
+    rank-1 candidate the better impact would let both sort branches agree and
+    the assertion would pass even with the rank sort disabled.
+
+    cand-0001's overlay impact (`medium`) also differs from its `result.json`
+    impact (`high`), pinning overlay-wins-over-result precedence.
     """
     return {
         "run_id": "run-min-0001",
@@ -77,7 +84,7 @@ def minimal_ranking() -> dict[str, Any]:
                 "id": "cand-demo-0002",
                 "rank": 1,
                 "score": 0.91,
-                "impact": "high",
+                "impact": "low",
                 "symbol": "lookup_table",
                 "rationale": "hot path, cheap change",
             },

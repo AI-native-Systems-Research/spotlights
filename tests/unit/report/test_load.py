@@ -44,9 +44,7 @@ def test_module_aggregates_come_from_the_final_candidate_set(tmp_path):
         "FAILED": 0,
         "SKIPPED": 0,
     }
-    assert d["modules"] == [
-        {"name": "demo/mod", "status": "SUCCEEDED", "total": 2, "high": 1}
-    ]
+    assert d["modules"] == [{"name": "demo/mod", "status": "SUCCEEDED", "total": 2, "high": 1}]
 
 
 def test_ranking_overlay_supplies_rank_and_reorders_rows(tmp_path):
@@ -54,8 +52,10 @@ def test_ranking_overlay_supplies_rank_and_reorders_rows(tmp_path):
 
     assert d["ranked"] is True
     assert d["method"] == "weighted-impact-v1"
-    # the overlay wins over impact order
+    # the overlay wins over impact order: by impact these rows would come back
+    # ["cand-demo-0001", "cand-demo-0002"], so this pins the rank sort itself
     assert [r["id"] for r in d["rows"]] == ["cand-demo-0002", "cand-demo-0001"]
+    assert [r["impact"] for r in d["rows"]] == ["low", "medium"]
     assert d["rows"][0]["rank"] == 1
     assert d["rows"][0]["score"] == 0.91
     assert d["rows"][0]["symbol"] == "lookup_table"
