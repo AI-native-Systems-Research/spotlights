@@ -1,17 +1,15 @@
-#!/usr/bin/env python3
 """Render one finished Spotlights run directory into a single self-contained experiment page.
 
 Reads result.json + run_manifest.json + sorted/sorted_candidates.json (plus the
 evolve/ and apply/ artifact trees) and writes one experiment.html: inlined CSS/JS,
 no external assets, theme-aware, every chart paired with a table view.
 
-Usage:  python3 build_experiment_page.py <run-dir> [-o out.html]
+Usage:  spotlights-engine report <run-dir> [-o out.html]
 
 Stdlib only.
 """
 from __future__ import annotations
 
-import argparse
 import html
 import json
 import re
@@ -3790,35 +3788,3 @@ def render(d: dict) -> str:
     )
 
 
-def main(argv=None) -> int:
-    ap = argparse.ArgumentParser(
-        description="Render a finished Spotlights run directory into one "
-                    "self-contained experiment page.")
-    ap.add_argument("run_dir", type=Path, help="run directory containing result.json")
-    ap.add_argument("-o", "--out", type=Path, default=None,
-                    help="output path (default: <run-dir>/experiment.html)")
-    args = ap.parse_args(argv)
-
-    run = args.run_dir.resolve()
-    d = load(run)
-    out = args.out or (run / "experiment.html")
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(render(d), encoding="utf-8")
-
-    high = sum(1 for r in d["rows"] if r["impact"] == "high")
-    print(f"run        {d['run_id']}")
-    print(f"objective  {d['objective'][:70]}")
-    print(f"candidates {len(d['rows'])} ({high} high impact) "
-          f"over {len(d['modules'])} modules")
-    R = d.get("research")
-    if R:
-        print(f"research   {len(R['findings'])} findings ({R['works']} distinct "
-              f"works) over {len(R['researched'])} modules; "
-              f"{R['pairs']} pairs -> {R['grounded']} grounded proposals; "
-              f"{len(R['orphans'])} findings unused")
-    print(f"written    {out}  ({out.stat().st_size / 1024:.0f} KB)")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
