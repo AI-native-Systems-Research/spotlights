@@ -65,6 +65,7 @@ spotlights-out/
   index.md                          # repo-level summary, one row per module
   result.json                       # full structured run output
   run_manifest.json                 # copy of the public run manifest (see artifacts/ below)
+  experiment.html                   # one self-contained page, written by 'spotlights-engine report'
   modules/
     vllm_v1_kv_offload.md           # module page: candidates table
     vllm_v1_kv_offload/
@@ -113,7 +114,7 @@ For LiteLLM gateway config, picking which model each CLI runs on, and a quick re
 
 | Command | Purpose |
 |---|---|
-| `spotlights-engine` | Main engine: structural map → candidates → proposals. Subcommands: `doctor`, `init`, `prep-evolve`, `apply`. |
+| `spotlights-engine` | Main engine: structural map → candidates → proposals. Subcommands: `doctor`, `init`, `prep-evolve`, `apply`, `report`. |
 | `signal-pipeline` | Telemetry-driven discovery (**preview**) — a separate entry point. |
 
 ## Skills
@@ -208,7 +209,15 @@ spotlights-engine --include vllm/v1/kv_offload --include vllm/v1/worker ...
 
 Point it at `./spotlights-out/result.json` and it writes a ranked `./spotlights-out/sorted/sorted_candidates.md` (a summary table linking each candidate to its write-up) plus a machine-readable `./spotlights-out/sorted/sorted_candidates.json`.
 
-**6. Share the top candidates (optional).** Once a run is ranked, the bundled `/spotlights-share-candidates` slash command packages the top-N candidates into a self-contained ZIP an external teammate can unzip and open by double-clicking `index.html` — no server, works offline. In Claude Code:
+**6. Render the run as one browsable page (optional).** `spotlights-engine report` turns a finished run into a single self-contained `experiment.html` beside its `result.json` — inlined CSS and JS, no external assets, every chart paired with a table view, openable offline by double-clicking:
+
+```bash
+spotlights-engine report ./spotlights-out
+```
+
+Only `result.json` is required. The run manifest, a `sorted/` ranking and the `evolve/` and `apply/` trees are folded in when present — so if you ranked the candidates first, the page comes out ranked. Pass `-o` to write the page somewhere else.
+
+**7. Share the top candidates (optional).** Once a run is ranked, the bundled `/spotlights-share-candidates` slash command packages the top-N candidates into a self-contained ZIP an external teammate can unzip and open by double-clicking `index.html` — no server, works offline. In Claude Code:
 
 ```
 /spotlights-share-candidates
