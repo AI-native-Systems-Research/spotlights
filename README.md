@@ -65,6 +65,7 @@ spotlights-out/
   index.md                          # repo-level summary, one row per module
   result.json                       # full structured run output
   run_manifest.json                 # copy of the public run manifest (see artifacts/ below)
+  experiment.html                   # one self-contained page, written by 'spotlights-engine report'
   modules/
     vllm_v1_kv_offload.md           # module page: candidates table
     vllm_v1_kv_offload/
