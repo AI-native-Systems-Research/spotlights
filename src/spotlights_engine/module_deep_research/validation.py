@@ -175,12 +175,21 @@ def _looks_like_cli_envelope(payload: Any) -> bool:
 
 
 def _renumber_findings(
-    findings: list[AgentFinding], max_findings: int, *, segment: str
+    findings: list[AgentFinding],
+    max_findings: int,
+    *,
+    segment: str,
+    candidate_ids: list[str | None] | None = None,
 ) -> list[Finding]:
     """Cap, renumber, and prefix wire findings into persisted `Finding`s.
 
     The agent-supplied (bare, advisory) id is discarded; each surviving finding
-    gets a deterministic `find-<segment>-NNNN` id in output order."""
+    gets a deterministic `find-<segment>-NNNN` id in output order.
+
+    `candidate_ids`, when given, is a parallel list (same order as `findings`)
+    tagging each finding with the discovery candidate it was researched for; it
+    is stamped onto the promoted `Finding`. `None` (default, or a `None` entry)
+    leaves the finding module-wide."""
     return [
         Finding(
             finding_id=f"find-{segment}-{idx:04d}",
@@ -189,8 +198,11 @@ def _renumber_findings(
             source_type=finding.source_type,
             technique_summary=finding.technique_summary,
             supporting_evidence=finding.supporting_evidence,
+            candidate_id=(candidate_ids[i] if candidate_ids is not None else None),
         )
-        for idx, finding in enumerate(findings[:max_findings], start=1)
+        for idx, (i, finding) in enumerate(
+            enumerate(findings[:max_findings]), start=1
+        )
     ]
 
 
@@ -200,6 +212,7 @@ def normalize_module_deep_research_output(
     max_findings_per_module: int,
     segment: str,
     search_queries: list[SearchQueryLog] | None = None,
+    candidate_ids: list[str | None] | None = None,
 ) -> ModuleDeepResearchOutput:
     """Cap findings and assign deterministic module-prefixed finding IDs in
     output order, promoting the wire output to the persisted contract.
@@ -207,10 +220,17 @@ def normalize_module_deep_research_output(
     `search_queries` is a passthrough: the wire model has no `agent` field (the
     agent label lives only on `RunnerOutcome.agent_name`), so the caller tags
     each query with its runner and forwards the already-built persisted
-    `SearchQueryLog`s here verbatim."""
+    `SearchQueryLog`s here verbatim.
+
+    `candidate_ids` is a parallel list (same order as `output.findings`) stamping
+    each finding with the discovery candidate it was researched for; passed
+    through to `_renumber_findings`. `None` leaves findings module-wide."""
     return ModuleDeepResearchOutput(
         findings=_renumber_findings(
-            output.findings, max_findings_per_module, segment=segment
+            output.findings,
+            max_findings_per_module,
+            segment=segment,
+            candidate_ids=candidate_ids,
         ),
         issues=list(output.issues),
         search_queries=list(search_queries or []),

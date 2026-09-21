@@ -34,6 +34,9 @@ class Finding(BaseModel):
     source_type: FindingSourceType
     technique_summary: str = Field(min_length=1)
     supporting_evidence: str = ""
+    # Discovery candidate this finding was researched for; None = module-wide
+    # (research ran once for the whole module, not per-candidate).
+    candidate_id: str | None = None
 
 
 __all__ = [

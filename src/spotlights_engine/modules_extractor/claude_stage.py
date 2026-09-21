@@ -391,6 +391,12 @@ def run_structured_claude_stage(
         schema_text,
         "--permission-mode",
         "plan",
+        # Plan mode exposes ExitPlanMode; chatty local models (e.g. gpt-oss-120b)
+        # call it to "finish" instead of the required StructuredOutput tool, then
+        # loop against the Stop hook until max_turns. Deny it so the only terminal
+        # tool is StructuredOutput. Read-only guarantee of plan mode is unaffected.
+        "--disallowed-tools",
+        "ExitPlanMode",
         "--max-turns",
         str(max_turns),
     ]

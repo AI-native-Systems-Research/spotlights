@@ -167,10 +167,17 @@ def _validate_setup(
 def _build_pair_keys(
     candidates: list[Candidate], findings: list[Finding]
 ) -> list[tuple[Candidate, Finding, str]]:
-    """Return all pairs in candidate-outer, finding-inner order."""
+    """Return pairs in candidate-outer, finding-inner order.
+
+    A finding tagged with a `candidate_id` (per-candidate deep research) is paired
+    only with that candidate — no N×M cross product. A finding with
+    `candidate_id is None` (module-wide research) pairs with every candidate,
+    preserving the pre-per-candidate behavior."""
     pairs: list[tuple[Candidate, Finding, str]] = []
     for c in candidates:
         for f in findings:
+            if f.candidate_id is not None and f.candidate_id != c.id:
+                continue
             pairs.append((c, f, f"{c.id}__{f.finding_id}"))
     return pairs
 
@@ -381,6 +388,7 @@ async def _run_async(
     pairs = _build_pair_keys(
         list(input.candidates.candidates), list(input.findings)
     )
+    total_pairs = len(pairs)
 
     truncated = False
     if config.debug_first_n_pairs is not None:
@@ -394,7 +402,7 @@ async def _run_async(
             "running %s of %s pairs (DEBUG MODE, do not use for production)",
             config.debug_first_n_pairs,
             len(pairs),
-            len(input.candidates.candidates) * len(input.findings),
+            total_pairs,
         )
 
     semaphore = asyncio.Semaphore(config.max_parallel_pairs)

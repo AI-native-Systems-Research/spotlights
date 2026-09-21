@@ -115,14 +115,10 @@ def validate_source_root_decision(
                     f"under {other!r}"
                 )
 
-    for excluded in exclusions:
-        if not any(
-            path == excluded or path.startswith(excluded + "/")
-            for path in detected_source_files
-        ):
-            raise CrossArtifactError(
-                f"exclusion {excluded!r} covers no detected source file"
-            )
+    # A zero-coverage exclusion (matches no detected source file) is a harmless
+    # no-op — it prunes nothing downstream. Chatty models sometimes invent such
+    # patterns (e.g. a stray '.sps'); aborting the whole run over one is too
+    # strict, so tolerate it rather than raise.
 
 
 __all__ = [

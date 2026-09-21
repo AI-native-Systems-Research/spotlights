@@ -15,6 +15,7 @@ import argparse
 import dataclasses
 import json
 import logging
+import os
 import re
 import sys
 from pathlib import Path
@@ -216,12 +217,64 @@ def _build_argparser() -> argparse.ArgumentParser:
     )
 
     p.add_argument(
+        "--per-candidate-deep-research",
+        dest="per_candidate_deep_research",
+        action="store_true",
+        help=(
+            "Run step 3 (module_deep_research) once per candidate hot spot "
+            "instead of once per module. Each research pass is scoped to a "
+            "single candidate; findings from all passes are merged, deduped, "
+            "and capped together. Applies to every runner (Codex/Claude/"
+            "OpenAlex). Default: off — one module-wide pass."
+        ),
+    )
+
+    p.add_argument(
         "--enable-claude-search",
         dest="enable_claude_search",
         action="store_true",
         help=(
             "Also run the Claude runner in step 3 (module_deep_research). "
             "Default: off — step 3 runs Codex only."
+        ),
+    )
+
+    p.add_argument(
+        "--enable-openalex",
+        dest="enable_openalex",
+        action="store_true",
+        help=(
+            "Replace Codex with the OpenAlex runner in step 3 "
+            "(module_deep_research): relevance-ranked academic-paper research "
+            "via the free OpenAlex REST API instead of the code-aware Codex "
+            "survey. Default: off. No API key required; set OPENALEX_API_KEY "
+            "for premium credits and OPENALEX_MAILTO for the polite pool."
+        ),
+    )
+
+    p.add_argument(
+        "--openalex-model",
+        default=None,
+        metavar="ID",
+        help=(
+            "Model id passed to the OpenAlex runner in step 3. In --openalex-query-mode "
+            "codex this is the Codex query-writer's model; otherwise a no-op. Omit "
+            "to use the SDK default. No-op unless --enable-openalex is set."
+        ),
+    )
+
+    p.add_argument(
+        "--openalex-query-mode",
+        dest="openalex_query_mode",
+        choices=("regex", "codex"),
+        default="codex",
+        help=(
+            "How the OpenAlex runner turns the step-3 prompt into an OpenAlex "
+            "search query. 'regex' — deterministic parse of the module's "
+            "qualified name + objective, no LLM. 'codex' (default) — a Codex "
+            "query-writer distills the prompt into keywords, falling back to "
+            "the regex derivation if it yields nothing. No-op unless "
+            "--enable-openalex is set."
         ),
     )
 
@@ -237,6 +290,21 @@ def _build_argparser() -> argparse.ArgumentParser:
             "--max-findings-per-module) become no-ops but still take part in "
             "the resume fingerprint, so a run must be resumed with the same "
             "flags it was started with. Default: deep research is enabled."
+        ),
+    )
+
+    p.add_argument(
+        "--no-proposals-from-findings",
+        dest="enable_proposals_from_findings",
+        action="store_false",
+        help=(
+            "Skip step 4 (proposal_from_finding_creator) pairing: step 3 still "
+            "runs and its findings are kept, but no per-(candidate, finding) "
+            "Claude session fires. Every candidate advances with zero "
+            "finding-derived proposals. Steps 1, 2, 3 and 5 still run. This is "
+            "the cost lever for step 4 (one Claude session per pair). Included "
+            "in the resume fingerprint, so resume with the same flag it started "
+            "with. Default: proposals-from-findings enabled."
         ),
     )
 
@@ -421,8 +489,16 @@ def _build_input(args: argparse.Namespace) -> SpotlightsManagerInput:
     if args.max_findings_per_module is not None:
         input_kwargs["max_findings_per_module"] = args.max_findings_per_module
     input_kwargs["include_candidate_hotspots"] = args.include_candidate_hotspots
+    input_kwargs["per_candidate_deep_research"] = args.per_candidate_deep_research
     input_kwargs["enable_claude_search"] = args.enable_claude_search
     input_kwargs["enable_deep_research"] = args.enable_deep_research
+    input_kwargs["enable_proposals_from_findings"] = (
+        args.enable_proposals_from_findings
+    )
+    input_kwargs["enable_openalex"] = args.enable_openalex
+    input_kwargs["openalex_query_mode"] = args.openalex_query_mode
+    if args.openalex_model is not None:
+        input_kwargs["openalex_model"] = args.openalex_model
     return SpotlightsManagerInput(**input_kwargs)
 
 
@@ -555,7 +631,20 @@ def _build_config(args: argparse.Namespace) -> SpotlightsManagerConfig:
     discovery_cfg = DiscoveryConfig(**discovery_kwargs) if discovery_kwargs else None
 
     # Step 1 always has a config object, so stamp the model straight onto it.
-    extractor_cfg = ExtractorConfig(claude_model=claude_model)
+    # SPOTLIGHTS_SOURCE_ROOT_MAX_TURNS raises the source-root discovery turn cap
+    # for chattier models (e.g. local gpt-oss) that over-explore and hit the
+    # default 15-turn ceiling before emitting the module list. Unset = default.
+    # SPOTLIGHTS_EXTRACTOR_MAX_TURNS raises the enrich/assign (Stage-3A) turn cap
+    # for the same reason: chatty models blow past the default 60 and abort with
+    # `terminal_reason=max_turns`. Unset = default.
+    _extractor_kwargs: dict = {"claude_model": claude_model}
+    _srmt = os.environ.get("SPOTLIGHTS_SOURCE_ROOT_MAX_TURNS", "").strip()
+    if _srmt:
+        _extractor_kwargs["source_root_max_turns"] = int(_srmt)
+    _emt = os.environ.get("SPOTLIGHTS_EXTRACTOR_MAX_TURNS", "").strip()
+    if _emt:
+        _extractor_kwargs["max_turns"] = int(_emt)
+    extractor_cfg = ExtractorConfig(**_extractor_kwargs)
 
     # Step 3 has no config object of its own: its Codex model rides on the
     # `CodexExecOptions` the manager copies per module, the Claude model on a
@@ -597,6 +686,7 @@ def _print_summary(
     result: SpotlightsManagerResult,
     *,
     deep_research_enabled: bool = True,
+    proposals_from_findings_enabled: bool = True,
 ) -> None:
     """Render the §2 stdout shape from a completed run.
 
@@ -641,10 +731,13 @@ def _print_summary(
             print(f"[3/5] module_deep_research ({qn}) … {n_findings} findings")
         else:
             print(f"[3/5] module_deep_research ({qn}) … disabled")
-        print(
-            f"[4/5] proposal_from_finding_creator ({qn}) … "
-            f"{n_proposals} proposals attached"
-        )
+        if proposals_from_findings_enabled:
+            print(
+                f"[4/5] proposal_from_finding_creator ({qn}) … "
+                f"{n_proposals} proposals attached"
+            )
+        else:
+            print(f"[4/5] proposal_from_finding_creator ({qn}) … disabled")
         print(
             f"[5/5] agent_proposals ({qn}) … "
             f"{n_agent_proposals} agent proposals attached"
@@ -789,6 +882,12 @@ def main(argv: list[str] | None = None) -> int:
         ignored = []
         if args.enable_claude_search:
             ignored.append("--enable-claude-search")
+        if args.enable_openalex:
+            ignored.append("--enable-openalex")
+        if args.openalex_query_mode != "codex":
+            ignored.append("--openalex-query-mode")
+        if args.per_candidate_deep_research:
+            ignored.append("--per-candidate-deep-research")
         if not args.include_candidate_hotspots:
             ignored.append("--no-candidate-hotspots")
         if args.max_findings_per_module is not None:
@@ -843,6 +942,11 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  codex-model: {codex_label}")
         if not args.enable_deep_research:
             print("  deep-research: DISABLED (step 3 skipped, step 4 empty)")
+        if not args.enable_proposals_from_findings:
+            print(
+                "  proposals-from-findings: DISABLED "
+                "(step 4 pairing skipped, step 3 findings kept)"
+            )
         return 0
 
     _configure_logging(args)
@@ -856,7 +960,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     result = run_with_telemetry(inp, config=cfg)
-    _print_summary(result, deep_research_enabled=inp.enable_deep_research)
+    _print_summary(
+        result,
+        deep_research_enabled=inp.enable_deep_research,
+        proposals_from_findings_enabled=inp.enable_proposals_from_findings,
+    )
     if isinstance(result, SpotlightsManagerResult):
         json_path = _write_result_json(result, args.output_folder)
         print(f"result json: {json_path}")

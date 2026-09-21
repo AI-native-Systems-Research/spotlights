@@ -11,6 +11,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from spotlights_engine.module_deep_research.agent_exec import AgentExecResult, ModuleResearchRunner
+from spotlights_engine.module_deep_research.openalex_exec import (
+    OpenAlexRunner,
+    OpenAlexRunnerOptions,
+)
 from spotlights_engine.module_deep_research.claude_exec import ClaudeExecClient, ClaudeExecOptions
 from spotlights_engine.module_deep_research.codex_exec import CodexExecClient, CodexExecOptions
 from spotlights_engine.module_deep_research.validation import (
@@ -65,11 +69,16 @@ def select_runners(
     runners: Sequence[ModuleResearchRunner] | None,
     enable_claude_search: bool = False,
     claude_model: str | None = None,
+    enable_openalex: bool = False,
+    openalex_model: str | None = None,
+    openalex_query_mode: str = "codex",
 ) -> tuple[ModuleResearchRunner, ...]:
     """Resolve caller-provided runners or create the default runner set.
 
-    The default set is Codex only; when `enable_claude_search` is true, Claude
-    is added so step 3 fans out to Codex + Claude.
+    The default runner is Codex. When `enable_openalex` is true it is *exclusive*
+    — it replaces the entire agent set (both Codex and Claude), so step 3 does
+    academic-paper research alone. Otherwise, when `enable_claude_search` is
+    true, Claude is added alongside Codex.
 
     `claude_model` applies only to the default Claude runner built here. The
     Codex model rides on `codex_options`, and caller-supplied `runner`/`runners`
@@ -82,8 +91,21 @@ def select_runners(
     if runners is not None:
         return tuple(runners)
 
+    # OpenAlex is exclusive: when armed it replaces the entire agent set (both
+    # Codex and Claude), so step 3 does academic-paper research alone.
+    if enable_openalex:
+        return (
+            OpenAlexRunner(
+                OpenAlexRunnerOptions(
+                    cwd=repo_path,
+                    model=openalex_model,
+                    query_mode=openalex_query_mode,
+                )
+            ),
+        )
+
     default_runners: list[ModuleResearchRunner] = [
-        CodexExecClient(codex_options or CodexExecOptions(cwd=repo_path)),
+        CodexExecClient(codex_options or CodexExecOptions(cwd=repo_path))
     ]
     if enable_claude_search:
         default_runners.append(
@@ -136,8 +158,15 @@ def merge_outcomes(
     *,
     max_findings_per_module: int,
     segment: str,
+    candidate_id: str | None = None,
 ) -> ModuleDeepResearchOutput:
     """Merge agent outputs into the stable module deep-research contract.
+
+    `candidate_id`, when given, tags every finding from these outcomes with the
+    discovery candidate they were researched for. In per-candidate mode this is
+    called once per candidate, so the finding dedup below is naturally scoped
+    per candidate (the same paper can resurface for another candidate as a
+    separate scoped finding). `None` leaves findings module-wide.
 
     Per-runner outputs are parsed into the lenient wire shape (bare ids), then
     deduped and merged; the single promotion to persisted `Finding`s — capping,
@@ -198,11 +227,15 @@ def merge_outcomes(
 
     merged = AgentModuleDeepResearchOutput(findings=findings, issues=issues)
     merged_findings_cap = max_findings_per_module * len(outcomes)
+    candidate_ids = (
+        [candidate_id] * len(findings) if candidate_id is not None else None
+    )
     return normalize_module_deep_research_output(
         merged,
         max_findings_per_module=merged_findings_cap,
         segment=segment,
         search_queries=search_logs,
+        candidate_ids=candidate_ids,
     )
 
 

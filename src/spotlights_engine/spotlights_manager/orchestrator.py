@@ -875,7 +875,11 @@ async def _do_step3(
         max_findings_per_module=mgr_input.max_findings_per_module,
         candidates=list(candidates.candidates),
         include_candidate_hotspots=mgr_input.include_candidate_hotspots,
+        per_candidate_deep_research=mgr_input.per_candidate_deep_research,
         enable_claude_search=mgr_input.enable_claude_search,
+        enable_openalex=mgr_input.enable_openalex,
+        openalex_model=mgr_input.openalex_model,
+        openalex_query_mode=mgr_input.openalex_query_mode,
     )
     options = _build_deep_research_options(
         cfg, mgr_input.repo_path, module_paths.deep_research_last_message_path
@@ -1414,7 +1418,26 @@ async def _run_module(
         proposal_output: ProposalFromFindingCreatorOutput | None = None
 
         if run_step4:
-            if not research_output.findings:
+            if not mgr_input.enable_proposals_from_findings:
+                # --no-proposals-from-findings: keep step-3 findings but skip all
+                # per-pair Claude sessions. Same synthetic empty output as the
+                # zero-findings short-circuit; every candidate advances with no
+                # finding-derived proposals.
+                _log.info(
+                    "[%s] proposal_from_finding: skipped "
+                    "(--no-proposals-from-findings) — synthetic empty output",
+                    qn,
+                )
+                proposal_output = _synthetic_step4_output_for_zero_findings(
+                    candidates
+                )
+                P.write_proposal_from_finding(
+                    module_paths,
+                    proposal_output,
+                    duration_s=0.0,
+                    per_pair_durations_s={},
+                )
+            elif not research_output.findings:
                 # Architecture-mandated short-circuit: every candidate
                 # advances to FINDING_PROPOSALS_CREATED with no proposals,
                 # no Claude session is scheduled.
@@ -1433,7 +1456,15 @@ async def _run_module(
                     per_pair_durations_s={},
                 )
             else:
-                n_pairs = len(candidates.candidates) * len(research_output.findings)
+                # Per-candidate findings pair only with their own candidate;
+                # module-wide findings (candidate_id None) pair with all. Count
+                # the scoped pairs, not the raw N×M, so the log is truthful.
+                cand_ids = {c.id for c in candidates.candidates}
+                n_pairs = sum(
+                    len(candidates.candidates) if f.candidate_id is None
+                    else (1 if f.candidate_id in cand_ids else 0)
+                    for f in research_output.findings
+                )
                 _log.info(
                     "[%s] proposal_from_finding: start — %d (candidate, finding) pairs",
                     qn,
@@ -1872,6 +1903,7 @@ async def _run_async(
         include_candidate_hotspots=input.include_candidate_hotspots,
         enable_claude_search=input.enable_claude_search,
         enable_deep_research=input.enable_deep_research,
+        enable_proposals_from_findings=input.enable_proposals_from_findings,
     )
     config_fp = P.build_config_fingerprint(
         module_filter=config.module_filter,

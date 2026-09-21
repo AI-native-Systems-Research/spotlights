@@ -67,6 +67,92 @@ def _request_with_cap(max_findings_per_module: int) -> ModuleDeepResearchInput:
     )
 
 
+def _candidate(cid: str, symbol: str):
+    from spotlights_engine.schemas.candidate import Candidate
+
+    return Candidate(
+        id=cid,
+        module_qualified_name="inference/attention",
+        origin="code_agent",
+        locations=[
+            {
+                "file": "src/inference/attention.py",
+                "spans": [
+                    {"line_start": 1, "line_end": 9, "symbol": symbol, "kind": "function"}
+                ],
+            }
+        ],
+        description=f"Optimize {symbol}.",
+        current_approach="Naive implementation.",
+        evolve_rationale="Hot on the decode path.",
+        estimated_impact="high",
+        estimated_impact_explanation="Dominates latency.",
+    )
+
+
+def test_research_module_per_candidate_runs_one_pass_per_candidate() -> None:
+    runner = FakeRunner('{"findings": [], "issues": []}')
+    request = _request().model_copy(
+        update={
+            "per_candidate_deep_research": True,
+            "candidates": [
+                _candidate("cand-x-0001", "softmax"),
+                _candidate("cand-x-0002", "matmul"),
+            ],
+        }
+    )
+
+    research_module(request, runner=runner)
+
+    # One scoped research pass per candidate; each prompt names only its own.
+    assert len(runner.prompts) == 2
+    assert "softmax" in runner.prompts[0] and "matmul" not in runner.prompts[0]
+    assert "matmul" in runner.prompts[1] and "softmax" not in runner.prompts[1]
+
+
+def test_research_module_per_candidate_noop_without_candidates() -> None:
+    runner = FakeRunner('{"findings": [], "issues": []}')
+    request = _request().model_copy(update={"per_candidate_deep_research": True})
+
+    research_module(request, runner=runner)
+
+    assert len(runner.prompts) == 1
+
+
+def test_research_module_per_candidate_stamps_and_dedups_per_candidate() -> None:
+    # The same runner replies with the same paper for every prompt, so each
+    # candidate researches the identical work. Per-candidate dedup keeps one
+    # scoped finding per candidate (not a single global one), each tagged with
+    # its own candidate_id and given a globally unique renumbered finding id.
+    runner = FakeRunner(_payload("Shared paper", "https://example.com/shared"))
+    request = _request().model_copy(
+        update={
+            "per_candidate_deep_research": True,
+            "candidates": [
+                _candidate("cand-x-0001", "softmax"),
+                _candidate("cand-x-0002", "matmul"),
+            ],
+        }
+    )
+
+    output = research_module(request, runner=runner)
+
+    assert [f.candidate_id for f in output.findings] == ["cand-x-0001", "cand-x-0002"]
+    assert [f.finding_id for f in output.findings] == [
+        "find-inference_attention-0001",
+        "find-inference_attention-0002",
+    ]
+    assert all(f.title == "Shared paper" for f in output.findings)
+
+
+def test_research_module_module_wide_findings_have_no_candidate_id() -> None:
+    runner = FakeRunner(_payload("Module paper", "https://example.com/module"))
+
+    output = research_module(_request(), runner=runner)
+
+    assert output.findings[0].candidate_id is None
+
+
 def test_resolve_target_module_by_slash_qualified_name() -> None:
     module = resolve_target_module(_tree(), "inference/attention")
 
@@ -320,3 +406,61 @@ def test_select_runners_enable_claude_search_adds_claude(tmp_path: Path) -> None
     assert len(runners) == 2
     assert isinstance(runners[0], CodexExecClient)
     assert isinstance(runners[1], ClaudeExecClient)
+
+
+def test_select_runners_enable_openalex_replaces_codex(tmp_path: Path) -> None:
+    from spotlights_engine.module_deep_research.openalex_exec import OpenAlexRunner
+
+    runners = select_runners(
+        repo_path=tmp_path,
+        codex_options=None,
+        runner=None,
+        runners=None,
+        enable_openalex=True,
+    )
+
+    assert len(runners) == 1
+    assert isinstance(runners[0], OpenAlexRunner)
+
+
+def test_select_runners_openalex_is_exclusive_over_claude_and_codex(tmp_path: Path) -> None:
+    from spotlights_engine.module_deep_research.openalex_exec import OpenAlexRunner
+
+    runners = select_runners(
+        repo_path=tmp_path,
+        codex_options=None,
+        runner=None,
+        runners=None,
+        enable_openalex=True,
+        enable_claude_search=True,
+    )
+
+    assert [type(r) for r in runners] == [OpenAlexRunner]
+
+
+def test_select_runners_openalex_query_mode_default_is_codex(tmp_path: Path) -> None:
+    from spotlights_engine.module_deep_research.openalex_exec import OpenAlexRunner
+
+    (runner,) = select_runners(
+        repo_path=tmp_path,
+        codex_options=None,
+        runner=None,
+        runners=None,
+        enable_openalex=True,
+    )
+
+    assert isinstance(runner, OpenAlexRunner)
+    assert runner.options.query_mode == "codex"
+
+
+def test_select_runners_openalex_query_mode_regex_passthrough(tmp_path: Path) -> None:
+    (runner,) = select_runners(
+        repo_path=tmp_path,
+        codex_options=None,
+        runner=None,
+        runners=None,
+        enable_openalex=True,
+        openalex_query_mode="regex",
+    )
+
+    assert runner.options.query_mode == "regex"

@@ -11,13 +11,48 @@ from spotlights_engine.proposal_from_finding_creator import (
     create_proposals,
     create_proposals_with_telemetry,
 )
+from spotlights_engine.proposal_from_finding_creator.api import _build_pair_keys
 from spotlights_engine.proposal_from_finding_creator.claude_exec import PairRunResult
 from spotlights_engine.utils.schema_compat import proposals_from
 from tests.unit.proposal_from_finding_creator._fakes import (
     fake_runner_factory,
+    make_candidate,
+    make_finding,
     make_input,
     make_proposal_payload,
 )
+
+
+def test_build_pair_keys_scopes_by_candidate_id() -> None:
+    # Per-candidate findings pair only with their own candidate; an untagged
+    # (candidate_id=None) finding pairs with every candidate (module-wide /
+    # back-compat). No N×M cross product.
+    cand_a = make_candidate(0)  # cand-v1_kv_offload-0001
+    cand_b = make_candidate(1)  # cand-v1_kv_offload-0002
+    find_a = make_finding(0).model_copy(update={"candidate_id": cand_a.id})
+    find_b = make_finding(1).model_copy(update={"candidate_id": cand_b.id})
+    find_all = make_finding(2)  # candidate_id is None
+
+    pairs = _build_pair_keys([cand_a, cand_b], [find_a, find_b, find_all])
+
+    got = {(c.id, f.finding_id) for c, f, _ in pairs}
+    assert got == {
+        (cand_a.id, find_a.finding_id),
+        (cand_a.id, find_all.finding_id),
+        (cand_b.id, find_b.finding_id),
+        (cand_b.id, find_all.finding_id),
+    }
+    # cross terms excluded
+    assert (cand_a.id, find_b.finding_id) not in got
+    assert (cand_b.id, find_a.finding_id) not in got
+
+
+def test_build_pair_keys_untagged_is_full_cross_product() -> None:
+    # All findings untagged -> classic N×M (unchanged for non-per-candidate runs).
+    cands = [make_candidate(0), make_candidate(1)]
+    finds = [make_finding(0), make_finding(1)]
+    pairs = _build_pair_keys(cands, finds)
+    assert len(pairs) == 4
 
 
 @pytest.fixture

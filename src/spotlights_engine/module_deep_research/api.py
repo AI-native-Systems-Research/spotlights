@@ -10,6 +10,7 @@ from spotlights_engine.costing.usage import CliUsage
 from spotlights_engine.module_deep_research.agent_exec import ModuleResearchRunner
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
 from spotlights_engine.module_deep_research.orchestration import (
+    RunnerOutcome,
     merge_outcomes,
     module_deep_research_issue,
     run_runners,
@@ -17,6 +18,7 @@ from spotlights_engine.module_deep_research.orchestration import (
 )
 from spotlights_engine.module_deep_research.prompts import render_module_deep_research_prompt
 from spotlights_engine.schemas.common import StepIssue
+from spotlights_engine.schemas.finding import Finding
 from spotlights_engine.schemas.pipeline import (
     ModuleDeepResearchInput,
     ModuleDeepResearchOutput,
@@ -54,7 +56,51 @@ def _cli_for_agent(agent_name: str) -> str | None:
         return "claude"
     if "codex" in name:
         return "codex"
+    if "openalex" in name:
+        return "openalex"
     return None
+
+
+def _usages_from(outcomes: Sequence[RunnerOutcome]) -> list[CliUsage]:
+    """Collect per-runner CLI usage from a batch of outcomes."""
+    usages: list[CliUsage] = []
+    for outcome in outcomes:
+        if outcome.result is None or outcome.result.usage is None:
+            continue
+        cli = _cli_for_agent(outcome.agent_name)
+        if cli is None:
+            continue
+        usages.append(CliUsage(cli=cli, usage=outcome.result.usage))
+    return usages
+
+
+def _combine_per_candidate(
+    outputs: Sequence[ModuleDeepResearchOutput], *, segment: str
+) -> ModuleDeepResearchOutput:
+    """Concatenate per-candidate research outputs into one module output.
+
+    Each input was merged/capped/renumbered on its own, so finding ids restart at
+    `find-<segment>-0001` per candidate. Re-sequence the concatenated findings
+    once here to keep ids globally unique while preserving each finding's
+    `candidate_id` (and every other field). Search-query logs and issues are
+    concatenated in candidate order for stable, per-candidate-attributable output."""
+    findings: list[Finding] = []
+    search_queries = []
+    issues: list[StepIssue] = []
+    for out in outputs:
+        findings.extend(out.findings)
+        search_queries.extend(out.search_queries)
+        issues.extend(out.issues)
+
+    renumbered = [
+        f.model_copy(update={"finding_id": f"find-{segment}-{idx:04d}"})
+        for idx, f in enumerate(findings, start=1)
+    ]
+    return ModuleDeepResearchOutput(
+        findings=renumbered,
+        issues=issues,
+        search_queries=search_queries,
+    )
 
 
 def research_module_with_telemetry(
@@ -83,7 +129,6 @@ def research_module_with_telemetry(
             )
         )
 
-    prompt = render_module_deep_research_prompt(request, module)
     active_runners = select_runners(
         repo_path=request.repo_path,
         codex_options=codex_options,
@@ -91,29 +136,60 @@ def research_module_with_telemetry(
         runners=runners,
         enable_claude_search=request.enable_claude_search,
         claude_model=claude_model,
+        enable_openalex=request.enable_openalex,
+        openalex_model=request.openalex_model,
+        openalex_query_mode=request.openalex_query_mode,
     )
-    outcomes = run_runners(
-        prompt=prompt,
-        runners=active_runners,
-        check=check,
-        module_qualified_name=request.module_qualified_name,
-    )
+    # Per-candidate mode: one scoped research pass per hot spot (each pass sees a
+    # single candidate). Each pass's outcomes are merged/deduped/capped on their
+    # own and tagged with that candidate's id, then the per-candidate outputs are
+    # combined (findings kept scoped, ids re-sequenced globally). Step 4 pairs a
+    # candidate only with its own findings. Any other case (flag off, or no
+    # candidates) runs a single module-wide pass with untagged findings.
     usages: list[CliUsage] = []
-    for outcome in outcomes:
-        if outcome.result is None or outcome.result.usage is None:
-            continue
-        cli = _cli_for_agent(outcome.agent_name)
-        if cli is None:
-            continue
-        usages.append(CliUsage(cli=cli, usage=outcome.result.usage))
-    return ModuleDeepResearchResult(
-        output=merge_outcomes(
+    if request.per_candidate_deep_research and request.candidates:
+        per_candidate_outputs: list[ModuleDeepResearchOutput] = []
+        for candidate in request.candidates:
+            prompt = render_module_deep_research_prompt(
+                request.model_copy(
+                    update={
+                        "candidates": [candidate],
+                        "include_candidate_hotspots": True,
+                    }
+                ),
+                module,
+            )
+            outcomes = run_runners(
+                prompt=prompt,
+                runners=active_runners,
+                check=check,
+                module_qualified_name=request.module_qualified_name,
+            )
+            usages.extend(_usages_from(outcomes))
+            per_candidate_outputs.append(
+                merge_outcomes(
+                    outcomes,
+                    max_findings_per_module=request.max_findings_per_module,
+                    segment=seg,
+                    candidate_id=candidate.id,
+                )
+            )
+        output = _combine_per_candidate(per_candidate_outputs, segment=seg)
+    else:
+        outcomes = run_runners(
+            prompt=render_module_deep_research_prompt(request, module),
+            runners=active_runners,
+            check=check,
+            module_qualified_name=request.module_qualified_name,
+        )
+        usages.extend(_usages_from(outcomes))
+        output = merge_outcomes(
             outcomes,
             max_findings_per_module=request.max_findings_per_module,
             segment=seg,
-        ),
-        usages=usages,
-    )
+        )
+
+    return ModuleDeepResearchResult(output=output, usages=usages)
 
 
 def research_module(

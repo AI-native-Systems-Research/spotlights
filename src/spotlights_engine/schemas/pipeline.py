@@ -67,9 +67,25 @@ class ModuleDeepResearchInput(BaseModel):
     candidates: list[Candidate] = Field(default_factory=list)
     include_candidate_hotspots: bool = True
 
+    # When True, run deep research once PER candidate (each research call is
+    # scoped to a single hot spot) instead of one call spanning the whole module
+    # with every candidate listed as a hot spot. Findings from all per-candidate
+    # runs are merged/deduped/capped together. Applies to every runner
+    # (Codex/Claude/OpenAlex). No-op when there are no candidates.
+    per_candidate_deep_research: bool = False
+
     # Controls the default step-3 runner fan-out. False (default) → Codex only;
     # True → Codex + Claude.
     enable_claude_search: bool = False
+
+    # Opt-in OpenAlex runner. When True the default fan-out adds an OpenAlex
+    # runner alongside Codex (and Claude, if enabled). Uses the OPENALEX_API_KEY
+    # env var by default; `openalex_model` overrides the SDK default model.
+    enable_openalex: bool = False
+    openalex_model: str | None = None
+    # How the OpenAlex runner builds its OpenAlex query from the prompt:
+    # "regex" (deterministic) or "codex" (Codex query-writer + regex fallback).
+    openalex_query_mode: str = "codex"
 
 
 class ModuleDeepResearchOutput(BaseModel):
@@ -158,11 +174,21 @@ class SpotlightsManagerInput(BaseModel):
     context: SpotlightContext
     max_findings_per_module: int = Field(default=30, ge=0)
     include_candidate_hotspots: bool = True
+    # Run step 3 once per candidate (scoped research) instead of once per module.
+    per_candidate_deep_research: bool = False
     enable_claude_search: bool = False
+    enable_openalex: bool = False
+    openalex_model: str | None = None
+    openalex_query_mode: str = "codex"
     # False -> step 3 (module_deep_research) is not run for any module; the
     # manager substitutes an empty ModuleDeepResearchOutput and step 4 takes
     # its zero-findings short-circuit.
     enable_deep_research: bool = True
+    # False -> step 4 (proposal_from_finding_creator) pairing is skipped: step 3
+    # findings are kept, but no per-pair Claude session runs. Every candidate
+    # advances with zero finding-derived proposals (same synthetic empty output
+    # as the zero-findings short-circuit). Steps 1, 2, 3, 5 still run.
+    enable_proposals_from_findings: bool = True
     continue_on_module_failure: bool = True
 
 

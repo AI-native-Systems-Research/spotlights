@@ -304,6 +304,7 @@ def build_input_fingerprint(
     include_candidate_hotspots: bool = True,
     enable_claude_search: bool = False,
     enable_deep_research: bool = True,
+    enable_proposals_from_findings: bool = True,
 ) -> dict[str, Any]:
     fp: dict[str, Any] = {
         "repo_path": str(repo_path),
@@ -317,6 +318,9 @@ def build_input_fingerprint(
     # existed still resume; see design/disable_deep_research.md §6.
     if not enable_deep_research:
         fp["enable_deep_research"] = False
+    # Same omit-when-default rule: pre-flag run dirs keep their fingerprint.
+    if not enable_proposals_from_findings:
+        fp["enable_proposals_from_findings"] = False
     return fp
 
 
