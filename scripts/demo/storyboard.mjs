@@ -13,6 +13,14 @@ export const PAGE_RELATIVE_PATH = 'examples/vllm_subset/experiment.html';
 /** Rank 17, TieringOffloadingManager._initiate_promotion, 11 proposals, 5 paper-cited. */
 export const DRILL_IN_ROW = 'tbody#cand-vllm_v1_kv_offload-0009';
 
+/**
+ * The downstream-artifacts section: the three tiles the closing caption is about.
+ * The section carries no id, so it is addressed by its heading. Playwright's text
+ * engine matches DOM text, which `text-transform: uppercase` on `section.sec > h2`
+ * does not touch, so the source spelling is the right thing to match on.
+ */
+export const DOWNSTREAM_SECTION = 'section.sec:has(h2:text-is("Downstream artifacts"))';
+
 const CUTS = new Set(['gif', 'full']);
 const BOTH = ['gif', 'full'];
 const FULL_ONLY = ['full'];
@@ -231,8 +239,12 @@ export const BEATS = [
       full: '3 evolve scaffolds · 2 patches applied · <b>nothing measured yet</b> — the page says so',
       gif: '3 evolve scaffolds · 2 applied · <b>nothing measured yet</b>',
     },
-    actions: [{ type: 'scrollTo', sel: '#lbview' }],
+    actions: [{ type: 'scrollTo', sel: DOWNSTREAM_SECTION }],
     asserts: [
+      /* The two domContains guard the caption's figures wherever they sit in the
+         document; only inViewport can witness that the closing frame is actually
+         looking at the tiles, which is what the caption claims. */
+      { type: 'inViewport', sel: DOWNSTREAM_SECTION },
       { type: 'domContains', text: 'Awaiting measurement' },
       { type: 'domContains', text: 'no candidate has a measured speedup yet' },
     ],

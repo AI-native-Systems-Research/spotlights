@@ -92,6 +92,28 @@ async function checkAssert(page, beatId, a) {
       if (!(await page.locator(a.sel).first().isVisible())) fail(`${a.sel} is not visible`);
       return;
     }
+    /**
+     * `visible` is Playwright's isVisible(), which is true for an element parked
+     * thousands of pixels above the fold: it answers "is this rendered", not "is
+     * this in frame". A beat whose whole point is where the page is looking needs
+     * the stronger question, so this compares the element's box against the
+     * viewport and demands the box lie wholly inside it.
+     */
+    case 'inViewport': {
+      const box = await page.locator(a.sel).first().boundingBox();
+      if (!box) fail(`${a.sel} has no box, so it cannot be in the viewport`);
+      const view = page.viewportSize();
+      const right = box.x + box.width;
+      const bottom = box.y + box.height;
+      if (box.x < 0 || box.y < 0 || right > view.width || bottom > view.height) {
+        fail(
+          `${a.sel} is not wholly inside the ${view.width}x${view.height} viewport: `
+          + `box is x ${box.x.toFixed(0)}..${right.toFixed(0)}, `
+          + `y ${box.y.toFixed(0)}..${bottom.toFixed(0)}`,
+        );
+      }
+      return;
+    }
     case 'attr': {
       const got = await page.locator(a.sel).first().getAttribute(a.name);
       if (got !== a.equals) fail(`${a.sel}[${a.name}] is ${JSON.stringify(got)}, want ${JSON.stringify(a.equals)}`);

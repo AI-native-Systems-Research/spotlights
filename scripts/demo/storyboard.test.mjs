@@ -1,12 +1,12 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  BEATS, GEOMETRY, DRILL_IN_ROW,
+  BEATS, GEOMETRY, DRILL_IN_ROW, DOWNSTREAM_SECTION,
   beatsForCut, dwellFor, captionFor, totalDuration, validateStoryboard,
 } from './storyboard.mjs';
 
 const ACTION_TYPES = new Set(['scrollTo', 'click', 'select', 'hover', 'fill', 'ring', 'unring', 'pause']);
-const ASSERT_TYPES = new Set(['domContains', 'visible', 'attr', 'minChildren', 'textMatches']);
+const ASSERT_TYPES = new Set(['domContains', 'visible', 'attr', 'minChildren', 'textMatches', 'inViewport']);
 
 test('the storyboard validates clean', () => {
   assert.deepEqual(validateStoryboard(), []);
@@ -92,4 +92,31 @@ test('no beat ever touches the theme toggle', () => {
 
 test('beatsForCut rejects an unknown cut', () => {
   assert.throws(() => beatsForCut('nope'), /unknown cut/);
+});
+
+test('the close beat looks at the downstream artifacts it narrates', () => {
+  const close = BEATS.find((b) => b.id === 'close');
+  // Both cuts end on this beat, so retargeting its one scroll retargets both.
+  assert.deepEqual(close.cuts, ['gif', 'full']);
+  assert.deepEqual(close.actions, [{ type: 'scrollTo', sel: DOWNSTREAM_SECTION }]);
+  assert.ok(
+    DOWNSTREAM_SECTION.includes('Downstream artifacts'),
+    'the close beat must scroll to the downstream artifacts section, not the leaderboard',
+  );
+  // It must no longer share the radial-tree beat's target, which is why it never moved.
+  const tree = BEATS.find((b) => b.id === 'radial-tree');
+  const treeScrolls = tree.actions.filter((a) => a.type === 'scrollTo').map((a) => a.sel);
+  assert.ok(treeScrolls.includes('#lbview'));
+  for (const a of close.actions) assert.notEqual(a.sel, '#lbview');
+
+  // A domContains cannot witness scroll position; the beat needs an assertion that can.
+  const inView = close.asserts.filter((a) => a.type === 'inViewport');
+  assert.equal(inView.length, 1);
+  assert.equal(inView[0].sel, DOWNSTREAM_SECTION);
+  assert.equal(inView[0].sel, close.actions[0].sel, 'the assertion must watch what the beat scrolls to');
+  // The figure guards stay.
+  assert.deepEqual(
+    close.asserts.filter((a) => a.type === 'domContains').map((a) => a.text),
+    ['Awaiting measurement', 'no candidate has a measured speedup yet'],
+  );
 });
