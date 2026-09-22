@@ -302,7 +302,8 @@ def test_run_builds_relevance_search_url(monkeypatch):
     client = OpenAlexRunner(_regex_opts(api_key="k", max_results=5))
     client.run("Qualified name: inference/attention\nObjective: cut latency\n")
 
-    params = _query_params(calls["url"])
+    # calls["urls"][0] is the relevance slice; a recency slice may follow.
+    params = _query_params(calls["urls"][0])
     assert params["search"] == "inference attention cut latency"
     assert params["filter"] == "type:article|preprint,primary_topic.field.id:17|26|22|31|18"
     assert params["per_page"] == "5"
@@ -321,7 +322,38 @@ def test_run_command_redacts_api_key(monkeypatch):
 def test_per_page_clamped_to_200(monkeypatch):
     calls = _install_fake_urlopen(monkeypatch, results=[])
     OpenAlexRunner(_regex_opts(max_results=9999)).run("Qualified name: m/x\n")
-    assert _query_params(calls["url"])["per_page"] == "200"
+    # Relevance slice is the first URL; recency slice (if any) uses its own per_page.
+    assert _query_params(calls["urls"][0])["per_page"] == "200"
+
+
+def test_recency_slice_appends_recent_low_cited_work(monkeypatch):
+    # Relevance slice returns a high-cited family paper; the recency slice
+    # (sort=publication_date:desc) returns a brand-new low-cited preprint the
+    # relevance ranking would bury. Both must land in the findings.
+    def fake_urlopen(request, timeout=None):
+        if "sort=publication_date" in request.full_url:
+            work = _work(wid="https://openalex.org/W-NEW", title="Fresh Preprint",
+                         doi="https://doi.org/10.1/new", cited=1)
+        else:
+            work = _work(wid="https://openalex.org/W-OLD", title="Established Paper",
+                         doi="https://doi.org/10.1/old", cited=999)
+        return io.BytesIO(json.dumps({"results": [work]}).encode("utf-8"))
+
+    monkeypatch.setattr(openalex_exec.urllib.request, "urlopen", fake_urlopen)
+    result = OpenAlexRunner(_regex_opts(recency_results=3)).run(
+        "Qualified name: m/x\nObjective: speed\n"
+    )
+
+    parsed = parse_agent_output(result.final_message)
+    titles = [f.title for f in parsed.findings]
+    assert titles == ["Established Paper", "Fresh Preprint"]  # relevance first, recency tail
+
+
+def test_recency_slice_disabled_when_zero(monkeypatch):
+    calls = _install_fake_urlopen(monkeypatch, results=[_work()])
+    OpenAlexRunner(_regex_opts(recency_results=0)).run("Qualified name: m/x\nObjective: speed\n")
+    assert len(calls["urls"]) == 1  # only the relevance slice, no recency fetch
+    assert "sort=publication_date" not in calls["urls"][0]
 
 
 # --------------------------------------------------------------------------
