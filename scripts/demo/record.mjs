@@ -137,19 +137,49 @@ await installOverlay(page);
 await page.locator('#lbtable').scrollIntoViewIfNeeded();
 await page.waitForTimeout(600);
 
+/**
+ * A beat's dwell is the *span* it is meant to occupy, not an extra pause on the end:
+ * `totalDuration(cut)` sums the dwells and is the declared length of the cut. So the
+ * dwell is treated as a deadline -- choreography (actions, assertions, the caption
+ * fade-in) runs inside it and only the remainder is waited out. A beat whose
+ * choreography is already longer than its dwell waits zero and says so, because those
+ * overruns are the whole budget discussion and have to be visible to a human.
+ */
+const DRY_RUN_WAIT_MS = 60;
+
 let failed = null;
+const runStartedAt = Date.now();
 try {
   for (const beat of beatsForCut(cut)) {
+    const beatStartedAt = Date.now();
+
     for (const action of beat.actions) await runAction(page, action);
     for (const a of beat.asserts) await checkAssert(page, beat.id, a);
 
     const caption = captionFor(beat, cut);
     if (caption) await showCaption(page, caption);
-    const dwellMs = Math.round(dwellFor(beat, cut) * 1000);
-    await page.waitForTimeout(dryRun ? 60 : dwellMs);
+
+    const dwellSec = dwellFor(beat, cut);
+    const dwellMs = Math.round(dwellSec * 1000);
+    if (dryRun) {
+      await page.waitForTimeout(DRY_RUN_WAIT_MS);
+    } else {
+      const spentMs = Date.now() - beatStartedAt;
+      const remainingMs = dwellMs - spentMs;
+      if (remainingMs > 0) {
+        await page.waitForTimeout(remainingMs);
+      } else {
+        console.warn(
+          `  WARN  ${beat.id} overran its dwell: dwell ${dwellSec.toFixed(1)}s, `
+          + `choreography cost ${(spentMs / 1000).toFixed(2)}s `
+          + `(over by ${(-remainingMs / 1000).toFixed(2)}s) -- waited 0s`,
+        );
+      }
+    }
     if (caption) await hideCaption(page);
 
-    console.log(`  ok  ${beat.id} (${dwellFor(beat, cut)}s)`);
+    const elapsedSec = (Date.now() - runStartedAt) / 1000;
+    console.log(`  ok  ${beat.id} (${dwellSec}s, elapsed ${elapsedSec.toFixed(2)}s)`);
   }
 } catch (err) {
   failed = err;
