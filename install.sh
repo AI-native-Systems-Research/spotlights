@@ -47,11 +47,11 @@ uv tool update-shell >/dev/null 2>&1 || true
 # it reroutes `claude/codex --model Qwen*` (from any directory) to the local pi
 # agent backed by VELA Qwen3.8-27B. Idempotent.
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
-ALIAS_FILE="${SCRIPT_DIR}/scripts/qwen_alias.sh"
+ALIAS_FILE="${SCRIPT_DIR}/scripts/qwen.sh"
 if [ -f "$ALIAS_FILE" ]; then
   for RC in "$HOME/.zshrc" "$HOME/.bashrc"; do
     [ -f "$RC" ] || continue
-    if ! grep -qF "qwen_alias.sh" "$RC" 2>/dev/null; then
+    if ! grep -qF "scripts/qwen.sh" "$RC" 2>/dev/null; then
       {
         printf '\n# spotlights: reroute `claude/codex --model Qwen*` to pi (VELA Qwen3.8-27B).\n'
         printf '# Must stay after the claude()/codex() definitions so fallbacks are preserved.\n'
