@@ -304,7 +304,7 @@ def test_run_builds_relevance_search_url(monkeypatch):
 
     params = _query_params(calls["url"])
     assert params["search"] == "inference attention cut latency"
-    assert params["filter"] == "type:article|preprint,primary_topic.field.id:17|26"
+    assert params["filter"] == "type:article|preprint,primary_topic.field.id:17|26|22|31|18"
     assert params["per_page"] == "5"
     assert "abstract_inverted_index" in params["select"]
 

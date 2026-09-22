@@ -83,14 +83,22 @@ class OpenAlexRunnerOptions(BaseModel):
     #   type:article|preprint — GT papers are overwhelmingly arXiv PREPRINTS
     #     (e.g. the Muon paper 2502.16982); an `article`-only gate silently
     #     excluded every one of them, so preprints must be allowed through.
-    #   primary_topic.field.id:17|26 — Computer Science (17) + Mathematics (26).
-    #     NOTE: 15 is Chemical Engineering, NOT Mathematics — the prior 17|15
-    #     value leaked chemistry/spectroscopy noise (boron spectrometry, ion-trap
-    #     cooling, catalysis). 26 is the real Mathematics field. Kept at
-    #     field-level (not subfield) on purpose: OpenAlex frequently mis-topics
-    #     niche methods (the Muon paper is tagged Physics), and narrower subfield
-    #     gates drop those GTs entirely. Field-level trades some noise for recall.
-    base_filter: str = "type:article|preprint,primary_topic.field.id:17|26"
+    #   primary_topic.field.id — a QUANTITATIVE-TECHNICAL allow-list, not just CS:
+    #     17 Computer Science, 26 Mathematics, 22 Engineering,
+    #     31 Physics & Astronomy, 18 Decision Sciences.
+    #     Rationale: OpenAlex routinely MIS-TOPICS ML/optimization methods into
+    #     adjacent technical fields — the Muon optimizer is tagged Physics (the
+    #     word "muon" is a particle), "How Much Orthogonalization Does Muon Need?"
+    #     is tagged Engineering, operations-research optimizers land in Decision
+    #     Sciences. A CS-only (or CS+Math) gate silently drops these true hits.
+    #     The five technical fields keep them while still excluding the real noise
+    #     domains (biology, medicine, chemistry, social sciences, humanities) that
+    #     a bare full-text `search` otherwise drags in. NOTE: 15 is Chemical
+    #     Engineering (NOT Mathematics — that is 26); the original 17|15 value was
+    #     a bug that leaked chemistry/spectroscopy papers. Precision is recovered
+    #     upstream by the query-writer (specific, application-anchored queries)
+    #     rather than by a narrow field gate, which trades away recall.
+    base_filter: str = "type:article|preprint,primary_topic.field.id:17|26|22|31|18"
     # How the OpenAlex search query is built from the research prompt:
     #   "regex" — deterministic: parse qualified name + objective (no LLM).
     #   "codex" — a Codex query-writer distills the prompt into keywords, with
@@ -308,6 +316,16 @@ _QUERY_WRITER_INSTRUCTION = (
     '(e.g. \"orthogonalized momentum matrix optimizer\", not \"optimization\").\n'
     "- Prefer the method's proper name and its algorithmic mechanism if known "
     '(e.g. \"Newton-Schulz iteration orthogonalization\", \"Muon optimizer\").\n'
+    "- ANCHOR a method/algorithm name with its application domain in the SAME "
+    "query — a bare method name matches the wrong field (e.g. \"Newton-Schulz "
+    "orthogonalization\" alone returns pure-mathematics matrix-iteration papers; "
+    "\"Newton-Schulz orthogonalization momentum optimizer neural network\" "
+    "returns the machine-learning application). Add 2-3 application words "
+    "(the task, the model class, or \"optimizer\"/\"training\") to every "
+    "method-named query.\n"
+    "- The target module and its hot spots (above) name the concrete method — "
+    "USE those names verbatim; they are the research subject, not forbidden "
+    "framework identifiers.\n"
     "- Do not use the NOT operator.\n"
     "\n"
     "Output up to 10 queries, ONE PER LINE, ordered most to least important. "
