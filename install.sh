@@ -43,6 +43,25 @@ uv tool install --force "git+${REPO}@${VERSION}"
 # Make sure ~/.local/bin is on PATH for future shells (idempotent)
 uv tool update-shell >/dev/null 2>&1 || true
 
+# Optionally wire the qwen agent alias into the user's shell rc. When sourced,
+# it reroutes `claude/codex --model Qwen*` (from anywhere inside a spotlights
+# tree) to the local pi agent backed by VELA Qwen3.8-27B. Idempotent.
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+ALIAS_FILE="${SCRIPT_DIR}/scripts/qwen_alias.sh"
+if [ -f "$ALIAS_FILE" ]; then
+  for RC in "$HOME/.zshrc" "$HOME/.bashrc"; do
+    [ -f "$RC" ] || continue
+    if ! grep -qF "qwen_alias.sh" "$RC" 2>/dev/null; then
+      {
+        printf '\n# spotlights: reroute `claude/codex --model Qwen*` to pi (VELA Qwen3.8-27B).\n'
+        printf '# Must stay after the claude()/codex() definitions so fallbacks are preserved.\n'
+        printf '[ -f "%s" ] && source "%s"\n' "$ALIAS_FILE" "$ALIAS_FILE"
+      } >> "$RC"
+      say "Installed qwen agent alias into ${RC}"
+    fi
+  done
+fi
+
 if command -v spotlights-engine >/dev/null 2>&1; then
   say "Installed: spotlights-engine ($(command -v spotlights-engine))"
   cat <<'EOF'
