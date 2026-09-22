@@ -1,10 +1,11 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
-import { GEOMETRY } from './storyboard.mjs';
+import { BEATS, GEOMETRY, dwellFor } from './storyboard.mjs';
 import { PAGE_URL } from './paths.mjs';
 import {
   OVERLAY_IDS, installOverlay, showCaption, hideCaption, ring, unring, moveCursor, pulseCursor,
+  beatWaits, pageText, CAPTION_HIDE_WAIT_MS, CAPTION_MIN_ONSCREEN_MS,
 } from './overlay.mjs';
 
 let browser;
@@ -133,4 +134,71 @@ test('the cursor moves to a target centre and can pulse', async () => {
 
 test('moveCursor rejects a selector that is not on the page', async () => {
   await assert.rejects(() => moveCursor(page, '#no-such-element'), /no-such-element/);
+});
+
+/**
+ * The three below are the guard on the defect that made most of the recorded captions
+ * unreadable: the recorder used to show a caption *after* a beat's choreography, so its
+ * screen time was whatever the dwell had left over -- nothing, for every beat that
+ * overran, and three of the gif's seven captions lasted a single sampled frame.
+ */
+test('a caption is guaranteed the on-screen floor on a beat that would flash it', () => {
+  // A trivial beat: a 1.0s dwell and nothing spent but the caption's own fade-in. The
+  // dwell remainder alone leaves the caption up for well under the floor.
+  const fast = beatWaits({ dwellMs: 1000, spentMs: 320, onScreenMs: 0, hasCaption: true });
+  assert.ok(fast.dwellWaitMs < CAPTION_MIN_ONSCREEN_MS, 'premise: the dwell alone is not enough');
+  assert.ok(fast.floorTopUpMs > 0, 'no top-up on a beat that would flash its caption');
+  assert.equal(fast.projectedOnScreenMs, CAPTION_MIN_ONSCREEN_MS);
+
+  // The floor holds for every dwell the storyboard actually declares, at the worst case
+  // for the caption: choreography that eats the whole dwell and leaves zero remainder.
+  for (const beat of BEATS) {
+    for (const cut of beat.cuts) {
+      const dwellMs = Math.round(dwellFor(beat, cut) * 1000);
+      for (const spentMs of [0, dwellMs, dwellMs * 3]) {
+        const w = beatWaits({ dwellMs, spentMs, onScreenMs: 0, hasCaption: true });
+        assert.ok(
+          w.projectedOnScreenMs >= CAPTION_MIN_ONSCREEN_MS,
+          `${beat.id}/${cut} spent ${spentMs}ms: caption gets only ${w.projectedOnScreenMs}ms`,
+        );
+      }
+    }
+  }
+
+  // An uncaptioned beat is paced by its dwell alone and asks for no hold.
+  const bare = beatWaits({ dwellMs: 1000, spentMs: 100, hasCaption: false });
+  assert.equal(bare.hideReserveMs, 0);
+  assert.equal(bare.floorTopUpMs, 0);
+  assert.equal(bare.projectedOnScreenMs, 0);
+});
+
+test('the dwell stays a deadline, and a caption already past the floor is not held', () => {
+  // A beat whose choreography has blown the dwell waits none of it and says how much.
+  const over = beatWaits({ dwellMs: 1500, spentMs: 4200, onScreenMs: 3900, hasCaption: true });
+  assert.equal(over.dwellWaitMs, 0);
+  assert.equal(over.overrunMs, 4200 + CAPTION_HIDE_WAIT_MS - 1500);
+  assert.equal(over.floorTopUpMs, 0, 'a caption long past the floor must not be held further');
+  assert.equal(over.projectedOnScreenMs, 3900);
+
+  // The fade-out is still reserved out of the remainder rather than added to the beat.
+  const roomy = beatWaits({ dwellMs: 8000, spentMs: 1000, onScreenMs: 680, hasCaption: true });
+  assert.equal(roomy.hideReserveMs, CAPTION_HIDE_WAIT_MS);
+  assert.equal(roomy.dwellWaitMs, 8000 - 1000 - CAPTION_HIDE_WAIT_MS);
+  assert.equal(roomy.overrunMs, 0);
+  assert.equal(roomy.floorTopUpMs, 0);
+});
+
+test('page text excludes the overlay, so a caption cannot satisfy a page assertion', async () => {
+  // The caption is up while a beat's assertions run, and it quotes the page's own
+  // figures, so the text a domContains reads must not include it.
+  await showCaption(page, 'sl-caption-sentinel <b>$35.75</b>');
+  const text = await pageText(page);
+  assert.ok(!text.includes('sl-caption-sentinel'), 'the caption leaked into the page text');
+  assert.match(text, /candidate leaderboard/i, 'the page text lost the page');
+  // Nothing rendered may be dropped by the read, and the caption must survive it.
+  // addEventListener occurs only inside the page's two body <script> blocks, never in
+  // its prose, so it witnesses that unrendered source stayed out of the read.
+  assert.ok(!text.includes('addEventListener'), 'the body <script> source leaked into the page text');
+  assert.equal(await page.locator(`#${OVERLAY_IDS.caption}`).isVisible(), true);
+  await hideCaption(page);
 });

@@ -14,7 +14,7 @@ import {
 } from './storyboard.mjs';
 import {
   installOverlay, showCaption, hideCaption, ring, unring, moveCursor, pulseCursor,
-  CAPTION_HIDE_WAIT_MS,
+  beatWaits, pageText, CAPTION_MIN_ONSCREEN_MS,
 } from './overlay.mjs';
 import { PAGE_URL } from './paths.mjs';
 
@@ -82,7 +82,10 @@ async function checkAssert(page, beatId, a) {
   };
   switch (a.type) {
     case 'domContains': {
-      const text = await page.locator('body').innerText();
+      // The page's own text, with the overlay excluded: the caption is up by the time
+      // assertions run, so `body.innerText` would let a beat assert against its own
+      // narration instead of the report. See pageText in overlay.mjs.
+      const text = await pageText(page);
       if (!text.toLowerCase().includes(a.text.toLowerCase())) {
         fail(`page does not contain ${JSON.stringify(a.text)}`);
       }
@@ -170,6 +173,19 @@ await page.waitForTimeout(600);
  * number, and nothing here duplicates it. A beat whose choreography plus that reserve
  * is already longer than its dwell waits zero and says so, because those overruns are
  * the whole budget discussion and have to be visible to a human.
+ *
+ * The caption is raised BEFORE the beat's actions, and so is up for the whole beat.
+ * Showing it last made its screen time whatever the dwell had left over, which for
+ * every beat that overran was nothing at all: the caption appeared and the fade-out
+ * immediately pulled it down. Now the choreography plays underneath the sentence that
+ * describes it, and `CAPTION_MIN_ONSCREEN_MS` is the floor no caption may fall below.
+ * The assertions still run after the actions -- only the caption moved -- so a beat
+ * still has to prove its effect fired. Every captioned beat logs the caption's measured
+ * on-screen time, because this regression is invisible in the code and shows up only in
+ * a rendered GIF.
+ *
+ * A dry run paces nothing: it neither waits out a dwell nor honours the floor, so it
+ * reports no caption time rather than a misleading one.
  */
 const DRY_RUN_WAIT_MS = 60;
 
@@ -179,35 +195,66 @@ try {
   for (const beat of beatsForCut(cut)) {
     const beatStartedAt = Date.now();
 
+    // Caption first: it narrates what is about to happen, and the choreography, the
+    // dwell remainder and the fade-out all run underneath it.
+    const caption = captionFor(beat, cut);
+    let captionShownAt = null;
+    if (caption) {
+      await showCaption(page, caption);
+      captionShownAt = Date.now();
+    }
+
     for (const action of beat.actions) await runAction(page, action);
     for (const a of beat.asserts) await checkAssert(page, beat.id, a);
-
-    const caption = captionFor(beat, cut);
-    if (caption) await showCaption(page, caption);
 
     const dwellSec = dwellFor(beat, cut);
     const dwellMs = Math.round(dwellSec * 1000);
     if (dryRun) {
       await page.waitForTimeout(DRY_RUN_WAIT_MS);
     } else {
-      const spentMs = Date.now() - beatStartedAt;
-      const hideReserveMs = caption ? CAPTION_HIDE_WAIT_MS : 0;
-      const remainingMs = dwellMs - spentMs - hideReserveMs;
-      if (remainingMs > 0) {
-        await page.waitForTimeout(remainingMs);
+      const now = Date.now();
+      const spentMs = now - beatStartedAt;
+      const waits = beatWaits({
+        dwellMs,
+        spentMs,
+        onScreenMs: captionShownAt === null ? 0 : now - captionShownAt,
+        hasCaption: Boolean(caption),
+      });
+      if (waits.dwellWaitMs > 0) {
+        await page.waitForTimeout(waits.dwellWaitMs);
       } else {
         console.warn(
           `  WARN  ${beat.id} overran its dwell: dwell ${dwellSec.toFixed(1)}s, `
           + `choreography cost ${(spentMs / 1000).toFixed(2)}s `
-          + `+ ${(hideReserveMs / 1000).toFixed(2)}s reserved for the caption fade-out `
-          + `(over by ${(-remainingMs / 1000).toFixed(2)}s) -- waited 0s`,
+          + `+ ${(waits.hideReserveMs / 1000).toFixed(2)}s reserved for the caption fade-out `
+          + `(over by ${(waits.overrunMs / 1000).toFixed(2)}s) -- waited 0s`,
+        );
+      }
+      if (waits.floorTopUpMs > 0) {
+        await page.waitForTimeout(waits.floorTopUpMs);
+        console.warn(
+          `  WARN  ${beat.id} held its caption ${(waits.floorTopUpMs / 1000).toFixed(2)}s `
+          + `past the beat to clear the ${CAPTION_MIN_ONSCREEN_MS}ms caption floor`,
         );
       }
     }
+
+    // Measured, not predicted: the span the caption was fully up, from the end of its
+    // fade-in to the start of its fade-out.
+    const onScreenMs = !dryRun && captionShownAt !== null ? Date.now() - captionShownAt : null;
     if (caption) await hideCaption(page);
 
+    if (onScreenMs !== null && onScreenMs < CAPTION_MIN_ONSCREEN_MS) {
+      console.warn(
+        `  WARN  ${beat.id} caption was legible for only ${onScreenMs}ms, under the `
+        + `${CAPTION_MIN_ONSCREEN_MS}ms floor -- it will flash past unread`,
+      );
+    }
+
+    let captionNote = 'no caption';
+    if (caption) captionNote = onScreenMs === null ? 'caption unpaced' : `caption ${onScreenMs}ms`;
     const elapsedSec = (Date.now() - runStartedAt) / 1000;
-    console.log(`  ok  ${beat.id} (${dwellSec}s, elapsed ${elapsedSec.toFixed(2)}s)`);
+    console.log(`  ok  ${beat.id} (${dwellSec}s, ${captionNote}, elapsed ${elapsedSec.toFixed(2)}s)`);
   }
 } catch (err) {
   failed = err;

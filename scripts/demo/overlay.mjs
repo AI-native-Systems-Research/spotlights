@@ -27,6 +27,21 @@ const HIDE_SLACK_MS = 60;
 export const CAPTION_HIDE_WAIT_MS = CAPTION_TRANSITION_MS + HIDE_SLACK_MS;
 const RING_HIDE_WAIT_MS = RING_TRANSITION_MS + HIDE_SLACK_MS;
 
+/**
+ * The floor on a caption's legible screen time.
+ *
+ * The burned-in caption is the demo's whole narrative device, so no beat may flash
+ * one past the viewer: a beat with trivial choreography and a short dwell would
+ * otherwise hold its caption up for barely longer than the fade-in. The recorder
+ * tops a beat up to this before starting the fade-out, even when that pushes the
+ * beat past its dwell -- legibility beats the budget, and the top-up is logged.
+ *
+ * Deliberately *not* derived from the transition durations above. A variant that
+ * halves every fade to speed the demo up must not halve how long a sentence stays
+ * readable, so this number is independent of them.
+ */
+export const CAPTION_MIN_ONSCREEN_MS = 1200;
+
 const CSS = `
 #${OVERLAY_IDS.caption} {
   position: fixed; left: 50%; bottom: 56px; transform: translateX(-50%) translateY(8px);
@@ -106,6 +121,59 @@ export async function hideCaption(page) {
     document.getElementById(id).dataset.shown = '0';
   }, OVERLAY_IDS.caption);
   await page.waitForTimeout(CAPTION_HIDE_WAIT_MS);
+}
+
+/**
+ * Pure pacing arithmetic for one beat, so the caption guarantee is testable without
+ * a browser and cannot drift silently the way the ordering bug did.
+ *
+ * `spentMs` is everything the beat has cost so far -- the caption fade-in, the
+ * actions, the assertions. `onScreenMs` is how long the caption has been fully up at
+ * that same moment; the two differ because the caption is raised first and the fade-in
+ * itself is not reading time. The dwell is a deadline, so `dwellWaitMs` is whatever is
+ * left of it once the fade-out reserve is set aside, and a beat already past its dwell
+ * waits zero and reports `overrunMs`. `floorTopUpMs` is the extra hold, after that
+ * remainder, needed to clear CAPTION_MIN_ONSCREEN_MS.
+ */
+export function beatWaits({ dwellMs, spentMs, onScreenMs = 0, hasCaption }) {
+  const hideReserveMs = hasCaption ? CAPTION_HIDE_WAIT_MS : 0;
+  const remainingMs = dwellMs - spentMs - hideReserveMs;
+  const dwellWaitMs = Math.max(0, remainingMs);
+  const afterDwellMs = onScreenMs + dwellWaitMs;
+  const floorTopUpMs = hasCaption ? Math.max(0, CAPTION_MIN_ONSCREEN_MS - afterDwellMs) : 0;
+  return {
+    hideReserveMs,
+    dwellWaitMs,
+    overrunMs: Math.max(0, -remainingMs),
+    floorTopUpMs,
+    projectedOnScreenMs: hasCaption ? afterDwellMs + floorTopUpMs : 0,
+  };
+}
+
+/**
+ * The report's own rendered text, with the overlay's nodes excluded.
+ *
+ * The caption is a child of `document.body`, and the recorder now raises it *before*
+ * a beat's assertions run, so a plain `body.innerText` would hand a beat the sentence
+ * it is being narrated with: the cost-tiles caption quotes "$35.75", which is exactly
+ * what that beat's assertion exists to prove the report still says. Hiding the overlay
+ * nodes for the read keeps `innerText` semantics intact -- reading per-child instead
+ * would pull in the page's two body `<script>` blocks, whose source is not rendered
+ * text but which `innerText` falls back to `textContent` for. There is no await
+ * between hiding and restoring, so no frame can be painted without the caption and
+ * it never blinks on camera.
+ */
+export async function pageText(page) {
+  return page.evaluate((ids) => {
+    const nodes = ids.map((id) => document.getElementById(id)).filter(Boolean);
+    const saved = nodes.map((el) => el.style.display);
+    nodes.forEach((el) => { el.style.display = 'none'; });
+    try {
+      return document.body.innerText;
+    } finally {
+      nodes.forEach((el, i) => { el.style.display = saved[i]; });
+    }
+  }, Object.values(OVERLAY_IDS));
 }
 
 export async function ring(page, selector) {
