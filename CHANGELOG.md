@@ -24,6 +24,10 @@ The first end-to-end version: point it at a repo and a goal, get a ranked, brows
 - **`/spotlights-share-candidates`** — packages the top-N candidates into a self-contained offline ZIP.
 - **`/spotlights-apply-candidate`** — drives `spotlights-engine apply` in-session.
 
+### Paper
+
+- **[Spotlights: Discovering Improvement Opportunities in Software Repositories](https://arxiv.org/abs/2609.20446)** (arXiv:2609.20446) — the method behind this release: the module map, the successive agent reviews that narrow it to candidates, and the evaluation across four domains.
+
 ### Known limitations
 
 - **Some candidates will be irrelevant to your setup.** v0 reasons over the code as written and knows nothing about your workload or configuration, so it can surface candidates in paths your deployment never executes — a disabled backend, an unset feature flag, another platform's code. Ranking orders candidates by estimated impact; it does not check reachability. Expect to discard some on review.
