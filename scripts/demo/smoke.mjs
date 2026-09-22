@@ -1,15 +1,12 @@
 // Proves Playwright can open the self-contained report over file:// with real fonts.
 import { chromium } from 'playwright';
-import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
 import { mkdir } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
+import { GEOMETRY } from './storyboard.mjs';
+import { PAGE_URL } from './paths.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-export const REPO_ROOT = resolve(HERE, '..', '..');
-export const PAGE_URL = pathToFileURL(
-  resolve(REPO_ROOT, 'examples/vllm_subset/experiment.html'),
-).href;
-export const GEOMETRY = { width: 1440, height: 810 };
 
 const browser = await chromium.launch({ channel: 'chrome' });
 const page = await browser.newPage({ viewport: GEOMETRY, deviceScaleFactor: 1 });

@@ -1,16 +1,11 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { chromium } from 'playwright';
-import { pathToFileURL } from 'node:url';
-import { resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { GEOMETRY, PAGE_RELATIVE_PATH } from './storyboard.mjs';
+import { GEOMETRY } from './storyboard.mjs';
+import { PAGE_URL } from './paths.mjs';
 import {
   OVERLAY_IDS, installOverlay, showCaption, hideCaption, ring, unring, moveCursor, pulseCursor,
 } from './overlay.mjs';
-
-const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
-const PAGE_URL = pathToFileURL(resolve(REPO_ROOT, PAGE_RELATIVE_PATH)).href;
 
 let browser;
 let page;

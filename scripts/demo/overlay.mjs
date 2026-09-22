@@ -15,6 +15,16 @@ export const OVERLAY_IDS = {
 
 const STYLE_ID = 'sl-demo-overlay-style';
 
+// Transition durations from CSS (in milliseconds). Hide helpers wait these + ~60ms slack.
+const CAPTION_TRANSITION_MS = 280;
+const RING_TRANSITION_MS = 250;
+const HIDE_SLACK_MS = 60;
+
+// Total wait times for hide operations, derived from transition + slack above.
+// Must exceed the actual transition time to avoid racing the CSS visibility flip.
+const CAPTION_HIDE_WAIT_MS = CAPTION_TRANSITION_MS + HIDE_SLACK_MS;
+const RING_HIDE_WAIT_MS = RING_TRANSITION_MS + HIDE_SLACK_MS;
+
 const CSS = `
 #${OVERLAY_IDS.caption} {
   position: fixed; left: 50%; bottom: 56px; transform: translateX(-50%) translateY(8px);
@@ -93,7 +103,7 @@ export async function hideCaption(page) {
   await page.evaluate((id) => {
     document.getElementById(id).dataset.shown = '0';
   }, OVERLAY_IDS.caption);
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(CAPTION_HIDE_WAIT_MS);
 }
 
 export async function ring(page, selector) {
@@ -117,7 +127,7 @@ export async function unring(page) {
   await page.evaluate((id) => {
     document.getElementById(id).dataset.shown = '0';
   }, OVERLAY_IDS.ring);
-  await page.waitForTimeout(260);
+  await page.waitForTimeout(RING_HIDE_WAIT_MS);
 }
 
 export async function moveCursor(page, selector) {
