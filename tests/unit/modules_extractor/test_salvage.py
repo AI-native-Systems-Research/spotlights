@@ -1,6 +1,6 @@
 """Unit tests for `claude_stage.salvage_structured_payload`.
 
-Local models (e.g. `aws/gpt-oss-120b`) intermittently type the structured
+Local models (e.g. `Qwen/Qwen3.8-27B`) intermittently type the structured
 answer as assistant *text* — ``StructuredOutput({...})`` or bare JSON — instead
 of invoking the StructuredOutput tool, then loop against the Stop hook until
 `max_turns`. The terminal event then carries no `structured_output`, so the run
@@ -8,7 +8,7 @@ hard-fails even though the model produced the answer. `salvage_structured_payloa
 reconstructs the payload from the text stream.
 
 The event shapes and payload values below are lifted verbatim from a real
-`gpt-oss-120b` run over the `hrl_ocr/models/fonts_recognition` shard, so the
+`Qwen/Qwen3.8-27B` run over the `hrl_ocr/models/fonts_recognition` shard, so the
 fixture stays faithful to what the model actually emits (fields split across
 separate turns; ``StructuredOutput(...)`` wrapping; interleaved refusals).
 """

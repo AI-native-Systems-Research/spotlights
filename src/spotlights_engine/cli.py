@@ -632,7 +632,7 @@ def _build_config(args: argparse.Namespace) -> SpotlightsManagerConfig:
 
     # Step 1 always has a config object, so stamp the model straight onto it.
     # SPOTLIGHTS_SOURCE_ROOT_MAX_TURNS raises the source-root discovery turn cap
-    # for chattier models (e.g. local gpt-oss) that over-explore and hit the
+    # for chattier models (e.g. local Qwen/Qwen3.8-27B) that over-explore and hit the
     # default 15-turn ceiling before emitting the module list. Unset = default.
     # SPOTLIGHTS_EXTRACTOR_MAX_TURNS raises the enrich/assign (Stage-3A) turn cap
     # for the same reason: chatty models blow past the default 60 and abort with
@@ -646,7 +646,7 @@ def _build_config(args: argparse.Namespace) -> SpotlightsManagerConfig:
         _extractor_kwargs["max_turns"] = int(_emt)
     # SPOTLIGHTS_ENRICH_TIMEOUT_S / SPOTLIGHTS_EXTRACTOR_TIMEOUT_S raise the
     # per-shard enrich and whole-repo stage deadlines: a slow local proxy
-    # (gpt-oss over IBM LiteLLM) generates far slower than hosted Claude and
+    # (Qwen/Qwen3.8-27B over IBM LiteLLM) generates far slower than hosted Claude and
     # trips the defaults. Unset = default.
     _ets = os.environ.get("SPOTLIGHTS_ENRICH_TIMEOUT_S", "").strip()
     if _ets:
