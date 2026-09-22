@@ -278,17 +278,24 @@ def _parse_pi_stream(stdout: str) -> tuple[str, str | None, int, int]:
 
 
 def _heartbeat_loop(
-    stop: threading.Event, start: float, model: str, timeout_s: float
+    stop: threading.Event, start: float, model: str, timeout_s: float, env: dict
 ) -> None:
-    """Log liveness every `_HEARTBEAT_INTERVAL_S` while run_pi blocks.
+    """Log liveness every `_HEARTBEAT_INTERVAL_S` while run_pi blocks, and
+    auto-restart the tunnel if it drops.
 
     Cheap per beat: only a reachability check (`_backend_up`), never a
     generation probe — a probe would contend with the in-flight decode and
-    could false-alarm under load. A dropped `oc port-forward` tunnel (the most
-    common real "hang") makes the endpoint unreachable, so this catches it and
-    warns that the call will now block until the wall-clock timeout, instead of
-    the run sitting silent. For the deeper "listening but not generating" case,
-    use `probe_backend` on demand (`qwen.sh probe`).
+    could false-alarm under load.
+
+    A dropped `oc port-forward` tunnel is the most common real "hang": the pod
+    resets the connection, `oc` does not reconnect, and pi's in-flight HTTP
+    request blocks on the dead socket until the multi-hour wall-clock timeout.
+    Observed recovery: pi's HTTP client *does* retry, so the moment a fresh
+    tunnel is up it reconnects and the call resumes. So on an unreachable beat
+    this shells `qwen.sh ensure` to rebuild the tunnel — turning a silent
+    2-hour stall into a ~30s blip the run heals from on its own, no restart.
+    For the deeper "listening but not generating" case, use `probe_backend` on
+    demand (`qwen.sh probe`).
     """
     beat = 0
     while not stop.wait(_HEARTBEAT_INTERVAL_S):
@@ -301,15 +308,21 @@ def _heartbeat_loop(
                 elapsed,
                 timeout_s,
             )
+            continue
+        _log.warning(
+            "pi[%s] %.0fs/%.0fs elapsed; BACKEND UNREACHABLE at %s "
+            "(oc port-forward dropped?) — restarting tunnel so pi can reconnect",
+            model,
+            elapsed,
+            timeout_s,
+            _BACKEND_MODELS_URL,
+        )
+        try:
+            ensure_backend(env)
+        except LocalAgentError as exc:
+            _log.warning("pi[%s] tunnel restart failed: %s", model, exc)
         else:
-            _log.warning(
-                "pi[%s] %.0fs/%.0fs elapsed; BACKEND UNREACHABLE at %s "
-                "— call will block until timeout (oc port-forward dropped?)",
-                model,
-                elapsed,
-                timeout_s,
-                _BACKEND_MODELS_URL,
-            )
+            _log.info("pi[%s] tunnel restarted; pi should reconnect shortly", model)
 
 
 def run_pi(
@@ -354,7 +367,7 @@ def run_pi(
     stop = threading.Event()
     heartbeat = threading.Thread(
         target=_heartbeat_loop,
-        args=(stop, start, model or PI_DEFAULT_MODEL, timeout_s),
+        args=(stop, start, model or PI_DEFAULT_MODEL, timeout_s, env),
         daemon=True,
     )
     heartbeat.start()
