@@ -44,8 +44,8 @@ uv tool install --force "git+${REPO}@${VERSION}"
 uv tool update-shell >/dev/null 2>&1 || true
 
 # Optionally wire the qwen agent alias into the user's shell rc. When sourced,
-# it reroutes `claude/codex --model Qwen*` (from anywhere inside a spotlights
-# tree) to the local pi agent backed by VELA Qwen3.8-27B. Idempotent.
+# it reroutes `claude/codex --model Qwen*` (from any directory) to the local pi
+# agent backed by VELA Qwen3.8-27B. Idempotent.
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 ALIAS_FILE="${SCRIPT_DIR}/scripts/qwen_alias.sh"
 if [ -f "$ALIAS_FILE" ]; then

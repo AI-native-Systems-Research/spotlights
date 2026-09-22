@@ -1,9 +1,9 @@
 #!/usr/bin/env zsh
 # Transparent qwen redirect for `claude` / `codex`.
 #
-# When you are anywhere inside a `spotlights` tree AND pass a Qwen model
-# (e.g. `claude --model Qwen-3.8-27B ...`), the call is rerouted to the pi
-# agent backed by Qwen3.8-27B on VELA (via scripts/qwen_agent.sh pi).
+# When you pass a Qwen model (e.g. `claude --model Qwen-3.8-27B ...`) from any
+# directory, the call is rerouted to the pi agent backed by Qwen3.8-27B on VELA
+# (via scripts/qwen_agent.sh pi).
 #
 # Otherwise the call falls through to your normal `claude` / `codex`
 # (the IBM-LiteLLM routing functions defined in ~/.zshrc), unchanged.
@@ -42,7 +42,7 @@ _spot_run_pi_qwen() {
 }
 
 claude() {
-  if [[ "$PWD" == */spotlights* ]] && _spot_has_qwen "$@"; then
+  if _spot_has_qwen "$@"; then
     _spot_run_pi_qwen "$@"
   elif (( ${+functions[_orig_claude]} )); then
     _orig_claude "$@"
@@ -52,7 +52,7 @@ claude() {
 }
 
 codex() {
-  if [[ "$PWD" == */spotlights* ]] && _spot_has_qwen "$@"; then
+  if _spot_has_qwen "$@"; then
     _spot_run_pi_qwen "$@"
   elif (( ${+functions[_orig_codex]} )); then
     _orig_codex "$@"
