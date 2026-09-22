@@ -174,6 +174,9 @@ if _qwen_is_sourced; then
     elif (( ${+functions[_orig_codex]} )); then _orig_codex "$@"
     else command codex "$@"; fi
   }
+  # Direct launcher: `qwen [pi|research|caveman|fast|opencode|codex] [args]`.
+  # Auto-starts the port-forward if down (via qwen_launch -> ensure_pf).
+  qwen() { qwen_launch "$@"; }
 else
   qwen_launch "$@"
 fi
