@@ -1,0 +1,74 @@
+cff-version: 1.2.0
+message: "If you use Spotlights in your research, please cite the paper below."
+title: "Spotlights"
+abstract: "Find the few places in a codebase worth optimizing — and see the evidence for why."
+type: software
+version: 0.1.0
+license: Apache-2.0
+repository-code: "https://github.com/AI-native-Systems-Research/spotlights"
+url: "https://github.com/AI-native-Systems-Research/spotlights"
+keywords:
+  - optimization-opportunity discovery
+  - code analysis
+  - large language models
+  - agents
+authors:
+  - given-names: Udi
+    family-names: Barzelay
+  - given-names: Ophir
+    family-names: Azulai
+  - given-names: Idan
+    family-names: Friedman
+  - given-names: Inbar
+    family-names: Shapira
+  - given-names: Foad
+    family-names: Abo Dahood
+  - given-names: Yevgeny
+    family-names: Burshtein
+  - given-names: Orit
+    family-names: Prince
+  - given-names: Michael
+    family-names: Soloveitchik
+  - given-names: Oshri
+    family-names: Naparstek
+  - given-names: Roi
+    family-names: Pony
+  - given-names: Tal
+    family-names: Drory
+  - given-names: Michael
+    family-names: Factor
+preferred-citation:
+  type: article
+  title: "Spotlights: Discovering Improvement Opportunities in Software Repositories"
+  year: 2026
+  month: 9
+  url: "https://arxiv.org/abs/2609.20446"
+  identifiers:
+    - type: other
+      value: "arXiv:2609.20446"
+      description: arXiv preprint identifier
+  authors:
+    - given-names: Udi
+      family-names: Barzelay
+    - given-names: Ophir
+      family-names: Azulai
+    - given-names: Idan
+      family-names: Friedman
+    - given-names: Inbar
+      family-names: Shapira
+    - given-names: Foad
+      family-names: Abo Dahood
+    - given-names: Yevgeny
+      family-names: Burshtein
+    - given-names: Orit
+      family-names: Prince
+    - given-names: Michael
+      family-names: Soloveitchik
+    - given-names: Oshri
+      family-names: Naparstek
+    - given-names: Roi
+      family-names: Pony
+    - given-names: Tal
+      family-names: Drory
+    - given-names: Michael
+      family-names: Factor
