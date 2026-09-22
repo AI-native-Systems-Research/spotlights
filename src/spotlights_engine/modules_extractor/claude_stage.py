@@ -218,6 +218,103 @@ def final_message_text(result_event: dict) -> str:
     return ""
 
 
+def _iter_json_objects(text: str):
+    """Yield every top-level ``{...}`` region in `text` that parses as a JSON
+    object.
+
+    Brace-matched, string-aware (ignores braces inside JSON strings). Only the
+    outermost object at each start position is yielded, so an inner payload
+    like ``StructuredOutput({...})`` yields the ``{...}`` — exactly the shape a
+    chatty local model emits when it types the tool call as prose instead of
+    invoking the tool.
+    """
+    i, n = 0, len(text)
+    while i < n:
+        if text[i] != "{":
+            i += 1
+            continue
+        depth = 0
+        in_str = False
+        esc = False
+        j = i
+        matched = False
+        while j < n:
+            ch = text[j]
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == "\\":
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+            elif ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    candidate = text[i : j + 1]
+                    try:
+                        obj = json.loads(candidate)
+                    except json.JSONDecodeError:
+                        obj = None
+                    if isinstance(obj, dict):
+                        yield obj
+                    i = j + 1
+                    matched = True
+                    break
+            j += 1
+        if not matched:
+            break
+
+
+def salvage_structured_payload(
+    stdout: bytes, output_type: type[BaseModel]
+) -> str | None:
+    """Reconstruct a structured payload from a run that never called the tool.
+
+    A chatty local model sometimes types the answer as assistant text —
+    ``StructuredOutput({...})`` or bare JSON — instead of invoking the
+    StructuredOutput tool, then loops against the Stop hook until it burns
+    `max_turns`/timeout. The terminal event carries no `structured_output`, so
+    the run hard-fails even though the model produced the answer.
+
+    This scans every assistant text event for embedded JSON objects and, for
+    each *required* field of `output_type`, keeps the last value seen. Local
+    models split the required fields across separate emissions (e.g.
+    ``module_decisions`` in one turn, ``assignments`` in the next); merging the
+    latest of each reassembles a complete payload. Returns the merged JSON text
+    only when every required field was found, else None.
+    """
+    schema = output_type.model_json_schema()
+    required = set(schema.get("required") or schema.get("properties") or {})
+    if not required:
+        return None
+    latest: dict[str, object] = {}
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(ev, dict) or ev.get("type") != "assistant":
+            continue
+        message = ev.get("message") or {}
+        for chunk in message.get("content") or []:
+            if not isinstance(chunk, dict) or chunk.get("type") != "text":
+                continue
+            for obj in _iter_json_objects(chunk.get("text") or ""):
+                for key in required:
+                    if key in obj:
+                        latest[key] = obj[key]
+    if not required.issubset(latest):
+        return None
+    return json.dumps({key: latest[key] for key in latest})
+
+
 def duration_seconds(event: dict) -> float | None:
     for key in ("duration_s", "elapsed_s"):
         value = as_float(event.get(key))
@@ -367,15 +464,69 @@ def run_structured_claude_stage(
     max_turns: int,
     timeout_s: int,
     on_event: Callable[[str], None] | None = None,
+    salvage: bool = False,
 ) -> ClaudeStageResult[TModel]:
     """Run one structured-output Claude attempt over `repo_path`.
 
     Writes the rendered prompt and schema before launch, then raw stdout/stderr,
     the terminal result event, and the extracted final message before Pydantic
     parsing — so a parse/schema failure still leaves the raw evidence on disk.
+
+    When `salvage` is set, a subprocess-level failure (timeout, nonzero exit,
+    absent terminal event, terminal `is_error`) does not immediately raise: the
+    raw stream is scanned for a structured payload the model typed as text but
+    never emitted through the tool (see `salvage_structured_payload`). A
+    reconstructed payload is validated and returned like a normal attempt; only
+    when nothing salvageable is found does the original error propagate.
     """
     argv0 = resolve_and_check(claude_bin=claude_bin, repo_path=repo_path)
     schema_text = build_schema_text(output_type)
+
+    def _salvage_result(
+        stdout: bytes, *, fallback_duration_s: float, why: str
+    ) -> ClaudeStageResult[TModel] | None:
+        if not salvage:
+            return None
+        payload = salvage_structured_payload(stdout, output_type)
+        if not payload or not payload.strip():
+            return None
+        telem = _stage_telemetry_from_stream(
+            stdout, fallback_duration_s=fallback_duration_s
+        )
+        result_event = extract_result_event(stdout) or {}
+        if attempt_dir is not None:
+            atomic_write_text(attempt_dir / "salvaged_payload.json", payload)
+        notify(
+            on_event,
+            f"extractor: {stage_name} salvaged structured payload from "
+            f"text stream ({why})",
+        )
+        try:
+            parsed = output_type.model_validate_json(payload)
+        except ValidationError as exc:
+            if attempt_dir is not None:
+                atomic_write_text(
+                    attempt_dir / "salvage_validation_error.txt", str(exc)
+                )
+            return ClaudeStageResult(
+                parsed=None,
+                validation_error=exc,
+                result_event=result_event,
+                raw_payload=payload,
+                telemetry=telem,
+            )
+        if attempt_dir is not None:
+            atomic_write_text(
+                attempt_dir / "parsed_model.json",
+                parsed.model_dump_json(indent=2),
+            )
+        return ClaudeStageResult(
+            parsed=parsed,
+            validation_error=None,
+            result_event=result_event,
+            raw_payload=payload,
+            telemetry=telem,
+        )
 
     if attempt_dir is not None:
         attempt_dir.mkdir(parents=True, exist_ok=True)
@@ -416,6 +567,13 @@ def run_structured_claude_stage(
         if attempt_dir is not None:
             atomic_write_bytes(attempt_dir / "stream.jsonl", exc.stdout or b"")
             atomic_write_bytes(attempt_dir / "stderr.log", exc.stderr or b"")
+        salvaged = _salvage_result(
+            exc.stdout or b"",
+            fallback_duration_s=exc.duration_s,
+            why=f"timeout after {exc.duration_s:.1f}s",
+        )
+        if salvaged is not None:
+            return salvaged
         context: dict[str, object] = {
             "timeout_s": timeout_s,
             "stage": stage_name,
@@ -441,6 +599,13 @@ def run_structured_claude_stage(
         result.stdout, fallback_duration_s=result.duration_s
     )
     if result.returncode != 0:
+        salvaged = _salvage_result(
+            result.stdout,
+            fallback_duration_s=result.duration_s,
+            why=f"exit={result.returncode}",
+        )
+        if salvaged is not None:
+            return salvaged
         stderr_tail = result.stderr[-500:].decode("utf-8", "replace")
         stdout_tail = result.stdout[-500:].decode("utf-8", "replace")
         context = {
@@ -462,6 +627,13 @@ def run_structured_claude_stage(
 
     result_event = extract_result_event(result.stdout)
     if result_event is None:
+        salvaged = _salvage_result(
+            result.stdout,
+            fallback_duration_s=result.duration_s,
+            why="no terminal result event",
+        )
+        if salvaged is not None:
+            return salvaged
         raise ExtractorAgentError(
             f"claude ({stage_name}) stream-json had no terminal result event",
             stage=stage_name,
@@ -469,6 +641,18 @@ def run_structured_claude_stage(
         )
     if result_event.get("is_error"):
         api_reason = api_failure_reason(result.stdout)
+        # Only salvage a non-API terminal error: an API-classified failure
+        # (rate limit, timeout, overload) must stay retryable upstream rather
+        # than be resolved from a partial stream. The loop-to-max_turns case
+        # this salvage targets is not API-classified.
+        if api_reason is None:
+            salvaged = _salvage_result(
+                result.stdout,
+                fallback_duration_s=result.duration_s,
+                why="terminal is_error",
+            )
+            if salvaged is not None:
+                return salvaged
         terminal_context: dict[str, object] = {
             "stage": stage_name,
             "telemetry": stage_telemetry,
@@ -544,4 +728,5 @@ __all__ = [
     "notify",
     "resolve_and_check",
     "run_structured_claude_stage",
+    "salvage_structured_payload",
 ]

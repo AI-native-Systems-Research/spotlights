@@ -644,6 +644,26 @@ def _build_config(args: argparse.Namespace) -> SpotlightsManagerConfig:
     _emt = os.environ.get("SPOTLIGHTS_EXTRACTOR_MAX_TURNS", "").strip()
     if _emt:
         _extractor_kwargs["max_turns"] = int(_emt)
+    # SPOTLIGHTS_ENRICH_TIMEOUT_S / SPOTLIGHTS_EXTRACTOR_TIMEOUT_S raise the
+    # per-shard enrich and whole-repo stage deadlines: a slow local proxy
+    # (gpt-oss over IBM LiteLLM) generates far slower than hosted Claude and
+    # trips the defaults. Unset = default.
+    _ets = os.environ.get("SPOTLIGHTS_ENRICH_TIMEOUT_S", "").strip()
+    if _ets:
+        _extractor_kwargs["enrich_timeout_s"] = int(_ets)
+    _tts = os.environ.get("SPOTLIGHTS_EXTRACTOR_TIMEOUT_S", "").strip()
+    if _tts:
+        _extractor_kwargs["timeout_s"] = int(_tts)
+    # SPOTLIGHTS_MAX_PARALLEL_ENRICH_SHARDS cuts Stage-3 fan-out (local proxy
+    # refuses connections under the default 5). SPOTLIGHTS_ENRICH_API_RETRIES
+    # adds retries for transient API failures incl. ConnectionRefused. Unset =
+    # default.
+    _mpes = os.environ.get("SPOTLIGHTS_MAX_PARALLEL_ENRICH_SHARDS", "").strip()
+    if _mpes:
+        _extractor_kwargs["max_parallel_enrich_shards"] = int(_mpes)
+    _ear = os.environ.get("SPOTLIGHTS_ENRICH_API_RETRIES", "").strip()
+    if _ear:
+        _extractor_kwargs["enrich_api_retries"] = int(_ear)
     extractor_cfg = ExtractorConfig(**_extractor_kwargs)
 
     # Step 3 has no config object of its own: its Codex model rides on the

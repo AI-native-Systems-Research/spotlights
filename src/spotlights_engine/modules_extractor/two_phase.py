@@ -469,6 +469,7 @@ def _stage1_source_root(
             max_turns=config.source_root_max_turns,
             timeout_s=_effective_timeout(config.source_root_timeout_s, config.timeout_s),
             on_event=on_event,
+            salvage=True,
         )
         telemetry.add_claude("01_source_root", result)
         _persist_sessions(base, telemetry)
@@ -810,6 +811,7 @@ def _stage3a_single(
             max_turns=config.max_turns,
             timeout_s=config.timeout_s,
             on_event=on_event,
+            salvage=True,
         )
         telemetry.add_claude("03_enrich", result)
         _persist_sessions(base, telemetry)
@@ -1086,6 +1088,7 @@ async def _run_stage_with_api_retry(
     telemetry: _Telemetry,
     stage_tag: str,
     on_event: Callable[[str], None] | None,
+    salvage: bool = False,
 ) -> tuple[ClaudeStageResult[_TStage], str]:
     """One structured stage call, retrying API-level failures with backoff.
 
@@ -1122,6 +1125,7 @@ async def _run_stage_with_api_retry(
                 max_turns=config.max_turns,
                 timeout_s=timeout_s,
                 on_event=on_event,
+                salvage=salvage,
             )
         except ExtractorAgentError as exc:
             reason = exc.context.get("api_failure")
@@ -1214,6 +1218,7 @@ async def _assignment_shard_attempts(
             telemetry=telemetry,
             stage_tag=stage_tag,
             on_event=on_event,
+            salvage=True,
         )
         telemetry.add_claude(stage_tag, result)
 
@@ -1567,6 +1572,7 @@ async def _metadata_batch_attempts(
             telemetry=telemetry,
             stage_tag=stage_tag,
             on_event=on_event,
+            salvage=True,
         )
         telemetry.add_claude(stage_tag, result)
 
