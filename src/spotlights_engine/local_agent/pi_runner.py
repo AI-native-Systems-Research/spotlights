@@ -81,12 +81,25 @@ def _pi_bin() -> str | None:
     return shutil.which("pi")
 
 
-def _backend_up() -> bool:
-    try:
-        with urllib.request.urlopen(_BACKEND_MODELS_URL, timeout=3):
-            return True
-    except Exception:  # noqa: BLE001 - any failure means "not reachable"
-        return False
+def _backend_up(*, attempts: int = 3, timeout_s: float = 5.0) -> bool:
+    """True if the models endpoint answers within `attempts` tries.
+
+    A *single* GET can exceed a tight deadline while vLLM is mid-decode — the
+    /v1/models handler shares the event loop with an in-flight generation, so
+    it answers in <1s idle but can spike past several seconds under load. One
+    such spike is NOT a dropped tunnel; treating it as one made the heartbeat
+    cry "UNREACHABLE" and needlessly poke `qwen.sh ensure` while a healthy
+    `oc port-forward` was still serving. Only a genuinely dead tunnel fails
+    every retry across the whole window, so we retry before concluding down.
+    """
+    for i in range(attempts):
+        try:
+            with urllib.request.urlopen(_BACKEND_MODELS_URL, timeout=timeout_s):
+                return True
+        except Exception:  # noqa: BLE001 - any failure means "not reachable"
+            if i + 1 < attempts:
+                time.sleep(1.0)
+    return False
 
 
 @dataclass
