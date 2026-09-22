@@ -727,10 +727,17 @@ def run_structured_claude_stage(
 
     payload = final_message_text(result_event)
     if not payload.strip():
+        # An empty final message is a truncated stream, not a prompt/repo
+        # fault: the turn ended (often after burning output tokens on thinking)
+        # before any answer text arrived — the signature of a backend/tunnel
+        # drop mid-generation on a long call. Tag it `api_failure` so the retry
+        # loop restarts with a fresh session and backoff instead of hard-failing
+        # a multi-hour run on one dropped call. Exhaustion still re-raises.
         raise ExtractorAgentError(
             f"claude ({stage_name}) returned an empty final message",
             stage=stage_name,
             telemetry=stage_telemetry,
+            api_failure="empty_final_message",
         )
     if attempt_dir is not None:
         atomic_write_text(attempt_dir / "last_message.json", payload)
