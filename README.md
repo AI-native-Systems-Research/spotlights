@@ -267,7 +267,7 @@ Open an issue to discuss a direction before a large change. Bug reports and exam
 
 ## Citation
 
-⭐ If you find Spotlights useful, please consider giving us a Star and/or citing it in your work (please use the official BibTeX below rather than Google Scholar's auto-generated citation, which may truncate the author list):
+If you use Spotlights for your research, please cite our [paper](https://arxiv.org/abs/2609.20446):
 
 ```bibtex
 @article{barzelay2026spotlights,
