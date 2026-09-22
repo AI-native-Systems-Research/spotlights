@@ -24,6 +24,37 @@ DOC_PROMPT="To read PDFs/office docs/scans, use bash: 'pdftotext file.pdf -' (ad
 have()  { command -v "$1" >/dev/null 2>&1; }
 pf_up() { curl -sf -m3 "${BASE}/models" >/dev/null 2>&1; }
 
+# Active liveness probe: is the backend *generating*, or just accepting TCP?
+# `pf_up` (the /models reachability check) can pass while vLLM is wedged and no
+# completion ever returns — the state that makes a run look silently hung. This
+# fires a 1-token completion with a short deadline and reports which of the
+# three states we're in. Exit: 0 generating, 1 unreachable, 2 blocked.
+QWEN_PROBE_TIMEOUT="${QWEN_PROBE_TIMEOUT:-20}"
+qwen_probe() {
+  if ! pf_up; then
+    echo "xx  UNREACHABLE: ${BASE}/models not answering — tunnel down (run: qwen.sh ensure)" >&2
+    return 1
+  fi
+  local start end body
+  start=$(date +%s.%N)
+  body=$(curl -sf -m"${QWEN_PROBE_TIMEOUT}" "${BASE}/chat/completions" \
+    -H 'Content-Type: application/json' \
+    -d "{\"model\":\"${MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"max_tokens\":1,\"temperature\":0,\"stream\":false}" 2>/dev/null)
+  local rc=$?
+  end=$(date +%s.%N)
+  local dt; dt=$(awk "BEGIN{printf \"%.2f\", ${end}-${start}}")
+  if [ $rc -ne 0 ]; then
+    echo "xx  BLOCKED: reachable but no completion in ${dt}s (timeout=${QWEN_PROBE_TIMEOUT}s) — vLLM wedged/saturated" >&2
+    return 2
+  fi
+  if print -r -- "$body" | grep -q '"choices"'; then
+    echo "==> OK: backend generating (${dt}s round-trip on ${MODEL})"
+    return 0
+  fi
+  echo "xx  BLOCKED: completion returned no choices in ${dt}s: ${body:0:200}" >&2
+  return 2
+}
+
 open_url() {
   if have open; then open "$1"
   elif have xdg-open; then xdg-open "$1"
@@ -183,6 +214,11 @@ else
   # to make the local Qwen endpoint reachable before spawning pi.
   if [ "${1:-}" = "ensure" ]; then
     ensure_pf
+  elif [ "${1:-}" = "probe" ]; then
+    # `qwen.sh probe` — on-demand "is the API blocked?" check. Does NOT start
+    # the tunnel (use `ensure` for that); just reports reachable/generating/
+    # blocked so a hung run can be diagnosed without reading Python logs.
+    qwen_probe
   else
     qwen_launch "$@"
   fi

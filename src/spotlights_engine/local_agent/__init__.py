@@ -23,20 +23,24 @@ from spotlights_engine.local_agent.dispatch import (
     run_streaming_local,
 )
 from spotlights_engine.local_agent.pi_runner import (
+    BackendHealth,
     LocalAgentError,
     LocalAgentTimeout,
     PiRun,
+    probe_backend,
     run_pi,
 )
 
 __all__ = [
     "AgentExecResult",
+    "BackendHealth",
     "LocalAgentError",
     "LocalAgentTimeout",
     "ModuleResearchRunner",
     "PiRun",
     "is_local_model",
     "local_final_json",
+    "probe_backend",
     "resolve_cli_executable",
     "run_agent_exec_local",
     "run_pi",
