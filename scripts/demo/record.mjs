@@ -14,6 +14,7 @@ import {
 } from './storyboard.mjs';
 import {
   installOverlay, showCaption, hideCaption, ring, unring, moveCursor, pulseCursor,
+  CAPTION_HIDE_WAIT_MS,
 } from './overlay.mjs';
 import { PAGE_URL } from './paths.mjs';
 
@@ -141,9 +142,12 @@ await page.waitForTimeout(600);
  * A beat's dwell is the *span* it is meant to occupy, not an extra pause on the end:
  * `totalDuration(cut)` sums the dwells and is the declared length of the cut. So the
  * dwell is treated as a deadline -- choreography (actions, assertions, the caption
- * fade-in) runs inside it and only the remainder is waited out. A beat whose
- * choreography is already longer than its dwell waits zero and says so, because those
- * overruns are the whole budget discussion and have to be visible to a human.
+ * fade-in), the dwell remainder *and* the closing caption fade-out all happen inside
+ * it, and only the remainder is waited out. The fade-out is part of the beat, so its
+ * cost is reserved up front from `CAPTION_HIDE_WAIT_MS` -- overlay.mjs owns that
+ * number, and nothing here duplicates it. A beat whose choreography plus that reserve
+ * is already longer than its dwell waits zero and says so, because those overruns are
+ * the whole budget discussion and have to be visible to a human.
  */
 const DRY_RUN_WAIT_MS = 60;
 
@@ -165,13 +169,15 @@ try {
       await page.waitForTimeout(DRY_RUN_WAIT_MS);
     } else {
       const spentMs = Date.now() - beatStartedAt;
-      const remainingMs = dwellMs - spentMs;
+      const hideReserveMs = caption ? CAPTION_HIDE_WAIT_MS : 0;
+      const remainingMs = dwellMs - spentMs - hideReserveMs;
       if (remainingMs > 0) {
         await page.waitForTimeout(remainingMs);
       } else {
         console.warn(
           `  WARN  ${beat.id} overran its dwell: dwell ${dwellSec.toFixed(1)}s, `
           + `choreography cost ${(spentMs / 1000).toFixed(2)}s `
+          + `+ ${(hideReserveMs / 1000).toFixed(2)}s reserved for the caption fade-out `
           + `(over by ${(-remainingMs / 1000).toFixed(2)}s) -- waited 0s`,
         );
       }

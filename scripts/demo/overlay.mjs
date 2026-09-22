@@ -22,7 +22,9 @@ const HIDE_SLACK_MS = 60;
 
 // Total wait times for hide operations, derived from transition + slack above.
 // Must exceed the actual transition time to avoid racing the CSS visibility flip.
-const CAPTION_HIDE_WAIT_MS = CAPTION_TRANSITION_MS + HIDE_SLACK_MS;
+// The caption's is exported because a beat's recorded span has to reserve it: the
+// recorder budgets the fade-out inside the dwell rather than re-deriving the number.
+export const CAPTION_HIDE_WAIT_MS = CAPTION_TRANSITION_MS + HIDE_SLACK_MS;
 const RING_HIDE_WAIT_MS = RING_TRANSITION_MS + HIDE_SLACK_MS;
 
 const CSS = `
