@@ -73,7 +73,10 @@ class OpenAlexRunnerOptions(BaseModel):
     mailto: str | None = None
     mailto_env: str = OPENALEX_MAILTO_ENV
     # Number of works fetched per query (OpenAlex per_page; downstream caps).
-    max_results: int = 8
+    # 30 per pool: each of the (up to `max_queries`) facet queries is its own
+    # relevance-ranked pool, so a deep-enough page lets the exact-match paper
+    # surface even when it is not the #1 hit of its facet.
+    max_results: int = 30
     # Per query, ALSO fetch this many most-recent works (sort=publication_date
     # :desc) as a second slice, merged after the relevance hits and deduped.
     #   Why: OpenAlex `relevance_score` is citation-weighted, so a brand-new
@@ -85,11 +88,11 @@ class OpenAlexRunnerOptions(BaseModel):
     #   without disturbing the relevance ordering (it only appends to the tail).
     #   Set 0 to disable. Bounded by the same `search` + `base_filter`.
     recency_results: int = 3
-    # Max distinct OpenAlex searches issued per run. In "codex" mode the
-    # query-writer emits up to this many one-per-line queries (each facet gets
-    # its own relevance-ranked search); results are merged + deduped. "regex"
-    # mode always issues a single query regardless.
-    max_queries: int = 10
+    # Max distinct OpenAlex searches issued per run = number of facet POOLS. In
+    # "codex" mode the query-writer emits up to this many one-per-line queries
+    # (each facet gets its own relevance-ranked search); results are merged +
+    # deduped. "regex" mode always issues a single query regardless.
+    max_queries: int = 5
     # OpenAlex `filter` value ANDed with the relevance search.
     #   type:article|preprint — GT papers are overwhelmingly arXiv PREPRINTS
     #     (e.g. the Muon paper 2502.16982); an `article`-only gate silently
@@ -366,7 +369,7 @@ _QUERY_WRITER_INSTRUCTION = (
     "framework identifiers.\n"
     "- Do not use the NOT operator.\n"
     "\n"
-    "Output up to 10 queries, ONE PER LINE, ordered most to least important. "
+    "Output up to 5 queries, ONE PER LINE, ordered most to least important. "
     "Favor specificity over breadth — a precise 3-5 concept query beats a vague "
     "1-2 word one. No numbering, no bullets, no markdown, no blank lines, no "
     "explanation — just the query strings, each on its own line.\n"
