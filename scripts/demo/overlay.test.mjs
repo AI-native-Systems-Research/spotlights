@@ -53,6 +53,51 @@ test('the caption is hidden until shown, and renders markup', async () => {
   assert.equal(await caption.isVisible(), false);
 });
 
+test('the caption fades rather than snapping', async () => {
+  // Ensure caption is hidden before the test begins
+  await hideCaption(page);
+
+  // Assertion 1: display must NOT be none (which would prevent fading)
+  const display = await page.evaluate((id) => {
+    return getComputedStyle(document.getElementById(id)).display;
+  }, OVERLAY_IDS.caption);
+  assert.notEqual(display, 'none', 'caption hidden with display: none cannot fade');
+
+  // Assertion 2: opacity must pass through intermediate values during show
+  // Install a requestAnimationFrame loop to sample opacity over ~400ms
+  await page.evaluate((id) => {
+    window._opacitySamples = [];
+    const captionEl = document.getElementById(id);
+    const startTime = performance.now();
+    const loop = () => {
+      const elapsed = performance.now() - startTime;
+      if (elapsed < 400) {
+        const opacity = parseFloat(getComputedStyle(captionEl).opacity);
+        window._opacitySamples.push(opacity);
+        requestAnimationFrame(loop);
+      }
+    };
+    requestAnimationFrame(loop);
+  }, OVERLAY_IDS.caption);
+
+  // Call the real showCaption to exercise the actual code path
+  await showCaption(page, 'fade test');
+
+  // Wait for the sampling window to elapse
+  await page.waitForTimeout(450);
+
+  // Read the collected samples and verify at least one is in the intermediate range
+  const samples = await page.evaluate(() => window._opacitySamples);
+  const intermediate = samples.filter((s) => s > 0.01 && s < 0.99);
+  assert.ok(
+    intermediate.length > 0,
+    `no intermediate opacity samples found between 0.01 and 0.99. collected samples: ${samples.slice(0, 50).join(', ')}${samples.length > 50 ? '...' : ''}`,
+  );
+
+  // Clean up: hide and wait for transition to complete before returning to next test
+  await hideCaption(page);
+});
+
 test('the caption takes its colours from the page, not from hard-coded hex', async () => {
   await showCaption(page, 'probe');
   const [pagePanel, captionBg] = await page.evaluate((id) => {
