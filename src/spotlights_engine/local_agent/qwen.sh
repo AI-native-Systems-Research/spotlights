@@ -135,6 +135,13 @@ ensure_pf() {
   pf_up && return 0
   ensure_oc || return 1
   ensure_login || return 1
+  # Reap stale/dead forwards for this port BEFORE spawning a fresh one. `oc
+  # port-forward` routinely dies at the data layer (pod resets the connection)
+  # while the process lingers: pf_up is then false but the dead proc still
+  # holds :PORT. Without this reap each restart stacks another oc, and the
+  # survivors fight over the port — the flapping that makes calls hang. We only
+  # reach here when pf_up already failed, so we never kill a working forward.
+  pkill -f "oc port-forward ${SVC} ${PORT}:8000" 2>/dev/null && sleep 1
   echo "==> starting port-forward ${SVC} ${PORT}:8000"
   nohup oc port-forward "$SVC" "${PORT}:8000" >/tmp/qwen_pf.log 2>&1 &
   local _; for _ in $(seq 1 15); do pf_up && break; sleep 1; done
