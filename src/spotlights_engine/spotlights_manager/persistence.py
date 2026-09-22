@@ -185,6 +185,15 @@ class ModulePaths:
     def deep_research_path(self) -> Path:
         return self.dir / "module_deep_research.json"
 
+    def deep_research_path_indexed(self, index: int) -> Path:
+        """Sidecar for an extra determinism-repeat pass (index >= 1).
+
+        The canonical pass (index 0) keeps the bare `module_deep_research.json`
+        name; repeats append the index so their outputs can be diffed without
+        clobbering the canonical result the downstream steps consume.
+        """
+        return self.dir / f"module_deep_research.{index}.json"
+
     @property
     def deep_research_last_message_path(self) -> Path:
         return self.dir / "module_deep_research.last_message.md"
@@ -575,12 +584,25 @@ def write_deep_research(
     module_paths: ModulePaths,
     output: ModuleDeepResearchOutput,
     duration_s: float,
+    *,
+    index: int | None = None,
 ) -> None:
+    """Persist a deep-research output sidecar.
+
+    `index` None (default) or 0 -> canonical `module_deep_research.json` the
+    downstream steps read. `index >= 1` -> an indexed determinism-repeat sidecar
+    (`module_deep_research.{index}.json`) that is written but never consumed.
+    """
     payload = {
         "output": output.model_dump(mode="json"),
         "duration_s": duration_s,
     }
-    _atomic_write_json(module_paths.deep_research_path, payload)
+    target = (
+        module_paths.deep_research_path
+        if not index
+        else module_paths.deep_research_path_indexed(index)
+    )
+    _atomic_write_json(target, payload)
 
 
 def write_deep_research_search_log(
@@ -719,6 +741,10 @@ def clear_deep_research_artifacts(
     ):
         if p.exists():
             p.unlink()
+    # Determinism-repeat sidecars (module_deep_research.{i}.json) — sweep any so
+    # a re-run does not leave stale extra passes beside the fresh canonical one.
+    for p in module_paths.dir.glob("module_deep_research.[0-9]*.json"):
+        p.unlink()
     clear_usage_records(module_paths, "module_deep_research", session_index)
 
 

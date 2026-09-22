@@ -217,6 +217,51 @@ def test_clear_helpers_remove_artifacts(tmp_path: Path) -> None:
     assert not mp.deep_research_search_log_path.exists()
 
 
+def test_write_deep_research_indexed_sidecar(tmp_path: Path) -> None:
+    """Determinism-repeat: index None/0 -> canonical name; index >= 1 ->
+    `module_deep_research.{index}.json`. Canonical stays the downstream read."""
+    paths = ManagerPaths(tmp_path)
+    mp = paths.for_module("v1/kv_offload")
+    mp.dir.mkdir(parents=True)
+
+    P.write_deep_research(mp, make_research_output(n_findings=2), duration_s=1.0)
+    P.write_deep_research(
+        mp, make_research_output(n_findings=3), duration_s=2.0, index=1
+    )
+    P.write_deep_research(
+        mp, make_research_output(n_findings=4), duration_s=3.0, index=2
+    )
+
+    assert mp.deep_research_path.exists()
+    assert mp.deep_research_path_indexed(1).exists()
+    assert mp.deep_research_path_indexed(2).exists()
+    assert mp.deep_research_path_indexed(1).name == "module_deep_research.1.json"
+
+    # index=0 targets the canonical file, not an indexed one.
+    P.write_deep_research(
+        mp, make_research_output(n_findings=9), duration_s=4.0, index=0
+    )
+    assert not (mp.dir / "module_deep_research.0.json").exists()
+    state = P.read_module_state(mp)
+    assert state.deep_research is not None
+    assert len(state.deep_research.findings) == 9  # canonical overwritten
+
+
+def test_clear_deep_research_removes_indexed_sidecars(tmp_path: Path) -> None:
+    paths = ManagerPaths(tmp_path)
+    mp = paths.for_module("v1/kv_offload")
+    mp.dir.mkdir(parents=True)
+
+    P.write_deep_research(mp, make_research_output(), duration_s=1.0)
+    P.write_deep_research(mp, make_research_output(), duration_s=1.0, index=1)
+    P.write_deep_research(mp, make_research_output(), duration_s=1.0, index=2)
+
+    P.clear_deep_research_artifacts(mp)
+    assert not mp.deep_research_path.exists()
+    assert not mp.deep_research_path_indexed(1).exists()
+    assert not mp.deep_research_path_indexed(2).exists()
+
+
 def test_init_manifest_creates_tree(tmp_path: Path) -> None:
     paths = ManagerPaths(tmp_path)
     manifest = P.init_manifest(

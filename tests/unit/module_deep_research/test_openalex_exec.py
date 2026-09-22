@@ -50,8 +50,14 @@ class _FakeQueryWriter:
 
 
 def _regex_opts(**kw) -> OpenAlexRunnerOptions:
-    """Options with deterministic (no-LLM) query mode for hermetic URL tests."""
+    """Options with deterministic (no-LLM) query mode for hermetic URL tests.
+
+    Extra slices (recency, semantic) default OFF so URL-shape assertions see
+    only the keyword slice; individual tests re-enable the slice they exercise.
+    """
     kw.setdefault("query_mode", "regex")
+    kw.setdefault("recency_results", 0)
+    kw.setdefault("semantic_results", 0)
     return OpenAlexRunnerOptions(**kw)
 
 
@@ -175,7 +181,7 @@ def test_codex_mode_uses_writer_output_as_search(monkeypatch):
 
     # The writer saw the research prompt; its reply drove the OpenAlex search.
     assert "Qualified name: inference/attention" in writer.prompts[0]
-    assert _query_params(calls["url"])["search"] == "attention kv cache compression"
+    assert _query_params(calls["urls"][0])["search"] == "attention kv cache compression"
 
 
 def test_codex_query_brief_strips_execution_sections(monkeypatch):
@@ -201,7 +207,7 @@ def test_codex_query_brief_strips_execution_sections(monkeypatch):
     assert "Workflow:" not in seen
     assert "findings" not in seen
     assert "severity" not in seen
-    assert _query_params(calls["url"])["search"] == "fused optimizer update"
+    assert _query_params(calls["urls"][0])["search"] == "fused optimizer update"
 
 
 def test_codex_mode_falls_back_to_regex_when_writer_empty(monkeypatch):
@@ -212,7 +218,7 @@ def test_codex_mode_falls_back_to_regex_when_writer_empty(monkeypatch):
     )
     client.run("Qualified name: inference/attention\nObjective: cut latency\n")
 
-    assert _query_params(calls["url"])["search"] == "inference attention cut latency"
+    assert _query_params(calls["urls"][0])["search"] == "inference attention cut latency"
 
 
 def test_codex_mode_falls_back_to_regex_when_writer_fails(monkeypatch):
@@ -223,7 +229,7 @@ def test_codex_mode_falls_back_to_regex_when_writer_fails(monkeypatch):
     )
     client.run("Qualified name: m/x\nObjective: speed\n")
 
-    assert _query_params(calls["url"])["search"] == "m x speed"
+    assert _query_params(calls["urls"][0])["search"] == "m x speed"
 
 
 def test_codex_mode_issues_one_search_per_query_line(monkeypatch):
@@ -354,6 +360,54 @@ def test_recency_slice_disabled_when_zero(monkeypatch):
     OpenAlexRunner(_regex_opts(recency_results=0)).run("Qualified name: m/x\nObjective: speed\n")
     assert len(calls["urls"]) == 1  # only the relevance slice, no recency fetch
     assert "sort=publication_date" not in calls["urls"][0]
+
+
+def test_semantic_slice_uses_search_semantic_and_caps_per_page(monkeypatch):
+    calls = _install_fake_urlopen(monkeypatch, results=[_work()])
+    OpenAlexRunner(_regex_opts(semantic_results=200)).run(
+        "Qualified name: m/x\nObjective: speed\n"
+    )
+    # Two slices: keyword relevance, then the semantic slice.
+    assert len(calls["urls"]) == 2
+    keyword, semantic = calls["urls"]
+    assert "search" in _query_params(keyword)
+    params = _query_params(semantic)
+    # Semantic slice swaps to search.semantic (no plain `search`) and its
+    # per_page is clamped to the endpoint's 50 ceiling even when asked for 200.
+    assert params["search.semantic"] == "m x speed"
+    assert "search" not in params
+    assert params["per_page"] == "50"
+
+
+def test_semantic_slice_disabled_when_zero(monkeypatch):
+    calls = _install_fake_urlopen(monkeypatch, results=[_work()])
+    OpenAlexRunner(_regex_opts(semantic_results=0)).run(
+        "Qualified name: m/x\nObjective: speed\n"
+    )
+    assert len(calls["urls"]) == 1
+    assert not any("search.semantic" in u for u in calls["urls"])
+
+
+def test_semantic_slice_rescues_work_missing_from_keyword_pool(monkeypatch):
+    # The keyword (relevance) slice buries a fresh low-cited GT; the semantic
+    # slice (search.semantic) surfaces it. Both must land in the findings.
+    def fake_urlopen(request, timeout=None):
+        if "search.semantic" in request.full_url:
+            work = _work(wid="https://openalex.org/W-SEM", title="Semantic Rescue",
+                         doi="https://doi.org/10.1/sem", cited=1)
+        else:
+            work = _work(wid="https://openalex.org/W-KW", title="Keyword Hit",
+                         doi="https://doi.org/10.1/kw", cited=999)
+        return io.BytesIO(json.dumps({"results": [work]}).encode("utf-8"))
+
+    monkeypatch.setattr(openalex_exec.urllib.request, "urlopen", fake_urlopen)
+    result = OpenAlexRunner(_regex_opts(semantic_results=50)).run(
+        "Qualified name: m/x\nObjective: speed\n"
+    )
+
+    parsed = parse_agent_output(result.final_message)
+    titles = [f.title for f in parsed.findings]
+    assert titles == ["Keyword Hit", "Semantic Rescue"]  # keyword first, semantic tail
 
 
 # --------------------------------------------------------------------------

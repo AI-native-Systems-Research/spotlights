@@ -180,6 +180,14 @@ class SpotlightsManagerInput(BaseModel):
     enable_openalex: bool = False
     openalex_model: str | None = None
     openalex_query_mode: str = "codex"
+    # Determinism stress test: run step 3 (module_deep_research) this many times
+    # per module. 1 (default) = normal single pass. When >1 the FIRST pass is the
+    # canonical result used by every downstream step; each extra pass is written
+    # to its own indexed sidecar (module_deep_research.{i}.json, i=1..N-1) purely
+    # so the repeated outputs can be diffed for run-to-run determinism. Applies to
+    # whatever step-3 runner set is active (Codex/Claude/OpenAlex). Each extra
+    # pass issues real agent/API calls, so N>1 multiplies step-3 cost.
+    deep_research_repeat: int = Field(default=1, ge=1)
     # False -> step 3 (module_deep_research) is not run for any module; the
     # manager substitutes an empty ModuleDeepResearchOutput and step 4 takes
     # its zero-findings short-circuit.

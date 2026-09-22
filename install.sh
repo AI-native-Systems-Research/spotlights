@@ -43,6 +43,36 @@ uv tool install --force "git+${REPO}@${VERSION}"
 # Make sure ~/.local/bin is on PATH for future shells (idempotent)
 uv tool update-shell >/dev/null 2>&1 || true
 
+# Optionally wire the qwen agent alias into the user's shell rc. When sourced,
+# it reroutes `claude/codex --model Qwen*` (from any directory) to the local pi
+# agent backed by VELA Qwen3.8-27B. Idempotent.
+SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+ALIAS_FILE="${SCRIPT_DIR}/scripts/qwen.sh"
+if [ -f "$ALIAS_FILE" ]; then
+  for RC in "$HOME/.zshrc" "$HOME/.bashrc"; do
+    [ -f "$RC" ] || continue
+    if ! grep -qF "scripts/qwen.sh" "$RC" 2>/dev/null; then
+      {
+        printf '\n# spotlights: reroute `claude/codex --model Qwen*` to pi (VELA Qwen3.8-27B).\n'
+        printf '# Must stay after the claude()/codex() definitions so fallbacks are preserved.\n'
+        printf '[ -f "%s" ] && source "%s"\n' "$ALIAS_FILE" "$ALIAS_FILE"
+      } >> "$RC"
+      say "Installed qwen agent alias into ${RC}"
+    fi
+  done
+fi
+
+# OpenShift preflight: if `oc` is installed but the session is missing/expired,
+# open the token page so the user can grab a fresh login command.
+if command -v oc >/dev/null 2>&1 && ! oc whoami >/dev/null 2>&1; then
+  TOKEN_URL="https://oauth-openshift.apps.dmf.dipc.res.ibm.com/oauth/token/display"
+  warn "OpenShift session not active — opening token page: ${TOKEN_URL}"
+  if command -v open >/dev/null 2>&1; then open "$TOKEN_URL" >/dev/null 2>&1 || true
+  elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$TOKEN_URL" >/dev/null 2>&1 || true
+  fi
+  warn "Then run the 'oc login --token=sha256~... --server=...' command it shows."
+fi
+
 if command -v spotlights-engine >/dev/null 2>&1; then
   say "Installed: spotlights-engine ($(command -v spotlights-engine))"
   cat <<'EOF'
