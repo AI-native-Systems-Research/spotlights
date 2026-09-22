@@ -265,6 +265,19 @@ The project is organized around signal sources, and the most useful contribution
 
 Open an issue to discuss a direction before a large change. Bug reports and example runs on new repos are also valuable.
 
+## Citation
+
+If you use Spotlights for your research, please cite our [paper](https://arxiv.org/abs/2609.20446):
+
+```bibtex
+@article{barzelay2026spotlights,
+  title={Spotlights: Discovering Improvement Opportunities in Software Repositories},
+  author={Barzelay, Udi and Azulai, Ophir and Friedman, Idan and Shapira, Inbar and Abo Dahood, Foad and Burshtein, Yevgeny and Prince, Orit and Soloveitchik, Michael and Naparstek, Oshri and Pony, Roi and Drory, Tal and Factor, Michael},
+  journal={arXiv preprint arXiv:2609.20446},
+  year={2026}
+}
+```
+
 ## License
 
 Apache-2.0 — see [LICENSE](LICENSE).
