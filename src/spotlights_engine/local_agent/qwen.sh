@@ -178,5 +178,12 @@ if _qwen_is_sourced; then
   # Auto-starts the port-forward if down (via qwen_launch -> ensure_pf).
   qwen() { qwen_launch "$@"; }
 else
-  qwen_launch "$@"
+  # `qwen.sh ensure` just brings the backend up (oc login + port-forward) and
+  # exits — used by the Python dispatch (local_agent.pi_runner.ensure_backend)
+  # to make the local Qwen endpoint reachable before spawning pi.
+  if [ "${1:-}" = "ensure" ]; then
+    ensure_pf
+  else
+    qwen_launch "$@"
+  fi
 fi

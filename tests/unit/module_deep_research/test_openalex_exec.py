@@ -14,7 +14,7 @@ import urllib.parse
 import pytest
 
 from spotlights_engine.module_deep_research import openalex_exec
-from spotlights_engine.module_deep_research.agent_exec import AgentExecResult
+from spotlights_engine.local_agent.base import AgentExecResult
 from spotlights_engine.module_deep_research.openalex_exec import (
     OPENALEX_API_KEY_ENV,
     OPENALEX_MAILTO_ENV,

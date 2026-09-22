@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from spotlights_engine.module_deep_research.agent_exec import AgentExecResult
+from spotlights_engine.local_agent.base import AgentExecResult
 from spotlights_engine.module_deep_research.orchestration import (
     RunnerOutcome,
     merge_outcomes,

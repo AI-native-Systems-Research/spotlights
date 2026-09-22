@@ -187,6 +187,52 @@ def run_apply_claude(
     claude_model: str | None = None,
 ) -> ApplyRunResult:
     """Run one `claude -p` apply session with `worktree` as the working directory."""
+    # Local-model dispatch: a Qwen model routes to pi/vLLM. The apply stage
+    # mutates the worktree, so pi keeps its edit/write tools (read_only=False);
+    # there is no structured output — the produced diff is the result.
+    from spotlights_engine.local_agent.pi_runner import (
+        LocalAgentTimeout,
+        is_local_model,
+        run_pi,
+    )
+
+    if is_local_model(claude_model):
+        try:
+            pi = run_pi(
+                prompt=prompt,
+                cwd=worktree,
+                env=_clean_env(),
+                timeout_s=wallclock_s,
+                model=claude_model,
+                read_only=False,
+            )
+        except LocalAgentTimeout as exc:
+            return ApplyRunResult(
+                candidate_id=candidate_id,
+                duration_s=exc.duration_s,
+                error=f"pi timed out after {exc.duration_s:.1f}s",
+                stderr=exc.stderr.encode("utf-8", "replace"),
+            )
+        usage = AgentUsage(
+            input=pi.input_tokens, output=pi.output_tokens, model=pi.model
+        )
+        if pi.returncode != 0:
+            return ApplyRunResult(
+                candidate_id=candidate_id,
+                duration_s=pi.duration_s,
+                error=f"pi (local) exit={pi.returncode}",
+                stdout=pi.stdout.encode("utf-8", "replace"),
+                stderr=pi.stderr.encode("utf-8", "replace"),
+                usage=usage,
+            )
+        return ApplyRunResult(
+            candidate_id=candidate_id,
+            duration_s=pi.duration_s,
+            stdout=pi.stdout.encode("utf-8", "replace"),
+            stderr=pi.stderr.encode("utf-8", "replace"),
+            usage=usage,
+        )
+
     # Resolve via shutil.which so Windows finds the .CMD shim. Bare
     # "claude" → FileNotFoundError because subprocess on Windows doesn't
     # follow PATHEXT for unqualified argv[0].

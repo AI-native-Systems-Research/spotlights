@@ -34,15 +34,22 @@ from typing import Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from spotlights_engine.module_deep_research.agent_exec import AgentExecResult
+from spotlights_engine.local_agent.base import AgentExecResult
 
 OPENALEX_API_KEY_ENV = "OPENALEX_API_KEY"
 OPENALEX_MAILTO_ENV = "OPENALEX_MAILTO"
 OPENALEX_WORKS_URL = "https://api.openalex.org/works"
 
 # Transient-failure retry budget for a single works fetch (see `_fetch_works`).
-_FETCH_RETRIES = 2
+_FETCH_RETRIES = 4
 _FETCH_BACKOFF_SECONDS = 1.5
+
+# Minimum wall-clock gap between consecutive works fetches in this process, to
+# stay under the OpenAlex free-pool burst limit (bursts trigger HTTP 429).
+# Override via OPENALEX_MIN_INTERVAL_SECONDS. Cross-process bursts are handled
+# by retrying 429 with backoff in `_fetch_works`.
+_MIN_INTERVAL_SECONDS = float(os.environ.get("OPENALEX_MIN_INTERVAL_SECONDS", "1.2"))
+_last_fetch_ts = 0.0
 
 # Fields we ask OpenAlex to return — keeps the response small and fast.
 _SELECT_FIELDS = (
@@ -351,8 +358,14 @@ class OpenAlexRunner:
         # The semantic endpoint (and occasionally the main one) returns transient
         # 5xx / times out under load; retry a couple of times with backoff before
         # giving up so a slow semantic slice still lands its rescue hits.
+        global _last_fetch_ts
         last_exc: Exception | None = None
         for attempt in range(_FETCH_RETRIES + 1):
+            # Throttle: never fire two fetches closer than _MIN_INTERVAL_SECONDS.
+            gap = time.monotonic() - _last_fetch_ts
+            if gap < _MIN_INTERVAL_SECONDS:
+                time.sleep(_MIN_INTERVAL_SECONDS - gap)
+            _last_fetch_ts = time.monotonic()
             try:
                 request = urllib.request.Request(url, headers=self._headers())
                 with urllib.request.urlopen(
@@ -363,13 +376,20 @@ class OpenAlexRunner:
                 works = data.get("results") if isinstance(data, dict) else None
                 return works if isinstance(works, list) else []
             except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
-                retryable = (
-                    isinstance(exc, urllib.error.HTTPError) and exc.code >= 500
-                ) or not isinstance(exc, urllib.error.HTTPError)
+                # 429 (Too Many Requests) is retryable — the burst limit clears
+                # after a short wait; honor Retry-After when the server sends it.
+                is_http = isinstance(exc, urllib.error.HTTPError)
+                retryable = (not is_http) or exc.code >= 500 or exc.code == 429
                 if not retryable or attempt == _FETCH_RETRIES:
                     raise
                 last_exc = exc
-                time.sleep(_FETCH_BACKOFF_SECONDS * (attempt + 1))
+                delay = _FETCH_BACKOFF_SECONDS * (attempt + 1)
+                if is_http and exc.code == 429:
+                    try:
+                        delay = max(delay, float(exc.headers.get("Retry-After", 0)))
+                    except (TypeError, ValueError):
+                        pass
+                time.sleep(delay)
         assert last_exc is not None  # unreachable; loop either returns or raises
         raise last_exc
 

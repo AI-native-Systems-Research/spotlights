@@ -98,12 +98,55 @@ class AgentRunner(ABC):
     @abstractmethod
     def parse_last_message(self, iter_dir: Path) -> str: ...
 
+    def _resolved_model(self) -> str | None:
+        """Configured model id for this runner (used for local dispatch)."""
+        return None
+
     def invoke(
         self,
         prompt: str,
         iter_dir: Path,
         schema_path: Path,
     ) -> AgentInvocation:
+        # Local-model dispatch: a Qwen model routes to pi/vLLM. pi is
+        # schema-prompted, its final JSON is written to last_message.json (the
+        # same artifact parse_last_message reads), and usage is captured.
+        from spotlights_engine.local_agent.dispatch import (
+            is_local_model,
+            local_final_json,
+            run_pi,
+        )
+
+        model = self._resolved_model()
+        if is_local_model(model):
+            schema_text = schema_path.read_text(encoding="utf-8")
+            start = time.monotonic()
+            pi = run_pi(
+                prompt=prompt,
+                cwd=self._config.repo_path,
+                env=_clean_env(),
+                timeout_s=self._config.per_iteration_wallclock_s,
+                model=model,
+                schema_text=schema_text,
+            )
+            (iter_dir / "raw_stdout.log").write_bytes(pi.stdout.encode("utf-8", "replace"))
+            (iter_dir / "raw_stderr.log").write_bytes(pi.stderr.encode("utf-8", "replace"))
+            (iter_dir / "last_message.json").write_text(
+                local_final_json(pi, schema_text), encoding="utf-8"
+            )
+            if pi.returncode != 0:
+                raise _SchemaParseError(
+                    f"agent {self.name} (local/pi) exit={pi.returncode}"
+                )
+            return AgentInvocation(
+                session_id=pi.session_id,
+                duration_s=pi.duration_s,
+                cost_usd=None,
+                input_tokens=pi.input_tokens,
+                output_tokens=pi.output_tokens,
+                model=pi.model,
+            )
+
         argv = self._build_argv(schema_path=schema_path, iter_dir=iter_dir)
         env = _clean_env()
         cwd = self._config.repo_path
@@ -171,6 +214,9 @@ def _append_streams(
 class ClaudeRunner(AgentRunner):
     name = "claude_code"
     _executable = "claude"
+
+    def _resolved_model(self) -> str | None:
+        return self._config.claude_model
 
     def _build_argv(self, schema_path: Path, iter_dir: Path) -> list[str]:
         schema_text = schema_path.read_text(encoding="utf-8")
@@ -284,6 +330,9 @@ class ClaudeRunner(AgentRunner):
 class CodexRunner(AgentRunner):
     name = "codex"
     _executable = "codex"
+
+    def _resolved_model(self) -> str | None:
+        return self._config.codex_model
 
     def _build_argv(self, schema_path: Path, iter_dir: Path) -> list[str]:
         # Codex runs with `-C <repo_path>`, so any relative path here would

@@ -258,6 +258,21 @@ def run_streaming_claude(
     model that emits a real tool_use (nothing to detect in text), so callers
     can pass it unconditionally.
     """
+    # Local-model dispatch: when the argv targets a Qwen model there is no
+    # hosted Claude CLI to spawn — route to the local pi/vLLM backend, which
+    # synthesizes an equivalent stream-json StreamingResult. Imported lazily to
+    # avoid a package import cycle (dispatch imports StreamingResult from here).
+    from spotlights_engine.local_agent.dispatch import (
+        is_local_model,
+        model_from_argv,
+        run_streaming_local,
+    )
+
+    if is_local_model(model_from_argv(argv)):
+        return run_streaming_local(
+            argv=argv, prompt=prompt, env=env, cwd=cwd, timeout_s=timeout_s
+        )
+
     popen_kwargs: dict = {}
     if sys.platform != "win32":
         popen_kwargs["start_new_session"] = True

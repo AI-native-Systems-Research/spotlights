@@ -14,7 +14,7 @@ from typing import IO
 from pydantic import BaseModel, ConfigDict, Field
 
 from spotlights_engine.costing.usage import codex_usage_from_stream
-from spotlights_engine.module_deep_research.agent_exec import (
+from spotlights_engine.local_agent.base import (
     AgentExecResult,
     resolve_cli_executable,
 )
@@ -109,6 +109,38 @@ class CodexExecClient:
         env = os.environ.copy()
         if self.options.env:
             env.update(dict(self.options.env))
+
+        # Local-model dispatch: a Qwen model routes to pi/vLLM instead of the
+        # codex CLI. Deep research is free-text, so pi's final message becomes
+        # `final_message` and is mirrored into the `--output-last-message` file.
+        from spotlights_engine.costing.usage import AgentUsage
+        from spotlights_engine.local_agent.dispatch import is_local_model, run_pi
+
+        if is_local_model(self.options.model):
+            pi = run_pi(
+                prompt=prompt,
+                cwd=Path(self.options.cwd).expanduser().resolve(),
+                env=env,
+                timeout_s=self.options.timeout_seconds or 3600,
+                model=self.options.model,
+                read_only=self.options.sandbox in (None, "read-only"),
+            )
+            if last_path is not None:
+                last_path.write_text(pi.final_text, encoding="utf-8")
+            result = CodexExecResult(
+                command=cmd,
+                returncode=pi.returncode,
+                stdout=pi.stdout,
+                stderr=pi.stderr,
+                final_message=pi.final_text,
+                usage=AgentUsage(
+                    input=pi.input_tokens, output=pi.output_tokens, model=pi.model
+                ),
+                output_last_message=last_path,
+            )
+            if check:
+                result.raise_for_status()
+            return result
 
         proc = subprocess.Popen(
             cmd,

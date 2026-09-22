@@ -78,6 +78,64 @@ def run_candidate_codex(
         except OSError:
             pass
 
+    # Local-model dispatch: a Qwen model routes to pi/vLLM. pi is
+    # schema-prompted; its parsed JSON is written to last_message_path and
+    # returned as structured_output.
+    from spotlights_engine.local_agent.dispatch import (
+        is_local_model,
+        structured_from_pi,
+    )
+    from spotlights_engine.local_agent.pi_runner import LocalAgentTimeout, run_pi
+
+    if is_local_model(codex_model):
+        from spotlights_engine.costing.usage import AgentUsage
+
+        try:
+            pi = run_pi(
+                prompt=prompt,
+                cwd=repo_path,
+                env=_clean_env(),
+                timeout_s=wallclock_s,
+                model=codex_model,
+                schema_text=schema_text,
+            )
+        except LocalAgentTimeout as exc:
+            return CandidateAgentRunResult(
+                candidate_id=candidate_id,
+                duration_s=exc.duration_s,
+                error=f"pi timed out after {exc.duration_s:.1f}s",
+                stderr=exc.stderr.encode("utf-8", "replace"),
+            )
+        usage = AgentUsage(
+            input=pi.input_tokens, output=pi.output_tokens, model=pi.model
+        )
+        if pi.returncode != 0:
+            return CandidateAgentRunResult(
+                candidate_id=candidate_id,
+                duration_s=pi.duration_s,
+                error=f"pi (local) exit={pi.returncode}",
+                stdout=pi.stdout.encode("utf-8", "replace"),
+                stderr=pi.stderr.encode("utf-8", "replace"),
+                usage=usage,
+            )
+        structured = structured_from_pi(pi, schema_text)
+        if isinstance(structured, (dict, list)):
+            last_message_path.write_text(json.dumps(structured), encoding="utf-8")
+            return CandidateAgentRunResult(
+                candidate_id=candidate_id,
+                duration_s=pi.duration_s,
+                structured_output=structured,
+                usage=usage,
+            )
+        return CandidateAgentRunResult(
+            candidate_id=candidate_id,
+            duration_s=pi.duration_s,
+            error="pi (local) produced no schema-conforming JSON object",
+            stdout=pi.stdout.encode("utf-8", "replace"),
+            stderr=pi.stderr.encode("utf-8", "replace"),
+            usage=usage,
+        )
+
     # Codex runs with `cwd=repo_path` and `-C <repo_path>`, so any relative
     # path here would resolve under the target repo. Pass absolutes.
     # Resolve via shutil.which so Windows finds the .CMD/.ps1 shim; bare

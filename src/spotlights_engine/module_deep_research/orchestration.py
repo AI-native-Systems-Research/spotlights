@@ -10,7 +10,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from spotlights_engine.module_deep_research.agent_exec import AgentExecResult, ModuleResearchRunner
+from spotlights_engine.local_agent.base import AgentExecResult, ModuleResearchRunner
 from spotlights_engine.module_deep_research.openalex_exec import (
     OpenAlexRunner,
     OpenAlexRunnerOptions,

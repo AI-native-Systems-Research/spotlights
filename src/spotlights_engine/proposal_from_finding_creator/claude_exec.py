@@ -82,6 +82,60 @@ def run_pair(
     claude_model: str | None = None,
 ) -> PairRunResult:
     """Run one Claude session and return the parsed structured output."""
+    # Local-model dispatch: a Qwen model routes to pi/vLLM. pi is
+    # schema-prompted; its parsed JSON is unwrapped into the proposals list.
+    from spotlights_engine.local_agent.dispatch import (
+        is_local_model,
+        structured_from_pi,
+    )
+    from spotlights_engine.local_agent.pi_runner import LocalAgentTimeout, run_pi
+
+    if is_local_model(claude_model):
+        try:
+            pi = run_pi(
+                prompt=prompt,
+                cwd=repo_path,
+                env=_clean_env(),
+                timeout_s=wallclock_s,
+                model=claude_model,
+                schema_text=schema_text,
+            )
+        except LocalAgentTimeout as exc:
+            return PairRunResult(
+                pair_key=pair_key,
+                duration_s=exc.duration_s,
+                error=f"pi timed out after {exc.duration_s:.1f}s",
+                stderr=exc.stderr.encode("utf-8", "replace"),
+            )
+        usage = AgentUsage(
+            input=pi.input_tokens, output=pi.output_tokens, model=pi.model
+        )
+        if pi.returncode != 0:
+            return PairRunResult(
+                pair_key=pair_key,
+                duration_s=pi.duration_s,
+                error=f"pi (local) exit={pi.returncode}",
+                stdout=pi.stdout.encode("utf-8", "replace"),
+                stderr=pi.stderr.encode("utf-8", "replace"),
+                usage=usage,
+            )
+        unwrapped = _unwrap_proposals(structured_from_pi(pi, schema_text))
+        if unwrapped is not None:
+            return PairRunResult(
+                pair_key=pair_key,
+                duration_s=pi.duration_s,
+                structured_output=unwrapped,
+                usage=usage,
+            )
+        return PairRunResult(
+            pair_key=pair_key,
+            duration_s=pi.duration_s,
+            error="pi (local) produced no schema-conforming proposals",
+            stdout=pi.stdout.encode("utf-8", "replace"),
+            stderr=pi.stderr.encode("utf-8", "replace"),
+            usage=usage,
+        )
+
     # Resolve via shutil.which so Windows finds the .CMD shim. Bare
     # "claude" → FileNotFoundError because subprocess on Windows doesn't
     # follow PATHEXT for unqualified argv[0].

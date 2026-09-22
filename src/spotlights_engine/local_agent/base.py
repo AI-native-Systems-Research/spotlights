@@ -1,4 +1,15 @@
-"""Shared subprocess result and runner protocol for module deep research."""
+"""Base agent-execution API shared by every CLI runner in the engine.
+
+This is the canonical home for the agent-runner contract: the captured-result
+model (`AgentExecResult`), the minimal runner `Protocol` (`ModuleResearchRunner`),
+and the Windows shim resolver (`resolve_cli_executable`). Codex, Claude, the
+local pi/Qwen backend, and the test fakes all speak this shape so the
+orchestration layer can treat them interchangeably.
+
+Historically this lived in `module_deep_research.agent_exec`; it moved here when
+the local-model dispatch was added, so all agent transports (hosted + local)
+sit under one package.
+"""
 
 from __future__ import annotations
 
@@ -42,7 +53,7 @@ class AgentExecResult(BaseModel):
 
 
 class ModuleResearchRunner(Protocol):
-    """Minimal interface shared by Codex, Claude, and test fakes."""
+    """Minimal interface shared by Codex, Claude, pi/Qwen, and test fakes."""
 
     name: str
 

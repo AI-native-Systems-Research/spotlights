@@ -11,7 +11,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field
 
 from spotlights_engine.costing.usage import AgentUsage, claude_usage_from_payload
-from spotlights_engine.module_deep_research.agent_exec import (
+from spotlights_engine.local_agent.base import (
     AgentExecResult,
     resolve_cli_executable,
 )
@@ -76,6 +76,24 @@ class ClaudeExecClient:
         env = os.environ.copy()
         if self.options.env:
             env.update(dict(self.options.env))
+
+        # Local-model dispatch: a Qwen model routes to pi/vLLM (free-text
+        # research), bypassing the claude CLI.
+        from spotlights_engine.local_agent.dispatch import (
+            is_local_model,
+            run_agent_exec_local,
+        )
+
+        if is_local_model(self.options.model):
+            return run_agent_exec_local(
+                prompt=prompt,
+                cwd=Path(self.options.cwd).expanduser().resolve(),
+                env=env,
+                timeout_s=self.options.timeout_seconds or 3600,
+                model=self.options.model,
+                command=cmd,
+                check=check,
+            )
 
         completed = subprocess.run(
             cmd,

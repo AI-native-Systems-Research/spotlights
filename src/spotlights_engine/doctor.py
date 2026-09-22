@@ -82,7 +82,7 @@ def _probe_model(
     an unpriced model that no run would ever ask for. Any failure to launch, a
     non-zero exit, or unparseable output becomes `ok=False`.
     """
-    from spotlights_engine.module_deep_research.agent_exec import ModuleResearchRunner
+    from spotlights_engine.local_agent.base import ModuleResearchRunner
 
     run_cwd = cwd or Path.cwd()
     client: ModuleResearchRunner

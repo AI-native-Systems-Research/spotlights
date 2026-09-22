@@ -1,6 +1,6 @@
 """Module deep-research step for Spotlights."""
 
-from spotlights_engine.module_deep_research.agent_exec import AgentExecResult, ModuleResearchRunner
+from spotlights_engine.local_agent.base import AgentExecResult, ModuleResearchRunner
 from spotlights_engine.module_deep_research.api import (
     ModuleDeepResearchResult,
     research_module,

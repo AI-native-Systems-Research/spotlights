@@ -7,7 +7,7 @@ from collections.abc import Sequence
 from pydantic import BaseModel, ConfigDict, Field
 
 from spotlights_engine.costing.usage import CliUsage
-from spotlights_engine.module_deep_research.agent_exec import ModuleResearchRunner
+from spotlights_engine.local_agent.base import ModuleResearchRunner
 from spotlights_engine.module_deep_research.codex_exec import CodexExecOptions
 from spotlights_engine.module_deep_research.orchestration import (
     RunnerOutcome,

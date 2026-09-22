@@ -356,7 +356,7 @@ def test_claude_command_shape_uses_litellm_safe_research_tools(tmp_path: Path) -
 
 
 def test_cli_resolution_preserves_posix_command_shape(monkeypatch) -> None:
-    from spotlights_engine.module_deep_research import agent_exec
+    from spotlights_engine.local_agent import base as agent_exec
 
     monkeypatch.setattr(agent_exec, "WINDOWS_SUBPROCESS_NEEDS_SHIM_RESOLUTION", False)
 
@@ -364,7 +364,7 @@ def test_cli_resolution_preserves_posix_command_shape(monkeypatch) -> None:
 
 
 def test_cli_resolution_uses_windows_cmd_shims(monkeypatch) -> None:
-    from spotlights_engine.module_deep_research import agent_exec
+    from spotlights_engine.local_agent import base as agent_exec
     from spotlights_engine.module_deep_research.claude_exec import ClaudeExecClient
     from spotlights_engine.module_deep_research.codex_exec import CodexExecClient, CodexExecOptions
 
