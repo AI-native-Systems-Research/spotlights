@@ -5,6 +5,7 @@
 <h1 align="center">Spotlights</h1>
 
 <p align="center">
+  <a href="https://arxiv.org/abs/2609.20446"><img src="https://img.shields.io/badge/arXiv-2609.20446-b31b1b.svg" alt="arXiv:2609.20446"></a>
   <img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0">
   <img src="https://img.shields.io/badge/python-%E2%89%A5%203.11-blue.svg" alt="Python ≥ 3.11">
 </p>
@@ -18,6 +19,7 @@ Most code-research tools either scan broadly and return shallow hits, or dive de
 The core philosophy behind the project: execution tooling — coding agents, evolutionary search, experiment harnesses — is abundant and improving fast. The harder, less-solved problem is knowing **where to point it**. Spotlights treats that as a first-class discovery problem: build a map of the codebase, converge independent signal sources onto that map, and let the places where evidence piles up — the *spots that light up* — surface as candidates worth optimizing.
 
 <p align="center">
+  <a href="https://arxiv.org/abs/2609.20446">Paper</a> ·
   <a href="docs/INSTALL.md">Install</a> ·
   <a href="#quickstart">Quickstart</a> ·
   <a href="docs/cost-and-manifest.md">Cost</a> ·
