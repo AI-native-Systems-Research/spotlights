@@ -908,6 +908,22 @@ async def _do_step3(
     return result, duration, []
 
 
+def _findings_match(
+    a: ModuleDeepResearchOutput, b: ModuleDeepResearchOutput
+) -> bool:
+    """True if two step-3 passes surfaced the same papers (order-insensitive).
+
+    Compares by (title, url) — the finding_id is a positional stamp assigned at
+    normalization, so it always differs run-to-run and is deliberately excluded.
+    Used only for the determinism-repeat log line.
+    """
+
+    def key(o: ModuleDeepResearchOutput) -> set[tuple[str, str]]:
+        return {(f.title, f.url) for f in o.findings}
+
+    return key(a) == key(b)
+
+
 def _synthetic_step4_output_for_zero_findings(
     candidates: Candidates,
 ) -> ProposalFromFindingCreatorOutput:
@@ -1305,7 +1321,11 @@ async def _run_module(
             P.write_checkpoint(module_paths, cp)
             await _update_module_in_manifest(paths, manifest, manifest_lock, qn, cp)
         elif run_step3:
-            _log.info("[%s] deep_research: start", qn)
+            repeat = max(1, mgr_input.deep_research_repeat)
+            if repeat > 1:
+                _log.info("[%s] deep_research: start (determinism x%d)", qn, repeat)
+            else:
+                _log.info("[%s] deep_research: start", qn)
             try:
                 research_output, dr_duration, dr_usages = await _do_step3(
                     qn=qn,
@@ -1316,6 +1336,32 @@ async def _run_module(
                     segment=segment,
                     candidates=candidates,
                 )
+                # Determinism stress test: run the SAME step 3 the requested extra
+                # times, writing each to its own indexed sidecar (never consumed
+                # downstream — only the canonical first pass above is). Compared
+                # against the first pass so run-to-run drift is visible in the log.
+                for i in range(1, repeat):
+                    extra_output, extra_duration, _extra_usages = await _do_step3(
+                        qn=qn,
+                        tree=tree,
+                        mgr_input=mgr_input,
+                        cfg=cfg,
+                        module_paths=module_paths,
+                        segment=segment,
+                        candidates=candidates,
+                    )
+                    P.write_deep_research(
+                        module_paths, extra_output, extra_duration, index=i
+                    )
+                    _log.info(
+                        "[%s] deep_research: repeat %d/%d — %d findings, "
+                        "matches-run0=%s",
+                        qn,
+                        i,
+                        repeat - 1,
+                        len(extra_output.findings),
+                        _findings_match(research_output, extra_output),
+                    )
             except Exception as e:  # noqa: BLE001
                 cp = _now_checkpoint(
                     qn=qn,

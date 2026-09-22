@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -38,6 +39,10 @@ from spotlights_engine.module_deep_research.agent_exec import AgentExecResult
 OPENALEX_API_KEY_ENV = "OPENALEX_API_KEY"
 OPENALEX_MAILTO_ENV = "OPENALEX_MAILTO"
 OPENALEX_WORKS_URL = "https://api.openalex.org/works"
+
+# Transient-failure retry budget for a single works fetch (see `_fetch_works`).
+_FETCH_RETRIES = 2
+_FETCH_BACKOFF_SECONDS = 1.5
 
 # Fields we ask OpenAlex to return — keeps the response small and fast.
 _SELECT_FIELDS = (
@@ -73,10 +78,26 @@ class OpenAlexRunnerOptions(BaseModel):
     mailto: str | None = None
     mailto_env: str = OPENALEX_MAILTO_ENV
     # Number of works fetched per query (OpenAlex per_page; downstream caps).
-    # 30 per pool: each of the (up to `max_queries`) facet queries is its own
-    # relevance-ranked pool, so a deep-enough page lets the exact-match paper
-    # surface even when it is not the #1 hit of its facet.
-    max_results: int = 30
+    # 20 per keyword pool: each of the (up to `max_queries`) facet queries is its
+    # own relevance-ranked pool, so a deep-enough page lets the exact-match paper
+    # surface even when it is not the #1 hit of its facet. Trimmed 30->20 to
+    # offset the added semantic slice below (fewer pre-dedup findings => fewer
+    # downstream step-4 pairs) with negligible recall loss: when a query carries
+    # the paper's title/method tokens the exact match collapses into the top ~20.
+    max_results: int = 20
+    # Per query, ALSO fetch this many meaning-matched works via OpenAlex
+    # `search.semantic` (GTE-Large-EN embeddings; cosine similarity), merged
+    # after the keyword hits and deduped.
+    #   Why: keyword `search` ANDs stemmed tokens and is citation-weighted, so a
+    #   fresh, low-cited GT preprint can be MISSED entirely even with the right
+    #   words (proven: the Muon paper is absent from the keyword page). The
+    #   semantic slice matches by meaning and is NOT citation-weighted, so it
+    #   surfaced that same Muon GT at rank #1 on the identical query. It is the
+    #   only lever that rescued a hard fresh GT that keyword search misses.
+    #   Capped at 50 (the semantic endpoint's per_page ceiling). Set 0 to
+    #   disable. NOT recency-sorted: semantic ignores citations, so fresh works
+    #   already rank fairly (Muon #1 without any sort override).
+    semantic_results: int = 50
     # Per query, ALSO fetch this many most-recent works (sort=publication_date
     # :desc) as a second slice, merged after the relevance hits and deduped.
     #   Why: OpenAlex `relevance_score` is citation-weighted, so a brand-new
@@ -159,18 +180,36 @@ class OpenAlexRunner:
         return os.environ.get(opt.mailto_env) or None
 
     def _build_url(
-        self, terms: str, *, sort: str | None = None, per_page: int | None = None
+        self,
+        terms: str,
+        *,
+        sort: str | None = None,
+        per_page: int | None = None,
+        semantic: bool = False,
     ) -> str:
+        # The semantic endpoint caps per_page at 50; keyword search allows 200.
+        page_cap = 50 if semantic else 200
         params: dict[str, str] = {
-            "per_page": str(max(1, min(per_page or self.options.max_results, 200))),
+            "per_page": str(max(1, min(per_page or self.options.max_results, page_cap))),
             "select": ",".join(_SELECT_FIELDS),
         }
         if terms:
-            params["search"] = terms  # relevance_score desc by default
+            # search.semantic ranks by embedding similarity (meaning), not the
+            # citation-weighted token match of the default `search`.
+            params["search.semantic" if semantic else "search"] = terms
         if sort:
             params["sort"] = sort  # overrides the default relevance ordering
         if self.options.base_filter:
-            params["filter"] = self.options.base_filter
+            # search.semantic accepts only a limited filter set — notably NOT
+            # primary_topic.field.id — so drop the unsupported clauses (keeping
+            # e.g. type:article|preprint) rather than 400 the whole slice.
+            flt = (
+                _semantic_safe_filter(self.options.base_filter)
+                if semantic
+                else self.options.base_filter
+            )
+            if flt:
+                params["filter"] = flt
         mailto = self._resolve_mailto()
         if mailto:
             params["mailto"] = mailto
@@ -283,29 +322,51 @@ class OpenAlexRunner:
         )
 
     def _query_urls(self, query: str) -> list[str]:
-        """URLs to fetch for one query: relevance slice, then recency slice.
+        """URLs to fetch for one query: keyword, then recency, then semantic.
 
-        The recency slice is only added when there is a query to bound it
-        (`search` present) and `recency_results > 0`; it re-uses the same
-        `search` + `base_filter`, only swapping the sort to most-recent-first.
+        All extra slices require a query to bound them (`search` present). The
+        recency slice (`recency_results > 0`) re-uses the keyword `search` with
+        a most-recent-first sort; the semantic slice (`semantic_results > 0`)
+        swaps to `search.semantic` for embedding-similarity recall of fresh,
+        low-cited GTs the citation-weighted keyword ranking misses.
         """
         urls = [self._build_url(query)]
-        n = self.options.recency_results
-        if query and n > 0:
-            urls.append(
-                self._build_url(query, sort="publication_date:desc", per_page=n)
-            )
+        if query:
+            n = self.options.recency_results
+            if n > 0:
+                urls.append(
+                    self._build_url(query, sort="publication_date:desc", per_page=n)
+                )
+            s = self.options.semantic_results
+            if s > 0:
+                urls.append(self._build_url(query, per_page=s, semantic=True))
         return urls
 
     def _fetch_works(self, url: str) -> list:
-        request = urllib.request.Request(url, headers=self._headers())
-        with urllib.request.urlopen(
-            request, timeout=self.options.timeout_seconds
-        ) as resp:
-            body = resp.read().decode("utf-8")
-        data = json.loads(body)
-        works = data.get("results") if isinstance(data, dict) else None
-        return works if isinstance(works, list) else []
+        # The semantic endpoint (and occasionally the main one) returns transient
+        # 5xx / times out under load; retry a couple of times with backoff before
+        # giving up so a slow semantic slice still lands its rescue hits.
+        last_exc: Exception | None = None
+        for attempt in range(_FETCH_RETRIES + 1):
+            try:
+                request = urllib.request.Request(url, headers=self._headers())
+                with urllib.request.urlopen(
+                    request, timeout=self.options.timeout_seconds
+                ) as resp:
+                    body = resp.read().decode("utf-8")
+                data = json.loads(body)
+                works = data.get("results") if isinstance(data, dict) else None
+                return works if isinstance(works, list) else []
+            except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
+                retryable = (
+                    isinstance(exc, urllib.error.HTTPError) and exc.code >= 500
+                ) or not isinstance(exc, urllib.error.HTTPError)
+                if not retryable or attempt == _FETCH_RETRIES:
+                    raise
+                last_exc = exc
+                time.sleep(_FETCH_BACKOFF_SECONDS * (attempt + 1))
+        assert last_exc is not None  # unreachable; loop either returns or raises
+        raise last_exc
 
     def _headers(self) -> dict[str, str]:
         mailto = self._resolve_mailto()
@@ -694,6 +755,46 @@ def _works_to_output_json(
         "search_queries": search_queries,
     }
     return json.dumps(output)
+
+
+# Filter keys OpenAlex `search.semantic` accepts (others 400 the request).
+# From the endpoint's own error message; notably excludes topic/field filters.
+_SEMANTIC_FILTER_KEYS = frozenset(
+    {
+        "author.id",
+        "authorships.author.id",
+        "authorships.institutions.id",
+        "authorships.institutions.lineage",
+        "funders.id",
+        "has_abstract",
+        "has_fulltext",
+        "institution.id",
+        "institutions.id",
+        "is_oa",
+        "is_retracted",
+        "language",
+        "open_access.is_oa",
+        "primary_location.license",
+        "primary_location.source.id",
+        "publication_year",
+        "type",
+    }
+)
+
+
+def _semantic_safe_filter(base_filter: str) -> str:
+    """Keep only the comma-clauses `search.semantic` supports (e.g. `type`).
+
+    OpenAlex `filter` is comma-separated `key:value` AND-clauses. The semantic
+    endpoint rejects most keys (topic/field especially), so drop any clause
+    whose key is not in `_SEMANTIC_FILTER_KEYS`; returns "" if none survive.
+    """
+    kept = [
+        clause
+        for clause in base_filter.split(",")
+        if clause.split(":", 1)[0].strip() in _SEMANTIC_FILTER_KEYS
+    ]
+    return ",".join(kept)
 
 
 def _redact_api_key(url: str) -> str:

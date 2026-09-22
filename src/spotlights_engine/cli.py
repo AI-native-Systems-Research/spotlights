@@ -230,6 +230,23 @@ def _build_argparser() -> argparse.ArgumentParser:
     )
 
     p.add_argument(
+        "--deep-research-repeat",
+        dest="deep_research_repeat",
+        type=int,
+        default=1,
+        metavar="N",
+        help=(
+            "Determinism stress test: run step 3 (module_deep_research) N times "
+            "per module. 1 (default) = normal single pass. When >1 the FIRST "
+            "pass is the canonical result every downstream step consumes; each "
+            "extra pass is written to module_deep_research.<i>.json (i=1..N-1) "
+            "for run-to-run diffing and logs whether it matched the first. "
+            "Runner-agnostic (Codex/Claude/OpenAlex). Each extra pass makes real "
+            "agent/API calls, so N>1 multiplies step-3 cost."
+        ),
+    )
+
+    p.add_argument(
         "--enable-claude-search",
         dest="enable_claude_search",
         action="store_true",
@@ -490,6 +507,7 @@ def _build_input(args: argparse.Namespace) -> SpotlightsManagerInput:
         input_kwargs["max_findings_per_module"] = args.max_findings_per_module
     input_kwargs["include_candidate_hotspots"] = args.include_candidate_hotspots
     input_kwargs["per_candidate_deep_research"] = args.per_candidate_deep_research
+    input_kwargs["deep_research_repeat"] = args.deep_research_repeat
     input_kwargs["enable_claude_search"] = args.enable_claude_search
     input_kwargs["enable_deep_research"] = args.enable_deep_research
     input_kwargs["enable_proposals_from_findings"] = (
@@ -876,6 +894,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.max_cost is not None and args.max_cost <= 0:
         _build_argparser().error("--max-cost must be > 0")
 
+    if args.deep_research_repeat < 1:
+        _build_argparser().error("--deep-research-repeat must be >= 1")
+
     # Warn (never error) so wrapper scripts that always pass step-3 knobs keep
     # working. Checked before the --dry-run return so a dry run still reports it.
     if not args.enable_deep_research:
@@ -888,6 +909,8 @@ def main(argv: list[str] | None = None) -> int:
             ignored.append("--openalex-query-mode")
         if args.per_candidate_deep_research:
             ignored.append("--per-candidate-deep-research")
+        if args.deep_research_repeat > 1:
+            ignored.append("--deep-research-repeat")
         if not args.include_candidate_hotspots:
             ignored.append("--no-candidate-hotspots")
         if args.max_findings_per_module is not None:
