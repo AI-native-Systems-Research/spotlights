@@ -1,0 +1,13 @@
+{
+  "name": "spotlights-demo-recorder",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Scripted Playwright walkthrough of examples/vllm_subset/experiment.html",
+  "scripts": {
+    "test": "node --test storyboard.test.mjs overlay.test.mjs"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.0"
+  }
+}
