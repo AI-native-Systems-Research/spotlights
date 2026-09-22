@@ -74,6 +74,17 @@ class OpenAlexRunnerOptions(BaseModel):
     mailto_env: str = OPENALEX_MAILTO_ENV
     # Number of works fetched per query (OpenAlex per_page; downstream caps).
     max_results: int = 8
+    # Per query, ALSO fetch this many most-recent works (sort=publication_date
+    # :desc) as a second slice, merged after the relevance hits and deduped.
+    #   Why: OpenAlex `relevance_score` is citation-weighted, so a brand-new
+    #   arXiv preprint with cited_by=1 (exactly the profile of most GT papers,
+    #   e.g. the Muon paper 2502.16982, cited=1) ranks BELOW its established,
+    #   higher-cited family papers and never makes the relevance page — even
+    #   though it matches the query and passes the field/preprint gate. A small
+    #   recency slice per query rescues these low-cited-but-exact preprints
+    #   without disturbing the relevance ordering (it only appends to the tail).
+    #   Set 0 to disable. Bounded by the same `search` + `base_filter`.
+    recency_results: int = 3
     # Max distinct OpenAlex searches issued per run. In "codex" mode the
     # query-writer emits up to this many one-per-line queries (each facet gets
     # its own relevance-ranked search); results are merged + deduped. "regex"
@@ -144,13 +155,17 @@ class OpenAlexRunner:
             return opt.env[opt.mailto_env]
         return os.environ.get(opt.mailto_env) or None
 
-    def _build_url(self, terms: str) -> str:
+    def _build_url(
+        self, terms: str, *, sort: str | None = None, per_page: int | None = None
+    ) -> str:
         params: dict[str, str] = {
-            "per_page": str(max(1, min(self.options.max_results, 200))),
+            "per_page": str(max(1, min(per_page or self.options.max_results, 200))),
             "select": ",".join(_SELECT_FIELDS),
         }
         if terms:
             params["search"] = terms  # relevance_score desc by default
+        if sort:
+            params["sort"] = sort  # overrides the default relevance ordering
         if self.options.base_filter:
             params["filter"] = self.options.base_filter
         mailto = self._resolve_mailto()
@@ -206,14 +221,15 @@ class OpenAlexRunner:
 
     def run(self, prompt: str, *, check: bool = True) -> AgentExecResult:
         queries = self._resolve_queries(prompt)
-        urls = [self._build_url(q) for q in queries]
-        safe_cmd = ["GET", *(_redact_api_key(u) for u in urls)]
+        plans = [(q, self._query_urls(q)) for q in queries]
+        safe_cmd = ["GET", *(_redact_api_key(u) for _q, us in plans for u in us)]
 
         per_query: list[tuple[str, str, list]] = []
         first_error: tuple[int, str] | None = None
-        for query, url in zip(queries, urls, strict=True):
+        for query, urls in plans:
+            primary_url = urls[0]
             try:
-                works = self._fetch_works(url)
+                works = self._fetch_works(primary_url)
             except urllib.error.HTTPError as exc:
                 if check:
                     raise RuntimeError(
@@ -232,7 +248,14 @@ class OpenAlexRunner:
                 if first_error is None:
                     first_error = (1, str(exc))
                 continue
-            per_query.append((query, url, works))
+            # Best-effort recency slice(s): appended after relevance hits and
+            # deduped. A recency-slice failure must never sink the query.
+            for extra_url in urls[1:]:
+                try:
+                    works = _concat_dedup(works, self._fetch_works(extra_url))
+                except Exception:
+                    pass
+            per_query.append((query, primary_url, works))
 
         # Every query failed: surface the first error like the single-query path.
         if not per_query and first_error is not None:
@@ -255,6 +278,21 @@ class OpenAlexRunner:
             final_message=payload,
             usage=None,
         )
+
+    def _query_urls(self, query: str) -> list[str]:
+        """URLs to fetch for one query: relevance slice, then recency slice.
+
+        The recency slice is only added when there is a query to bound it
+        (`search` present) and `recency_results > 0`; it re-uses the same
+        `search` + `base_filter`, only swapping the sort to most-recent-first.
+        """
+        urls = [self._build_url(query)]
+        n = self.options.recency_results
+        if query and n > 0:
+            urls.append(
+                self._build_url(query, sort="publication_date:desc", per_page=n)
+            )
+        return urls
 
     def _fetch_works(self, url: str) -> list:
         request = urllib.request.Request(url, headers=self._headers())
@@ -546,6 +584,24 @@ def _work_key(work: object) -> str | None:
     if isinstance(oa_id, str) and oa_id.strip():
         return oa_id.strip().lower()
     return None
+
+
+def _concat_dedup(primary: list, extra: list) -> list:
+    """Append `extra` works onto `primary`, dropping DOI/OpenAlex-id repeats.
+
+    Order-preserving: relevance hits stay first, recency-slice hits follow.
+    Works without a usable key are always kept (never deduped).
+    """
+    seen = {k for w in primary if (k := _work_key(w)) is not None}
+    out = list(primary)
+    for work in extra:
+        key = _work_key(work)
+        if key is not None:
+            if key in seen:
+                continue
+            seen.add(key)
+        out.append(work)
+    return out
 
 
 def _merge_works(
