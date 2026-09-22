@@ -94,10 +94,15 @@ class OpenAlexRunnerOptions(BaseModel):
     #   semantic slice matches by meaning and is NOT citation-weighted, so it
     #   surfaced that same Muon GT at rank #1 on the identical query. It is the
     #   only lever that rescued a hard fresh GT that keyword search misses.
-    #   Capped at 50 (the semantic endpoint's per_page ceiling). Set 0 to
-    #   disable. NOT recency-sorted: semantic ignores citations, so fresh works
-    #   already rank fairly (Muon #1 without any sort override).
-    semantic_results: int = 50
+    #   Endpoint per_page ceiling is 50, but 30 is the default: a live probe on
+    #   the hard tiny GTs (Muon, ZeroBubble, SiLU/Swish) put every GT the
+    #   semantic slice recovers at rank <=12 given a title/method-token query, so
+    #   slots 31-50 added zero recall while doubling pre-dedup findings (=> step-4
+    #   pairs). 30 keeps a safety margin over the observed rank-12 worst case.
+    #   Recall is decided by query phrasing (title/method tokens), not depth: a
+    #   generic query MISSES at any size. Set 0 to disable. NOT recency-sorted:
+    #   semantic ignores citations, so fresh works already rank fairly.
+    semantic_results: int = 30
     # Per query, ALSO fetch this many most-recent works (sort=publication_date
     # :desc) as a second slice, merged after the relevance hits and deduped.
     #   Why: OpenAlex `relevance_score` is citation-weighted, so a brand-new
