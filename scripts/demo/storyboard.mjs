@@ -157,7 +157,12 @@ export const BEATS = [
     ],
     asserts: [
       { type: 'attr', sel: '#hotbtn', name: 'aria-pressed', equals: 'true' },
-      { type: 'textMatches', sel: '#lbnote', pattern: '\\S' },
+      /* #lbnote is a transient toast, set only by the deep-link reveal and cleared
+         by any filter change -- including this beat's own select -- so it can never
+         witness hot mode. #count is the live proof the filter took effect, and the
+         caption's own figures are asserted against the prose that states them. */
+      { type: 'textMatches', sel: '#count', pattern: '^\\d+ / 173 shown$' },
+      { type: 'domContains', text: '4 of 8 modules, holding 41 of the 60 high-impact candidates' },
       { type: 'visible', sel: DRILL_IN_ROW },
     ],
   },
