@@ -206,13 +206,17 @@ class StreamingResult:
     `stdout`/`stderr` are the captured bytes (utf-8 decoded then re-encoded);
     callers parse the terminal `result` event from `stdout` themselves.
     `returncode` is `proc.returncode`. `duration_s` is wall-clock from
-    Popen until process exit / kill.
+    Popen until process exit / kill. `early_stopped` is True when the
+    `early_stop` predicate fired and the child was killed before it exited
+    on its own — the caller should salvage the captured stream rather than
+    treat the nonzero returncode as a failure.
     """
 
     stdout: bytes
     stderr: bytes
     returncode: int
     duration_s: float
+    early_stopped: bool = False
 
 
 class StreamingTimeout(RuntimeError):
@@ -237,12 +241,22 @@ def run_streaming_claude(
     cwd: Path | str | None,
     timeout_s: float,
     on_event: Callable[[str], None] | None = default_on_event,
+    early_stop: Callable[[dict], bool] | None = None,
 ) -> StreamingResult:
     """Spawn `argv`, feed `prompt` on stdin, stream stdout events to `on_event`.
 
     Returns the captured streams + returncode on normal exit. Raises
     `StreamingTimeout` if the deadline elapses (process tree is killed
     before the exception is raised).
+
+    `early_stop`, when given, is called with every parsed stdout event dict.
+    The first time it returns True the child tree is killed and the call
+    returns with `early_stopped=True`. This exists for structured stages run
+    against a model that types the answer as assistant text instead of calling
+    the tool: once the full payload has streamed there is no reason to let the
+    CLI keep re-nudging the model to max_turns. The predicate is inert for a
+    model that emits a real tool_use (nothing to detect in text), so callers
+    can pass it unconditionally.
     """
     popen_kwargs: dict = {}
     if sys.platform != "win32":
@@ -272,11 +286,12 @@ def run_streaming_claude(
 
     stdout_chunks: list[str] = []
     stderr_chunks: list[str] = []
+    early_stop_event = threading.Event()
 
     def _drain(stream, sink: list[str], parse: bool) -> None:
         for line in iter(stream.readline, ""):
             sink.append(line)
-            if not parse or on_event is None:
+            if not parse:
                 continue
             stripped = line.strip()
             if not stripped:
@@ -286,6 +301,14 @@ def run_streaming_claude(
             except json.JSONDecodeError:
                 continue
             if not isinstance(ev, dict):
+                continue
+            if early_stop is not None and not early_stop_event.is_set():
+                try:
+                    if early_stop(ev):
+                        early_stop_event.set()
+                except Exception:  # noqa: BLE001 - detector must not abort the run
+                    pass
+            if on_event is None:
                 continue
             summary = summarize_event(ev, start)
             if summary:
@@ -306,9 +329,18 @@ def run_streaming_claude(
 
     deadline = start + timeout_s
     timed_out = False
+    early_stopped = False
     while True:
         rc = proc.poll()
         if rc is not None:
+            break
+        if early_stop_event.is_set():
+            kill_tree(proc)
+            early_stopped = True
+            try:
+                proc.wait(timeout=10)
+            except subprocess.TimeoutExpired:
+                pass
             break
         if time.monotonic() > deadline:
             kill_tree(proc)
@@ -340,6 +372,7 @@ def run_streaming_claude(
         stderr=stderr_bytes,
         returncode=proc.returncode if proc.returncode is not None else -1,
         duration_s=duration,
+        early_stopped=early_stopped,
     )
 
 

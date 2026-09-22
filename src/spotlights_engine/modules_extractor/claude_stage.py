@@ -193,6 +193,13 @@ def api_failure_reason(stdout: bytes) -> str | None:
             return "rate_limit (429)" if "429" in text else "rate_limit"
         if "overloaded" in lowered:
             return "overloaded"
+        # Proxy failing to reach the upstream surfaces as "All connection
+        # attempts failed" (sometimes wrapped in a 401). It is a transport
+        # blip, not a bad credential — a token that just authenticated other
+        # stages does not go stale mid-run — so keep it retryable rather than
+        # fast-failing the whole extractor on one flaky shard.
+        if "all connection attempts failed" in lowered:
+            return "connection_failed"
         match = _API_STATUS_RE.search(text)
         if match is not None:
             status = int(match.group(1))
@@ -276,9 +283,10 @@ def salvage_structured_payload(
 
     A chatty local model sometimes types the answer as assistant text —
     ``StructuredOutput({...})`` or bare JSON — instead of invoking the
-    StructuredOutput tool, then loops against the Stop hook until it burns
-    `max_turns`/timeout. The terminal event carries no `structured_output`, so
-    the run hard-fails even though the model produced the answer.
+    StructuredOutput tool. Left alone it would loop against the Stop hook until
+    it burns `max_turns`/timeout; `_SalvageWatcher` cuts that short by killing
+    the child once the full payload has streamed. Either way the terminal event
+    carries no `structured_output`, so this reconstructs the answer from text.
 
     This scans every assistant text event for embedded JSON objects and, for
     each *required* field of `output_type`, keeps the last value seen. Local
@@ -313,6 +321,40 @@ def salvage_structured_payload(
     if not required.issubset(latest):
         return None
     return json.dumps({key: latest[key] for key in latest})
+
+
+class _SalvageWatcher:
+    """Incremental sibling of `salvage_structured_payload` for live streams.
+
+    Fed one stdout event at a time, it tracks which *required* fields of
+    `output_type` have appeared inside assistant **text** (the JSON a chatty
+    local model types instead of calling the tool). `__call__` returns True the
+    moment every required field has been seen, so `run_streaming_claude` can
+    kill the child right after the answer streams instead of letting the CLI
+    re-nudge the model to `max_turns`.
+
+    Inert for a well-behaved model: one that emits a real `tool_use` never puts
+    the payload in text, so the watcher never fires and the run proceeds
+    normally.
+    """
+
+    def __init__(self, output_type: type[BaseModel]) -> None:
+        schema = output_type.model_json_schema()
+        self._required = set(schema.get("required") or schema.get("properties") or {})
+        self._seen: set[str] = set()
+
+    def __call__(self, ev: dict) -> bool:
+        if not self._required:
+            return False
+        if ev.get("type") != "assistant":
+            return False
+        message = ev.get("message") or {}
+        for chunk in message.get("content") or []:
+            if not isinstance(chunk, dict) or chunk.get("type") != "text":
+                continue
+            for obj in _iter_json_objects(chunk.get("text") or ""):
+                self._seen.update(k for k in self._required if k in obj)
+        return self._required.issubset(self._seen)
 
 
 def duration_seconds(event: dict) -> float | None:
@@ -562,6 +604,10 @@ def run_structured_claude_stage(
             cwd=repo_path,
             timeout_s=timeout_s,
             on_event=on_event,
+            # When salvaging, kill the child the moment the full payload has
+            # streamed as text — otherwise the CLI keeps re-nudging a
+            # non-tool-calling local model to max_turns for no gain.
+            early_stop=_SalvageWatcher(output_type) if salvage else None,
         )
     except StreamingTimeout as exc:
         if attempt_dir is not None:
@@ -598,6 +644,17 @@ def run_structured_claude_stage(
     stage_telemetry = _stage_telemetry_from_stream(
         result.stdout, fallback_duration_s=result.duration_s
     )
+    if getattr(result, "early_stopped", False):
+        # The watcher saw the full text-embedded payload and killed the child.
+        # Salvage it from the captured stream; only if that unexpectedly finds
+        # nothing do we fall through to the normal (now nonzero) exit handling.
+        salvaged = _salvage_result(
+            result.stdout,
+            fallback_duration_s=result.duration_s,
+            why="early-stop: required fields emitted as text",
+        )
+        if salvaged is not None:
+            return salvaged
     if result.returncode != 0:
         salvaged = _salvage_result(
             result.stdout,
