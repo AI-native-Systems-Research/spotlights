@@ -289,8 +289,10 @@ def _parse_cluster_members(members: list[str]) -> Cluster:
 def _clean_env() -> dict[str, str]:
     env = os.environ.copy()
     for key in list(env):
+        # NOTE: do NOT strip ANTHROPIC_BASE_URL — the IBM-LiteLLM wiring points
+        # claude at the proxy via that var; dropping it makes claude fall back to
+        # the default endpoint with no key → 401 "Not logged in" (exit 1).
         if key.startswith(("SPOTLIGHTS_", "VSCODE_")) or key in {
-            "ANTHROPIC_BASE_URL",
             "HTTP_PROXY",
             "HTTPS_PROXY",
             "ALL_PROXY",

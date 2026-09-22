@@ -1336,6 +1336,13 @@ async def _run_module(
                     segment=segment,
                     candidates=candidates,
                 )
+                # Flush the canonical pass to disk NOW — at the end of this
+                # deep-research pass — instead of deferring until every repeat
+                # finishes. Runner-agnostic: openalex / claude / codex all land
+                # here via research_output. Extra passes below flush per-pass too,
+                # so each sidecar appears as soon as its pass completes.
+                P.write_deep_research(module_paths, research_output, dr_duration)
+                P.write_deep_research_search_log(module_paths, research_output, qn)
                 # Determinism stress test: run the SAME step 3 the requested extra
                 # times, writing each to its own indexed sidecar (never consumed
                 # downstream — only the canonical first pass above is). Compared
@@ -1411,8 +1418,8 @@ async def _run_module(
                 _log.warning(
                     "[%s] deep_research: %s: %s", qn, iss.severity, iss.message
                 )
-            P.write_deep_research(module_paths, research_output, dr_duration)
-            P.write_deep_research_search_log(module_paths, research_output, qn)
+            # Canonical sidecar already flushed above (right after pass 0), so
+            # nothing to re-write here — just record usage + checkpoint.
             _write_cli_usage_records(
                 module_paths=module_paths,
                 qn=qn,
