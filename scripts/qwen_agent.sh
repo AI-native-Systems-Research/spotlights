@@ -23,18 +23,42 @@ MODEL="Qwen/Qwen3.8-27B"
 SVC="svc/qwen38-27b-vllm-3"
 PORT=18000
 BASE="http://localhost:${PORT}/v1"
+OC_SERVER="https://api.dmf.dipc.res.ibm.com:6443"
+TOKEN_URL="https://oauth-openshift.apps.dmf.dipc.res.ibm.com/oauth/token/display"
+TOKENS_FILE="$HOME/.claude/tokens"
 
 pf_up() { curl -sf -m3 "${BASE}/models" >/dev/null 2>&1; }
+
+open_url() {
+  if command -v open >/dev/null 2>&1; then open "$1"
+  elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$1"
+  fi
+}
+
+# Ensure a live OpenShift session. Try the stored token; if that is missing or
+# expired, open the token page so the user can grab a fresh one.
+ensure_login() {
+  oc whoami >/dev/null 2>&1 && return 0
+  if [ -f "$TOKENS_FILE" ]; then
+    # shellcheck disable=SC1090
+    . "$TOKENS_FILE"
+    if [ -n "${VELA_OC_TOKEN:-}" ]; then
+      oc login --token="$VELA_OC_TOKEN" --server="${VELA_OC_SERVER:-$OC_SERVER}" >/dev/null 2>&1 \
+        && oc whoami >/dev/null 2>&1 && { echo "==> OpenShift session refreshed from stored token"; return 0; }
+    fi
+  fi
+  echo "xx  OpenShift token missing/expired — opening token page in browser:" >&2
+  echo "    ${TOKEN_URL}" >&2
+  open_url "$TOKEN_URL"
+  echo "    Copy the 'oc login --token=sha256~... --server=...' command, run it (or update" >&2
+  echo "    VELA_OC_TOKEN in ${TOKENS_FILE}), then re-run this command." >&2
+  exit 1
+}
 
 ensure_pf() {
   if pf_up; then return; fi
   command -v oc >/dev/null 2>&1 || { echo "xx  oc CLI not found" >&2; exit 1; }
-  oc whoami >/dev/null 2>&1 || {
-    echo "xx  not logged into OpenShift. Refresh token:" >&2
-    echo "    https://oauth-openshift.apps.dmf.dipc.res.ibm.com/oauth/token/display" >&2
-    echo "    then: oc login --token=sha256~... --server=https://api.dmf.dipc.res.ibm.com:6443" >&2
-    exit 1
-  }
+  ensure_login
   echo "==> starting port-forward ${SVC} ${PORT}:8000"
   nohup oc port-forward "$SVC" "${PORT}:8000" >/tmp/qwen_pf.log 2>&1 &
   for _ in $(seq 1 15); do pf_up && break; sleep 1; done

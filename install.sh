@@ -62,6 +62,17 @@ if [ -f "$ALIAS_FILE" ]; then
   done
 fi
 
+# OpenShift preflight: if `oc` is installed but the session is missing/expired,
+# open the token page so the user can grab a fresh login command.
+if command -v oc >/dev/null 2>&1 && ! oc whoami >/dev/null 2>&1; then
+  TOKEN_URL="https://oauth-openshift.apps.dmf.dipc.res.ibm.com/oauth/token/display"
+  warn "OpenShift session not active — opening token page: ${TOKEN_URL}"
+  if command -v open >/dev/null 2>&1; then open "$TOKEN_URL" >/dev/null 2>&1 || true
+  elif command -v xdg-open >/dev/null 2>&1; then xdg-open "$TOKEN_URL" >/dev/null 2>&1 || true
+  fi
+  warn "Then run the 'oc login --token=sha256~... --server=...' command it shows."
+fi
+
 if command -v spotlights-engine >/dev/null 2>&1; then
   say "Installed: spotlights-engine ($(command -v spotlights-engine))"
   cat <<'EOF'
