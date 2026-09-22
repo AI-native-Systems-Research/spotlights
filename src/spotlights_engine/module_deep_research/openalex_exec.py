@@ -78,14 +78,19 @@ class OpenAlexRunnerOptions(BaseModel):
     # query-writer emits up to this many one-per-line queries (each facet gets
     # its own relevance-ranked search); results are merged + deduped. "regex"
     # mode always issues a single query regardless.
-    max_queries: int = 4
-    # OpenAlex `filter` value ANDed with the relevance search. Restricted to the
-    # Computer Science (17) and Mathematics (15) top-level fields: OpenAlex
-    # full-text `search` otherwise keyword-matches across all of science, so
-    # code-optimization queries surface chemistry/spectroscopy/physics noise
-    # (e.g. "spectral normalization" -> boron isotopic spectrometry). The domain
-    # gate keeps ML/optimization/manifold papers and drops the off-domain hits.
-    base_filter: str = "type:article,primary_topic.field.id:17|15"
+    max_queries: int = 10
+    # OpenAlex `filter` value ANDed with the relevance search.
+    #   type:article|preprint — GT papers are overwhelmingly arXiv PREPRINTS
+    #     (e.g. the Muon paper 2502.16982); an `article`-only gate silently
+    #     excluded every one of them, so preprints must be allowed through.
+    #   primary_topic.field.id:17|26 — Computer Science (17) + Mathematics (26).
+    #     NOTE: 15 is Chemical Engineering, NOT Mathematics — the prior 17|15
+    #     value leaked chemistry/spectroscopy noise (boron spectrometry, ion-trap
+    #     cooling, catalysis). 26 is the real Mathematics field. Kept at
+    #     field-level (not subfield) on purpose: OpenAlex frequently mis-topics
+    #     niche methods (the Muon paper is tagged Physics), and narrower subfield
+    #     gates drop those GTs entirely. Field-level trades some noise for recall.
+    base_filter: str = "type:article|preprint,primary_topic.field.id:17|26"
     # How the OpenAlex search query is built from the research prompt:
     #   "regex" — deterministic: parse qualified name + objective (no LLM).
     #   "codex" — a Codex query-writer distills the prompt into keywords, with
@@ -296,11 +301,19 @@ _QUERY_WRITER_INSTRUCTION = (
     "(\"attention\", \"quantization\", \"speculative decoding\"); NEVER file "
     "paths, class or variable names, or the host framework/library name unless "
     "it is itself the research subject.\n"
+    "- Do NOT emit a bare generic term on its own (\"optimization\", \"deep "
+    "learning\", \"neural network\", \"machine learning\", \"gradient descent\", "
+    "\"matrix\"): alone they match tens of thousands of off-topic papers. Always "
+    "pair a generic with the SPECIFIC method, structure, or problem "
+    '(e.g. \"orthogonalized momentum matrix optimizer\", not \"optimization\").\n'
+    "- Prefer the method's proper name and its algorithmic mechanism if known "
+    '(e.g. \"Newton-Schulz iteration orthogonalization\", \"Muon optimizer\").\n'
     "- Do not use the NOT operator.\n"
     "\n"
-    "Output 1 to 4 queries, ONE PER LINE, ordered most to least important. No "
-    "numbering, no bullets, no markdown, no blank lines, no explanation — just "
-    "the query strings, each on its own line.\n"
+    "Output up to 10 queries, ONE PER LINE, ordered most to least important. "
+    "Favor specificity over breadth — a precise 3-5 concept query beats a vague "
+    "1-2 word one. No numbering, no bullets, no markdown, no blank lines, no "
+    "explanation — just the query strings, each on its own line.\n"
     "\n"
     "--- RESEARCH BRIEF ---\n"
 )
