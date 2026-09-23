@@ -200,19 +200,36 @@ export async function unring(page) {
   await page.waitForTimeout(RING_HIDE_WAIT_MS);
 }
 
-export async function moveCursor(page, selector) {
+/**
+ * Park the synthetic cursor on an element.
+ *
+ * `align: 'right'` puts it near the element's trailing edge instead of its centre, for
+ * targets that are mostly left-aligned text in a wide box. A list box's option is the
+ * case that needed it: its centre lands in the middle of the label, so the pointer covered
+ * the last characters of "vllm/v1/kv_offload" in the one frame whose whole job is to show
+ * which module is being picked. CURSOR_EDGE_INSET is the dot's 9px radius plus a little,
+ * so the dot sits inside the element and clear of any text ending before that edge.
+ */
+const CURSOR_EDGE_INSET = 16;
+
+export async function moveCursor(page, selector, { align = 'center' } = {}) {
   const box = await boxOf(page, selector);
-  const centre = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  const point = {
+    x: align === 'right'
+      ? Math.max(box.x + box.width / 2, box.x + box.width - CURSOR_EDGE_INSET)
+      : box.x + box.width / 2,
+    y: box.y + box.height / 2,
+  };
   await page.evaluate(
-    ({ id, point }) => {
+    ({ id, point: p }) => {
       const el = document.getElementById(id);
       el.dataset.shown = '1';
-      el.style.transform = `translate(${point.x}px, ${point.y}px)`;
+      el.style.transform = `translate(${p.x}px, ${p.y}px)`;
     },
-    { id: OVERLAY_IDS.cursor, point: centre },
+    { id: OVERLAY_IDS.cursor, point },
   );
   await page.waitForTimeout(480);
-  return centre;
+  return point;
 }
 
 export async function pulseCursor(page) {

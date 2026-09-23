@@ -71,6 +71,16 @@ export const PROPOSALS_VIEWPORT_COVERAGE = 0.9;
 export const FINDINGS_SECTION = 'section.sec:has(#fq)';
 
 /**
+ * The catalogue's own heading -- "Findings catalogue — 97 findings" -- which is what the
+ * arrival beat aligns to the top of the frame and asserts it landed on.
+ *
+ * `> h2` and not a descendant match: the section's detail panels carry `h4`s but the
+ * table's own column group headers are `h2`-free, so the direct child is unambiguous and
+ * stays unambiguous if the catalogue ever grows a sub-heading.
+ */
+export const FINDINGS_HEAD = `${FINDINGS_SECTION} > h2`;
+
+/**
  * The catalogue's top row once it has been filtered and sorted.
  *
  * One `tbody.fnd` per finding, and the section's script sorts by re-appending *every*
@@ -94,6 +104,17 @@ export const TOP_FINDING = 'table.fnd tbody.fnd:visible >> nth=0';
  */
 export const TOP_FINDING_FIRST_PROP = `${TOP_FINDING} >> details.pitem >> nth=0`;
 export const TOP_FINDING_CAND_LINK = `${TOP_FINDING_FIRST_PROP} >> a[data-cand]`;
+
+/**
+ * The leaderboard's top row as a viewer sees it, used by the closing beat to prove the
+ * list is really on screen behind the tiles.
+ *
+ * `:visible` for the same reason the catalogue's top row needs it: this page filters by
+ * hiding, so the first `tbody.cand` in document order is not necessarily one that is
+ * drawn. `>> nth=0` pins it to *the* top row, because an unpinned selector would let
+ * `inViewport` be satisfied by any row anywhere in a 173-row table.
+ */
+export const LEADERBOARD_TOP_ROW = 'table.lb tbody.cand:visible >> nth=0 >> tr.row';
 
 /** The alignments `scrollAlign` and `scrollStepped` accept for their `block` option. */
 export const ALIGN_BLOCKS = new Set(['start', 'center']);
@@ -120,11 +141,15 @@ export const STICKY_CLEARANCE_LB = 48;
 export const STICKY_CLEARANCE_FND = 56;
 
 /**
- * The gap above the closing section, which has no sticky header to clear and needs only
- * to not sit flush against the top edge of the frame: aligned at 0 its heading's box
- * starts at y=0 exactly.
+ * The gap above a section heading aligned to the top of the frame.
+ *
+ * Unlike the two clearances above, this one clears nothing: a `section.sec` has no sticky
+ * header of its own, and the only thing wrong with aligning it flush is that at 0 its
+ * heading's box starts at y=0 exactly, which reads as a frame that has been cut off
+ * rather than composed. Both sections the demo opens on -- the findings catalogue and the
+ * downstream artifacts -- want the same gap, which is why this is not named for either.
  */
-export const CLOSE_CLEARANCE = 24;
+export const SECTION_CLEARANCE = 24;
 
 /**
  * Slack allowed when asserting where an alignment landed.
@@ -277,7 +302,10 @@ export const BEATS = [
   {
     id: 'board',
     cuts: BOTH,
-    dwell: { full: 8.0, gif: 3.0 },
+    /* 8.0 -> 10.0 and 3.0 -> 5.0. The module filter is now picked from an open list
+       rather than set, which costs ~1.9s more than `select` did: the list has to be on
+       screen long enough to read five module names before the cursor travels down it. */
+    dwell: { full: 10.0, gif: 8.0 },   // gif: measured 7.6s of choreography, see below
     caption: {
       full: 'hot modules: <b>4 of 8</b> modules hold <b>41 of the 60</b> high-impact candidates',
       gif: 'hot modules: <b>4 of 8</b> hold <b>41 of 60</b> high-impact',
@@ -288,8 +316,16 @@ export const BEATS = [
       { type: 'click', sel: '#hotbtn' },
       { type: 'pause', ms: 1200 },
       { type: 'unring' },
-      { type: 'select', sel: '#mod', value: 'vllm/v1/kv_offload' },
-      { type: 'pause', ms: 900 },
+      /* Not `select`, which set the filter with nothing on screen to say a choice had
+         been made: one frame showed 86 candidates, the next showed 19, and the control
+         that did it never opened. It cannot simply be clicked either -- Chrome draws a
+         `<select>`'s popup as a native widget outside the page, so Playwright's video
+         records the focus ring and no list at all. `pickFromList` expands the real
+         control in-page instead, so the options a viewer sees are the page's own, with
+         the hot percentages hot mode just put on them. */
+      { type: 'pickFromList', sel: '#mod', value: 'vllm/v1/kv_offload' },
+      /* 900 -> 600: pickFromList already holds the picked row before it collapses. */
+      { type: 'pause', ms: 600 },
     ],
     asserts: [
       { type: 'attr', sel: '#hotbtn', name: 'aria-pressed', equals: 'true' },
@@ -297,7 +333,10 @@ export const BEATS = [
          by any filter change -- including this beat's own select -- so it can never
          witness hot mode. #count is the live proof the filter took effect, and the
          caption's own figures are asserted against the prose that states them. */
-      { type: 'textMatches', sel: '#count', pattern: '^\\d+ / 173 shown$' },
+      /* Anchored on 19, not `\\d+`. The loose pattern was satisfied by any filter state at
+         all -- hot mode alone shows 86 -- so it could not witness which module was picked,
+         which is now the substance of the beat. kv_offload is 19 of the 173. */
+      { type: 'textMatches', sel: '#count', pattern: '^19 / 173 shown$' },
       { type: 'domContains', text: '4 of 8 modules, holding 41 of the 60 high-impact candidates' },
       { type: 'visible', sel: DRILL_IN_ROW },
     ],
@@ -305,7 +344,7 @@ export const BEATS = [
   {
     id: 'drill-writeup',
     cuts: BOTH,
-    dwell: { full: 5.0, gif: 2.5 },
+    dwell: { full: 5.0, gif: 3.5 },   // gif: measured 3.1s of choreography, see below
     caption: {
       full: 'every candidate is a full write-up — what it is, how it works today, why it is a candidate',
       gif: 'every candidate is a full write-up',
@@ -380,7 +419,7 @@ export const BEATS = [
   {
     id: 'radial-tree',
     cuts: BOTH,
-    dwell: { full: 5.0, gif: 1.5 },
+    dwell: { full: 7.5, gif: 7.5 },   // measured 7.1s of choreography in both cuts
     caption: {
       full: 'or see all <b>173</b> as a tree',
       gif: 'or see all <b>173</b> as a tree',
@@ -421,15 +460,81 @@ export const BEATS = [
   },
   {
     /**
-     * The evidence base -- and the loop it closes.
+     * Arriving at the evidence base.
      *
-     * It sits here, after the tree, because the demo has by now shown the whole run and
-     * one candidate out of it in detail; this is where that candidate's provenance is.
-     * The catalogue is not interesting as a list. It is interesting because of the two
-     * columns it exists for -- where a finding was published, and what it produced -- so
-     * the choreography asks the payoff question outright: narrow to the 27 findings that
-     * came from papers, rank them by how many proposals they produced, and open the top
-     * one.
+     * Its own beat, because the frame this establishes is not the frame the payoff beat
+     * ends on, and a beat's assertions can only see where it finished. Fused into one, the
+     * arrival was unwitnessed: the beat scrolled with `scrollIntoViewIfNeeded`, which does
+     * nothing once any sliver of the catalogue is in frame, and then filtered, sorted and
+     * expanded a row -- so by the time the assertions ran, the section heading that says
+     * what the viewer is looking at was long off the top of the screen, and nothing had
+     * ever checked it was on it. This beat's whole job is that heading, and it asserts it.
+     *
+     * The travel is stepped rather than jumped for the same reason the proposals beat's
+     * is: the tree the previous beat filled the frame with sits below the catalogue, so
+     * cutting straight here reads as a different page rather than as the same one scrolled.
+     *
+     * It also splits a caption that had grown to three lines. At 26px over a 1040px card
+     * that wrapped far enough up the frame to lie across the downstream tiles, and no
+     * viewer reads a paper's title, a technique, an evidence quote and a proposal list off
+     * one sentence anyway. The catalogue's two totals are narrated here; the payoff
+     * question is narrated where it is asked.
+     */
+    id: 'findings',
+    cuts: BOTH,
+    dwell: { full: 3.5, gif: 3.0 },
+    caption: {
+      full: 'the evidence base: <b>97</b> findings, tracked to where each was published (<b>46</b> sites) and whether it paid off',
+      gif: 'the evidence base: <b>97</b> findings across <b>46</b> sites',
+    },
+    actions: [
+      {
+        type: 'scrollStepped',
+        sel: FINDINGS_HEAD,
+        block: 'start',
+        marginTop: SECTION_CLEARANCE,
+        steps: 10,
+        stepMs: 90,
+      },
+      { type: 'pause', ms: 500 },
+    ],
+    asserts: [
+      /* What the heading says, in the two halves the caption leans on. Scoped to the
+         heading and not to the document: '97 findings' occurs in the section's own
+         footnote prose too, so a document-wide check would pass with the heading gone. */
+      { type: 'textMatches', sel: FINDINGS_HEAD, pattern: 'Findings catalogue' },
+      { type: 'textMatches', sel: FINDINGS_HEAD, pattern: '97 findings' },
+      /* ...and that the frame is anchored on it, which is the whole point of the beat.
+         `inViewport` would not do: the catalogue is 723px of a 810px frame, so it fits
+         from a range of scroll positions, including ones with the heading above the top
+         edge. These two say it landed where the alignment aimed and that nothing is
+         painted over it. */
+      { type: 'nearTop', sel: FINDINGS_HEAD, maxY: SECTION_CLEARANCE + ALIGN_TOLERANCE_PX },
+      { type: 'unoccluded', sel: FINDINGS_HEAD },
+      /* The catalogue is unfiltered here -- the narrowing is the next beat's move -- so
+         this is the 97 the caption quotes, off the section's own counter. */
+      { type: 'textMatches', sel: '#fcount', pattern: '^97 / 97 shown$' },
+      /* 46 sites is the figure the sort control states it under, so that is where the
+         caption's 46 is witnessed rather than anywhere in the document. */
+      { type: 'textMatches', sel: '#fsort option[value="host:1"]', pattern: '46 sites' },
+      /* And the controls the next beat reaches for are on screen when it starts. */
+      { type: 'inViewport', sel: '#fq' },
+    ],
+  },
+  {
+    /**
+     * The loop the run closes.
+     *
+     * The beat before this one arrived at the catalogue and named it; this one asks what
+     * the catalogue is for. It is not interesting as a list. It is interesting because of
+     * the two columns it exists for -- where a finding was published, and what it produced
+     * -- so the choreography asks the payoff question outright: narrow to the 27 findings
+     * that came from papers, rank them by how many proposals they produced, and open the
+     * top one.
+     *
+     * It opens on the frame its predecessor established, which is why it has no scroll of
+     * its own: the heading, the search box and the two filter controls are all already on
+     * screen when it starts, and its predecessor asserts they are.
      *
      * Opening it is the substance of the beat, not a flourish. The expanded detail names
      * the technique extracted from the paper, quotes the evidence it was extracted from,
@@ -457,21 +562,21 @@ export const BEATS = [
      * #fsort is itself ~0.9s, so the filtered-but-unsorted table is already held long
      * enough to read before the sort lands on top of it.
      */
-    id: 'findings',
+    id: 'findings-paper',
     cuts: BOTH,
-    /* 4.0 -> 6.0, in both cuts. The beat gained a click and a re-frame after the two
-       selects, so its choreography now spends ~5.3s of the dwell-as-deadline budget; at
-       4.0 every beat would have overrun and the opened finding would have been on screen
-       only for the caption's fade-out. 6.0 holds the expanded row, with the candidate
-       link in it, for over a second after the travel settles -- long enough to read a
-       rank and a symbol name. */
-    dwell: { full: 6.0, gif: 6.0 },
+    /* 4.0 -> 6.0. The beat gained a click and a re-frame after the two selects, so its
+       choreography spends ~5.3s of the dwell-as-deadline budget; at 4.0 every beat would
+       have overrun and the opened finding would have been on screen only for the caption's
+       fade-out. 6.0 holds the expanded row, with the candidate link in it, for over a
+       second after the travel settles -- long enough to read a rank and a symbol name.
+       The gif takes 5.5 rather than 6.0: the arrival that used to open this beat, and its
+       450ms settle, are the previous beat's now, and this caption is a line shorter. */
+    dwell: { full: 6.0, gif: 5.5 },
     caption: {
-      full: 'the evidence base: <b>97</b> findings, tracked to where each was published (<b>46</b> sites) and whether it paid off — rank the <b>27</b> from papers by payoff and open the top one: this paper taught one technique, which produced <b>6</b> proposals, the first of them rank <b>#17</b> — the candidate we just drilled into',
-      gif: '<b>97</b> findings, <b>46</b> sites — the <b>27</b> from papers, ranked by payoff. the top paper produced <b>6</b> proposals; the first is rank <b>#17</b>, the candidate we opened',
+      full: 'rank the <b>27</b> from papers by payoff, open the top one: it taught one technique that produced <b>6</b> proposals — the first is rank <b>#17</b>, the candidate we drilled into',
+      gif: 'the <b>27</b> from papers, by payoff: the top one produced <b>6</b> proposals; the first is rank <b>#17</b>, the candidate we opened',
     },
     actions: [
-      { type: 'scrollTo', sel: '#fq' },
       { type: 'select', sel: '#fsrc', value: 'paper' },
       { type: 'select', sel: '#fsort', value: 'props:-1' },
       /* The title cell, not the row. The row's own centre lands on the outbound source
@@ -495,16 +600,11 @@ export const BEATS = [
       { type: 'pause', ms: 600 },
     ],
     asserts: [
-      /* Two of the caption's figures at once, off the catalogue's own counter: 27 of
-         97 shown. This replaces a document-wide `domContains '97 findings'`, which the
-         page satisfies from several places and which would therefore have passed with
-         the whole catalogue deleted. Anchored, so a wider filter cannot satisfy it. */
+      /* The caption's 27, off the catalogue's own counter, and the proof the filter
+         narrowed rather than merely changed. Anchored, so a wider filter cannot satisfy
+         it: the arrival beat asserts the same counter reading 97 / 97, so between the two
+         beats the narrowing itself is witnessed. */
       { type: 'textMatches', sel: '#fcount', pattern: '^27 / 97 shown$' },
-      /* The section's own 97, from the section's own heading. */
-      { type: 'textMatches', sel: `${FINDINGS_SECTION} > h2`, pattern: '97 findings' },
-      /* 46 sites is the figure the sort control states it under, so that is where the
-         caption's 46 is witnessed rather than anywhere in the document. */
-      { type: 'textMatches', sel: '#fsort option[value="host:1"]', pattern: '46 sites' },
       /* The top row after the sort really is a paper finding with 6 proposals. The two
          data attributes are the sort key and the filter key themselves; the two
          rendered cells are what a viewer reads off the frame, so both are checked. The
@@ -557,7 +657,9 @@ export const BEATS = [
   {
     id: 'close',
     cuts: BOTH,
-    dwell: { full: 5.0, gif: 2.0 },
+    /* 5.0 -> 6.0 and 2.0 -> 3.0, for the view toggle the beat now clicks: the synthetic
+       cursor's travel to it and its pulse are ~0.9s before the click even lands. */
+    dwell: { full: 6.0, gif: 3.0 },
     caption: {
       full: '3 evolve scaffolds · 2 patches applied · <b>nothing measured yet</b> — the page says so',
       gif: '3 evolve scaffolds · 2 applied · <b>nothing measured yet</b>',
@@ -571,7 +673,15 @@ export const BEATS = [
          frame, under a caption that lay across them. Measured there, the section's box was
          y 681..810: flush against the bottom edge, and inside the frame by a fraction of a
          pixel -- which is all `inViewport` asks, and is why it passed in the recording. */
-      { type: 'scrollAlign', sel: DOWNSTREAM_SECTION, block: 'start', marginTop: CLOSE_CLEARANCE },
+      /* Back to the table first. The tree beat leaves the leaderboard in radial view, and
+         the closing shot frames the three tiles with the leaderboard directly beneath them
+         -- so the last thing on screen was a fan of rotated leaf labels. What the run
+         produces is a ranked list, so that is what the frame it ends on shows.
+
+         Before the alignment and not after: the two views are different heights, so
+         aligning first would compute the frame against a layout the frame never has. */
+      { type: 'click', sel: '#lbview' },
+      { type: 'scrollAlign', sel: DOWNSTREAM_SECTION, block: 'start', marginTop: SECTION_CLEARANCE },
     ],
     asserts: [
       /* The two domContains guard the caption's figures wherever they sit in the
@@ -584,9 +694,26 @@ export const BEATS = [
          including the bottom strip it was stranded in, under the caption, below most of
          the previous beat's expanded finding. inViewport cannot tell those apart, so this
          asserts where the alignment actually landed. */
-      { type: 'nearTop', sel: DOWNSTREAM_SECTION, maxY: CLOSE_CLEARANCE + ALIGN_TOLERANCE_PX },
+      { type: 'nearTop', sel: DOWNSTREAM_SECTION, maxY: SECTION_CLEARANCE + ALIGN_TOLERANCE_PX },
       { type: 'domContains', text: 'Awaiting measurement' },
       { type: 'domContains', text: 'no candidate has a measured speedup yet' },
+
+      /* --- and the leaderboard beneath the tiles is the table, not the tree --- */
+
+      /* The toggle's own state, read the two ways it reports it. Its label is what a
+         viewer reads off the frame: in table view the button offers 'radial tree'. */
+      { type: 'attr', sel: '#lbview', name: 'aria-pressed', equals: 'false' },
+      { type: 'textMatches', sel: '#lbview', pattern: '^radial tree$' },
+      /* `hidden` is how the page switches views, so this is the assertion that fails if
+         the click missed the toggle -- and `#lbtree` is checked too, because a page that
+         somehow drew both would satisfy the first on its own. */
+      { type: 'visible', sel: '#lbtable' },
+      { type: 'hidden', sel: '#lbtree' },
+      /* The rows are actually in the closing frame. None of the above can witness that:
+         the switch is a DOM fact and the tiles are aligned 24px from the top, which says
+         nothing about what the remaining 650px of the shot contains. */
+      { type: 'inViewport', sel: LEADERBOARD_TOP_ROW },
+      { type: 'unoccluded', sel: LEADERBOARD_TOP_ROW },
     ],
   },
 ];
@@ -650,6 +777,12 @@ export function beatProblems(beat) {
         problems.push(`${beat.id}: ${a.type} marginTop must be a non-negative number, got ${a.marginTop}`);
       }
     }
+    /* An empty `value` is `all modules` -- a clearing, not a pick -- and record.mjs would
+       run the whole open-travel-collapse choreography to select it. A misspelled key
+       reaches selectOption as undefined, which Playwright reads as "select nothing". */
+    if (a.type === 'pickFromList' && !(typeof a.value === 'string' && a.value.length > 0)) {
+      problems.push(`${beat.id}: pickFromList needs a non-empty value, got ${a.value}`);
+    }
     if (a.type === 'scrollStepped') {
       if (!(Number.isInteger(a.steps) && a.steps >= 2)) {
         problems.push(`${beat.id}: scrollStepped needs at least 2 steps, got ${a.steps}`);
@@ -677,11 +810,24 @@ export function validateStoryboard() {
     problems.push(...beatProblems(beat));
   }
 
-  /* 64.0, not 62.0: the findings beat's dwell went 4.0 -> 6.0 to pay for opening the top
-     paper finding and re-framing it. 23.0, not 20.5: the same +2.0, plus the +0.5 the
-     stepped scroll in drill-proposals costs the short cut. */
-  if (totalDuration('full') !== 64.0) problems.push(`full cut is ${totalDuration('full')}s, want 64.0s`);
-  if (totalDuration('gif') !== 23.0) problems.push(`gif cut is ${totalDuration('gif')}s, want 23.0s`);
+  /* The recorded length of each cut, and the reason it is worth pinning: three of these
+     dwells used to be smaller than the choreography they have to contain, which made this
+     check pass on a number nine seconds under what the recorder actually produced. A dwell
+     is a DEADLINE -- the recorder waits out whatever is left of it and logs an overrun if
+     there is nothing left -- so a dwell below its own choreography does not shorten the
+     beat, it only stops predicting it. The three were raised to the measured cost plus a
+     little: `board` to 8.0 (7.6s, most of it the module list opening and being read),
+     `drill-writeup` to 3.5 (3.1s), and `radial-tree` to 7.5 in both cuts (7.1s, nearly all
+     of it undoing the drill-in's filters to get back to all 173 as a tree).
+
+     73.0 = 64.0 as first budgeted, +2.0 on `board` for opening the module list rather than
+     setting it, +3.5 for `findings` (the arrival beat split off the front of the payoff
+     beat), +1.0 on `close` for the view toggle, and +2.5 for `radial-tree`'s correction.
+     38.5 = 23.0, the same +2.0, +3.0 and +1.0, less the 0.5 `findings-paper` gives back in
+     the short cut now that the arrival and its settle are the beat before it, plus the
+     +3.0, +1.0 and +6.0 the three corrections add there. */
+  if (totalDuration('full') !== 73.0) problems.push(`full cut is ${totalDuration('full')}s, want 73.0s`);
+  if (totalDuration('gif') !== 38.5) problems.push(`gif cut is ${totalDuration('gif')}s, want 38.5s`);
 
   return problems;
 }

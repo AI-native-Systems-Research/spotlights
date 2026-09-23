@@ -4,7 +4,8 @@ import {
   BEATS, GEOMETRY, DRILL_IN_ROW, DRILL_IN_CAND, DOWNSTREAM_SECTION, TREE_VIEWPORT_COVERAGE,
   FINDINGS_SECTION, TOP_FINDING, TOP_FINDING_FIRST_PROP, TOP_FINDING_CAND_LINK,
   LEADERBOARD_HEAD, PROPOSALS_VIEWPORT_COVERAGE, ALIGN_BLOCKS,
-  STICKY_CLEARANCE_LB, STICKY_CLEARANCE_FND, CLOSE_CLEARANCE, ALIGN_TOLERANCE_PX,
+  STICKY_CLEARANCE_LB, STICKY_CLEARANCE_FND, SECTION_CLEARANCE, ALIGN_TOLERANCE_PX,
+  FINDINGS_HEAD, LEADERBOARD_TOP_ROW,
   beatsForCut, dwellFor, captionFor, totalDuration, validateStoryboard, beatProblems,
 } from './storyboard.mjs';
 
@@ -12,7 +13,9 @@ const ACTION_TYPES = new Set([
   // scrollCenter became scrollAlign, which takes the alignment as an option rather than
   // spelling one per action type; scrollStepped reaches the same place in visible hops.
   'scrollTo', 'scrollAlign', 'scrollStepped', 'click', 'select', 'hover', 'fill',
-  'ring', 'unring', 'pause',
+  // pickFromList is `select` made visible: the native dropdown is not captured by the
+  // recorder, so the real control is expanded in-page and picked from.
+  'pickFromList', 'ring', 'unring', 'pause',
 ]);
 /**
  * `beatProblems` run over a beat that is valid except for what the caller overrides, so a
@@ -36,6 +39,8 @@ const ASSERT_TYPES = new Set([
   // Both added because inViewport passes on the two framings that shipped broken: content
   // under a sticky header, and a short section stranded at the bottom of the frame.
   'unoccluded', 'nearTop',
+  // `visible` on one of two mutually exclusive panes cannot witness a view switch.
+  'hidden',
 ]);
 
 test('the storyboard validates clean', () => {
@@ -46,9 +51,11 @@ test('geometry is the single recording geometry for both cuts', () => {
   assert.deepEqual(GEOMETRY, { width: 1440, height: 810 });
 });
 
-test('there are 13 beats with unique ids', () => {
-  assert.equal(BEATS.length, 13);
-  assert.equal(new Set(BEATS.map((b) => b.id)).size, 13);
+test('there are 14 beats with unique ids', () => {
+  // 14, not 13: the catalogue is two beats now -- arriving at it, then asking what it is
+  // for -- because one beat's assertions can only witness the frame it ends on.
+  assert.equal(BEATS.length, 14);
+  assert.equal(new Set(BEATS.map((b) => b.id)).size, 14);
 });
 
 test('every beat declares known action and assert types', () => {
@@ -72,12 +79,13 @@ test('every textMatches pattern compiles', () => {
   }
 });
 
-test('the gif cut keeps exactly the eight marked beats, in order', () => {
-  // Eight, not seven: the findings catalogue is in the short cut too. It now follows the
-  // tree rather than preceding it -- the whole run, then where its evidence came from.
+test('the gif cut keeps exactly the nine marked beats, in order', () => {
+  // Nine, not eight: the findings catalogue is in the short cut too, and it is two beats
+  // -- the arrival and the payoff question. Both are in the gif: the arrival is what puts
+  // the section's name on screen, without which the payoff beat opens on an unnamed table.
   assert.deepEqual(beatsForCut('gif').map((b) => b.id), [
     'cost-tiles', 'leaderboard-reveal', 'board', 'drill-writeup', 'drill-proposals',
-    'radial-tree', 'findings', 'close',
+    'radial-tree', 'findings', 'findings-paper', 'close',
   ]);
 });
 
@@ -199,68 +207,168 @@ test('the full cut keeps every beat, in declaration order', () => {
 });
 
 test('cut durations match the spec budgets', () => {
-  // 64.0, not 62.0: the findings beat's dwell went 4.0 -> 6.0 to pay for opening the top
-  // paper finding and re-framing it so the candidate link is legible.
-  assert.equal(totalDuration('full'), 64.0);
-  // 23.0, not 20.5: that same +2.0, plus the +0.5 the stepped scroll costs drill-proposals
-  // in the short cut. Nothing else moved.
-  assert.equal(totalDuration('gif'), 23.0);
-  // The arithmetic, spelled out: the gif cut without the findings beat is 17.0s -- the old
-  // 16.5 plus drill-proposals' half second. It lives here rather than in its own test so
-  // the gif budget is asserted in exactly one place -- the throwaway nortree variant
-  // re-keys this number, and a second copy would widen what that patch breaks.
-  const findings = BEATS.find((b) => b.id === 'findings');
-  assert.equal(totalDuration('gif') - dwellFor(findings, 'gif'), 17.0);
-  const props = BEATS.find((b) => b.id === 'drill-proposals');
+  // 73.0, from 64.0: `board` +2.0 for opening the module list rather than setting it, the
+  // 3.5s arrival beat split off the front of the catalogue, `close` +1.0 for the view
+  // toggle back to the table, and +2.5 correcting `radial-tree` (see below).
+  assert.equal(totalDuration('full'), 73.0);
+  // 38.5, from 23.0: the same +2.0, +3.0 and +1.0, less the 0.5 `findings-paper` hands
+  // back in the short cut now that the arrival and its settle are the beat before it, plus
+  // the +3.0, +1.0 and +6.0 of the three corrections.
+  assert.equal(totalDuration('gif'), 38.5);
+  // The arithmetic, spelled out, so a dwell that moves without its budget shows up as two
+  // failures rather than one. It lives here rather than in its own test so the gif budget
+  // is asserted in exactly one place -- the throwaway nortree variant re-keys this number,
+  // and a second copy would widen what that patch breaks.
+  const dwell = (id) => dwellFor(BEATS.find((b) => b.id === id), 'gif');
+  const catalogue = dwell('findings') + dwell('findings-paper');
+  assert.equal(catalogue, 8.5);
+  assert.equal(Math.round((totalDuration('gif') - catalogue) * 10) / 10, 30.0);
   assert.equal(
-    Math.round((totalDuration('gif') - dwellFor(findings, 'gif') - dwellFor(props, 'gif')) * 10) / 10,
-    13.5,
+    Math.round((totalDuration('gif') - catalogue - dwell('drill-proposals')) * 10) / 10,
+    26.5,
   );
 });
 
-test('the findings dwell pays for the choreography it grew, in both cuts alike', () => {
-  const findings = BEATS.find((b) => b.id === 'findings');
-  // 6.0, not 4.0: the beat now clicks the top finding open and re-frames it, which spends
-  // ~5.3s of the dwell-as-deadline budget before the caption's fade-out reserve. Both cuts
-  // get the same number because `actions` is shared -- the work is identical in each.
-  assert.equal(dwellFor(findings, 'gif'), 6.0);
-  assert.equal(dwellFor(findings, 'full'), 6.0);
-  // The +2.0 is the *only* reason the full budget moved: every other full dwell is as it
-  // was, so the full cut is the old 62.0 with this beat's two extra seconds in it.
-  const fullWithout = beatsForCut('full')
-    .filter((b) => b.id !== 'findings')
-    .reduce((s, b) => s + dwellFor(b, 'full'), 0);
-  assert.equal(Math.round((fullWithout + 4.0) * 10) / 10, 62.0);
-  assert.equal(Math.round((fullWithout + dwellFor(findings, 'full')) * 10) / 10, 64.0);
+test('no dwell is smaller than the choreography it has to contain', () => {
+  // A dwell is a deadline, not a duration: the recorder waits out whatever is left of it
+  // and, when nothing is, logs an overrun and moves on. So a dwell below its own
+  // choreography does not make the beat shorter -- it only stops predicting it, which is
+  // how the gif budget came to read 28.5s for a recording that ran 37.2s.
+  //
+  // These are the measured costs, from `node record.mjs --cut <cut>` on the committed
+  // storyboard: the choreography plus the 0.34s the recorder reserves for the caption's
+  // fade-out, for the beats whose choreography is substantial enough to have crowded or
+  // outrun a dwell. A beat whose real cost drifts past its dwell fails here rather than
+  // silently at record time.
+  const MEASURED_S = {
+    gif: { board: 7.6, 'drill-writeup': 3.1, 'radial-tree': 7.1, 'findings-paper': 5.2 },
+    full: { board: 7.9, 'radial-tree': 7.1, 'findings-paper': 5.7 },
+  };
+  for (const [cut, costs] of Object.entries(MEASURED_S)) {
+    for (const [id, costS] of Object.entries(costs)) {
+      const beat = BEATS.find((b) => b.id === id);
+      assert.ok(
+        dwellFor(beat, cut) >= costS,
+        `${cut}/${id}: dwell ${dwellFor(beat, cut)}s cannot contain ${costS}s of choreography`,
+      );
+    }
+  }
+  // And the one that was furthest out is now the storyboard's longest gif dwell, which is
+  // the honest reading of it: nearly all of that time is undoing the drill-in's filters to
+  // get back to all 173 as a tree, on camera, in the size-constrained cut.
+  const gifDwells = beatsForCut('gif').map((b) => [b.id, dwellFor(b, 'gif')]);
+  const longest = gifDwells.reduce((a, b) => (b[1] > a[1] ? b : a));
+  assert.equal(longest[0], 'board');
+  assert.equal(dwellFor(BEATS.find((b) => b.id === 'radial-tree'), 'gif'), 7.5);
+  // It costs the same in both cuts, because the choreography is identical in both.
+  assert.equal(
+    dwellFor(BEATS.find((b) => b.id === 'radial-tree'), 'gif'),
+    dwellFor(BEATS.find((b) => b.id === 'radial-tree'), 'full'),
+  );
 });
 
-test('the findings catalogue is in both cuts, and is the last thing shown before the close', () => {
-  const findings = BEATS.find((b) => b.id === 'findings');
-  assert.ok(findings, 'the findings beat must exist');
-  assert.deepEqual(findings.cuts, ['gif', 'full']);
+test('the catalogue pays for the choreography it grew, across its two beats', () => {
+  const arrival = BEATS.find((b) => b.id === 'findings');
+  const payoff = BEATS.find((b) => b.id === 'findings-paper');
+  // The payoff beat's 6.0 buys the two selects, the click and the re-frame -- ~5.3s of the
+  // dwell-as-deadline budget before the caption's fade-out reserve. Its gif dwell is the
+  // one dwell in the storyboard that is *lower* than its full one, because the arrival it
+  // used to do itself is now a beat of its own and this caption is a line shorter.
+  assert.equal(dwellFor(payoff, 'full'), 6.0);
+  assert.equal(dwellFor(payoff, 'gif'), 5.5);
+  // The arrival is a stepped travel plus a held frame, which is most of its 3.5s: ten 90ms
+  // hops, a 200ms landing, a 500ms pause and the caption's own fade in and out.
+  assert.equal(dwellFor(arrival, 'full'), 3.5);
+  assert.equal(dwellFor(arrival, 'gif'), 3.0);
+  // The split did not quietly change how long the catalogue gets overall: the two beats
+  // together are the old single beat's 6.0 plus the arrival's own time, in each cut.
+  assert.equal(Math.round((dwellFor(arrival, 'full') + dwellFor(payoff, 'full')) * 10) / 10, 9.5);
+  assert.equal(Math.round((dwellFor(arrival, 'gif') + dwellFor(payoff, 'gif')) * 10) / 10, 8.5);
+});
+
+/**
+ * How many rendered characters fit on two lines of the caption card.
+ *
+ * The card is 1040px wide with 44px of horizontal padding at 26px in the report's sans,
+ * whose average advance is about 12.5px -- roughly 80 characters a line. Two lines is the
+ * ceiling because the card is 56px off the bottom: a third line reaches up into the frame's
+ * content, which is how the fused catalogue caption came to lie across the downstream tiles.
+ */
+const TWO_CAPTION_LINES_CH = 160;
+
+test('the catalogue is two beats in both cuts, arrival then payoff, before the close', () => {
+  for (const id of ['findings', 'findings-paper']) {
+    const beat = BEATS.find((b) => b.id === id);
+    assert.ok(beat, `${id} must exist`);
+    assert.deepEqual(beat.cuts, ['gif', 'full'], `${id} is in both cuts`);
+  }
   const ids = BEATS.map((b) => b.id);
-  // It moved from just after drill-proposals to just after radial-tree, so the sequence
-  // is: this candidate, then the whole run as a tree, then where the evidence came from
-  // and which candidate it produced. Asserted on the shared array, which IS the play
-  // order, so this pins both cuts at once.
-  assert.equal(ids[ids.indexOf('radial-tree') + 1], 'findings');
+  // The sequence: this candidate, then the whole run as a tree, then where the evidence
+  // came from, then which candidate it produced. Asserted on the shared array, which IS
+  // the play order, so this pins both cuts at once.
   assert.equal(ids[ids.indexOf('drill-proposals') + 1], 'radial-tree');
-  assert.deepEqual(ids.slice(-4), ['drill-proposals', 'radial-tree', 'findings', 'close']);
-  // It used to sit before the board, upstream of the drill-in. It must not any more: the
-  // beat now points at the candidate the drill-in opened, which has to have happened.
-  assert.ok(ids.indexOf('findings') > ids.indexOf('board'));
-  assert.ok(ids.indexOf('findings') > ids.indexOf('drill-proposals'));
+  assert.deepEqual(ids.slice(-4), ['radial-tree', 'findings', 'findings-paper', 'close']);
+  // The payoff beat must follow the arrival immediately: it has no scroll of its own and
+  // works on the frame the arrival establishes, so anything between them breaks it.
+  assert.equal(ids[ids.indexOf('findings') + 1], 'findings-paper');
+  // The catalogue used to sit before the board, upstream of the drill-in. It must not any
+  // more: the payoff beat points at the candidate the drill-in opened, which has to have
+  // happened first.
+  assert.ok(ids.indexOf('findings-paper') > ids.indexOf('board'));
+  assert.ok(ids.indexOf('findings-paper') > ids.indexOf('drill-proposals'));
   for (const cut of ['gif', 'full']) {
     const order = beatsForCut(cut).map((b) => b.id);
     assert.equal(order[order.indexOf('radial-tree') + 1], 'findings');
-    assert.equal(order[order.indexOf('findings') + 1], 'close');
+    assert.equal(order[order.indexOf('findings') + 1], 'findings-paper');
+    assert.equal(order[order.indexOf('findings-paper') + 1], 'close');
   }
-  // The beat it hands over to, so its filters must not break that one.
-  assert.equal(ids[ids.indexOf('findings') + 1], 'close');
 });
 
-test('the findings beat asks the payoff question: filter to papers, then rank by proposals', () => {
-  const findings = BEATS.find((b) => b.id === 'findings');
+test('the arrival beat frames the catalogue by its heading, and travels there in steps', () => {
+  const arrival = BEATS.find((b) => b.id === 'findings');
+  // A stepped travel, not a jump and not scrollIntoViewIfNeeded: the tree the previous
+  // beat filled the frame with sits below the catalogue, so a cut reads as another page.
+  assert.deepEqual(arrival.actions, [
+    {
+      type: 'scrollStepped',
+      sel: FINDINGS_HEAD,
+      block: 'start',
+      marginTop: SECTION_CLEARANCE,
+      steps: 10,
+      stepMs: 90,
+    },
+    { type: 'pause', ms: 500 },
+  ]);
+  assert.equal(FINDINGS_HEAD, `${FINDINGS_SECTION} > h2`);
+
+  // And it witnesses the frame it exists to establish. inViewport on the section would
+  // not: the catalogue is 723px of a 810px frame, so it fits from a range of positions,
+  // including ones with the heading above the top edge -- which is what the unsplit beat
+  // silently recorded. These two say where the alignment landed and that nothing covers it.
+  const anchored = arrival.asserts.find((a) => a.type === 'nearTop');
+  assert.ok(anchored, 'the arrival must assert the frame is anchored on the heading');
+  assert.equal(anchored.sel, FINDINGS_HEAD);
+  assert.equal(anchored.maxY, SECTION_CLEARANCE + ALIGN_TOLERANCE_PX);
+  assert.ok(
+    arrival.asserts.some((a) => a.type === 'unoccluded' && a.sel === FINDINGS_HEAD),
+    'the heading must be the element on top, not merely near the top',
+  );
+  // The controls the payoff beat reaches for, on screen before it starts.
+  assert.ok(arrival.asserts.some((a) => a.type === 'inViewport' && a.sel === '#fq'));
+  // Unfiltered here: the narrowing is the next beat's move, and the two counters together
+  // are what witness it.
+  const count = arrival.asserts.find((a) => a.type === 'textMatches' && a.sel === '#fcount');
+  assert.equal(count.pattern, '^97 / 97 shown$');
+});
+
+test('the payoff beat asks the question: filter to papers, then rank by proposals', () => {
+  const findings = BEATS.find((b) => b.id === 'findings-paper');
+  // No scroll of its own: it opens on the frame the arrival beat established and asserted.
+  assert.deepEqual(
+    findings.actions.filter((a) => a.type.startsWith('scroll') && a.sel !== TOP_FINDING),
+    [],
+    'the arrival is the beat before this one; the only scroll here is the re-frame',
+  );
   const selects = findings.actions.filter((a) => a.type === 'select');
   assert.deepEqual(selects, [
     { type: 'select', sel: '#fsrc', value: 'paper' },
@@ -280,50 +388,81 @@ test('the findings beat asks the payoff question: filter to papers, then rank by
   }
 });
 
-test('both findings captions carry exactly the figures the beat proves', () => {
-  const findings = BEATS.find((b) => b.id === 'findings');
+test('each catalogue caption carries exactly the figures its own beat proves', () => {
+  const arrival = BEATS.find((b) => b.id === 'findings');
+  const payoff = BEATS.find((b) => b.id === 'findings-paper');
   for (const cut of ['gif', 'full']) {
-    const caption = captionFor(findings, cut);
-    assert.match(caption, /<b>97<\/b> findings/, `${cut}: the catalogue's own total`);
-    assert.match(caption, /<b>46<\/b> sites/, `${cut}: where the findings were published`);
-    assert.match(caption, /<b>27<\/b> from papers/, `${cut}: the filtered count`);
-    assert.match(caption, /<b>6<\/b> proposals|produced <b>6<\/b>/, `${cut}: the top row's payoff`);
+    // The arrival narrates the catalogue's two totals, which are the two figures visible
+    // in the frame it establishes.
+    const first = captionFor(arrival, cut);
+    assert.match(first, /<b>97<\/b> findings/, `${cut}: the catalogue's own total`);
+    assert.match(first, /<b>46<\/b> sites/, `${cut}: where the findings were published`);
+    // ...and not the payoff figures, which nothing on screen supports yet.
+    assert.doesNotMatch(first, /<b>27<\/b>/, `${cut}: the filter has not happened yet`);
+    assert.doesNotMatch(first, /#17/, `${cut}: no row is open yet`);
+
+    // The payoff beat narrates the chain it performs.
+    const second = captionFor(payoff, cut);
+    assert.match(second, /<b>27<\/b> from papers/, `${cut}: the filtered count`);
+    assert.match(second, /<b>6<\/b> proposals|produced <b>6<\/b>/, `${cut}: the top row's payoff`);
+    assert.match(second, /<b>#17<\/b>/, `${cut}: the candidate the chain lands on`);
   }
-  // The gif caption is the short form of the same claim.
-  assert.ok(captionFor(findings, 'gif').length < captionFor(findings, 'full').length);
-  assert.match(captionFor(findings, 'full'), /whether it paid off/);
+  // Splitting it is what got the caption back onto two lines: over a 1040px card at 26px
+  // the fused sentence wrapped to three, far enough up the frame to lie across the tiles.
+  // Measured on the rendered text, not the markup -- the <b> tags cost no width, so a
+  // length check over the raw string would pass a sentence purely by being plainer.
+  const rendered = (beat, cut) => captionFor(beat, cut).replace(/<[^>]+>/g, '');
+  for (const beat of [arrival, payoff]) {
+    assert.ok(rendered(beat, 'gif').length < rendered(beat, 'full').length);
+    assert.ok(
+      rendered(beat, 'full').length <= TWO_CAPTION_LINES_CH,
+      `${beat.id}: the full caption is ${rendered(beat, 'full').length} rendered chars, ` +
+        `over the ${TWO_CAPTION_LINES_CH} that fit two lines`,
+    );
+  }
+  assert.match(captionFor(arrival, 'full'), /whether it paid off/);
 });
 
-test('the findings beat witnesses each caption figure through a scoped selector', () => {
-  const findings = BEATS.find((b) => b.id === 'findings');
-  const text = (sel) => findings.asserts.find((a) => a.type === 'textMatches' && a.sel === sel);
+test('each catalogue figure is witnessed through a scoped selector, in its own beat', () => {
+  const arrival = BEATS.find((b) => b.id === 'findings');
+  const payoff = BEATS.find((b) => b.id === 'findings-paper');
+  const text = (beat, sel) => beat.asserts.find((a) => a.type === 'textMatches' && a.sel === sel);
 
   // 27 of 97, off the catalogue's own counter, anchored end to end.
-  const count = text('#fcount');
+  const count = text(payoff, '#fcount');
   assert.ok(count, 'the filtered count needs an assertion on #fcount');
   assert.equal(count.pattern, '^27 / 97 shown$');
   assert.match('27 / 97 shown', new RegExp(count.pattern));
   assert.doesNotMatch('127 / 97 shown', new RegExp(count.pattern));
   assert.doesNotMatch('97 / 97 shown', new RegExp(count.pattern));
+  // The same counter, unfiltered, in the beat before: between the two, the narrowing
+  // itself is witnessed rather than assumed from one reading.
+  assert.equal(text(arrival, '#fcount').pattern, '^97 / 97 shown$');
 
-  // The section's own 97, from the section's own heading.
-  const heading = text(`${FINDINGS_SECTION} > h2`);
+  // The section's own 97, from the section's own heading, in the beat that frames it.
+  const heading = text(arrival, FINDINGS_HEAD);
   assert.ok(heading, "the section's 97 needs an assertion on the section heading");
-  assert.match(heading.pattern, /97 findings/);
+  assert.ok(
+    arrival.asserts.some((a) => a.type === 'textMatches' && a.sel === FINDINGS_HEAD
+      && /97 findings/.test(a.pattern)),
+    'one of the heading assertions must carry the 97',
+  );
   assert.ok(FINDINGS_SECTION.includes('#fq'), 'the section is addressed by the control it owns');
 
   // 46 sites, from the label the sort control states it under.
-  const sites = text('#fsort option[value="host:1"]');
+  const sites = text(arrival, '#fsort option[value="host:1"]');
   assert.ok(sites, 'the 46 sites needs an assertion on the sort option that states it');
   assert.match(sites.pattern, /46 sites/);
 
   // The 97, the 46 and the 27 are never taken from a document-wide substring check: the
   // page repeats all three, so such a check would pass with the catalogue gone.
-  assert.deepEqual(findings.asserts.filter((a) => a.type === 'domContains'), []);
+  for (const beat of [arrival, payoff]) {
+    assert.deepEqual(beat.asserts.filter((a) => a.type === 'domContains'), [], beat.id);
+  }
 });
 
-test('the findings beat proves the top row after the sort, not merely that some row matches', () => {
-  const findings = BEATS.find((b) => b.id === 'findings');
+test('the payoff beat proves the top row after the sort, not merely that some row matches', () => {
+  const findings = BEATS.find((b) => b.id === 'findings-paper');
   // Pinned to one element: :visible skips the filtered-out tbodies the sort reorders
   // anyway, and nth=0 is what makes it the top row rather than any row.
   assert.ok(TOP_FINDING.includes(':visible'));
@@ -353,8 +492,7 @@ test('the findings beat proves the top row after the sort, not merely that some 
   // Every assertion in the beat is scoped to the catalogue or to its top row.
   for (const a of findings.asserts) {
     assert.ok(
-      a.sel.startsWith(TOP_FINDING) || a.sel.startsWith(FINDINGS_SECTION)
-        || ['#fcount', '#fsort option[value="host:1"]'].includes(a.sel),
+      a.sel.startsWith(TOP_FINDING) || a.sel === '#fcount',
       `unscoped assertion selector: ${a.sel}`,
     );
   }
@@ -405,9 +543,13 @@ test('the close beat looks at the downstream artifacts it narrates', () => {
   // already in frame, and the downstream section sits directly below the findings
   // catalogue -- so from the moment the findings beat moved in front of this one, the
   // closing shot never moved at all.
-  assert.deepEqual(close.actions, [{
-    type: 'scrollAlign', sel: DOWNSTREAM_SECTION, block: 'start', marginTop: CLOSE_CLEARANCE,
-  }]);
+  // The click first, then the alignment. The two leaderboard views are different heights,
+  // so aligning before the switch would compute the closing frame against a layout the
+  // frame never has.
+  assert.deepEqual(close.actions, [
+    { type: 'click', sel: '#lbview' },
+    { type: 'scrollAlign', sel: DOWNSTREAM_SECTION, block: 'start', marginTop: SECTION_CLEARANCE },
+  ]);
   assert.deepEqual(close.actions.filter((a) => a.type === 'scrollTo'), []);
   assert.ok(
     DOWNSTREAM_SECTION.includes('Downstream artifacts'),
@@ -417,13 +559,17 @@ test('the close beat looks at the downstream artifacts it narrates', () => {
   const tree = BEATS.find((b) => b.id === 'radial-tree');
   const treeScrolls = tree.actions.filter((a) => a.type === 'scrollTo').map((a) => a.sel);
   assert.ok(treeScrolls.includes('#lbview'));
-  for (const a of close.actions) assert.notEqual(a.sel, '#lbview');
+  // The close does press #lbview -- that is how it gets back to the table -- but it must
+  // not take its framing from the toggle, which is what left the shot where it was.
+  for (const a of close.actions.filter((x) => x.type.startsWith('scroll'))) {
+    assert.notEqual(a.sel, '#lbview');
+  }
 
   // A domContains cannot witness scroll position; the beat needs an assertion that can.
-  const inView = close.asserts.filter((a) => a.type === 'inViewport');
-  assert.equal(inView.length, 1);
-  assert.equal(inView[0].sel, DOWNSTREAM_SECTION);
-  assert.equal(inView[0].sel, close.actions[0].sel, 'the assertion must watch what the beat scrolls to');
+  const inView = close.asserts.filter((a) => a.type === 'inViewport').map((a) => a.sel);
+  assert.ok(inView.includes(DOWNSTREAM_SECTION), 'the beat must watch what it scrolls to');
+  const scroll = close.actions.find((a) => a.type === 'scrollAlign');
+  assert.ok(inView.includes(scroll.sel), 'the assertion must watch what the beat scrolls to');
 
   // inViewport alone is what let the stranded framing through: the section is 129px tall,
   // so it fitted from y 681..810 -- the bottom strip of a frame that was otherwise the
@@ -433,7 +579,7 @@ test('the close beat looks at the downstream artifacts it narrates', () => {
   const anchored = close.asserts.filter((a) => a.type === 'nearTop');
   assert.equal(anchored.length, 1);
   assert.equal(anchored[0].sel, DOWNSTREAM_SECTION);
-  assert.equal(anchored[0].maxY, CLOSE_CLEARANCE + ALIGN_TOLERANCE_PX);
+  assert.equal(anchored[0].maxY, SECTION_CLEARANCE + ALIGN_TOLERANCE_PX);
   assert.ok(anchored[0].maxY < GEOMETRY.height / 8, 'a loose bound would re-admit the defect');
   // The figure guards stay.
   assert.deepEqual(
@@ -442,8 +588,47 @@ test('the close beat looks at the downstream artifacts it narrates', () => {
   );
 });
 
-test('the findings beat opens the top paper finding rather than stopping at the sort', () => {
-  const findings = BEATS.find((b) => b.id === 'findings');
+test('the close beat leaves the leaderboard as a table, not as the tree it came from', () => {
+  const close = BEATS.find((b) => b.id === 'close');
+  // The beat before this one fills the frame with the radial tree, so without the toggle
+  // the demo's last shot of the leaderboard is a tree -- and the ranked table, which is
+  // the artifact the whole run produces, is never the thing the viewer leaves on.
+  assert.ok(BEATS.map((b) => b.id).indexOf('radial-tree') < BEATS.map((b) => b.id).indexOf('close'));
+  assert.ok(
+    BEATS.find((b) => b.id === 'radial-tree').asserts
+      .some((a) => a.type === 'visible' && a.sel === '#lbtree'),
+    'the beat this one undoes must be the one that showed the tree',
+  );
+
+  // visible on #lbtable cannot witness the switch by itself: the two panes are toggled
+  // with the `hidden` attribute, and the assertion would read the same in either state if
+  // the click silently failed to register -- the tree's pane is what has to be gone.
+  assert.ok(close.asserts.some((a) => a.type === 'visible' && a.sel === '#lbtable'));
+  assert.ok(
+    close.asserts.some((a) => a.type === 'hidden' && a.sel === '#lbtree'),
+    'the tree pane must be proved hidden, which is the half a visible check cannot see',
+  );
+
+  // And the control's own two readings, which is what makes the state legible in the
+  // frame rather than only in the DOM: the button offers the trip back.
+  assert.ok(close.asserts.some(
+    (a) => a.type === 'attr' && a.sel === '#lbview' && a.name === 'aria-pressed' && a.equals === 'false',
+  ));
+  const label = close.asserts.find((a) => a.type === 'textMatches' && a.sel === '#lbview');
+  assert.equal(label.pattern, '^radial tree$');
+  assert.match('radial tree', new RegExp(label.pattern));
+  assert.doesNotMatch('table view', new RegExp(label.pattern));
+
+  // A table with no visible row would satisfy every check above, so the closing frame has
+  // to prove a rank-ordered row is on screen and painted.
+  assert.ok(close.asserts.some((a) => a.type === 'inViewport' && a.sel === LEADERBOARD_TOP_ROW));
+  assert.ok(close.asserts.some((a) => a.type === 'unoccluded' && a.sel === LEADERBOARD_TOP_ROW));
+  assert.ok(LEADERBOARD_TOP_ROW.includes(':visible'), 'the row must be one the filters left in');
+  assert.match(LEADERBOARD_TOP_ROW, /nth=0 >> tr\.row$/, 'the top row, not any row');
+});
+
+test('the payoff beat opens the top paper finding rather than stopping at the sort', () => {
+  const findings = BEATS.find((b) => b.id === 'findings-paper');
   const types = findings.actions.map((a) => a.type);
   // The click comes after both selects, so what is opened is the top row of the *sorted,
   // filtered* table and not whatever happened to be first beforehand.
@@ -498,8 +683,8 @@ test('the findings beat opens the top paper finding rather than stopping at the 
   }
 });
 
-test('the findings beat proves the top paper links to the candidate the demo drilled into', () => {
-  const findings = BEATS.find((b) => b.id === 'findings');
+test('the payoff beat proves the top paper links to the candidate the demo drilled into', () => {
+  const findings = BEATS.find((b) => b.id === 'findings-paper');
   // The loop the whole beat exists to close: the first proposal the top paper produced is
   // the candidate the drill-in beats walked through. The expected value is DERIVED from
   // DRILL_IN_ROW -- a literal id would keep passing while the two beats pointed at
@@ -598,7 +783,8 @@ test('the proposals beat travels to the list in steps, not in one cut', () => {
  */
 test('every start-aligned scroll inside a sticky-headered table carries a clearance', () => {
   const props = BEATS.find((b) => b.id === 'drill-proposals');
-  const findings = BEATS.find((b) => b.id === 'findings');
+  const findings = BEATS.find((b) => b.id === 'findings-paper');
+  const arrival = BEATS.find((b) => b.id === 'findings');
   const lead = BEATS.find((b) => b.id === 'leaderboard-reveal');
 
   // Measured on the rendered page: the leaderboard's header box is 34px and the
@@ -606,7 +792,7 @@ test('every start-aligned scroll inside a sticky-headered table carries a cleara
   // own header, and neither may be so large it pushes the content it reveals out of frame.
   assert.ok(STICKY_CLEARANCE_LB > 34, 'the leaderboard header would still cover the row');
   assert.ok(STICKY_CLEARANCE_FND > 49, 'the catalogue header would still cover the row');
-  for (const px of [STICKY_CLEARANCE_LB, STICKY_CLEARANCE_FND, CLOSE_CLEARANCE]) {
+  for (const px of [STICKY_CLEARANCE_LB, STICKY_CLEARANCE_FND, SECTION_CLEARANCE]) {
     assert.ok(px < GEOMETRY.height / 8, `a ${px}px clearance is framing, not clearance`);
   }
 
@@ -614,6 +800,16 @@ test('every start-aligned scroll inside a sticky-headered table carries a cleara
   assert.equal(step.marginTop, STICKY_CLEARANCE_LB);
   const frame = findings.actions.find((a) => a.type === 'scrollAlign');
   assert.equal(frame.marginTop, STICKY_CLEARANCE_FND);
+
+  // The catalogue's arrival and the close both align a section heading rather than a row
+  // inside a table, so they clear the page's own sticky topbar and not a table header --
+  // the smaller of the three numbers, and the same one for both.
+  assert.equal(arrival.actions.find((a) => a.type === 'scrollStepped').marginTop, SECTION_CLEARANCE);
+  assert.equal(
+    BEATS.find((b) => b.id === 'close').actions.find((a) => a.type === 'scrollAlign').marginTop,
+    SECTION_CLEARANCE,
+  );
+  assert.ok(SECTION_CLEARANCE < STICKY_CLEARANCE_LB, 'a section heading clears less than a table row');
 
   // The leaderboard reveal is the one start-aligned scroll that needs no clearance: it
   // aligns the section heading, which sits above the table rather than inside it.
@@ -628,11 +824,16 @@ test('each clearance is witnessed by an occlusion check on what it reveals', () 
   // findings title sat at y 10..33 under a 49px header and passed it.
   const expected = {
     'drill-proposals': [`${DRILL_IN_ROW} .d-props > h4`],
-    findings: [
+    // The arrival's clearance reveals exactly one thing: the heading it aligns on.
+    findings: [FINDINGS_HEAD],
+    'findings-paper': [
       `${TOP_FINDING} >> tr.frow .ftitle`,
       `${TOP_FINDING} >> tr.frow .tag`,
       `${TOP_FINDING} >> tr.frow .fhost`,
     ],
+    // The close aligns the downstream section, and what its clearance has to reveal below
+    // that is the leaderboard's own top row -- back in table view, which is the point.
+    close: [LEADERBOARD_TOP_ROW],
   };
   for (const [id, sels] of Object.entries(expected)) {
     const beat = BEATS.find((b) => b.id === id);
@@ -688,8 +889,72 @@ test('the storyboard rejects a scroll alignment record.mjs would not understand'
   const aligning = BEATS.flatMap((b) => b.actions)
     .filter((a) => a.type === 'scrollAlign' || a.type === 'scrollStepped');
   // In play order: the leaderboard heading, the travel to the proposals, the tree, the
-  // opened finding, the downstream artifacts. Only the tree is centred, and only because
-  // it is taller than the frame.
-  assert.equal(aligning.length, 5);
-  assert.deepEqual(aligning.map((a) => a.block), ['start', 'start', 'center', 'start', 'start']);
+  // catalogue's heading, the opened finding, the downstream artifacts. Only the tree is
+  // centred, and only because it is taller than the frame.
+  assert.equal(aligning.length, 6);
+  assert.deepEqual(
+    aligning.map((a) => a.block),
+    ['start', 'start', 'center', 'start', 'start', 'start'],
+  );
+});
+
+test('the board beat picks the module from an open list, because a select cannot be filmed', () => {
+  const board = BEATS.find((b) => b.id === 'board');
+  // Chrome draws a <select>'s dropdown as a native OS widget, outside the page's
+  // compositing surface. Playwright's video and screenshots capture the page, so a plain
+  // `select` action records as a value that changes with no list ever appearing and no
+  // visible cause -- verified by screenshotting a real click on #mod. pickFromList expands
+  // the same control in-page (size > 1) so the options are painted pixels.
+  assert.ok(
+    board.actions.some((a) => a.type === 'pickFromList' && a.sel === '#mod'
+      && a.value === 'vllm/v1/kv_offload'),
+    'the module choice must be made from a list the camera can see',
+  );
+  assert.deepEqual(
+    board.actions.filter((a) => a.type === 'select' && a.sel === '#mod'),
+    [],
+    'the beat that demonstrates the choice must not make it invisibly',
+  );
+
+  // It happens after the hot-modules toggle, so the list the viewer reads is the hot one:
+  // the option labels carry each module's share, which is what the toggle just added.
+  const types = board.actions.map((a) => a.type);
+  assert.ok(types.indexOf('pickFromList') > types.indexOf('click'), 'pick after the toggle');
+  assert.equal(board.actions[types.indexOf('click')].sel, '#hotbtn');
+
+  // The counter is what witnesses WHICH module was picked, so it is anchored to the one
+  // number only this module produces. Hot mode on its own leaves 86 of the 173, so the
+  // loose `^\d+ / 173 shown$` this replaced passed on the toggle alone -- with the pick
+  // silently absent, which is exactly the defect the native dropdown was hiding.
+  const count = board.asserts.find((a) => a.type === 'textMatches' && a.sel === '#count');
+  assert.equal(count.pattern, '^19 / 173 shown$');
+  assert.doesNotMatch('86 / 173 shown', new RegExp(count.pattern));
+  assert.doesNotMatch('119 / 173 shown', new RegExp(count.pattern));
+  // Not asserted on #mod itself: a <select>'s innerText is every option's label
+  // concatenated, so any pattern over it matches whatever the selection is.
+  assert.deepEqual(board.asserts.filter((a) => a.sel === '#mod'), []);
+
+  // Elsewhere, a plain `select` stays correct: the radial-tree beat clears this same
+  // filter, and a reset is bookkeeping between shots rather than a move being shown.
+  assert.ok(
+    BEATS.find((b) => b.id === 'radial-tree').actions
+      .some((a) => a.type === 'select' && a.sel === '#mod' && a.value === ''),
+  );
+});
+
+test('the storyboard rejects a pickFromList with nothing to pick', () => {
+  // record.mjs passes `value` to selectOption and also builds the option selector from it,
+  // so an omitted or empty value is not a no-op: it hunts for `option[value=""]`, which on
+  // #mod is the "all modules" entry -- a pick that silently means the opposite.
+  for (const value of [undefined, '', 42, null]) {
+    const problems = withBeat({ actions: [{ type: 'pickFromList', sel: '#mod', value }] });
+    assert.ok(
+      problems.some((m) => /pickFromList needs a non-empty value/.test(m)),
+      `accepted value ${JSON.stringify(value)}: ${problems}`,
+    );
+  }
+  assert.deepEqual(
+    withBeat({ actions: [{ type: 'pickFromList', sel: '#mod', value: 'vllm/v1/kv_offload' }] }),
+    [],
+  );
 });

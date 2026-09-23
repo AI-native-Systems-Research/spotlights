@@ -152,6 +152,73 @@ async function runAction(page, action) {
       await pulseCursor(page);
       await page.locator(action.sel).first().selectOption(action.value);
       return;
+    /**
+     * A `<select>` choice the recording can actually show.
+     *
+     * `select` sets the filter with nothing on screen to say a choice was made, and the
+     * control cannot simply be clicked instead: Chrome draws a `<select>`'s dropdown as a
+     * native widget outside the page's compositing surface, so Playwright's video and
+     * screenshots capture the focus ring and no options at all. Verified rather than
+     * assumed -- a probe clicked it and screenshotted a list that was not there.
+     *
+     * So the real control is expanded in place. A `<select>` with `size` above 1 is a list
+     * box, which Chrome renders in-page like any other element: the options a viewer reads
+     * are the page's own `<option>` text, carrying whatever the page put there -- here the
+     * per-module hot percentages hot mode has just added. Nothing is drawn, mocked or
+     * restyled; `size` is set, the cursor travels down the list, the option is selected,
+     * and `size` goes back to 1.
+     *
+     * The expansion is checked twice, because the whole premise is that this list is
+     * painted inside the page. The box has to actually grow, and the target option has to
+     * be the thing hit-tested at the point the cursor is about to move to -- the same
+     * `elementFromPoint` question the `unoccluded` assertion asks. A Chrome that went back
+     * to drawing this natively would fail the render rather than quietly record a pick
+     * with no list, which is exactly the frame this action exists to replace.
+     */
+    case 'pickFromList': {
+      const select = page.locator(action.sel).first();
+      const option = page.locator(`${action.sel} option[value=${JSON.stringify(action.value)}]`).first();
+
+      await moveCursor(page, action.sel);
+      await pulseCursor(page);
+
+      const opened = await select.evaluate((el) => {
+        const before = el.getBoundingClientRect().height;
+        // `size` is what turns a combobox into an in-page list box. Two is the floor: a
+        // one-option select would otherwise expand to the same height it already had.
+        el.size = Math.max(2, el.options.length);
+        return { before, after: el.getBoundingClientRect().height, options: el.options.length };
+      });
+      if (!(opened.after > opened.before)) {
+        throw new Error(
+          `${action.sel} did not expand into a list: ${opened.options} options, `
+          + `height ${opened.before} -> ${opened.after}`,
+        );
+      }
+      // Long enough to read the list before the cursor starts down it.
+      await page.waitForTimeout(action.openMs ?? 600);
+
+      const painted = await option.evaluate((el) => {
+        const box = el.getBoundingClientRect();
+        if (box.height === 0) return { ok: false, why: 'the option has no box' };
+        const top = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+        if (!top) return { ok: false, why: 'nothing is painted at its centre' };
+        if (el === top || el.contains(top)) return { ok: true };
+        return { ok: false, why: `${top.tagName.toLowerCase()} is painted over it` };
+      });
+      if (!painted.ok) {
+        throw new Error(`${action.sel} option ${action.value} is not on screen: ${painted.why}`);
+      }
+
+      await moveCursor(page, `${action.sel} option[value=${JSON.stringify(action.value)}]`, { align: 'right' });
+      await select.selectOption(action.value);
+      // The picked row stays highlighted in the open list for this long before it shuts,
+      // so the recording shows which option was taken rather than only its effect.
+      await page.waitForTimeout(action.holdMs ?? 500);
+      await select.evaluate((el) => { el.size = 1; });
+      await page.waitForTimeout(250);
+      return;
+    }
     case 'hover':
       await moveCursor(page, action.sel);
       await page.locator(action.sel).first().hover();
@@ -200,6 +267,15 @@ async function checkAssert(page, beatId, a) {
     }
     case 'visible': {
       if (!(await page.locator(a.sel).first().isVisible())) fail(`${a.sel} is not visible`);
+      return;
+    }
+    /**
+     * The negation, which is what makes a toggle's effect non-vacuous: this page switches
+     * the leaderboard between table and tree by flipping `hidden` on one of two siblings,
+     * and `visible` on the one that should be showing passes just as well if both are.
+     */
+    case 'hidden': {
+      if (!(await page.locator(a.sel).first().isHidden())) fail(`${a.sel} is not hidden`);
       return;
     }
     /**
