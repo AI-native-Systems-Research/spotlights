@@ -363,8 +363,13 @@ export const BEATS = [
     cuts: BOTH,
     dwell: { full: 5.0, gif: 3.5 },   // gif: measured 3.1s of choreography, see below
     caption: {
-      full: 'every candidate is a full write-up — what it is, how it works today, why it is a candidate',
-      gif: 'every candidate is a full write-up',
+      /* "explains itself", not "is a full write-up". The frame prints three of the four
+         panel headings right beside the caption, so naming them is the caption reading the
+         UI back; and "write-up" frames the panels as documentation someone typed, when the
+         thing worth saying is that the candidate carries its own reasoning -- including,
+         one panel further down, why the impact came out where it did. */
+      full: 'every candidate explains itself — what it is, how it works today, why it is a candidate',
+      gif: 'every candidate explains itself',
     },
     actions: [
       { type: 'scrollTo', sel: `${DRILL_IN_ROW} tr.row` },
@@ -540,37 +545,98 @@ export const BEATS = [
   },
   {
     /**
-     * The loop the run closes.
+     * The question the catalogue exists to answer, asked in two moves.
      *
-     * The beat before this one arrived at the catalogue and named it; this one asks what
-     * the catalogue is for. It is not interesting as a list. It is interesting because of
+     * The beat before this one arrived at the catalogue and named it; this one starts
+     * asking what it is for. It is not interesting as a list. It is interesting because of
      * the two columns it exists for -- where a finding was published, and what it produced
-     * -- so the choreography asks the payoff question outright, in three narrowing moves
-     * that each visibly change the table: keep only the 27 findings that came from papers,
-     * rank those by how many proposals they produced, and then keep only the ones touching
-     * the module the demo has been in all along. Six papers are left, and the top of them
-     * is TinyLFU.
+     * -- so the choreography narrows to the findings that came from papers and ranks those
+     * by payoff. Twenty-seven are left, and the sort puts a six-proposal paper on top.
      *
-     * The module filter is what makes the beat land rather than merely finish. Ranked by
-     * payoff the 27 papers put a 6-proposal paper on top either way, but nothing then says
-     * why *this* paper is the one to open: it would be the best-paying paper in the run,
-     * about code the demo never showed. Narrowed to kv_offload it is the best-paying paper
-     * about the module whose leaderboard the viewer has just watched being filtered, drilled
-     * into and ranked -- and its first proposal turns out to be the row they opened.
+     * Why this is its own beat rather than the first half of the next one. The two moves
+     * here settle on a figure the caption names -- 27 -- and the move that follows in the
+     * next beat destroys it, taking the counter to 6. One beat covering both had to quote
+     * both numbers under a single caption, which meant the caption's first figure was
+     * true for about a second of the beat it belonged to and the caption was a sentence
+     * the viewer had to hold two states in mind to parse. Split, each caption is true for
+     * the whole of its own beat, and each beat's `asserts` -- which can only ever witness
+     * the frame it ends on -- witness the figure its own caption quotes.
      *
      * It opens on the frame its predecessor established, which is why it has no scroll of
-     * its own: the heading, the search box and the two filter controls are all already on
+     * its own: the heading, the search box and the filter controls are all already on
      * screen when it starts, and its predecessor asserts they are.
      *
-     * Opening it is the substance of the beat, not a flourish. The expanded detail names
-     * the technique extracted from the paper, quotes the evidence it was extracted from,
-     * and then lists the proposals that technique produced -- and the first of those
+     * The sort goes here rather than in the next beat because it has to precede the module
+     * filter. Applied to the six kv_offload papers the sort has nothing to reorder -- they
+     * already sit in proposal order in the document -- and a control that changes on camera
+     * while the table does not is the vacuous frame this storyboard keeps removing.
+     *
+     * No pause between the two moves. Moving the synthetic cursor from one control to the
+     * next is itself ~0.9s, so the unsorted 27 is held long enough to read before the sort
+     * lands on it.
+     */
+    id: 'findings-paper',
+    cuts: BOTH,
+    /* Two `select`s and the cursor travel between them, with no list to open and nothing
+       to click: this is the cheap half of the beat that was. See the recorded costs in the
+       budget note at the foot of this file. */
+    dwell: { full: 4.5, gif: 4.0 },
+    caption: {
+      full: 'the <b>27</b> from type papers, ranked by payoff',
+      gif: '<b>27</b> from type papers',
+    },
+    actions: [
+      { type: 'select', sel: '#fsrc', value: 'paper' },
+      { type: 'select', sel: '#fsort', value: 'props:-1' },
+    ],
+    asserts: [
+      /* The caption's figure, off the catalogue's own counter, anchored end to end so a
+         wider filter cannot satisfy it. Read against the arrival beat's 97 / 97 the
+         narrowing is witnessed rather than assumed from a single reading -- and because
+         this beat ends here, a plain assertion can witness it. */
+      { type: 'textMatches', sel: '#fcount', pattern: '^27 / 97 shown$' },
+      /* The sort landed, and it landed inside the filter. The data attributes are the
+         sort key and the filter key themselves; the rendered cells are what a viewer
+         reads off the frame, so both are checked. The highest proposal count in the whole
+         catalogue is 7, on a finding that is not a paper, so a sort that quietly ignored
+         the filter would fail these. */
+      { type: 'attr', sel: TOP_FINDING, name: 'data-src', equals: 'paper' },
+      { type: 'attr', sel: TOP_FINDING, name: 'data-props', equals: '6' },
+      { type: 'textMatches', sel: `${TOP_FINDING} >> tr.frow .tag`, pattern: '^paper$' },
+      { type: 'textMatches', sel: `${TOP_FINDING} >> tr.frow td.r >> nth=1`, pattern: '^6$' },
+    ],
+  },
+  {
+    /**
+     * The loop the run closes.
+     *
+     * The beat before this one ranked the 27 papers by payoff. This one narrows them to the
+     * module the demo has been inside all along and opens the paper that comes out on top.
+     *
+     * The module filter is what makes the pair of beats land rather than merely finish.
+     * Ranked by payoff the 27 papers put a six-proposal paper on top either way, but
+     * nothing then says why *this* paper is the one to open: it would be the best-paying
+     * paper in the run, about code the demo never showed. Narrowed to kv_offload it is the
+     * best-paying paper about the module whose leaderboard the viewer has just watched
+     * being filtered, drilled into and ranked -- and its first proposal turns out to be the
+     * row they opened.
+     *
+     * It is filmed from an open list, like the leaderboard's module filter and for the same
+     * reason: a collapsed `<select>` is a native widget the recording cannot see. It earns
+     * that cost where the source filter in the beat before does not -- "vllm/v1/kv_offload"
+     * is the name that ties this paper to the candidate the demo drilled into, so the
+     * viewer has to read it being chosen, whereas "paper" is legible in the collapsed
+     * control and repeated in the tag on every row the filter leaves behind.
+     *
+     * Opening the paper is the substance of the beat, not a flourish. The expanded detail
+     * names the technique extracted from the paper, quotes the evidence it was extracted
+     * from, and then lists the proposals that technique produced -- and the first of those
      * proposals is rank #17, TieringOffloadingManager._initiate_promotion: the candidate
-     * the two drill-in beats just walked through. So the shot holds the whole loop the
-     * run is for -- paper, technique, proposal, ranked candidate -- in one frame, instead
-     * of ending on a ranked table and leaving the viewer to take the connection on
-     * trust. The asserts below tie that link to DRILL_IN_ROW in code rather than to a
-     * copy of its id, so the beat cannot keep passing if the drill-in ever moves.
+     * the two drill-in beats just walked through. So the shot holds the whole loop the run
+     * is for -- paper, technique, proposal, ranked candidate -- in one frame, instead of
+     * ending on a ranked table and leaving the viewer to take the connection on trust. The
+     * asserts below tie that link to DRILL_IN_ROW in code rather than to a copy of its id,
+     * so the beat cannot keep passing if the drill-in ever moves.
      *
      * The first `details.pitem` is deliberately left shut. Its "why the technique applied
      * here" body is ~250 words of 12.5px prose -- unreadable at the size the gif is
@@ -583,48 +649,18 @@ export const BEATS = [
      *
      * The `#fq` search demonstration this beat used to do is gone: `actions` is shared by
      * both cuts, and a fill-pause-clear costs ~1.9s of cursor travel and hold.
-     *
-     * No pause between the filter moves. Moving the synthetic cursor from one control to
-     * the next is itself ~0.9s, so each intermediate table -- papers unsorted, then papers
-     * by payoff -- is already held long enough to read before the next change lands on it.
      */
-    id: 'findings-paper',
+    id: 'findings-module',
     cuts: BOTH,
-    /* 6.0/5.5 -> 9.0/8.5. The beat gained a third narrowing move, and that move is a
-       `pickFromList` rather than a `select`: opening the list, holding it open to be read,
-       travelling down it and collapsing it costs ~2.1s that a one-line `select` does not.
-       Measured, the choreography now spends 7.40s, and the recorder logged a 2.24s overrun
-       at 5.5 -- which does not shorten the beat, it only stops the budget predicting it.
-       8.5 covers the 7.40 plus the caption's 0.34s fade-out reserve and still holds the
-       expanded row, with the candidate link in it, for ~0.8s after the travel settles. The
-       full cut takes 9.0 for the same reason it always did: its caption is a line longer. */
-    dwell: { full: 9.0, gif: 8.5 },
+    /* The expensive half: a `pickFromList` opens a list, holds it open to be read, travels
+       down it and collapses it, and then the paper is clicked and the frame re-aligned. See
+       the recorded costs in the budget note at the foot of this file. */
+    dwell: { full: 7.5, gif: 7.0 },
     caption: {
-      full: 'the <b>27</b> from type papers, by payoff, inside <b>kv_offload</b>: the top one produced <b>6</b> proposals — the first is rank <b>#17</b>, the candidate we drilled into',
-      gif: '<b>27</b> from type papers, the top one produced <b>6</b> proposals; the first is rank <b>#17</b>, the candidate we opened',
+      full: 'the selected paper produced <b>6</b> proposals — the first is rank <b>#17</b>, the candidate we drilled into',
+      gif: 'selected paper produced <b>6</b> proposals; the first is rank <b>#17</b>, the candidate we opened',
     },
     actions: [
-      { type: 'select', sel: '#fsrc', value: 'paper' },
-      /* The caption's 27, checked where it is true rather than where the beat ends.
-         The module filter two lines down takes the catalogue to 6 / 97, so this is the
-         only moment the counter reads what the caption's first figure says -- and it is
-         a moment the viewer watches happen, under that caption. See `expectText`. */
-      { type: 'expectText', sel: '#fcount', pattern: '^27 / 97 shown$' },
-      { type: 'select', sel: '#fsort', value: 'props:-1' },
-      /* Filmed from an open list, like the leaderboard's module filter and for the same
-         reason -- a collapsed `<select>` is a native widget the recording cannot see. It
-         earns the cost here that `#fsrc` above does not: "vllm/v1/kv_offload" is the
-         name that ties this paper to the candidate the demo drilled into, so the viewer
-         has to read it being chosen, whereas "paper" is legible in the collapsed control
-         and repeated in the tag on every row the filter leaves behind.
-
-         Third and not first, so that each control visibly moves the table: the source
-         filter cuts 97 to 27, the sort lifts a 6-proposal paper to the top of those 27,
-         and only then does this cut the 27 to the 6 that touch the module. Applied
-         before the sort it would leave the sort with nothing to reorder -- the six
-         kv_offload papers are already in proposal order in the document -- and a control
-         that changes on camera while the table does not is the vacuous frame this
-         storyboard keeps removing. */
       { type: 'pickFromList', sel: '#fmod', value: DRILL_IN_MODULE },
       /* The title cell, not the row. The row's own centre lands on the outbound source
          link -- target=_blank, and the section's handler deliberately does not treat it
@@ -647,10 +683,11 @@ export const BEATS = [
       { type: 'pause', ms: 600 },
     ],
     asserts: [
-      /* Where the two filters leave the catalogue, off its own counter. Anchored, so a
+      /* Where the module filter leaves the catalogue, off its own counter. Anchored, so a
          wider filter cannot satisfy it. Read together with the arrival beat's 97 / 97 and
-         the mid-beat checkpoint's 27 / 97, the whole narrowing is witnessed: 97 papers and
-         everything else, then 27 papers, then the 6 papers that touch this module. */
+         the previous beat's 27 / 97, the whole narrowing is witnessed across the three
+         beats that perform it: everything, then the papers, then the papers about this
+         module. */
       { type: 'textMatches', sel: '#fcount', pattern: '^6 / 97 shown$' },
       /* ...and that the module filter is what narrowed it, rather than some other control
          landing on the same count. The attribute is the filter's own key; the cell is what
@@ -658,11 +695,11 @@ export const BEATS = [
          `<select>`'s innerText is every option concatenated, so any pattern would pass. */
       { type: 'attr', sel: TOP_FINDING, name: 'data-module', equals: DRILL_IN_MODULE },
       { type: 'textMatches', sel: `${TOP_FINDING} >> tr.frow td >> nth=2`, pattern: `^${DRILL_IN_MODULE}$` },
-      /* The top row after the sort really is a paper finding with 6 proposals. The two
-         data attributes are the sort key and the filter key themselves; the two
-         rendered cells are what a viewer reads off the frame, so both are checked. The
-         highest proposal count in the whole catalogue is 7, on a finding that is not a
-         paper, so a sort that quietly ignored the filter would fail these. */
+      /* The row this beat opens is still a paper, and still the six-proposal one. Asserted
+         here as well as in the beat before, and not because the beat before makes it
+         likely: the module filter re-picks `nth=0` from a different set of rows, so the row
+         the previous beat proved and the row this one opens are two different claims. This
+         is the one the caption's "the selected paper produced 6 proposals" rests on. */
       { type: 'attr', sel: TOP_FINDING, name: 'data-src', equals: 'paper' },
       { type: 'attr', sel: TOP_FINDING, name: 'data-props', equals: '6' },
       { type: 'textMatches', sel: `${TOP_FINDING} >> tr.frow .tag`, pattern: '^paper$' },
@@ -836,21 +873,6 @@ export function beatProblems(beat) {
     if (a.type === 'pickFromList' && !(typeof a.value === 'string' && a.value.length > 0)) {
       problems.push(`${beat.id}: pickFromList needs a non-empty value, got ${a.value}`);
     }
-    /* A checkpoint with no pattern, or one that will not compile, is a checkpoint that
-       cannot fail -- and the only thing it guards is a figure that is off screen by the
-       time the beat's own assertions run, so nothing downstream would catch it. */
-    if (a.type === 'expectText') {
-      if (!(typeof a.pattern === 'string' && a.pattern.length > 0)) {
-        problems.push(`${beat.id}: expectText needs a non-empty pattern, got ${a.pattern}`);
-      } else {
-        try {
-          new RegExp(a.pattern);
-        } catch {
-          problems.push(`${beat.id}: expectText has an uncompilable pattern ${a.pattern}`);
-        }
-      }
-      if (!a.sel) problems.push(`${beat.id}: expectText needs a selector, got ${a.sel}`);
-    }
     if (a.type === 'scrollStepped') {
       if (!(Number.isInteger(a.steps) && a.steps >= 2)) {
         problems.push(`${beat.id}: scrollStepped needs at least 2 steps, got ${a.steps}`);
@@ -895,12 +917,20 @@ export function validateStoryboard() {
      the short cut now that the arrival and its settle are the beat before it, plus the
      +3.0, +1.0 and +6.0 the three corrections add there.
 
-     Then +3.0 on each cut for the module filter in `findings-paper`: `pickFromList` opens a
-     list, holds it to be read and travels down it, which measured 7.40s of choreography
-     against a 5.5s dwell. Both numbers are the measured cost plus the caption's fade-out
-     reserve and ~0.8s of hold on the frame the beat exists to land. 76.0 and 41.5. */
-  if (totalDuration('full') !== 76.0) problems.push(`full cut is ${totalDuration('full')}s, want 76.0s`);
-  if (totalDuration('gif') !== 41.5) problems.push(`gif cut is ${totalDuration('gif')}s, want 41.5s`);
+     Then +3.0 on each cut for the module filter, when it joined `findings-paper`:
+     `pickFromList` opens a list, holds it to be read and travels down it, which measured
+     7.40s of choreography against a 5.5s dwell. 76.0 and 41.5.
+
+     Then +3.0 on each cut again when that beat was split in two, which is more than the
+     choreography grew by: the two halves measure 2.73s and 5.82s of actions in the gif cut
+     against the 7.40s they cost as one beat, so only ~1.2s is new work -- the cursor has to
+     travel back out to the module control from the sort rather than continuing through it.
+     The rest is the second caption's own transitions and reading time, which is what the
+     split was for. 4.0/4.5 covers the first half's 2.73s plus the fade-out reserve and ~0.6s
+     on the sorted 27; 7.0/7.5 covers the second half's 5.82s plus the reserve and the 0.6s
+     pause already inside it. 79.0 and 44.0, both recorded with no overrun. */
+  if (totalDuration('full') !== 79.0) problems.push(`full cut is ${totalDuration('full')}s, want 79.0s`);
+  if (totalDuration('gif') !== 44.0) problems.push(`gif cut is ${totalDuration('gif')}s, want 44.0s`);
 
   return problems;
 }

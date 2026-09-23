@@ -236,30 +236,6 @@ async function runAction(page, action) {
     case 'pause':
       await page.waitForTimeout(action.ms);
       return;
-    /**
-     * A text check that runs where it sits in the choreography instead of at the end of
-     * the beat.
-     *
-     * A beat's `asserts` can only witness the frame it finishes on, and that is the right
-     * default -- that frame is what the viewer is left holding. But a beat that narrows the
-     * catalogue twice passes through a state its caption quotes and then leaves behind: the
-     * counter reads "27 / 97 shown" after the source filter and "6 / 97 shown" after the
-     * module filter, and the caption names both. Without a checkpoint here the 27 would be
-     * the one figure in the whole demo that nothing checks, despite being on screen, under
-     * its own caption, for about a second.
-     *
-     * Deliberately an action rather than an assert: its position in the sequence is the
-     * entire point, and `asserts` is an unordered set evaluated once.
-     */
-    case 'expectText': {
-      if (!(await anyTextMatches(page, action.sel, action.pattern))) {
-        throw new Error(
-          `expectText: no ${action.sel} matches /${action.pattern}/ `
-          + 'at this point in the beat',
-        );
-      }
-      return;
-    }
     default:
       throw new Error(`unknown action type: ${action.type}`);
   }
@@ -277,8 +253,8 @@ async function runAction(page, action) {
 /**
  * Does any node matching `sel` render text matching `pattern`?
  *
- * Shared by the `textMatches` assertion and the `expectText` action so the two cannot
- * drift apart on case-folding or on the any-vs-all question.
+ * Factored out of the `textMatches` assertion so the any-vs-all question -- any node
+ * matching, not every node -- is stated once, in a name, rather than inlined in a switch.
  */
 async function anyTextMatches(page, sel, pattern) {
   const texts = await page.locator(sel).allInnerTexts();
