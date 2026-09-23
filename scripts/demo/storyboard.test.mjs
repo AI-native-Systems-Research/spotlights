@@ -225,11 +225,11 @@ test('cut durations match the spec budgets', () => {
   // setting a value in one line -- and +3.0 for splitting the filter beat in two, of which
   // only ~1.2s is new choreography and the rest is the second caption's own transitions and
   // reading time, which is what the split was for.
-  assert.equal(totalDuration('full'), 82.5);
+  assert.equal(totalDuration('full'), 83.5);
   // 44.0, from 23.0: the same +2.0, +3.0, +1.0, +3.0 and +3.0, less the 0.5 the papers beat
   // hands back in the short cut now that the arrival and its settle are before it, plus the
   // +3.0, +1.0 and +6.0 of the three corrections.
-  assert.equal(totalDuration('gif'), 47.5);
+  assert.equal(totalDuration('gif'), 49.5);
   // The arithmetic, spelled out, so a dwell that moves without its budget shows up as two
   // failures rather than one. It lives here rather than in its own test so the gif budget
   // is asserted in exactly one place -- the throwaway nortree variant re-keys this number,
@@ -237,10 +237,10 @@ test('cut durations match the spec budgets', () => {
   const dwell = (id) => dwellFor(BEATS.find((b) => b.id === id), 'gif');
   const catalogue = dwell('findings') + dwell('findings-paper') + dwell('findings-module');
   assert.equal(catalogue, 17.5);
-  assert.equal(Math.round((totalDuration('gif') - catalogue) * 10) / 10, 30.0);
+  assert.equal(Math.round((totalDuration('gif') - catalogue) * 10) / 10, 32.0);
   assert.equal(
     Math.round((totalDuration('gif') - catalogue - dwell('drill-proposals')) * 10) / 10,
-    26.5,
+    28.5,
   );
 });
 
@@ -707,6 +707,9 @@ test('the close beat looks at the downstream artifacts it narrates', () => {
   assert.deepEqual(close.actions, [
     { type: 'click', sel: '#lbview' },
     { type: 'scrollAlign', sel: DOWNSTREAM_SECTION, block: 'start', marginTop: SECTION_CLEARANCE },
+    // Last: the caption reads three figures off the tiles, and until the re-frame lands the
+    // tiles are not what is in frame.
+    { type: 'caption' },
   ]);
   assert.deepEqual(close.actions.filter((a) => a.type === 'scrollTo'), []);
   assert.ok(

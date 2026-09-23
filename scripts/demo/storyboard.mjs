@@ -772,7 +772,10 @@ export const BEATS = [
     cuts: BOTH,
     /* 5.0 -> 6.0 and 2.0 -> 3.0, for the view toggle the beat now clicks: the synthetic
        cursor's travel to it and its pulse are ~0.9s before the click even lands. */
-    dwell: { full: 6.0, gif: 3.0 },
+    /* 6.0/3.0 -> 7.0/5.0. The caption is cued last now, so the ~2.0s the toggle and the
+       re-frame take is beat time that is not caption time; the increase is that 2.0s in the
+       gif, and 1.0s in the full cut, whose caption had more room to give. */
+    dwell: { full: 7.0, gif: 5.0 },
     caption: {
       full: '3 evolve scaffolds · 2 patches applied · <b>nothing measured yet</b> — the page says so',
       gif: '3 evolve scaffolds · 2 applied · <b>nothing measured yet</b>',
@@ -795,6 +798,11 @@ export const BEATS = [
          aligning first would compute the frame against a layout the frame never has. */
       { type: 'click', sel: '#lbview' },
       { type: 'scrollAlign', sel: DOWNSTREAM_SECTION, block: 'start', marginTop: SECTION_CLEARANCE },
+      /* Last, once the tiles the caption reads off are the thing in frame. Raised at the
+         top of the beat it came up over the previous beat's expanded finding and stayed
+         there through the view toggle, so the demo's closing sentence spent most of its
+         life over a screen it was not about. */
+      { type: 'caption' },
     ],
     asserts: [
       /* The two domContains guard the caption's figures wherever they sit in the
@@ -967,8 +975,8 @@ export function validateStoryboard() {
      split was for. 4.0/4.5 covers the first half's 2.73s plus the fade-out reserve and ~0.6s
      on the sorted 27; 7.0/7.5 covers the second half's 5.82s plus the reserve and the 0.6s
      pause already inside it. 79.0 and 44.0, both recorded with no overrun. */
-  if (totalDuration('full') !== 82.5) problems.push(`full cut is ${totalDuration('full')}s, want 82.5s`);
-  if (totalDuration('gif') !== 47.5) problems.push(`gif cut is ${totalDuration('gif')}s, want 47.5s`);
+  if (totalDuration('full') !== 83.5) problems.push(`full cut is ${totalDuration('full')}s, want 83.5s`);
+  if (totalDuration('gif') !== 49.5) problems.push(`gif cut is ${totalDuration('gif')}s, want 49.5s`);
 
   return problems;
 }
