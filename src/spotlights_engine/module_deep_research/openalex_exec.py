@@ -48,7 +48,7 @@ _FETCH_BACKOFF_SECONDS = 1.5
 # stay under the OpenAlex free-pool burst limit (bursts trigger HTTP 429).
 # Override via OPENALEX_MIN_INTERVAL_SECONDS. Cross-process bursts are handled
 # by retrying 429 with backoff in `_fetch_works`.
-_MIN_INTERVAL_SECONDS = float(os.environ.get("OPENALEX_MIN_INTERVAL_SECONDS", "1.2"))
+_MIN_INTERVAL_SECONDS = float(os.environ.get("OPENALEX_MIN_INTERVAL_SECONDS", "0.5"))
 _last_fetch_ts = 0.0
 
 # Fields we ask OpenAlex to return — keeps the response small and fast.
@@ -455,10 +455,31 @@ _QUERY_WRITER_INSTRUCTION = (
     "framework identifiers.\n"
     "- Do not use the NOT operator.\n"
     "\n"
-    "Output up to 5 queries, ONE PER LINE, ordered most to least important. "
-    "Favor specificity over breadth — a precise 3-5 concept query beats a vague "
-    "1-2 word one. No numbering, no bullets, no markdown, no blank lines, no "
-    "explanation — just the query strings, each on its own line.\n"
+    "Output EXACTLY 5 queries, ONE PER LINE, filling these FIXED facet slots in "
+    "this order. Treat this as an EXTRACTION task, not creative writing: for a "
+    "given brief the same 5 lines must be produced every time.\n"
+    "  slot 1 — the method's proper name copied VERBATIM from the brief + the "
+    'single most specific application-domain noun in the brief (e.g. \"Muon '
+    'optimizer neural network training\")\n'
+    "  slot 2 — the core algorithmic mechanism, named with the brief's own terms "
+    '(e.g. \"Newton-Schulz iteration orthogonalization momentum\")\n'
+    "  slot 3 — the problem the method solves, in research-paper vocabulary drawn "
+    "from the brief\n"
+    "  slot 4 — the ONE most established published synonym for the method (the "
+    "only slot that may use a term not in the brief) + domain\n"
+    "  slot 5 — the broader technique class, anchored to the specific method name\n"
+    "Determinism rules — follow exactly; they are what make runs reproducible:\n"
+    "  1. Prefer terms that appear VERBATIM in the brief; copy them, do not "
+    "paraphrase.\n"
+    "  2. For each concept pick the SINGLE most established name — never invent "
+    "novel synonyms or alternate phrasings.\n"
+    "  3. Do NOT reorder concepts within a line, change casing, add adjectives, "
+    "or expand/contract acronyms unless the brief itself does.\n"
+    "  4. If a slot has no distinct content, restate the nearest higher-priority "
+    "slot more tightly rather than inventing a vague generic.\n"
+    "Favor specificity over breadth (a precise 3-5 concept query beats a vague "
+    "1-2 word one). No numbering, no bullets, no markdown, no blank lines, no "
+    "explanation — just the 5 query strings, each on its own line.\n"
     "\n"
     "--- RESEARCH BRIEF ---\n"
 )
