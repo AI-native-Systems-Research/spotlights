@@ -17,6 +17,9 @@ const ACTION_TYPES = new Set([
   // pickFromList is `select` made visible: the native dropdown is not captured by the
   // recorder, so the real control is expanded in-page and picked from.
   'pickFromList', 'ring', 'unring', 'pause',
+  // caption is a marker, not a move: it says where in the choreography the beat's caption
+  // comes up, for the beats whose caption states a fact the choreography has yet to produce.
+  'caption',
   // expectText is an assertion shaped as an action, for a figure a beat shows and then
   // narrows away: `asserts` only ever witness the frame a beat ends on.
   'expectText',
@@ -222,18 +225,18 @@ test('cut durations match the spec budgets', () => {
   // setting a value in one line -- and +3.0 for splitting the filter beat in two, of which
   // only ~1.2s is new choreography and the rest is the second caption's own transitions and
   // reading time, which is what the split was for.
-  assert.equal(totalDuration('full'), 79.0);
+  assert.equal(totalDuration('full'), 82.5);
   // 44.0, from 23.0: the same +2.0, +3.0, +1.0, +3.0 and +3.0, less the 0.5 the papers beat
   // hands back in the short cut now that the arrival and its settle are before it, plus the
   // +3.0, +1.0 and +6.0 of the three corrections.
-  assert.equal(totalDuration('gif'), 44.0);
+  assert.equal(totalDuration('gif'), 47.5);
   // The arithmetic, spelled out, so a dwell that moves without its budget shows up as two
   // failures rather than one. It lives here rather than in its own test so the gif budget
   // is asserted in exactly one place -- the throwaway nortree variant re-keys this number,
   // and a second copy would widen what that patch breaks.
   const dwell = (id) => dwellFor(BEATS.find((b) => b.id === id), 'gif');
   const catalogue = dwell('findings') + dwell('findings-paper') + dwell('findings-module');
-  assert.equal(catalogue, 14.0);
+  assert.equal(catalogue, 17.5);
   assert.equal(Math.round((totalDuration('gif') - catalogue) * 10) / 10, 30.0);
   assert.equal(
     Math.round((totalDuration('gif') - catalogue - dwell('drill-proposals')) * 10) / 10,
@@ -255,11 +258,11 @@ test('no dwell is smaller than the choreography it has to contain', () => {
   const MEASURED_S = {
     gif: {
       board: 7.6, 'drill-writeup': 3.1, 'radial-tree': 7.1,
-      'findings-paper': 3.4, 'findings-module': 6.5,
+      findings: 2.8, 'findings-paper': 5.0, 'findings-module': 6.2,
     },
     full: {
       board: 7.9, 'radial-tree': 7.1,
-      'findings-paper': 3.4, 'findings-module': 6.5,
+      findings: 2.8, 'findings-paper': 5.0, 'findings-module': 6.2,
     },
   };
   for (const [cut, costs] of Object.entries(MEASURED_S)) {
@@ -293,14 +296,16 @@ test('the catalogue pays for the choreography it grew, across its three beats', 
   const arrival = BEATS.find((b) => b.id === 'findings');
   const papers = BEATS.find((b) => b.id === 'findings-paper');
   const module = BEATS.find((b) => b.id === 'findings-module');
-  // The arrival is a stepped travel plus a held frame, which is most of its 3.5s: ten 90ms
-  // hops, a 200ms landing, a 500ms pause and the caption's own fade in and out.
-  assert.equal(dwellFor(arrival, 'full'), 3.5);
-  assert.equal(dwellFor(arrival, 'gif'), 3.0);
-  // The papers beat is two `select`s and the cursor travel between them: 2.73s of measured
-  // choreography, so its dwell is nearly all caption.
-  assert.equal(dwellFor(papers, 'full'), 4.5);
-  assert.equal(dwellFor(papers, 'gif'), 4.0);
+  // The arrival is a stepped travel plus a held frame: ten 90ms hops, a 200ms landing, a
+  // 500ms pause and the caption's own fade in and out. Its dwell carries the travel twice
+  // over, in effect, because the caption is cued after it -- the ~1.95s of scrolling is
+  // beat time that is not caption time.
+  assert.equal(dwellFor(arrival, 'full'), 5.5);
+  assert.equal(dwellFor(arrival, 'gif'), 5.0);
+  // The papers beat opens the source list and then sorts: 4.63s of measured choreography,
+  // of which the ~1.9s list-opening happens before its caption is cued.
+  assert.equal(dwellFor(papers, 'full'), 6.0);
+  assert.equal(dwellFor(papers, 'gif'), 5.5);
   // The module beat carries the expensive half -- the open list, the click, the re-frame --
   // at 5.82s measured, and is the longer of the two for that reason rather than by taste.
   assert.equal(dwellFor(module, 'full'), 7.5);
@@ -312,8 +317,8 @@ test('the catalogue pays for the choreography it grew, across its three beats', 
   const total = (cut) => Math.round(
     (dwellFor(arrival, cut) + dwellFor(papers, cut) + dwellFor(module, cut)) * 10,
   ) / 10;
-  assert.equal(total('full'), 15.5);
-  assert.equal(total('gif'), 14.0);
+  assert.equal(total('full'), 19.0);
+  assert.equal(total('gif'), 17.5);
 });
 
 /**
@@ -372,6 +377,9 @@ test('the arrival beat frames the catalogue by its heading, and travels there in
       steps: 10,
       stepMs: 90,
     },
+    // The caption comes up after the travel, not at the top of the beat: it names the
+    // section, and for the ~1.95s the scroll is running the section is not on screen yet.
+    { type: 'caption' },
     { type: 'pause', ms: 500 },
   ]);
   assert.equal(FINDINGS_HEAD, `${FINDINGS_SECTION} > h2`);
@@ -418,18 +426,42 @@ test('the catalogue narrows three times, and each move changes the table on came
     (a) => a.type === 'select' || a.type === 'pickFromList',
   );
   assert.deepEqual(controlsOf(papers), [
-    { type: 'select', sel: '#fsrc', value: 'paper' },
+    { type: 'pickFromList', sel: '#fsrc', value: 'paper' },
     { type: 'select', sel: '#fsort', value: 'props:-1' },
   ], 'the papers beat filters by source, then sorts');
   assert.deepEqual(controlsOf(module), [
     { type: 'pickFromList', sel: '#fmod', value: DRILL_IN_MODULE },
   ], 'the module beat does exactly one narrowing move');
 
-  // The module filter is filmed from an open list rather than set silently -- the same
-  // reason the leaderboard's `#mod` is, since a collapsed <select> is a native widget the
-  // recording cannot see. The source filter is not, and does not need to be: "paper" is
-  // legible in the collapsed control and repeated in the tag on every row it leaves behind.
-  assert.deepEqual(papers.actions.filter((a) => a.type === 'pickFromList'), []);
+  // Both filters are filmed from an open list rather than set silently -- a collapsed
+  // <select> is a native widget the recording cannot see, so a plain `select` would make
+  // the filter the one move in the catalogue the viewer never watches happen. The sort is
+  // the exception: it needs no list, because the table reordering underneath it is itself
+  // the evidence that something was chosen.
+  assert.deepEqual(
+    [...controlsOf(papers), ...controlsOf(module)].filter((a) => a.type === 'select'),
+    [{ type: 'select', sel: '#fsort', value: 'props:-1' }],
+    'every filter is picked from an open list; only the sort is set silently',
+  );
+
+  // Each beat cues its caption rather than taking the default of raising it first, and
+  // cues it after the move that makes the caption true: the papers beat's "27 from type
+  // papers" after the source filter, the module beat's after the module filter.
+  for (const [beat, sel] of [[papers, '#fsrc'], [module, '#fmod']]) {
+    const at = (pred) => beat.actions.findIndex(pred);
+    const cue = at((a) => a.type === 'caption');
+    assert.ok(cue >= 0, `${beat.id}: its caption states a filtered figure, so it must be cued`);
+    assert.ok(
+      cue > at((a) => a.sel === sel),
+      `${beat.id}: the caption must come up after ${sel}, not before it`,
+    );
+  }
+  // And the module beat cues it before the click, so the viewer reads the claim and then
+  // watches it checked rather than the other way round.
+  assert.ok(
+    module.actions.findIndex((a) => a.type === 'caption')
+      < module.actions.findIndex((a) => a.type === 'click'),
+  );
 
   // It points at the same module the leaderboard was filtered to, through one constant:
   // the demo's claim is that the two filters are aimed at the same place.
@@ -1066,6 +1098,27 @@ test('the board beat picks the module from an open list, because a select cannot
     BEATS.find((b) => b.id === 'radial-tree').actions
       .some((a) => a.type === 'select' && a.sel === '#mod' && a.value === ''),
   );
+});
+
+test('the storyboard rejects a caption cue that cannot do what it says', () => {
+  // A cue in a beat with no caption marks a moment for a sentence that never appears --
+  // it does not fail at record time, it simply does nothing, which is how a beat could end
+  // up silently uncaptioned after a caption was deleted.
+  // Asserted as a member rather than as the whole list: a beat with no caption is already
+  // a problem on its own account, and this rule is the second, independent one.
+  assert.ok(
+    withBeat({ caption: {}, actions: [{ type: 'caption' }] })
+      .includes('probe: a caption cue in a beat with no caption'),
+  );
+  // Two cues do not fail at record time either: the recorder would raise the caption
+  // twice, resetting the clock that measures its on-screen time, so the beat would report
+  // a legible caption while having shown it for less than it claims.
+  assert.deepEqual(
+    withBeat({ actions: [{ type: 'caption' }, { type: 'caption' }] }),
+    ['probe: 2 caption cues, want at most 1'],
+  );
+  // One cue in a captioned beat is the whole point, and passes.
+  assert.deepEqual(withBeat({ actions: [{ type: 'caption' }] }), []);
 });
 
 test('the storyboard rejects a pickFromList with nothing to pick', () => {

@@ -236,6 +236,18 @@ async function runAction(page, action) {
     case 'pause':
       await page.waitForTimeout(action.ms);
       return;
+    /**
+     * Where in the choreography this beat's caption comes up.
+     *
+     * Handled by the beat runner, not here: it owns the caption and has to know when the
+     * caption went up to measure its on-screen time. This case exists so the marker is a
+     * real action with a real position rather than an index into the list -- an index
+     * silently means something else the moment an action is inserted above it -- and so
+     * that a beat carrying one still validates against the same action vocabulary as
+     * everything else.
+     */
+    case 'caption':
+      return;
     default:
       throw new Error(`unknown action type: ${action.type}`);
   }
@@ -448,11 +460,20 @@ await page.waitForTimeout(600);
  * is already longer than its dwell waits zero and says so, because those overruns are
  * the whole budget discussion and have to be visible to a human.
  *
- * The caption is raised BEFORE the beat's actions, and so is up for the whole beat.
- * Showing it last made its screen time whatever the dwell had left over, which for
+ * The caption is raised BEFORE the beat's actions by default, and so is up for the whole
+ * beat. Showing it last made its screen time whatever the dwell had left over, which for
  * every beat that overran was nothing at all: the caption appeared and the fade-out
  * immediately pulled it down. Now the choreography plays underneath the sentence that
  * describes it, and `CAPTION_MIN_ONSCREEN_MS` is the floor no caption may fall below.
+ *
+ * A beat may override that default by putting a `caption` marker in its actions, and three
+ * do. "Raise it first" is right when the caption narrates what the viewer is about to
+ * watch, but wrong when the caption states a fact the choreography has not produced yet:
+ * the catalogue's "27 from type papers" was on screen for two seconds over a table showing
+ * all 97, which reads as the caption being wrong rather than as the demo being early. Where
+ * a beat carries the marker the caption comes up there instead, and the actions above it
+ * play on the previous beat's caption or on none. The floor and the fade-out reserve still
+ * apply, so a late caption costs the beat dwell rather than legibility.
  * The assertions still run after the actions -- only the caption moved -- so a beat
  * still has to prove its effect fired. Every captioned beat logs the caption's measured
  * on-screen time, because this regression is invisible in the code and shows up only in
@@ -469,16 +490,22 @@ try {
   for (const beat of beatsForCut(cut)) {
     const beatStartedAt = Date.now();
 
-    // Caption first: it narrates what is about to happen, and the choreography, the
-    // dwell remainder and the fade-out all run underneath it.
+    // Caption first, unless the beat says otherwise: it narrates what is about to happen,
+    // and the choreography, the dwell remainder and the fade-out all run underneath it.
     const caption = captionFor(beat, cut);
+    const cued = beat.actions.some((a) => a.type === 'caption');
     let captionShownAt = null;
-    if (caption) {
+    const raiseCaption = async () => {
+      if (!caption) return;
       await showCaption(page, caption);
       captionShownAt = Date.now();
-    }
+    };
+    if (!cued) await raiseCaption();
 
-    for (const action of beat.actions) await runAction(page, action);
+    for (const action of beat.actions) {
+      if (action.type === 'caption') await raiseCaption();
+      else await runAction(page, action);
+    }
     for (const a of beat.asserts) await checkAssert(page, beat.id, a);
 
     const dwellSec = dwellFor(beat, cut);

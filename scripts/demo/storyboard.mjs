@@ -504,7 +504,10 @@ export const BEATS = [
      */
     id: 'findings',
     cuts: BOTH,
-    dwell: { full: 3.5, gif: 3.0 },
+    /* 3.5/3.0 -> 5.5/5.0. The caption is cued after the travel rather than at the top of
+       the beat, so the ~1.95s the stepped scroll takes no longer counts toward its screen
+       time; the increase is that 1.95s, which buys back the 2.3s the caption had before. */
+    dwell: { full: 5.5, gif: 5.0 },
     caption: {
       full: '<b>97</b> findings, tracked to where each was published (<b>46</b> sites) and whether it paid off',
       gif: '<b>97</b> findings across <b>46</b> sites',
@@ -518,6 +521,11 @@ export const BEATS = [
         steps: 10,
         stepMs: 90,
       },
+      /* After the travel, not before it. The caption names the section, and for the two
+         seconds the stepped scroll is running the section is not yet on screen -- so
+         raised at the top of the beat it sat over the tail of the radial tree, naming
+         something the viewer could not see. */
+      { type: 'caption' },
       { type: 'pause', ms: 500 },
     ],
     asserts: [
@@ -577,16 +585,26 @@ export const BEATS = [
      */
     id: 'findings-paper',
     cuts: BOTH,
-    /* Two `select`s and the cursor travel between them, with no list to open and nothing
-       to click: this is the cheap half of the beat that was. See the recorded costs in the
-       budget note at the foot of this file. */
-    dwell: { full: 4.5, gif: 4.0 },
+    /* 4.5/4.0 -> 6.0/5.5, for two reasons at once: the source filter is now picked from an
+       open list rather than set in one line (+1.9s of choreography, measured 4.63s in all),
+       and the caption is cued after that pick rather than at the top of the beat, so the
+       pick's cost no longer counts toward its screen time. */
+    dwell: { full: 6.0, gif: 5.5 },
     caption: {
       full: 'the <b>27</b> from type papers, ranked by payoff',
       gif: '<b>27</b> from type papers',
     },
     actions: [
-      { type: 'select', sel: '#fsrc', value: 'paper' },
+      /* From an open list, like the module filters. This one was a plain `select` on the
+         grounds that "paper" is legible in the collapsed control and repeated in the tag on
+         every row the filter leaves behind -- true, but it makes the filter the one move in
+         the catalogue the viewer never sees happen, and the beat's whole claim is that the
+         27 are the result of a choice. */
+      { type: 'pickFromList', sel: '#fsrc', value: 'paper' },
+      /* Here, because this is the first frame in which "27 from type papers" is a true
+         sentence. Raised at the top of the beat it spent two seconds over a table showing
+         all 97, which reads as the caption being wrong rather than as the demo being early. */
+      { type: 'caption' },
       { type: 'select', sel: '#fsort', value: 'props:-1' },
     ],
     asserts: [
@@ -657,11 +675,16 @@ export const BEATS = [
        the recorded costs in the budget note at the foot of this file. */
     dwell: { full: 7.5, gif: 7.0 },
     caption: {
-      full: 'the selected paper produced <b>6</b> proposals — the first is rank <b>#17</b>, the candidate we drilled into',
-      gif: 'selected paper produced <b>6</b> proposals; the first is rank <b>#17</b>, the candidate we opened',
+      full: 'module selected: the paper produced <b>6</b> proposals — the first is rank <b>#17</b>, the candidate we drilled into',
+      gif: 'module selected paper produced <b>6</b> proposals; the first is rank <b>#17</b>, the candidate we opened',
     },
     actions: [
       { type: 'pickFromList', sel: '#fmod', value: DRILL_IN_MODULE },
+      /* After the module is chosen and before the paper is opened. The caption's subject is
+         "module selected paper" -- the paper the module filter selected -- so it cannot come
+         up before that filter has run; and it comes up before the click so that the viewer
+         reads the claim and then watches it being checked, rather than the other way round. */
+      { type: 'caption' },
       /* The title cell, not the row. The row's own centre lands on the outbound source
          link -- target=_blank, and the section's handler deliberately does not treat it
          as the expander -- so clicking the row's box would open paperity.org in a new
@@ -873,6 +896,21 @@ export function beatProblems(beat) {
     if (a.type === 'pickFromList' && !(typeof a.value === 'string' && a.value.length > 0)) {
       problems.push(`${beat.id}: pickFromList needs a non-empty value, got ${a.value}`);
     }
+    /* A caption cue in a beat with no caption, or two of them in one beat, is a marker
+       that either does nothing or silently wins by being last. Neither fails at record
+       time -- the recorder would simply raise the caption twice, resetting the on-screen
+       clock -- so it has to fail here. */
+    if (a.type === 'caption') {
+      if (!(beat.caption && (beat.caption.full || beat.caption.gif))) {
+        problems.push(`${beat.id}: a caption cue in a beat with no caption`);
+      }
+      const cues = beat.actions.filter((x) => x.type === 'caption');
+      // Reported from the first cue only, so two markers produce one problem rather than
+      // one per marker -- the defect is the beat's, not each marker's.
+      if (cues.length > 1 && a === cues[0]) {
+        problems.push(`${beat.id}: ${cues.length} caption cues, want at most 1`);
+      }
+    }
     if (a.type === 'scrollStepped') {
       if (!(Number.isInteger(a.steps) && a.steps >= 2)) {
         problems.push(`${beat.id}: scrollStepped needs at least 2 steps, got ${a.steps}`);
@@ -929,8 +967,8 @@ export function validateStoryboard() {
      split was for. 4.0/4.5 covers the first half's 2.73s plus the fade-out reserve and ~0.6s
      on the sorted 27; 7.0/7.5 covers the second half's 5.82s plus the reserve and the 0.6s
      pause already inside it. 79.0 and 44.0, both recorded with no overrun. */
-  if (totalDuration('full') !== 79.0) problems.push(`full cut is ${totalDuration('full')}s, want 79.0s`);
-  if (totalDuration('gif') !== 44.0) problems.push(`gif cut is ${totalDuration('gif')}s, want 44.0s`);
+  if (totalDuration('full') !== 82.5) problems.push(`full cut is ${totalDuration('full')}s, want 82.5s`);
+  if (totalDuration('gif') !== 47.5) problems.push(`gif cut is ${totalDuration('gif')}s, want 47.5s`);
 
   return problems;
 }
