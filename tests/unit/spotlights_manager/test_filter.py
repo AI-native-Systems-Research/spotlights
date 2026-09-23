@@ -17,9 +17,7 @@ def test_empty_filter_keeps_all() -> None:
 
 def test_include_preserves_user_supplied_order() -> None:
     leaves = ["v1/kv_offload", "v1/attention/paged_kv", "v1/scheduler"]
-    out = apply_filter(
-        leaves, ModuleFilter(include=["v1/scheduler", "v1/kv_offload"])
-    )
+    out = apply_filter(leaves, ModuleFilter(include=["v1/scheduler", "v1/kv_offload"]))
     assert out == ["v1/scheduler", "v1/kv_offload"]
 
 
@@ -28,9 +26,7 @@ def test_unknown_name_is_warned_and_ignored(
 ) -> None:
     leaves = ["v1/kv_offload"]
     with caplog.at_level(logging.WARNING):
-        out = apply_filter(
-            leaves, ModuleFilter(include=["v1/kv_offload", "does/not/exist"])
-        )
+        out = apply_filter(leaves, ModuleFilter(include=["v1/kv_offload", "does/not/exist"]))
     assert out == ["v1/kv_offload"]
     assert "does/not/exist" in caplog.text
 
@@ -87,22 +83,18 @@ def test_virtual_prefix_expands_to_descendants() -> None:
     assert out == ["v1/worker/gpu", "v1/worker/tpu"]
 
 
-def test_real_module_selects_only_itself() -> None:
-    """When the named module exists, it selects exactly that module and none
-    of its submodules."""
+def test_real_module_selects_itself_and_submodules() -> None:
+    """A real parent module selects its complete subtree, as promised by CLI."""
     modules = ["v1/worker", "v1/worker/gpu", "v1/worker/tpu", "v1/kv_offload"]
     out = apply_filter(modules, ModuleFilter(include=["v1/worker"]))
-    assert out == ["v1/worker"]
+    assert out == ["v1/worker", "v1/worker/gpu", "v1/worker/tpu"]
 
 
 def test_explicit_module_and_submodule_both_selected() -> None:
-    """Naming a module and one of its submodules selects exactly those two,
-    in user-supplied order."""
+    """Overlapping scopes preserve user order and deduplicate descendants."""
     modules = ["v1/worker", "v1/worker/gpu", "v1/worker/tpu"]
-    out = apply_filter(
-        modules, ModuleFilter(include=["v1/worker/gpu", "v1/worker"])
-    )
-    assert out == ["v1/worker/gpu", "v1/worker"]
+    out = apply_filter(modules, ModuleFilter(include=["v1/worker/gpu", "v1/worker"]))
+    assert out == ["v1/worker/gpu", "v1/worker", "v1/worker/tpu"]
 
 
 def test_source_root_prefixed_names() -> None:
@@ -116,17 +108,13 @@ def test_source_root_prefixed_names() -> None:
         "spotlights_engine/schemas",
     ]
     # Exact leaf match.
-    assert apply_filter(
-        leaves, ModuleFilter(include=["spotlights_engine/schemas"])
-    ) == ["spotlights_engine/schemas"]
+    assert apply_filter(leaves, ModuleFilter(include=["spotlights_engine/schemas"])) == [
+        "spotlights_engine/schemas"
+    ]
     # Virtual prefix (no node resolves to `spotlights_engine`) expands all.
-    assert apply_filter(
-        leaves, ModuleFilter(include=["spotlights_engine"])
-    ) == leaves
+    assert apply_filter(leaves, ModuleFilter(include=["spotlights_engine"])) == leaves
     # Mid prefix expands its descendants.
-    assert apply_filter(
-        leaves, ModuleFilter(include=["spotlights_engine/modules_extractor"])
-    ) == [
+    assert apply_filter(leaves, ModuleFilter(include=["spotlights_engine/modules_extractor"])) == [
         "spotlights_engine/modules_extractor/agent",
         "spotlights_engine/modules_extractor/errors",
     ]

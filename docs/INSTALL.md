@@ -111,7 +111,7 @@ All flags are optional once `--repo` and the agent CLIs are available.
 |---|---|---|
 | `--repo` | `../vllm` | Target repo path. |
 | `--repo-url` | inferred from `--repo` | Canonical target repo URL recorded in the public run manifest. |
-| `--include` | (all modules) | Restrict to slash-form leaf qualified names. |
+| `--include` | (all modules) | Restrict to slash-form qualified names; a parent includes its full module subtree. |
 | `--objective` | `"reduce hot-path latency on common workloads"` | Threaded into discovery + deep research. |
 | `--hint` (repeatable) | `[]` | Workload hints; map to `SpotlightContext.workload_hints`. |
 | `--output-folder` | `./spotlights-out` | Where `index.md` and module pages land. |
