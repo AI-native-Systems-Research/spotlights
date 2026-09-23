@@ -21,25 +21,22 @@ export const DRILL_IN_ROW = 'tbody#cand-vllm_v1_kv_offload-0009';
  */
 export const DOWNSTREAM_SECTION = 'section.sec:has(h2:text-is("Downstream artifacts"))';
 
+/**
+ * The share of the viewport's height the radial tree must fill in the tree beat.
+ *
+ * Measured, not guessed: the plot renders 1186px square in the 1440x810 viewport, so
+ * once it is centred it covers the full 810px (coverage 1.00), while the toggle-only
+ * scroll the beat used to end on leaves just 307px of it in frame (coverage 0.38).
+ * 0.90 sits well clear of both -- it fails the old framing and holds with slack for
+ * whatever the layout does to the plot's size.
+ */
+export const TREE_VIEWPORT_COVERAGE = 0.9;
+
 const CUTS = new Set(['gif', 'full']);
 const BOTH = ['gif', 'full'];
 const FULL_ONLY = ['full'];
 
 export const BEATS = [
-  {
-    id: 'cold-open',
-    cuts: BOTH,
-    dwell: { full: 2.5, gif: 2.0 },
-    caption: {
-      full: '<b>173</b> ranked optimisation candidates, from one run over <code>vllm</code>',
-      gif: '<b>173</b> ranked optimisation candidates',
-    },
-    actions: [],
-    asserts: [
-      { type: 'visible', sel: '#lbtable' },
-      { type: 'textMatches', sel: 'h2', pattern: 'Candidate leaderboard' },
-    ],
-  },
   {
     id: 'the-ask',
     cuts: FULL_ONLY,
@@ -60,18 +57,44 @@ export const BEATS = [
     cuts: BOTH,
     dwell: { full: 4.5, gif: 2.5 },
     caption: {
-      full: '60 high impact · <b>544</b> proposals · <b>$35.75</b> · 266.42M tokens, <b>85% cached</b> · 7h 07m',
-      gif: '<b>544</b> proposals · <b>$35.75</b> · <b>85%</b> cached',
+      full: '<b>173</b> candidates · 60 high impact · <b>544</b> proposals · <b>$35.75</b> · 266.42M tokens, <b>85% cached</b> · 7h 07m',
+      gif: '<b>173</b> candidates · <b>544</b> proposals · <b>$35.75</b> · <b>85%</b> cached',
     },
     actions: [
       { type: 'unring' },
       { type: 'scrollTo', sel: '.tiles' },
     ],
     asserts: [
+      /* The candidate count the caption now leads with. The hero figure is where the
+         page states it, and the label is asserted with it so the number cannot be
+         witnessed by some other 173: the string occurs all over this page -- the
+         "Awaiting measurement" tile is 173 too -- so a document-wide substring check
+         would pass with the candidate count gone. */
+      { type: 'textMatches', sel: '.hero .fig', pattern: '^173$' },
+      { type: 'textMatches', sel: '.hero .figlab', pattern: 'optimisation candidates' },
       { type: 'domContains', text: '$35.75' },
       { type: 'domContains', text: '266.42M' },
       { type: 'domContains', text: '7h 07m' },
       { type: 'textMatches', sel: 'div.tile:has-text("Proposals") .n', pattern: '^544$' },
+    ],
+  },
+  {
+    /* Was the cold open, back when something outside the beat loop had already parked
+       the page on the board. The overview opens the demo now and this beat follows it,
+       so it scrolls itself to the leaderboard, and the id says what it reveals. */
+    id: 'leaderboard-reveal',
+    cuts: BOTH,
+    dwell: { full: 2.5, gif: 2.0 },
+    caption: {
+      full: '<b>173</b> ranked optimisation candidates, from one run over <code>vllm</code>',
+      gif: '<b>173</b> ranked optimisation candidates',
+    },
+    actions: [{ type: 'scrollTo', sel: '#lbtable' }],
+    asserts: [
+      { type: 'visible', sel: '#lbtable' },
+      { type: 'textMatches', sel: 'h2', pattern: 'Candidate leaderboard' },
+      /* The caption quotes 173, so the beat proves the board still says so. */
+      { type: 'textMatches', sel: '.sechead h2', pattern: '173 ranked' },
     ],
   },
   {
@@ -223,12 +246,34 @@ export const BEATS = [
       { type: 'click', sel: `${DRILL_IN_ROW} tr.row` },
       { type: 'select', sel: '#mod', value: '' },
       { type: 'scrollTo', sel: '#lbview' },
+      /* Hot mode is still on from the board beat, and the tree obeys the filters: it
+         drew 86 candidates under a hub reading "hot modules" while the caption said all
+         173. Invisible while the tree hung off the bottom of the frame; the moment the
+         frame is filled the hub is the middle of the shot, so the filter is cleared and
+         the tree really is the whole run. */
+      { type: 'click', sel: '#hotbtn' },
       { type: 'click', sel: '#lbview' },
+      /* The toggle sits in the section header, so the beat's scrollTo leaves the tree
+         hanging off the bottom of the frame. It is drawn ~1186px tall in a 810px
+         viewport, so there is no scroll position that contains it: centring it is what
+         fills the frame, and it puts the hub -- the "173 candidates" label -- in the
+         middle of the shot. The tree is drawn at its final size by the time the toggle's
+         click resolves, so this comes *before* the beat's pause: framed last, the
+         centred tree would be on screen only for the fade-out at the end of a beat whose
+         choreography has already spent the dwell. */
+      { type: 'scrollCenter', sel: '#rtplot svg' },
       { type: 'pause', ms: 1400 },
     ],
     asserts: [
       { type: 'visible', sel: '#lbtree' },
       { type: 'minChildren', sel: '#rtplot svg', n: 1 },
+      /* Not inViewport: that demands the whole box be inside the frame, which a tree
+         taller than the viewport can never satisfy. This asks the question the beat is
+         actually about -- how much of the frame the tree fills. */
+      { type: 'viewportCoverage', sel: '#rtplot svg', minFraction: TREE_VIEWPORT_COVERAGE },
+      /* The caption says "all 173", so the beat proves no filter is still narrowing the
+         tree. #count is the live count and keeps its text while the table is hidden. */
+      { type: 'textMatches', sel: '#count', pattern: '^173 / 173 shown$' },
     ],
   },
   {

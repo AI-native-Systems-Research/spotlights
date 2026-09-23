@@ -35,6 +35,18 @@ async function runAction(page, action) {
       await page.locator(action.sel).first().scrollIntoViewIfNeeded();
       await page.waitForTimeout(450);
       return;
+    /**
+     * `scrollTo` is scrollIntoViewIfNeeded, which does nothing at all once any sliver of
+     * the element is in frame -- exactly the wrong move for something taller than the
+     * viewport, which is "not needed" while 38% of it shows. This one always scrolls, and
+     * centres the box, so an oversized element fills the frame instead of hanging off the
+     * bottom of it.
+     */
+    case 'scrollCenter':
+      await page.locator(action.sel).first()
+        .evaluate((el) => el.scrollIntoView({ block: 'center', inline: 'nearest' }));
+      await page.waitForTimeout(450);
+      return;
     case 'click':
       await moveCursor(page, action.sel);
       await pulseCursor(page);
@@ -117,6 +129,30 @@ async function checkAssert(page, beatId, a) {
       }
       return;
     }
+    /**
+     * How much of the frame an element actually fills: the height of the intersection of
+     * its box with the viewport, over the viewport's height. `inViewport` cannot answer
+     * this -- it demands the whole box be inside the frame, so anything taller than the
+     * viewport fails it at every scroll position, and it is silent about how much of a
+     * merely-visible element is in shot. The threshold lives in the storyboard.
+     */
+    case 'viewportCoverage': {
+      const box = await page.locator(a.sel).first().boundingBox();
+      if (!box) fail(`${a.sel} has no box, so it covers none of the viewport`);
+      const view = page.viewportSize();
+      const bottom = box.y + box.height;
+      const visibleHeight = Math.max(0, Math.min(view.height, bottom) - Math.max(0, box.y));
+      const fraction = visibleHeight / view.height;
+      if (fraction < a.minFraction) {
+        fail(
+          `${a.sel} covers ${(fraction * 100).toFixed(0)}% of the ${view.height}px viewport `
+          + `height, want at least ${(a.minFraction * 100).toFixed(0)}%: `
+          + `${visibleHeight.toFixed(0)}px of ${view.height}px in frame, `
+          + `box is y ${box.y.toFixed(0)}..${bottom.toFixed(0)} and ${box.height.toFixed(0)}px tall`,
+        );
+      }
+      return;
+    }
     case 'attr': {
       const got = await page.locator(a.sel).first().getAttribute(a.name);
       if (got !== a.equals) fail(`${a.sel}[${a.name}] is ${JSON.stringify(got)}, want ${JSON.stringify(a.equals)}`);
@@ -158,9 +194,11 @@ const page = await context.newPage();
 await page.goto(PAGE_URL, { waitUntil: 'load' });
 await installOverlay(page);
 
-// The cold open starts already looking at the board, so the very first frame has
-// something in it. This positioning happens before any caption is shown.
-await page.locator('#lbtable').scrollIntoViewIfNeeded();
+// The demo opens on the overview -- the objective in the top bar and the output tiles
+// -- so the first frame is the top of the page and the opening beat's own scroll is a
+// settle rather than a jump. The leaderboard is no longer pre-positioned: the beat that
+// reveals it scrolls itself there. This happens before any caption is shown.
+await page.evaluate(() => window.scrollTo(0, 0));
 await page.waitForTimeout(600);
 
 /**
