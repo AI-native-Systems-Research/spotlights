@@ -14,6 +14,24 @@ export const PAGE_RELATIVE_PATH = 'examples/vllm_subset/experiment.html';
 export const DRILL_IN_ROW = 'tbody#cand-vllm_v1_kv_offload-0009';
 
 /**
+ * The same candidate as a bare element id rather than as a selector: the value a
+ * finding's proposal link carries in `data-cand`.
+ *
+ * Derived from DRILL_IN_ROW rather than written out, because the findings beat's whole
+ * claim is that the top paper finding's first proposal landed on *the row the demo
+ * opened*. A literal id there would still pass if the drill-in ever moved to another
+ * candidate, and would then be proving a tie that is no longer in the demo.
+ */
+export const DRILL_IN_CAND = DRILL_IN_ROW.replace(/^tbody#/, '');
+
+/**
+ * The leaderboard's own section header: the h2 the reveal beat frames, on the same line
+ * as the hot-modules and radial-tree toggles. There is exactly one `.sechead` in the
+ * document, so it needs no `:has` to disambiguate it.
+ */
+export const LEADERBOARD_HEAD = '.sechead';
+
+/**
  * The downstream-artifacts section: the three tiles the closing caption is about.
  * The section carries no id, so it is addressed by its heading. Playwright's text
  * engine matches DOM text, which `text-transform: uppercase` on `section.sec > h2`
@@ -31,6 +49,19 @@ export const DOWNSTREAM_SECTION = 'section.sec:has(h2:text-is("Downstream artifa
  * whatever the layout does to the plot's size.
  */
 export const TREE_VIEWPORT_COVERAGE = 0.9;
+
+/**
+ * The share of the viewport's height the opened candidate's proposal list must fill once
+ * the drill-proposals travel has landed.
+ *
+ * Measured, not guessed: `.d-props` renders 4056px tall, so at the write-up's scroll
+ * position -- where the beat starts -- only its first 242px are inside the 810px frame
+ * (coverage 0.30), and with its top aligned to the top of the frame it covers all 810px
+ * (coverage 1.00). 0.90 fails the starting position by a wide margin and holds with
+ * slack at the destination. `inViewport` cannot ask this question of a box five times
+ * the height of the viewport.
+ */
+export const PROPOSALS_VIEWPORT_COVERAGE = 0.9;
 
 /**
  * The findings catalogue: the run's evidence base, and the one section that records
@@ -51,6 +82,21 @@ export const FINDINGS_SECTION = 'section.sec:has(#fq)';
  * has 6 proposals, which is true however the table is ordered.
  */
 export const TOP_FINDING = 'table.fnd tbody.fnd:visible >> nth=0';
+
+/**
+ * The top finding's first proposal, and the link inside it that names the candidate the
+ * proposal landed on.
+ *
+ * `nth=0` a second time, for the same reason TOP_FINDING carries one: the claim is about
+ * the *first* proposal of the *top* finding. Unpinned, `a[data-cand]` would be satisfied
+ * by any proposal anywhere in the catalogue that points at the drill-in candidate, which
+ * is precisely what the assertion exists to establish rather than to assume.
+ */
+export const TOP_FINDING_FIRST_PROP = `${TOP_FINDING} >> details.pitem >> nth=0`;
+export const TOP_FINDING_CAND_LINK = `${TOP_FINDING_FIRST_PROP} >> a[data-cand]`;
+
+/** The alignments `scrollAlign` and `scrollStepped` accept for their `block` option. */
+export const ALIGN_BLOCKS = new Set(['start', 'center']);
 
 const CUTS = new Set(['gif', 'full']);
 const BOTH = ['gif', 'full'];
@@ -109,12 +155,30 @@ export const BEATS = [
       full: '<b>173</b> ranked optimisation candidates, from one run over <code>vllm</code>',
       gif: '<b>173</b> ranked optimisation candidates',
     },
-    actions: [{ type: 'scrollTo', sel: '#lbtable' }],
+    actions: [
+      /* Not `scrollTo`. scrollIntoViewIfNeeded on #lbtable framed the rows with the
+         section heading above the top of the frame, so the recorded shot was a table
+         with no title -- nothing on screen said what the list was. Aligning the header
+         to the top of the viewport puts "Candidate leaderboard -- 173 ranked" at the top
+         of the shot with the first rows underneath it, which is the frame the caption
+         is written for. */
+      { type: 'scrollAlign', sel: LEADERBOARD_HEAD, block: 'start' },
+    ],
     asserts: [
       { type: 'visible', sel: '#lbtable' },
       { type: 'textMatches', sel: 'h2', pattern: 'Candidate leaderboard' },
-      /* The caption quotes 173, so the beat proves the board still says so. */
-      { type: 'textMatches', sel: '.sechead h2', pattern: '173 ranked' },
+      /* The caption quotes 173, so the beat proves the board still says so -- and now
+         anchored end to end, because the caption claims the *whole* heading, which is
+         what the viewer reads off the top of the frame. */
+      { type: 'textMatches', sel: `${LEADERBOARD_HEAD} h2`, pattern: '^Candidate leaderboard \u2014 173 ranked$' },
+      /* Reading right is not the same as being on screen, and being on screen is the
+         entire point of the change. The h2 rather than its container: the header box
+         lands within a rounded pixel of y=0, where a subpixel of overshoot would fail
+         inViewport for no reason a viewer could see, and it is the heading itself the
+         caption is about. */
+      { type: 'inViewport', sel: `${LEADERBOARD_HEAD} h2` },
+      /* ...with the first rows beneath it, so the shot is a titled list and not a title. */
+      { type: 'inViewport', sel: 'table.lb tbody.cand:visible >> nth=0' },
     ],
   },
   {
@@ -223,72 +287,35 @@ export const BEATS = [
   {
     id: 'drill-proposals',
     cuts: BOTH,
-    dwell: { full: 4.0, gif: 3.0 },
+    /* gif 3.0 -> 3.5. The travel is now driven in ten 90ms hops plus a settle rather than
+       jumped, which costs ~650ms more than the scrollIntoViewIfNeeded it replaced; at 3.0
+       the gif cut overran the beat and the arrival was cut into the caption's fade-out.
+       The full dwell already had the headroom, so it does not move. */
+    dwell: { full: 4.0, gif: 3.5 },
     caption: {
       full: '<b>11 proposals</b>, 5 grounded in papers — arXiv, USENIX, AAAI',
       gif: '<b>11 proposals</b>, 5 from papers',
     },
     actions: [
-      { type: 'scrollTo', sel: `${DRILL_IN_ROW} .d-props` },
+      /* Stepped, not scrollIntoViewIfNeeded. The write-up and the proposals are two ends
+         of one expanded row, and an instant cut between them reads as a new screen rather
+         than as more of the same candidate; seeing the page travel is what tells the
+         viewer the proposals belong to the candidate they just read about. The distance
+         is ~568px -- 451px of it inside the leaderboard's own max-height scroller and
+         117px the document -- driven in ten hops, so the recording holds frames at
+         intermediate scroll positions instead of one before and one after. */
+      { type: 'scrollStepped', sel: `${DRILL_IN_ROW} .d-props`, block: 'start', steps: 10, stepMs: 90 },
       { type: 'pause', ms: 600 },
     ],
     asserts: [
       { type: 'textMatches', sel: `${DRILL_IN_ROW} .d-props`, pattern: '11 proposals' },
       { type: 'textMatches', sel: `${DRILL_IN_ROW} .d-props`, pattern: 'from paper:' },
       { type: 'minChildren', sel: `${DRILL_IN_ROW} .d-props`, n: 11 },
-    ],
-  },
-  {
-    /**
-     * The evidence base, placed straight after the candidate that cites it:
-     * drill-proposals closes on "5 from papers", and this is where those papers are.
-     *
-     * The beat is not about the search box. The interesting thing about the catalogue
-     * is the two columns it exists for -- where a finding was published, and what it
-     * produced -- so the choreography asks the payoff question outright: narrow to
-     * papers, rank by proposals, and the frame ends on real venues ordered by what
-     * they led to. The `#fq` search demonstration this beat used to do is gone:
-     * `actions` is shared by both cuts, and a fill-pause-clear costs ~1.9s of cursor
-     * travel and hold that the gif cannot afford inside a dwell the full cut is not
-     * allowed to grow.
-     *
-     * No pause between the two selects. Moving the synthetic cursor from #fsrc to
-     * #fsort is itself ~0.9s, so the filtered-but-unsorted table is already held long
-     * enough to read before the sort lands on top of it.
-     */
-    id: 'findings',
-    cuts: BOTH,
-    dwell: { full: 4.0, gif: 4.0 },
-    caption: {
-      full: 'the evidence base: <b>97</b> findings, each tracked to where it was published (<b>46</b> sites) and whether it paid off \u2014 narrow to the <b>27</b> from papers, rank by most proposals, and the top one produced <b>6</b>',
-      gif: '<b>97</b> findings from <b>46</b> sites \u2014 the <b>27</b> from papers, ranked by payoff: top one, <b>6</b> proposals',
-    },
-    actions: [
-      { type: 'scrollTo', sel: '#fq' },
-      { type: 'select', sel: '#fsrc', value: 'paper' },
-      { type: 'select', sel: '#fsort', value: 'props:-1' },
-      { type: 'pause', ms: 600 },
-    ],
-    asserts: [
-      /* Two of the caption's figures at once, off the catalogue's own counter: 27 of
-         97 shown. This replaces a document-wide `domContains '97 findings'`, which the
-         page satisfies from several places and which would therefore have passed with
-         the whole catalogue deleted. Anchored, so a wider filter cannot satisfy it. */
-      { type: 'textMatches', sel: '#fcount', pattern: '^27 / 97 shown$' },
-      /* The section's own 97, from the section's own heading. */
-      { type: 'textMatches', sel: `${FINDINGS_SECTION} > h2`, pattern: '97 findings' },
-      /* 46 sites is the figure the sort control states it under, so that is where the
-         caption's 46 is witnessed rather than anywhere in the document. */
-      { type: 'textMatches', sel: '#fsort option[value="host:1"]', pattern: '46 sites' },
-      /* The top row after the sort really is a paper finding with 6 proposals. The two
-         data attributes are the sort key and the filter key themselves; the two
-         rendered cells are what a viewer reads off the frame, so both are checked. The
-         highest proposal count in the whole catalogue is 7, on a finding that is not a
-         paper, so a sort that quietly ignored the filter would fail these. */
-      { type: 'attr', sel: TOP_FINDING, name: 'data-src', equals: 'paper' },
-      { type: 'attr', sel: TOP_FINDING, name: 'data-props', equals: '6' },
-      { type: 'textMatches', sel: `${TOP_FINDING} >> tr.frow .tag`, pattern: '^paper$' },
-      { type: 'textMatches', sel: `${TOP_FINDING} >> tr.frow td.r >> nth=1`, pattern: '^6$' },
+      /* The three above read the DOM at any scroll position at all, so none of them can
+         witness where the travel ended. This one can: the list is 4056px tall, which
+         `inViewport` can never accept, so the question worth asking is how much of the
+         frame it fills. 0.30 at the write-up, 1.00 once it has arrived. */
+      { type: 'viewportCoverage', sel: `${DRILL_IN_ROW} .d-props`, minFraction: PROPOSALS_VIEWPORT_COVERAGE },
     ],
   },
   {
@@ -318,7 +345,7 @@ export const BEATS = [
          click resolves, so this comes *before* the beat's pause: framed last, the
          centred tree would be on screen only for the fade-out at the end of a beat whose
          choreography has already spent the dwell. */
-      { type: 'scrollCenter', sel: '#rtplot svg' },
+      { type: 'scrollAlign', sel: '#rtplot svg', block: 'center' },
       { type: 'pause', ms: 1400 },
     ],
     asserts: [
@@ -331,6 +358,126 @@ export const BEATS = [
       /* The caption says "all 173", so the beat proves no filter is still narrowing the
          tree. #count is the live count and keeps its text while the table is hidden. */
       { type: 'textMatches', sel: '#count', pattern: '^173 / 173 shown$' },
+    ],
+  },
+  {
+    /**
+     * The evidence base -- and the loop it closes.
+     *
+     * It sits here, after the tree, because the demo has by now shown the whole run and
+     * one candidate out of it in detail; this is where that candidate's provenance is.
+     * The catalogue is not interesting as a list. It is interesting because of the two
+     * columns it exists for -- where a finding was published, and what it produced -- so
+     * the choreography asks the payoff question outright: narrow to the 27 findings that
+     * came from papers, rank them by how many proposals they produced, and open the top
+     * one.
+     *
+     * Opening it is the substance of the beat, not a flourish. The expanded detail names
+     * the technique extracted from the paper, quotes the evidence it was extracted from,
+     * and then lists the proposals that technique produced -- and the first of those
+     * proposals is rank #17, TieringOffloadingManager._initiate_promotion: the candidate
+     * the two drill-in beats just walked through. So the shot holds the whole loop the
+     * run is for -- paper, technique, proposal, ranked candidate -- in one frame, instead
+     * of ending on a ranked table and leaving the viewer to take the connection on
+     * trust. The asserts below tie that link to DRILL_IN_ROW in code rather than to a
+     * copy of its id, so the beat cannot keep passing if the drill-in ever moves.
+     *
+     * The first `details.pitem` is deliberately left shut. Its "why the technique applied
+     * here" body is ~250 words of 12.5px prose -- unreadable at the size the gif is
+     * watched at; opening it would push the candidate link, which is the thing that
+     * closes the loop, a screenful below the "6 proposals it produced" heading the
+     * caption quotes; and clicking the summary means clicking within a few pixels of the
+     * `a[data-cand]` itself, whose delegated handler jumps the page back to the
+     * leaderboard. The summary line already renders everything the caption claims: the
+     * rank, the impact, and the symbol.
+     *
+     * The `#fq` search demonstration this beat used to do is gone: `actions` is shared by
+     * both cuts, and a fill-pause-clear costs ~1.9s of cursor travel and hold.
+     *
+     * No pause between the two selects. Moving the synthetic cursor from #fsrc to
+     * #fsort is itself ~0.9s, so the filtered-but-unsorted table is already held long
+     * enough to read before the sort lands on top of it.
+     */
+    id: 'findings',
+    cuts: BOTH,
+    /* 4.0 -> 6.0, in both cuts. The beat gained a click and a re-frame after the two
+       selects, so its choreography now spends ~5.3s of the dwell-as-deadline budget; at
+       4.0 every beat would have overrun and the opened finding would have been on screen
+       only for the caption's fade-out. 6.0 holds the expanded row, with the candidate
+       link in it, for over a second after the travel settles -- long enough to read a
+       rank and a symbol name. */
+    dwell: { full: 6.0, gif: 6.0 },
+    caption: {
+      full: 'the evidence base: <b>97</b> findings, tracked to where each was published (<b>46</b> sites) and whether it paid off — rank the <b>27</b> from papers by payoff and open the top one: this paper taught one technique, which produced <b>6</b> proposals, the first of them rank <b>#17</b> — the candidate we just drilled into',
+      gif: '<b>97</b> findings, <b>46</b> sites — the <b>27</b> from papers, ranked by payoff. the top paper produced <b>6</b> proposals; the first is rank <b>#17</b>, the candidate we opened',
+    },
+    actions: [
+      { type: 'scrollTo', sel: '#fq' },
+      { type: 'select', sel: '#fsrc', value: 'paper' },
+      { type: 'select', sel: '#fsort', value: 'props:-1' },
+      /* The title cell, not the row. The row's own centre lands on the outbound source
+         link -- target=_blank, and the section's handler deliberately does not treat it
+         as the expander -- so clicking the row's box would open paperity.org in a new
+         tab instead of expanding the finding. */
+      { type: 'click', sel: `${TOP_FINDING} >> tr.frow .ftitle` },
+      /* The detail is ~700px of content unfolding below a row that sits two thirds of the
+         way down the frame, so without this the expansion happens off screen. 'start' on
+         the whole tbody rather than on the detail's own body: aligning `.fbody` puts the
+         "technique extracted" and "supporting evidence" headings underneath the table's
+         48px sticky `th`, and those headings are half of what the shot is for. */
+      { type: 'scrollAlign', sel: TOP_FINDING, block: 'start' },
+      { type: 'pause', ms: 600 },
+    ],
+    asserts: [
+      /* Two of the caption's figures at once, off the catalogue's own counter: 27 of
+         97 shown. This replaces a document-wide `domContains '97 findings'`, which the
+         page satisfies from several places and which would therefore have passed with
+         the whole catalogue deleted. Anchored, so a wider filter cannot satisfy it. */
+      { type: 'textMatches', sel: '#fcount', pattern: '^27 / 97 shown$' },
+      /* The section's own 97, from the section's own heading. */
+      { type: 'textMatches', sel: `${FINDINGS_SECTION} > h2`, pattern: '97 findings' },
+      /* 46 sites is the figure the sort control states it under, so that is where the
+         caption's 46 is witnessed rather than anywhere in the document. */
+      { type: 'textMatches', sel: '#fsort option[value="host:1"]', pattern: '46 sites' },
+      /* The top row after the sort really is a paper finding with 6 proposals. The two
+         data attributes are the sort key and the filter key themselves; the two
+         rendered cells are what a viewer reads off the frame, so both are checked. The
+         highest proposal count in the whole catalogue is 7, on a finding that is not a
+         paper, so a sort that quietly ignored the filter would fail these. */
+      { type: 'attr', sel: TOP_FINDING, name: 'data-src', equals: 'paper' },
+      { type: 'attr', sel: TOP_FINDING, name: 'data-props', equals: '6' },
+      { type: 'textMatches', sel: `${TOP_FINDING} >> tr.frow .tag`, pattern: '^paper$' },
+      { type: 'textMatches', sel: `${TOP_FINDING} >> tr.frow td.r >> nth=1`, pattern: '^6$' },
+
+      /* --- the click landed, and the frame shows what the caption says it shows --- */
+
+      /* `tr.fdetail` exists in the DOM whether or not the row is open, so this is
+         `visible` and not `minChildren`: it is the assertion that fails if the click
+         missed the expander or hit the source link instead. */
+      { type: 'visible', sel: `${TOP_FINDING} >> tr.fdetail` },
+      /* The two things the detail says about the paper: what was taken from it, and the
+         quoted passage it was taken from. Both headings, scoped to this row's detail --
+         the catalogue has 97 of each. */
+      { type: 'textMatches', sel: `${TOP_FINDING} >> tr.fdetail h4`, pattern: '^Technique extracted$' },
+      { type: 'textMatches', sel: `${TOP_FINDING} >> tr.fdetail h4`, pattern: '^Supporting evidence$' },
+      /* The caption's "produced 6 proposals" as the frame renders it, anchored: the
+         viewer reads this heading, so the caption and the heading must agree word for
+         word rather than merely both mention a 6. */
+      { type: 'textMatches', sel: `${TOP_FINDING} >> .fprops > h4`, pattern: '^6 proposals it produced$' },
+      /* ...and the first of those proposals is the candidate the demo just drilled into.
+         `equals: DRILL_IN_CAND` is derived from DRILL_IN_ROW rather than written out, so
+         retargeting the drill-in retargets this too -- a literal id here would keep
+         passing while the beats pointed at different candidates, which is exactly the
+         drift that would make the caption a lie. */
+      { type: 'attr', sel: TOP_FINDING_CAND_LINK, name: 'data-cand', equals: DRILL_IN_CAND },
+      /* The rank and the symbol as they are rendered on the summary line, because
+         `data-cand` is an attribute and a viewer cannot read attributes. These are what
+         make the tie legible in the frame rather than merely true in the DOM. */
+      { type: 'textMatches', sel: `${TOP_FINDING_FIRST_PROP} >> .prank`, pattern: '^#17$' },
+      { type: 'textMatches', sel: TOP_FINDING_CAND_LINK, pattern: '_initiate_promotion' },
+      /* And it is in frame. The whole point of the re-frame is that the link is legible
+         in the recording, which no amount of DOM truth can witness. */
+      { type: 'inViewport', sel: TOP_FINDING_CAND_LINK },
     ],
   },
   {
@@ -395,6 +542,19 @@ export function validateStoryboard() {
     }
     for (const a of beat.actions) {
       if (a.sel === '#theme') problems.push(`${beat.id}: clicks the theme toggle`);
+      /* The two scroll actions that take an alignment take the same alignments, and a
+         typo in one would otherwise reach record.mjs as a silent default. */
+      if (a.type === 'scrollAlign' || a.type === 'scrollStepped') {
+        if (!ALIGN_BLOCKS.has(a.block)) problems.push(`${beat.id}: ${a.type} block ${a.block}`);
+      }
+      if (a.type === 'scrollStepped') {
+        if (!(Number.isInteger(a.steps) && a.steps >= 2)) {
+          problems.push(`${beat.id}: scrollStepped needs at least 2 steps, got ${a.steps}`);
+        }
+        if (!(typeof a.stepMs === 'number' && a.stepMs > 0)) {
+          problems.push(`${beat.id}: scrollStepped needs a positive stepMs, got ${a.stepMs}`);
+        }
+      }
     }
     if (beat.cuts.includes('gif')) {
       if (!beat.caption.gif) problems.push(`${beat.id}: in gif cut but has no gif caption`);
@@ -402,8 +562,11 @@ export function validateStoryboard() {
     }
   }
 
-  if (totalDuration('full') !== 62.0) problems.push(`full cut is ${totalDuration('full')}s, want 62.0s`);
-  if (totalDuration('gif') !== 20.5) problems.push(`gif cut is ${totalDuration('gif')}s, want 20.5s`);
+  /* 64.0, not 62.0: the findings beat's dwell went 4.0 -> 6.0 to pay for opening the top
+     paper finding and re-framing it. 23.0, not 20.5: the same +2.0, plus the +0.5 the
+     stepped scroll in drill-proposals costs the short cut. */
+  if (totalDuration('full') !== 64.0) problems.push(`full cut is ${totalDuration('full')}s, want 64.0s`);
+  if (totalDuration('gif') !== 23.0) problems.push(`gif cut is ${totalDuration('gif')}s, want 23.0s`);
 
   return problems;
 }

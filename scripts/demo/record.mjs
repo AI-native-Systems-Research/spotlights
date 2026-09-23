@@ -38,15 +38,76 @@ async function runAction(page, action) {
     /**
      * `scrollTo` is scrollIntoViewIfNeeded, which does nothing at all once any sliver of
      * the element is in frame -- exactly the wrong move for something taller than the
-     * viewport, which is "not needed" while 38% of it shows. This one always scrolls, and
-     * centres the box, so an oversized element fills the frame instead of hanging off the
-     * bottom of it.
+     * viewport, which is "not needed" while 38% of it shows. This one always scrolls, to
+     * the alignment the beat asks for: 'center' so an oversized element fills the frame
+     * instead of hanging off the bottom of it, 'start' so a section heading sits at the
+     * top of the shot with its content beneath.
+     *
+     * One action with a `block` option rather than a scrollCenter and a scrollTop that
+     * differ by one word: the two would share every line of this body, and a third
+     * alignment would then want a third near-duplicate.
      */
-    case 'scrollCenter':
+    case 'scrollAlign':
       await page.locator(action.sel).first()
-        .evaluate((el) => el.scrollIntoView({ block: 'center', inline: 'nearest' }));
+        .evaluate((el, block) => el.scrollIntoView({ block, inline: 'nearest' }), action.block);
       await page.waitForTimeout(450);
       return;
+    /**
+     * The same destination as `scrollAlign`, reached in visible increments so the
+     * recording contains frames at intermediate scroll positions. Two beats of one
+     * expanded row read as two unrelated screens when the page cuts between them.
+     *
+     * The steps are driven from here, one assignment per hop, rather than handed to the
+     * browser as `behavior: 'smooth'` or a CSS `scroll-behavior`: Chrome honours a
+     * `prefers-reduced-motion` preference by collapsing both to an instant jump, and it
+     * would do so silently -- the action would return, the assertions would pass, and the
+     * video would hold the same cut this replaces. Driving it means the motion is a
+     * property of the recorder, not of the recording machine's accessibility settings.
+     *
+     * The destination is learnt the only way that is reliable across nested scrollers:
+     * ask the browser. scrollIntoView is called, the resulting scrollTops are read, and
+     * the originals are put back -- all inside one `evaluate`, so the page never renders
+     * the jumped state, and the frames the recorder captures start from where the
+     * previous beat left it. Every scrollable ancestor is stepped, because this travel is
+     * split between the leaderboard's own max-height scroller and the document.
+     */
+    case 'scrollStepped': {
+      const steps = action.steps ?? 10;
+      const stepMs = action.stepMs ?? 90;
+      const plan = await page.locator(action.sel).first().evaluate((el, block) => {
+        const scrollers = [];
+        for (let n = el.parentElement; n; n = n.parentElement) {
+          const s = getComputedStyle(n);
+          const scrolls = /auto|scroll|overlay/.test(`${s.overflowY} ${s.overflowX}`);
+          if (scrolls && (n.scrollHeight > n.clientHeight || n.scrollWidth > n.clientWidth)) {
+            scrollers.push(n);
+          }
+        }
+        const doc = document.scrollingElement || document.documentElement;
+        if (!scrollers.includes(doc)) scrollers.push(doc);
+        const from = scrollers.map((n) => n.scrollTop);
+        el.scrollIntoView({ block, inline: 'nearest' });
+        const to = scrollers.map((n) => n.scrollTop);
+        scrollers.forEach((n, i) => { n.scrollTop = from[i]; });
+        // Handed back so the steps can be set from Node, one await between each.
+        window.__stepScrollers = scrollers;
+        return { from, to };
+      }, action.block);
+
+      for (let i = 1; i <= steps; i += 1) {
+        await page.evaluate(({ from, to, i: at, steps: n }) => {
+          const scrollers = window.__stepScrollers || [];
+          scrollers.forEach((el, k) => {
+            el.scrollTop = from[k] + ((to[k] - from[k]) * at) / n;
+          });
+        }, { ...plan, i, steps });
+        await page.waitForTimeout(stepMs);
+      }
+      await page.evaluate(() => { delete window.__stepScrollers; });
+      // The last hop lands on the destination; this is the frame that holds it still.
+      await page.waitForTimeout(200);
+      return;
+    }
     case 'click':
       await moveCursor(page, action.sel);
       await pulseCursor(page);
