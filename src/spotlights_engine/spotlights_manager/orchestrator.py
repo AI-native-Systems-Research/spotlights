@@ -255,6 +255,31 @@ def _effective_claude_model(cfg: SpotlightsManagerConfig) -> str | None:
     )
 
 
+def _step3_uses_local_model(
+    cfg: SpotlightsManagerConfig, mgr_input: SpotlightsManagerInput
+) -> bool:
+    """True when any model step 3 (module_deep_research) would use routes to the
+    local Qwen/pi backend.
+
+    Covers all three step-3 runners: the OpenAlex query-writer (codex model),
+    the Claude runner, and the Codex runner. `is_local_model` treats None as
+    non-local, so unset models are safely ignored.
+    """
+    from spotlights_engine.local_agent import is_local_model
+
+    discovery = cfg.discovery if cfg.discovery is not None else DiscoveryConfig()
+    codex = _first_set(
+        cfg.models.codex if cfg.models else None,
+        _explicit(cfg.deep_research, "model"),
+        _explicit(cfg.discovery, "codex_model"),
+        discovery.codex_model,
+    )
+    return any(
+        is_local_model(m)
+        for m in (_effective_claude_model(cfg), mgr_input.openalex_model, codex)
+    )
+
+
 def _models_requested(cfg: SpotlightsManagerConfig) -> RunManifestModelsRequested:
     """What the engine actually asked each CLI for, for the run manifest.
 
@@ -1322,6 +1347,20 @@ async def _run_module(
             await _update_module_in_manifest(paths, manifest, manifest_lock, qn, cp)
         elif run_step3:
             repeat = max(1, mgr_input.deep_research_repeat)
+            # The determinism stress-test's extra passes each cost a full
+            # multi-minute pi/vLLM round-trip on a single-slot local backend,
+            # turning one slow module into an N-fold stall for a signal the
+            # local run does not need. Force a single canonical pass whenever
+            # step 3 routes to the local Qwen backend, regardless of the
+            # requested --deep-research-repeat.
+            if repeat > 1 and _step3_uses_local_model(cfg, mgr_input):
+                _log.info(
+                    "[%s] deep_research: determinism x%d disabled (local model) "
+                    "— single pass",
+                    qn,
+                    repeat,
+                )
+                repeat = 1
             if repeat > 1:
                 _log.info("[%s] deep_research: start (determinism x%d)", qn, repeat)
             else:
@@ -1336,6 +1375,13 @@ async def _run_module(
                     segment=segment,
                     candidates=candidates,
                 )
+                # Flush the canonical pass to disk NOW — at the end of this
+                # deep-research pass — instead of deferring until every repeat
+                # finishes. Runner-agnostic: openalex / claude / codex all land
+                # here via research_output. Extra passes below flush per-pass too,
+                # so each sidecar appears as soon as its pass completes.
+                P.write_deep_research(module_paths, research_output, dr_duration)
+                P.write_deep_research_search_log(module_paths, research_output, qn)
                 # Determinism stress test: run the SAME step 3 the requested extra
                 # times, writing each to its own indexed sidecar (never consumed
                 # downstream — only the canonical first pass above is). Compared
@@ -1411,8 +1457,8 @@ async def _run_module(
                 _log.warning(
                     "[%s] deep_research: %s: %s", qn, iss.severity, iss.message
                 )
-            P.write_deep_research(module_paths, research_output, dr_duration)
-            P.write_deep_research_search_log(module_paths, research_output, qn)
+            # Canonical sidecar already flushed above (right after pass 0), so
+            # nothing to re-write here — just record usage + checkpoint.
             _write_cli_usage_records(
                 module_paths=module_paths,
                 qn=qn,
