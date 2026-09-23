@@ -23,6 +23,7 @@ stage error is logged and never masks the original error.
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import Callable, Coroutine
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -458,18 +459,34 @@ def _stage1_source_root(
         if attempt == 2 and last_errors is not None:
             prompt = _repair_prompt(base_prompt, last_errors, previous_payload=None)
 
-        result = run_structured_claude_stage(
-            output_type=SourceRootDecision,
-            repo_path=repo_path,
-            prompt=prompt,
-            stage_name="source_root",
-            attempt_dir=attempt_dir,
-            claude_bin=config.claude_bin,
-            claude_model=config.claude_model,
-            max_turns=config.source_root_max_turns,
-            timeout_s=_effective_timeout(config.source_root_timeout_s, config.timeout_s),
+        def _call_source_root(
+            api_try: int, _attempt_dir: Path | None = attempt_dir, _prompt: str = prompt
+        ) -> ClaudeStageResult[SourceRootDecision]:
+            ad = _attempt_dir
+            if api_try > 1 and stage_dir is not None:
+                ad = stage_dir / f"attempt_{attempt:02d}_api{api_try}"
+            return run_structured_claude_stage(
+                output_type=SourceRootDecision,
+                repo_path=repo_path,
+                prompt=_prompt,
+                stage_name="source_root",
+                attempt_dir=ad,
+                claude_bin=config.claude_bin,
+                claude_model=config.claude_model,
+                max_turns=config.source_root_max_turns,
+                timeout_s=_effective_timeout(
+                    config.source_root_timeout_s, config.timeout_s
+                ),
+                on_event=on_event,
+                salvage=True,
+            )
+
+        result = _call_stage_with_api_retry_sync(
+            _call_source_root,
+            retries=config.enrich_api_retries,
+            backoff_s=config.enrich_api_backoff_s,
+            label="stage-1 source-root",
             on_event=on_event,
-            salvage=True,
         )
         telemetry.add_claude("01_source_root", result)
         _persist_sessions(base, telemetry)
@@ -800,18 +817,33 @@ def _stage3a_single(
     for attempt in range(1, _MAX_STAGE3_ATTEMPTS + 1):
         attempt_rel = f"03_enrich/attempt_{attempt:02d}"
         attempt_dir = base / attempt_rel if base is not None else None
-        result: ClaudeStageResult[AssignmentTree] = run_structured_claude_stage(
-            output_type=AssignmentTree,
-            repo_path=repo_path,
-            prompt=prompt,
-            stage_name="assign",
-            attempt_dir=attempt_dir,
-            claude_bin=config.claude_bin,
-            claude_model=config.claude_model,
-            max_turns=config.max_turns,
-            timeout_s=config.timeout_s,
+
+        def _call_assign(
+            api_try: int, _attempt_dir: Path | None = attempt_dir, _prompt: str = prompt
+        ) -> ClaudeStageResult[AssignmentTree]:
+            ad = _attempt_dir
+            if api_try > 1 and base is not None:
+                ad = base / f"{attempt_rel}_api{api_try}"
+            return run_structured_claude_stage(
+                output_type=AssignmentTree,
+                repo_path=repo_path,
+                prompt=_prompt,
+                stage_name="assign",
+                attempt_dir=ad,
+                claude_bin=config.claude_bin,
+                claude_model=config.claude_model,
+                max_turns=config.max_turns,
+                timeout_s=config.timeout_s,
+                on_event=on_event,
+                salvage=True,
+            )
+
+        result: ClaudeStageResult[AssignmentTree] = _call_stage_with_api_retry_sync(
+            _call_assign,
+            retries=config.enrich_api_retries,
+            backoff_s=config.enrich_api_backoff_s,
+            label="monolithic assign",
             on_event=on_event,
-            salvage=True,
         )
         telemetry.add_claude("03_enrich", result)
         _persist_sessions(base, telemetry)
@@ -1072,6 +1104,45 @@ def _validate_assignment_fragment(
 
 
 _TStage = TypeVar("_TStage", bound=BaseModel)
+
+
+def _call_stage_with_api_retry_sync(
+    call: Callable[[int], ClaudeStageResult[_TStage]],
+    *,
+    retries: int,
+    backoff_s: float,
+    label: str,
+    on_event: Callable[[str], None] | None,
+) -> ClaudeStageResult[_TStage]:
+    """Synchronous sibling of `_run_stage_with_api_retry` for direct callers.
+
+    Stage-1 source-root and the monolithic assignment call
+    `run_structured_claude_stage` directly rather than through the async shard
+    wrapper, so without this an `api_failure`-tagged `ExtractorAgentError` —
+    notably an empty final message from a stream truncated by a dropped tunnel
+    — would propagate and hard-fail the whole extraction. Retry those transient
+    failures with a doubling backoff and a fresh session; any error without an
+    `api_failure` tag (a real prompt/repo fault) re-raises immediately, and so
+    does exhaustion — preserving fail-fast. `call` receives the 1-based api-try
+    index so it can route each attempt to its own artifact directory.
+    """
+    delay = backoff_s
+    total = retries + 1
+    for api_try in range(1, total + 1):
+        try:
+            return call(api_try)
+        except ExtractorAgentError as exc:
+            reason = exc.context.get("api_failure")
+            if reason is None or api_try >= total:
+                raise
+            notify(
+                on_event,
+                f"extractor: {label} hit an API failure ({reason}); "
+                f"retrying in {delay:.0f}s ({api_try}/{retries})",
+            )
+            time.sleep(delay)
+            delay *= 2
+    raise AssertionError("unreachable: sync API retry loop exhausted")
 
 
 async def _run_stage_with_api_retry(
