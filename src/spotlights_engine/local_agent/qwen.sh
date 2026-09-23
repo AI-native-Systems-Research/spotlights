@@ -135,18 +135,31 @@ ensure_pf() {
   pf_up && return 0
   ensure_oc || return 1
   ensure_login || return 1
-  # Reap stale/dead forwards for this port BEFORE spawning a fresh one. `oc
-  # port-forward` routinely dies at the data layer (pod resets the connection)
-  # while the process lingers: pf_up is then false but the dead proc still
-  # holds :PORT. Without this reap each restart stacks another oc, and the
-  # survivors fight over the port — the flapping that makes calls hang. We only
-  # reach here when pf_up already failed, so we never kill a working forward.
-  pkill -f "oc port-forward ${SVC} ${PORT}:8000" 2>/dev/null && sleep 1
-  echo "==> starting port-forward ${SVC} ${PORT}:8000"
-  nohup oc port-forward "$SVC" "${PORT}:8000" >/tmp/qwen_pf.log 2>&1 &
-  local _; for _ in $(seq 1 15); do pf_up && break; sleep 1; done
-  pf_up || { echo "xx  port-forward failed — see /tmp/qwen_pf.log" >&2; return 1; }
-  echo "==> qwen API live at ${BASE}"
+  # Retry the establish across a transient pod-connection blip. `oc
+  # port-forward` dies at the data layer ("error: lost connection to pod")
+  # even while the pod is healthy and Running — a momentary proxy/network hiccup.
+  # A single spawn whose 15s readiness poll happens to land inside that window
+  # gives up and the caller (ensure_backend) raises LocalAgentError, killing a
+  # multi-hour run over a <20s blip. So we respawn up to 3 times, reaping the
+  # dead forward before each try.
+  #
+  # Reap stale/dead forwards for this port BEFORE each spawn. A dead proc still
+  # holds :PORT (pf_up false but bound); without the reap each restart stacks
+  # another oc and the survivors fight over the port — the flapping that makes
+  # calls hang. We only reach here when pf_up already failed, so we never kill
+  # a working forward.
+  local attempt
+  for attempt in 1 2 3; do
+    pkill -f "oc port-forward ${SVC} ${PORT}:8000" 2>/dev/null && sleep 1
+    echo "==> starting port-forward ${SVC} ${PORT}:8000 (attempt ${attempt}/3)"
+    nohup oc port-forward "$SVC" "${PORT}:8000" >/tmp/qwen_pf.log 2>&1 &
+    local _; for _ in $(seq 1 15); do pf_up && break; sleep 1; done
+    if pf_up; then echo "==> qwen API live at ${BASE}"; return 0; fi
+    echo "xx  port-forward attempt ${attempt}/3 failed — see /tmp/qwen_pf.log" >&2
+    sleep 2
+  done
+  echo "xx  port-forward failed after 3 attempts — see /tmp/qwen_pf.log" >&2
+  return 1
 }
 
 # Launch an agent (no exec — safe when called from an interactive shell).
