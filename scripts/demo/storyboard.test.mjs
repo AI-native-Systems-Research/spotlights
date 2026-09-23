@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  BEATS, GEOMETRY, DRILL_IN_ROW, DRILL_IN_CAND, DOWNSTREAM_SECTION, TREE_VIEWPORT_COVERAGE,
+  BEATS, GEOMETRY, DRILL_IN_ROW, DRILL_IN_CAND, DRILL_IN_MODULE, DOWNSTREAM_SECTION,
+  TREE_VIEWPORT_COVERAGE,
   FINDINGS_SECTION, TOP_FINDING, TOP_FINDING_FIRST_PROP, TOP_FINDING_CAND_LINK,
   LEADERBOARD_HEAD, PROPOSALS_VIEWPORT_COVERAGE, ALIGN_BLOCKS,
   STICKY_CLEARANCE_LB, STICKY_CLEARANCE_FND, SECTION_CLEARANCE, ALIGN_TOLERANCE_PX,
@@ -16,6 +17,9 @@ const ACTION_TYPES = new Set([
   // pickFromList is `select` made visible: the native dropdown is not captured by the
   // recorder, so the real control is expanded in-page and picked from.
   'pickFromList', 'ring', 'unring', 'pause',
+  // expectText is an assertion shaped as an action, for a figure a beat shows and then
+  // narrows away: `asserts` only ever witness the frame a beat ends on.
+  'expectText',
 ]);
 /**
  * `beatProblems` run over a beat that is valid except for what the caller overrides, so a
@@ -207,21 +211,23 @@ test('the full cut keeps every beat, in declaration order', () => {
 });
 
 test('cut durations match the spec budgets', () => {
-  // 73.0, from 64.0: `board` +2.0 for opening the module list rather than setting it, the
+  // 76.0, from 64.0: `board` +2.0 for opening the module list rather than setting it, the
   // 3.5s arrival beat split off the front of the catalogue, `close` +1.0 for the view
-  // toggle back to the table, and +2.5 correcting `radial-tree` (see below).
-  assert.equal(totalDuration('full'), 73.0);
-  // 38.5, from 23.0: the same +2.0, +3.0 and +1.0, less the 0.5 `findings-paper` hands
+  // toggle back to the table, +2.5 correcting `radial-tree` (see below), and +3.0 for the
+  // module filter the payoff beat grew -- a `pickFromList`, which opens a list and holds it
+  // to be read rather than setting a value in one line.
+  assert.equal(totalDuration('full'), 76.0);
+  // 41.5, from 23.0: the same +2.0, +3.0, +1.0 and +3.0, less the 0.5 `findings-paper` hands
   // back in the short cut now that the arrival and its settle are the beat before it, plus
   // the +3.0, +1.0 and +6.0 of the three corrections.
-  assert.equal(totalDuration('gif'), 38.5);
+  assert.equal(totalDuration('gif'), 41.5);
   // The arithmetic, spelled out, so a dwell that moves without its budget shows up as two
   // failures rather than one. It lives here rather than in its own test so the gif budget
   // is asserted in exactly one place -- the throwaway nortree variant re-keys this number,
   // and a second copy would widen what that patch breaks.
   const dwell = (id) => dwellFor(BEATS.find((b) => b.id === id), 'gif');
   const catalogue = dwell('findings') + dwell('findings-paper');
-  assert.equal(catalogue, 8.5);
+  assert.equal(catalogue, 11.5);
   assert.equal(Math.round((totalDuration('gif') - catalogue) * 10) / 10, 30.0);
   assert.equal(
     Math.round((totalDuration('gif') - catalogue - dwell('drill-proposals')) * 10) / 10,
@@ -241,8 +247,8 @@ test('no dwell is smaller than the choreography it has to contain', () => {
   // outrun a dwell. A beat whose real cost drifts past its dwell fails here rather than
   // silently at record time.
   const MEASURED_S = {
-    gif: { board: 7.6, 'drill-writeup': 3.1, 'radial-tree': 7.1, 'findings-paper': 5.2 },
-    full: { board: 7.9, 'radial-tree': 7.1, 'findings-paper': 5.7 },
+    gif: { board: 7.6, 'drill-writeup': 3.1, 'radial-tree': 7.1, 'findings-paper': 7.7 },
+    full: { board: 7.9, 'radial-tree': 7.1, 'findings-paper': 7.7 },
   };
   for (const [cut, costs] of Object.entries(MEASURED_S)) {
     for (const [id, costS] of Object.entries(costs)) {
@@ -253,12 +259,14 @@ test('no dwell is smaller than the choreography it has to contain', () => {
       );
     }
   }
-  // And the one that was furthest out is now the storyboard's longest gif dwell, which is
-  // the honest reading of it: nearly all of that time is undoing the drill-in's filters to
-  // get back to all 173 as a tree, on camera, in the size-constrained cut.
-  const gifDwells = beatsForCut('gif').map((b) => [b.id, dwellFor(b, 'gif')]);
-  const longest = gifDwells.reduce((a, b) => (b[1] > a[1] ? b : a));
-  assert.equal(longest[0], 'board');
+  // The two longest gif dwells, in order, and both for the same reason: they are the beats
+  // that work a control the recorder cannot film collapsed. `findings-paper` now leads, on
+  // three narrowing moves the last of which opens a list box; `board` is behind it on the
+  // same open-list choreography plus undoing the drill-in's filters on camera. These are the
+  // two places to look first if the gif has to give time back.
+  const gifDwells = beatsForCut('gif').map((b) => [b.id, dwellFor(b, 'gif')])
+    .sort((a, b) => b[1] - a[1]);
+  assert.deepEqual(gifDwells.slice(0, 2).map((d) => d[0]), ['findings-paper', 'board']);
   assert.equal(dwellFor(BEATS.find((b) => b.id === 'radial-tree'), 'gif'), 7.5);
   // It costs the same in both cuts, because the choreography is identical in both.
   assert.equal(
@@ -270,20 +278,22 @@ test('no dwell is smaller than the choreography it has to contain', () => {
 test('the catalogue pays for the choreography it grew, across its two beats', () => {
   const arrival = BEATS.find((b) => b.id === 'findings');
   const payoff = BEATS.find((b) => b.id === 'findings-paper');
-  // The payoff beat's 6.0 buys the two selects, the click and the re-frame -- ~5.3s of the
-  // dwell-as-deadline budget before the caption's fade-out reserve. Its gif dwell is the
-  // one dwell in the storyboard that is *lower* than its full one, because the arrival it
-  // used to do itself is now a beat of its own and this caption is a line shorter.
-  assert.equal(dwellFor(payoff, 'full'), 6.0);
-  assert.equal(dwellFor(payoff, 'gif'), 5.5);
+  // The payoff beat's 9.0 buys three narrowing moves, the click and the re-frame -- 7.4s of
+  // the dwell-as-deadline budget before the caption's fade-out reserve, most of the growth
+  // being the module filter opening its list. Its gif dwell is the one dwell in the
+  // storyboard that is *lower* than its full one, because the arrival it used to do itself
+  // is now a beat of its own and this caption is a line shorter.
+  assert.equal(dwellFor(payoff, 'full'), 9.0);
+  assert.equal(dwellFor(payoff, 'gif'), 8.5);
   // The arrival is a stepped travel plus a held frame, which is most of its 3.5s: ten 90ms
   // hops, a 200ms landing, a 500ms pause and the caption's own fade in and out.
   assert.equal(dwellFor(arrival, 'full'), 3.5);
   assert.equal(dwellFor(arrival, 'gif'), 3.0);
-  // The split did not quietly change how long the catalogue gets overall: the two beats
-  // together are the old single beat's 6.0 plus the arrival's own time, in each cut.
-  assert.equal(Math.round((dwellFor(arrival, 'full') + dwellFor(payoff, 'full')) * 10) / 10, 9.5);
-  assert.equal(Math.round((dwellFor(arrival, 'gif') + dwellFor(payoff, 'gif')) * 10) / 10, 8.5);
+  // What the catalogue costs in total, in each cut. This is the number to look at first if
+  // the gif has to give time back: the catalogue is now the demo's longest stretch, and the
+  // module filter's open-list choreography is the most recent 3.0s of it.
+  assert.equal(Math.round((dwellFor(arrival, 'full') + dwellFor(payoff, 'full')) * 10) / 10, 12.5);
+  assert.equal(Math.round((dwellFor(arrival, 'gif') + dwellFor(payoff, 'gif')) * 10) / 10, 11.5);
 });
 
 /**
@@ -361,7 +371,7 @@ test('the arrival beat frames the catalogue by its heading, and travels there in
   assert.equal(count.pattern, '^97 / 97 shown$');
 });
 
-test('the payoff beat asks the question: filter to papers, then rank by proposals', () => {
+test('the payoff beat narrows three times, and each move changes the table on camera', () => {
   const findings = BEATS.find((b) => b.id === 'findings-paper');
   // No scroll of its own: it opens on the frame the arrival beat established and asserted.
   assert.deepEqual(
@@ -369,23 +379,72 @@ test('the payoff beat asks the question: filter to papers, then rank by proposal
     [],
     'the arrival is the beat before this one; the only scroll here is the re-frame',
   );
-  const selects = findings.actions.filter((a) => a.type === 'select');
-  assert.deepEqual(selects, [
+
+  // The three moves, in the order that makes each one visible. This order is not a
+  // preference: applied before the sort, the module filter would leave the sort nothing to
+  // reorder, because the six kv_offload papers already sit in proposal order in the
+  // document -- and a control that changes on camera while the table does not is exactly
+  // the vacuous frame this storyboard keeps removing.
+  const controls = findings.actions.filter(
+    (a) => a.type === 'select' || a.type === 'pickFromList',
+  );
+  assert.deepEqual(controls, [
     { type: 'select', sel: '#fsrc', value: 'paper' },
     { type: 'select', sel: '#fsort', value: 'props:-1' },
-  ], 'the source filter must land before the sort, so the frame ends on ranked papers');
-  // The sort is the last thing the beat changes, so the closing frame is the ranked one.
+    { type: 'pickFromList', sel: '#fmod', value: DRILL_IN_MODULE },
+  ], 'source filter, then sort, then module filter');
+
+  // The module filter is the last control the beat touches, so the frame it ends on is the
+  // fully narrowed one, and it is filmed from an open list rather than set silently -- the
+  // same reason the leaderboard's `#mod` is, since a collapsed <select> is a native widget
+  // the recording cannot see.
   const types = findings.actions.map((a) => a.type);
-  assert.equal(types.lastIndexOf('select'), findings.actions.indexOf(selects[1]));
+  assert.equal(types.lastIndexOf('pickFromList'), findings.actions.indexOf(controls[2]));
+  assert.ok(
+    findings.actions.indexOf(controls[2]) > types.lastIndexOf('select'),
+    'the module filter lands after both selects',
+  );
+  // It points at the same module the leaderboard was filtered to, through one constant:
+  // the demo's claim is that the two filters are aimed at the same place.
+  const board = BEATS.find((b) => b.id === 'board');
+  assert.equal(
+    board.actions.find((a) => a.sel === '#mod').value,
+    controls[2].value,
+    'the catalogue and the leaderboard must be narrowed to the same module',
+  );
+
   assert.deepEqual(findings.actions[findings.actions.length - 1], { type: 'pause', ms: 600 });
   // It no longer types into the search box: `actions` is shared by both cuts and the
   // fill-pause-clear does not fit the gif's dwell.
   assert.deepEqual(findings.actions.filter((a) => a.type === 'fill'), []);
-  // It must not touch the catalogue's other two controls, whose figures it does not quote.
+  // It must not touch the one catalogue control whose figures it does not quote.
   for (const a of findings.actions) {
-    assert.notEqual(a.sel, '#fmod', 'the beat quotes no per-module figure');
     assert.notEqual(a.sel, '#fuse', 'the beat quotes no used/unused figure');
   }
+});
+
+test('the payoff caption\'s 27 is checked in the moment it is true, not at the end', () => {
+  const findings = BEATS.find((b) => b.id === 'findings-paper');
+  // The caption opens on 27 and the beat ends on 6, because the module filter narrows the
+  // 27 papers further. A beat's `asserts` only ever see its last frame, so without a
+  // checkpoint the 27 would be the one figure in the demo that nothing checks -- while
+  // being on screen, under the caption that quotes it, for about a second.
+  const checkpoints = findings.actions.filter((a) => a.type === 'expectText');
+  assert.deepEqual(checkpoints, [
+    { type: 'expectText', sel: '#fcount', pattern: '^27 / 97 shown$' },
+  ]);
+  assert.match('27 / 97 shown', new RegExp(checkpoints[0].pattern));
+  assert.doesNotMatch('6 / 97 shown', new RegExp(checkpoints[0].pattern));
+  assert.doesNotMatch('127 / 97 shown', new RegExp(checkpoints[0].pattern));
+
+  // Position is the whole point of it being an action: it has to sit after the source
+  // filter, which produces the 27, and before the module filter, which destroys it.
+  const at = (pred) => findings.actions.findIndex(pred);
+  const src = at((a) => a.sel === '#fsrc');
+  const mod = at((a) => a.sel === '#fmod');
+  const check = at((a) => a.type === 'expectText');
+  assert.ok(src >= 0 && mod >= 0 && check > src && check < mod,
+    `the checkpoint must sit between #fsrc (${src}) and #fmod (${mod}), not at ${check}`);
 });
 
 test('each catalogue caption carries exactly the figures its own beat proves', () => {
@@ -403,7 +462,7 @@ test('each catalogue caption carries exactly the figures its own beat proves', (
 
     // The payoff beat narrates the chain it performs.
     const second = captionFor(payoff, cut);
-    assert.match(second, /<b>27<\/b> from papers/, `${cut}: the filtered count`);
+    assert.match(second, /<b>27<\/b> from (?:type )?papers/, `${cut}: the filtered count`);
     assert.match(second, /<b>6<\/b> proposals|produced <b>6<\/b>/, `${cut}: the top row's payoff`);
     assert.match(second, /<b>#17<\/b>/, `${cut}: the candidate the chain lands on`);
   }
@@ -428,15 +487,24 @@ test('each catalogue figure is witnessed through a scoped selector, in its own b
   const payoff = BEATS.find((b) => b.id === 'findings-paper');
   const text = (beat, sel) => beat.asserts.find((a) => a.type === 'textMatches' && a.sel === sel);
 
-  // 27 of 97, off the catalogue's own counter, anchored end to end.
+  // Where the two filters leave the counter, anchored end to end. The caption's other
+  // figure, the 27, is on screen a second earlier and is witnessed by the beat's mid-beat
+  // `expectText` checkpoint instead -- `asserts` can only see the closing frame.
   const count = text(payoff, '#fcount');
   assert.ok(count, 'the filtered count needs an assertion on #fcount');
-  assert.equal(count.pattern, '^27 / 97 shown$');
-  assert.match('27 / 97 shown', new RegExp(count.pattern));
-  assert.doesNotMatch('127 / 97 shown', new RegExp(count.pattern));
+  assert.equal(count.pattern, '^6 / 97 shown$');
+  assert.match('6 / 97 shown', new RegExp(count.pattern));
+  assert.doesNotMatch('16 / 97 shown', new RegExp(count.pattern));
+  assert.doesNotMatch('27 / 97 shown', new RegExp(count.pattern));
   assert.doesNotMatch('97 / 97 shown', new RegExp(count.pattern));
-  // The same counter, unfiltered, in the beat before: between the two, the narrowing
-  // itself is witnessed rather than assumed from one reading.
+  // The intermediate reading, from the same counter, checked where it is true.
+  assert.ok(
+    payoff.actions.some((a) => a.type === 'expectText' && a.sel === '#fcount'
+      && a.pattern === '^27 / 97 shown$'),
+    "the caption's 27 needs a checkpoint on #fcount between the two filters",
+  );
+  // The same counter, unfiltered, in the beat before: across the three readings the whole
+  // narrowing is witnessed rather than assumed from one of them.
   assert.equal(text(arrival, '#fcount').pattern, '^97 / 97 shown$');
 
   // The section's own 97, from the section's own heading, in the beat that frames it.
@@ -470,9 +538,14 @@ test('the payoff beat proves the top row after the sort, not merely that some ro
 
   const attrs = findings.asserts.filter((a) => a.type === 'attr' && a.sel === TOP_FINDING);
   assert.deepEqual(attrs, [
+    // First, because it is what the beat's last move narrowed to, and because it is the
+    // tie to the candidate the demo drilled into. The attribute is the filter's own key --
+    // `#fmod` itself cannot be asserted on, since a <select>'s innerText is every option
+    // concatenated and any pattern over it would pass.
+    { type: 'attr', sel: TOP_FINDING, name: 'data-module', equals: DRILL_IN_MODULE },
     { type: 'attr', sel: TOP_FINDING, name: 'data-src', equals: 'paper' },
     { type: 'attr', sel: TOP_FINDING, name: 'data-props', equals: '6' },
-  ], 'the top row must be proved a paper finding with the caption\'s proposal count');
+  ], 'the top row must be proved a paper finding, in the module, with its proposal count');
 
   // And the two cells a viewer actually reads off the frame.
   const badge = findings.asserts.find(
