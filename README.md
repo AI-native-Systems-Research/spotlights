@@ -18,7 +18,7 @@ Point Spotlights at a repo and a goal (e.g., `reduce p99 latency`, `minimize mem
   <img src="docs/demo.gif" alt="A walkthrough of a Spotlights report: 173 ranked candidates, one opened to its write-up and proposals, the run as a tree, and the findings catalogue narrowed to the paper that produced the top candidate" width="940">
 </p>
 
-<p align="center"><sub>A real run over 8 modules of <a href="https://github.com/vllm-project/vllm">vLLM</a>, targeting median TTFT and TPOT: the ranked candidates, what each one argues, and the evidence behind them.</sub></p>
+<p align="center"><sub>A real run over 8 modules of <a href="https://github.com/vllm-project/vllm">vLLM</a>: the ranked candidates, what each one argues, and the evidence behind them.</sub></p>
 
 Most code-research tools either scan broadly and return shallow hits, or dive deeply into a single file you already picked. **Spotlights acts as the targeting system**: it decides which functions and code regions across the whole repo are worth deep investigation for your goal, then spends real research effort on each one.
 
