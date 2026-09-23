@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import sys
 import tempfile
@@ -158,6 +159,12 @@ class CodexExecClient:
             cwd=str(Path(self.options.cwd).expanduser().resolve()),
             env=env,
             bufsize=1,
+            # Own process group so we can kill codex AND its grandchildren.
+            # codex spawns a node child that inherits the stdout/stderr pipe
+            # write-ends; killing only codex leaves the grandchild holding the
+            # pipe open, so the reader threads never see EOF and their join()
+            # blocks forever (whole run wedges at 0% CPU).
+            start_new_session=True,
         )
         assert proc.stdin is not None
         assert proc.stdout is not None
@@ -186,17 +193,31 @@ class CodexExecClient:
         finally:
             proc.stdin.close()
 
+        def _kill_group() -> None:
+            # SIGKILL the whole session (codex + node grandchildren) so the
+            # pipe write-ends close and the reader threads reach EOF.
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError, OSError):
+                proc.kill()
+
         try:
             returncode = proc.wait(timeout=self.options.timeout_seconds)
         except subprocess.TimeoutExpired:
-            proc.kill()
+            _kill_group()
             proc.wait()
-            stdout_thread.join()
-            stderr_thread.join()
+            stdout_thread.join(timeout=5)
+            stderr_thread.join(timeout=5)
             raise
 
-        stdout_thread.join()
-        stderr_thread.join()
+        stdout_thread.join(timeout=5)
+        stderr_thread.join(timeout=5)
+        if stdout_thread.is_alive() or stderr_thread.is_alive():
+            # codex exited but a grandchild still holds the pipe open. Kill the
+            # group so the threads see EOF, then reap; never join unbounded.
+            _kill_group()
+            stdout_thread.join(timeout=5)
+            stderr_thread.join(timeout=5)
 
         final_message = None
         if last_path and last_path.exists():
