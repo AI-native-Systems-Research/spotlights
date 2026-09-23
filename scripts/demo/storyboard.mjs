@@ -32,6 +32,26 @@ export const DOWNSTREAM_SECTION = 'section.sec:has(h2:text-is("Downstream artifa
  */
 export const TREE_VIEWPORT_COVERAGE = 0.9;
 
+/**
+ * The findings catalogue: the run's evidence base, and the one section that records
+ * where each finding was published and whether it paid off. It carries no id of its
+ * own, so it is addressed by the search box it contains.
+ */
+export const FINDINGS_SECTION = 'section.sec:has(#fq)';
+
+/**
+ * The catalogue's top row once it has been filtered and sorted.
+ *
+ * One `tbody.fnd` per finding, and the section's script sorts by re-appending *every*
+ * tbody -- filtered-out ones included -- so the first tbody in document order is
+ * usually a hidden one. `:visible` is what makes this the row a viewer actually sees
+ * at the top of the table. The `>> nth=0` is what makes it *the* top row rather than
+ * "any row": `textMatches` is satisfied by any match among the elements a selector
+ * returns, so an unpinned selector would prove only that some paper finding somewhere
+ * has 6 proposals, which is true however the table is ordered.
+ */
+export const TOP_FINDING = 'table.fnd tbody.fnd:visible >> nth=0';
+
 const CUTS = new Set(['gif', 'full']);
 const BOTH = ['gif', 'full'];
 const FULL_ONLY = ['full'];
@@ -154,22 +174,6 @@ export const BEATS = [
     ],
   },
   {
-    id: 'findings',
-    cuts: FULL_ONLY,
-    dwell: { full: 4.0 },
-    caption: { full: '<b>97</b> findings over 91 distinct works, filterable' },
-    actions: [
-      { type: 'scrollTo', sel: '#fq' },
-      { type: 'fill', sel: '#fq', text: 'cache' },
-      { type: 'pause', ms: 900 },
-      { type: 'fill', sel: '#fq', text: '' },
-    ],
-    asserts: [
-      { type: 'domContains', text: '97 findings' },
-      { type: 'textMatches', sel: '#fcount', pattern: '\\d' },
-    ],
-  },
-  {
     id: 'board',
     cuts: BOTH,
     dwell: { full: 8.0, gif: 3.0 },
@@ -232,6 +236,59 @@ export const BEATS = [
       { type: 'textMatches', sel: `${DRILL_IN_ROW} .d-props`, pattern: '11 proposals' },
       { type: 'textMatches', sel: `${DRILL_IN_ROW} .d-props`, pattern: 'from paper:' },
       { type: 'minChildren', sel: `${DRILL_IN_ROW} .d-props`, n: 11 },
+    ],
+  },
+  {
+    /**
+     * The evidence base, placed straight after the candidate that cites it:
+     * drill-proposals closes on "5 from papers", and this is where those papers are.
+     *
+     * The beat is not about the search box. The interesting thing about the catalogue
+     * is the two columns it exists for -- where a finding was published, and what it
+     * produced -- so the choreography asks the payoff question outright: narrow to
+     * papers, rank by proposals, and the frame ends on real venues ordered by what
+     * they led to. The `#fq` search demonstration this beat used to do is gone:
+     * `actions` is shared by both cuts, and a fill-pause-clear costs ~1.9s of cursor
+     * travel and hold that the gif cannot afford inside a dwell the full cut is not
+     * allowed to grow.
+     *
+     * No pause between the two selects. Moving the synthetic cursor from #fsrc to
+     * #fsort is itself ~0.9s, so the filtered-but-unsorted table is already held long
+     * enough to read before the sort lands on top of it.
+     */
+    id: 'findings',
+    cuts: BOTH,
+    dwell: { full: 4.0, gif: 4.0 },
+    caption: {
+      full: 'the evidence base: <b>97</b> findings, each tracked to where it was published (<b>46</b> sites) and whether it paid off \u2014 narrow to the <b>27</b> from papers, rank by most proposals, and the top one produced <b>6</b>',
+      gif: '<b>97</b> findings from <b>46</b> sites \u2014 the <b>27</b> from papers, ranked by payoff: top one, <b>6</b> proposals',
+    },
+    actions: [
+      { type: 'scrollTo', sel: '#fq' },
+      { type: 'select', sel: '#fsrc', value: 'paper' },
+      { type: 'select', sel: '#fsort', value: 'props:-1' },
+      { type: 'pause', ms: 600 },
+    ],
+    asserts: [
+      /* Two of the caption's figures at once, off the catalogue's own counter: 27 of
+         97 shown. This replaces a document-wide `domContains '97 findings'`, which the
+         page satisfies from several places and which would therefore have passed with
+         the whole catalogue deleted. Anchored, so a wider filter cannot satisfy it. */
+      { type: 'textMatches', sel: '#fcount', pattern: '^27 / 97 shown$' },
+      /* The section's own 97, from the section's own heading. */
+      { type: 'textMatches', sel: `${FINDINGS_SECTION} > h2`, pattern: '97 findings' },
+      /* 46 sites is the figure the sort control states it under, so that is where the
+         caption's 46 is witnessed rather than anywhere in the document. */
+      { type: 'textMatches', sel: '#fsort option[value="host:1"]', pattern: '46 sites' },
+      /* The top row after the sort really is a paper finding with 6 proposals. The two
+         data attributes are the sort key and the filter key themselves; the two
+         rendered cells are what a viewer reads off the frame, so both are checked. The
+         highest proposal count in the whole catalogue is 7, on a finding that is not a
+         paper, so a sort that quietly ignored the filter would fail these. */
+      { type: 'attr', sel: TOP_FINDING, name: 'data-src', equals: 'paper' },
+      { type: 'attr', sel: TOP_FINDING, name: 'data-props', equals: '6' },
+      { type: 'textMatches', sel: `${TOP_FINDING} >> tr.frow .tag`, pattern: '^paper$' },
+      { type: 'textMatches', sel: `${TOP_FINDING} >> tr.frow td.r >> nth=1`, pattern: '^6$' },
     ],
   },
   {
@@ -346,7 +403,7 @@ export function validateStoryboard() {
   }
 
   if (totalDuration('full') !== 62.0) problems.push(`full cut is ${totalDuration('full')}s, want 62.0s`);
-  if (totalDuration('gif') !== 16.5) problems.push(`gif cut is ${totalDuration('gif')}s, want 16.5s`);
+  if (totalDuration('gif') !== 20.5) problems.push(`gif cut is ${totalDuration('gif')}s, want 20.5s`);
 
   return problems;
 }
