@@ -4,7 +4,8 @@ import {
   BEATS, GEOMETRY, DRILL_IN_ROW, DRILL_IN_CAND, DOWNSTREAM_SECTION, TREE_VIEWPORT_COVERAGE,
   FINDINGS_SECTION, TOP_FINDING, TOP_FINDING_FIRST_PROP, TOP_FINDING_CAND_LINK,
   LEADERBOARD_HEAD, PROPOSALS_VIEWPORT_COVERAGE, ALIGN_BLOCKS,
-  beatsForCut, dwellFor, captionFor, totalDuration, validateStoryboard,
+  STICKY_CLEARANCE_LB, STICKY_CLEARANCE_FND, CLOSE_CLEARANCE, ALIGN_TOLERANCE_PX,
+  beatsForCut, dwellFor, captionFor, totalDuration, validateStoryboard, beatProblems,
 } from './storyboard.mjs';
 
 const ACTION_TYPES = new Set([
@@ -13,8 +14,28 @@ const ACTION_TYPES = new Set([
   'scrollTo', 'scrollAlign', 'scrollStepped', 'click', 'select', 'hover', 'fill',
   'ring', 'unring', 'pause',
 ]);
+/**
+ * `beatProblems` run over a beat that is valid except for what the caller overrides, so a
+ * rule can be tested by breaking it. The defaults are the minimum a beat needs to be
+ * otherwise clean, which is why a returned problem is always about the override.
+ */
+function withBeat(overrides) {
+  return beatProblems({
+    id: 'probe',
+    cuts: ['full'],
+    dwell: { full: 1.0 },
+    caption: { full: 'probe' },
+    actions: [],
+    asserts: [{ type: 'visible', sel: '#x' }],
+    ...overrides,
+  });
+}
+
 const ASSERT_TYPES = new Set([
   'domContains', 'visible', 'attr', 'minChildren', 'textMatches', 'inViewport', 'viewportCoverage',
+  // Both added because inViewport passes on the two framings that shipped broken: content
+  // under a sticky header, and a short section stranded at the bottom of the frame.
+  'unoccluded', 'nearTop',
 ]);
 
 test('the storyboard validates clean', () => {
@@ -380,7 +401,14 @@ test('the close beat looks at the downstream artifacts it narrates', () => {
   const close = BEATS.find((b) => b.id === 'close');
   // Both cuts end on this beat, so retargeting its one scroll retargets both.
   assert.deepEqual(close.cuts, ['gif', 'full']);
-  assert.deepEqual(close.actions, [{ type: 'scrollTo', sel: DOWNSTREAM_SECTION }]);
+  // Not scrollTo. scrollIntoViewIfNeeded does nothing while any part of the target is
+  // already in frame, and the downstream section sits directly below the findings
+  // catalogue -- so from the moment the findings beat moved in front of this one, the
+  // closing shot never moved at all.
+  assert.deepEqual(close.actions, [{
+    type: 'scrollAlign', sel: DOWNSTREAM_SECTION, block: 'start', marginTop: CLOSE_CLEARANCE,
+  }]);
+  assert.deepEqual(close.actions.filter((a) => a.type === 'scrollTo'), []);
   assert.ok(
     DOWNSTREAM_SECTION.includes('Downstream artifacts'),
     'the close beat must scroll to the downstream artifacts section, not the leaderboard',
@@ -396,6 +424,17 @@ test('the close beat looks at the downstream artifacts it narrates', () => {
   assert.equal(inView.length, 1);
   assert.equal(inView[0].sel, DOWNSTREAM_SECTION);
   assert.equal(inView[0].sel, close.actions[0].sel, 'the assertion must watch what the beat scrolls to');
+
+  // inViewport alone is what let the stranded framing through: the section is 129px tall,
+  // so it fitted from y 681..810 -- the bottom strip of a frame that was otherwise the
+  // previous beat -- with a fraction of a pixel to spare. Only a bound on where its top
+  // edge landed tells the two frames apart, and it has to be tight enough to reject the
+  // bottom of the frame by a wide margin.
+  const anchored = close.asserts.filter((a) => a.type === 'nearTop');
+  assert.equal(anchored.length, 1);
+  assert.equal(anchored[0].sel, DOWNSTREAM_SECTION);
+  assert.equal(anchored[0].maxY, CLOSE_CLEARANCE + ALIGN_TOLERANCE_PX);
+  assert.ok(anchored[0].maxY < GEOMETRY.height / 8, 'a loose bound would re-admit the defect');
   // The figure guards stay.
   assert.deepEqual(
     close.asserts.filter((a) => a.type === 'domContains').map((a) => a.text),
@@ -422,7 +461,7 @@ test('the findings beat opens the top paper finding rather than stopping at the 
   const frameAt = types.indexOf('scrollAlign');
   assert.ok(frameAt > clickAt, 'frame the detail after it has been opened');
   assert.deepEqual(findings.actions[frameAt], {
-    type: 'scrollAlign', sel: TOP_FINDING, block: 'start',
+    type: 'scrollAlign', sel: TOP_FINDING, block: 'start', marginTop: STICKY_CLEARANCE_FND,
   });
   // Framed before the closing pause, so the opened finding is held rather than glimpsed.
   assert.deepEqual(findings.actions.slice(frameAt + 1), [{ type: 'pause', ms: 600 }]);
@@ -550,6 +589,89 @@ test('the proposals beat travels to the list in steps, not in one cut', () => {
   assert.ok(step.sel.startsWith(DRILL_IN_ROW));
 });
 
+/**
+ * The guard on the framing defect that three beats shipped with, and that no assertion in
+ * the storyboard could see: `block: 'start'` inside either of the page's tables lands the
+ * aligned element underneath that table's own `position: sticky` header. Every text and
+ * attribute assertion passes on a row the header is painted over, so the only witnesses
+ * are the clearance itself and an occlusion check on what the clearance reveals.
+ */
+test('every start-aligned scroll inside a sticky-headered table carries a clearance', () => {
+  const props = BEATS.find((b) => b.id === 'drill-proposals');
+  const findings = BEATS.find((b) => b.id === 'findings');
+  const lead = BEATS.find((b) => b.id === 'leaderboard-reveal');
+
+  // Measured on the rendered page: the leaderboard's header box is 34px and the
+  // catalogue's, whose label wraps to two lines, is 49px. Each clearance must clear its
+  // own header, and neither may be so large it pushes the content it reveals out of frame.
+  assert.ok(STICKY_CLEARANCE_LB > 34, 'the leaderboard header would still cover the row');
+  assert.ok(STICKY_CLEARANCE_FND > 49, 'the catalogue header would still cover the row');
+  for (const px of [STICKY_CLEARANCE_LB, STICKY_CLEARANCE_FND, CLOSE_CLEARANCE]) {
+    assert.ok(px < GEOMETRY.height / 8, `a ${px}px clearance is framing, not clearance`);
+  }
+
+  const step = props.actions.find((a) => a.type === 'scrollStepped');
+  assert.equal(step.marginTop, STICKY_CLEARANCE_LB);
+  const frame = findings.actions.find((a) => a.type === 'scrollAlign');
+  assert.equal(frame.marginTop, STICKY_CLEARANCE_FND);
+
+  // The leaderboard reveal is the one start-aligned scroll that needs no clearance: it
+  // aligns the section heading, which sits above the table rather than inside it.
+  const reveal = lead.actions.find((a) => a.type === 'scrollAlign');
+  assert.equal(reveal.marginTop, undefined);
+  assert.equal(reveal.sel, LEADERBOARD_HEAD);
+});
+
+test('each clearance is witnessed by an occlusion check on what it reveals', () => {
+  // A clearance is a number; what makes it testable at render time is asking the browser
+  // what is actually painted at the revealed element's centre. inViewport cannot: the
+  // findings title sat at y 10..33 under a 49px header and passed it.
+  const expected = {
+    'drill-proposals': [`${DRILL_IN_ROW} .d-props > h4`],
+    findings: [
+      `${TOP_FINDING} >> tr.frow .ftitle`,
+      `${TOP_FINDING} >> tr.frow .tag`,
+      `${TOP_FINDING} >> tr.frow .fhost`,
+    ],
+  };
+  for (const [id, sels] of Object.entries(expected)) {
+    const beat = BEATS.find((b) => b.id === id);
+    assert.deepEqual(
+      beat.asserts.filter((a) => a.type === 'unoccluded').map((a) => a.sel),
+      sels,
+      `${id} does not prove its clearance worked`,
+    );
+  }
+  // Both cuts run both beats, so one clearance covers the gif and the mp4 alike.
+  for (const id of Object.keys(expected)) {
+    assert.deepEqual(BEATS.find((b) => b.id === id).cuts, ['gif', 'full']);
+  }
+});
+
+test('the storyboard rejects a clearance or a bound that record.mjs would silently default', () => {
+  // Both defaults are the failure: `marginTop ?? 0` is align-flush, the framing all this
+  // exists to stop, and `box.y > undefined` is false, which passes from anywhere in frame.
+  const align = { type: 'scrollAlign', sel: '#x', block: 'start' };
+  const bad = [
+    [{ ...align, marginTop: '48' }, /marginTop must be a non-negative number, got 48/],
+    [{ ...align, marginTop: -8 }, /marginTop must be a non-negative number, got -8/],
+    [{ ...align, marginTop: NaN }, /marginTop must be a non-negative number/],
+  ];
+  for (const [action, pattern] of bad) {
+    const problems = withBeat({ actions: [action] });
+    assert.ok(problems.some((m) => pattern.test(m)), `accepted ${JSON.stringify(action)}: ${problems}`);
+  }
+  // An omitted marginTop is legal -- most alignments want none -- so it must not be flagged.
+  assert.deepEqual(withBeat({ actions: [align] }), []);
+
+  assert.ok(
+    withBeat({ asserts: [{ type: 'nearTop', sel: '#x' }] })
+      .some((m) => /nearTop needs a non-negative maxY/.test(m)),
+    'a nearTop with no bound asserts nothing and must be rejected',
+  );
+  assert.deepEqual(withBeat({ asserts: [{ type: 'nearTop', sel: '#x', maxY: 32 }] }), []);
+});
+
 test('the storyboard rejects a scroll alignment record.mjs would not understand', () => {
   // scrollAlign and scrollStepped share their alignments, and a typo would otherwise
   // reach the browser as a silent default rather than as a failure.
@@ -566,7 +688,8 @@ test('the storyboard rejects a scroll alignment record.mjs would not understand'
   const aligning = BEATS.flatMap((b) => b.actions)
     .filter((a) => a.type === 'scrollAlign' || a.type === 'scrollStepped');
   // In play order: the leaderboard heading, the travel to the proposals, the tree, the
-  // opened finding. Only the tree is centred, and only because it is taller than the frame.
-  assert.equal(aligning.length, 4);
-  assert.deepEqual(aligning.map((a) => a.block), ['start', 'start', 'center', 'start']);
+  // opened finding, the downstream artifacts. Only the tree is centred, and only because
+  // it is taller than the frame.
+  assert.equal(aligning.length, 5);
+  assert.deepEqual(aligning.map((a) => a.block), ['start', 'start', 'center', 'start', 'start']);
 });

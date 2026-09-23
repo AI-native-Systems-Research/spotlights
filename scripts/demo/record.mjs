@@ -29,6 +29,48 @@ function parseArgs(argv) {
   return { cut, dryRun: argv.includes('--dry-run') };
 }
 
+/**
+ * Page-side: align `el` the way the beat asked, honouring a sticky-header clearance.
+ *
+ * The clearance is a temporary inline `scroll-margin-top`, which is the property
+ * `scrollIntoView` itself consults, rather than a scroll followed by a nudge: a nudge
+ * would have to work out which of the nested scrollers actually moved, and
+ * `scroll-margin` answers that for all of them at once. It is inline and restored, so
+ * the page's own stylesheet is never edited.
+ *
+ * With `plan: true` it leaves the page where it found it. It records every scrollable
+ * ancestor's scrollTop, aligns, records the destination, puts the originals back and
+ * hands the pair out -- all before returning, so no frame is ever painted at the jumped
+ * position and `scrollStepped` can walk there itself.
+ *
+ * Serialized to the browser by Playwright, so it closes over nothing.
+ */
+function scrollAligned(el, { block, marginTop, plan = false }) {
+  const scrollers = [];
+  for (let n = el.parentElement; n; n = n.parentElement) {
+    const s = getComputedStyle(n);
+    const scrolls = /auto|scroll|overlay/.test(`${s.overflowY} ${s.overflowX}`);
+    if (scrolls && (n.scrollHeight > n.clientHeight || n.scrollWidth > n.clientWidth)) {
+      scrollers.push(n);
+    }
+  }
+  const doc = document.scrollingElement || document.documentElement;
+  if (!scrollers.includes(doc)) scrollers.push(doc);
+
+  const from = scrollers.map((n) => n.scrollTop);
+  const previous = el.style.scrollMarginTop;
+  el.style.scrollMarginTop = `${marginTop}px`;
+  el.scrollIntoView({ block, inline: 'nearest' });
+  el.style.scrollMarginTop = previous;
+  if (!plan) return null;
+
+  const to = scrollers.map((n) => n.scrollTop);
+  scrollers.forEach((n, i) => { n.scrollTop = from[i]; });
+  // Handed back so the steps can be set from Node, one await between each.
+  window.__stepScrollers = scrollers;
+  return { from, to };
+}
+
 async function runAction(page, action) {
   switch (action.type) {
     case 'scrollTo':
@@ -46,10 +88,17 @@ async function runAction(page, action) {
      * One action with a `block` option rather than a scrollCenter and a scrollTop that
      * differ by one word: the two would share every line of this body, and a third
      * alignment would then want a third near-duplicate.
+     *
+     * `marginTop` is why `block: 'start'` is usable at all inside this page's tables.
+     * Both `table.lb th` and `table.fnd th` are `position: sticky; top: 0` within a
+     * scrolling ancestor, so aligning a row to the top of its scroller parks it
+     * *underneath* its own header -- measured at 34px of the leaderboard's and 49px of
+     * the catalogue's. Every assertion still passes there, because the DOM does not care
+     * what the header covers, and the recorded frame loses the row.
      */
     case 'scrollAlign':
       await page.locator(action.sel).first()
-        .evaluate((el, block) => el.scrollIntoView({ block, inline: 'nearest' }), action.block);
+        .evaluate(scrollAligned, { block: action.block, marginTop: action.marginTop ?? 0 });
       await page.waitForTimeout(450);
       return;
     /**
@@ -74,25 +123,10 @@ async function runAction(page, action) {
     case 'scrollStepped': {
       const steps = action.steps ?? 10;
       const stepMs = action.stepMs ?? 90;
-      const plan = await page.locator(action.sel).first().evaluate((el, block) => {
-        const scrollers = [];
-        for (let n = el.parentElement; n; n = n.parentElement) {
-          const s = getComputedStyle(n);
-          const scrolls = /auto|scroll|overlay/.test(`${s.overflowY} ${s.overflowX}`);
-          if (scrolls && (n.scrollHeight > n.clientHeight || n.scrollWidth > n.clientWidth)) {
-            scrollers.push(n);
-          }
-        }
-        const doc = document.scrollingElement || document.documentElement;
-        if (!scrollers.includes(doc)) scrollers.push(doc);
-        const from = scrollers.map((n) => n.scrollTop);
-        el.scrollIntoView({ block, inline: 'nearest' });
-        const to = scrollers.map((n) => n.scrollTop);
-        scrollers.forEach((n, i) => { n.scrollTop = from[i]; });
-        // Handed back so the steps can be set from Node, one await between each.
-        window.__stepScrollers = scrollers;
-        return { from, to };
-      }, action.block);
+      const plan = await page.locator(action.sel).first().evaluate(
+        scrollAligned,
+        { block: action.block, marginTop: action.marginTop ?? 0, plan: true },
+      );
 
       for (let i = 1; i <= steps; i += 1) {
         await page.evaluate(({ from, to, i: at, steps: n }) => {
@@ -210,6 +244,61 @@ async function checkAssert(page, beatId, a) {
           + `height, want at least ${(a.minFraction * 100).toFixed(0)}%: `
           + `${visibleHeight.toFixed(0)}px of ${view.height}px in frame, `
           + `box is y ${box.y.toFixed(0)}..${bottom.toFixed(0)} and ${box.height.toFixed(0)}px tall`,
+        );
+      }
+      return;
+    }
+    /**
+     * Whether the element is the thing a viewer would actually see at its own centre.
+     *
+     * `inViewport` cannot answer this: a row parked under a `position: sticky` header has
+     * a box wholly inside the frame and passes, and so does every text and attribute
+     * assertion on it, because the DOM does not care what is painted on top. Two beats
+     * lost their subject that way -- the findings catalogue's paper title sat at y 10..29
+     * under a 49px `th` while every assertion about that finding went green. Asking the
+     * browser what is at the point settles it without any pixel arithmetic here: the
+     * clearance can be wrong, the header can grow, and this still fails.
+     *
+     * A hit on a descendant counts -- `elementFromPoint` returns the innermost element,
+     * so the centre of a heading resolves to whatever span holds its text. The overlay is
+     * all `pointer-events: none`, so the caption is correctly invisible to this: it is
+     * not part of the report, and a beat must not fail because its own narration is up.
+     */
+    case 'unoccluded': {
+      const hit = await page.locator(a.sel).first().evaluate((el) => {
+        const box = el.getBoundingClientRect();
+        if (box.width === 0 || box.height === 0) return { ok: false, why: 'the element has no box' };
+        const x = box.left + box.width / 2;
+        const y = box.top + box.height / 2;
+        const top = document.elementFromPoint(x, y);
+        if (!top) return { ok: false, why: `nothing is at its centre (${x.toFixed(0)}, ${y.toFixed(0)})` };
+        if (el.contains(top)) return { ok: true };
+        return {
+          ok: false,
+          why: `${top.tagName.toLowerCase()}${top.className ? `.${String(top.className).split(/\s+/)[0]}` : ''} `
+            + `covers its centre (${x.toFixed(0)}, ${y.toFixed(0)})`,
+        };
+      });
+      if (!hit.ok) fail(`${a.sel} is not the element on top: ${hit.why}`);
+      return;
+    }
+    /**
+     * That the shot is anchored on this element, not merely that it fits.
+     *
+     * The closing beat is the case: its section is 129px tall, so it fits the frame from
+     * anywhere in it -- including the bottom strip, at y 681..810, where the recording
+     * left it once the findings beat moved in front and turned its `scrollTo` into a
+     * no-op. `inViewport` passed on that frame with a fraction of a pixel to spare, and
+     * nothing about *fitting* could have distinguished it from the intended shot, so this
+     * asserts where the top edge landed instead.
+     */
+    case 'nearTop': {
+      const box = await page.locator(a.sel).first().boundingBox();
+      if (!box) fail(`${a.sel} has no box, so nothing is anchored on it`);
+      if (box.y < 0 || box.y > a.maxY) {
+        fail(
+          `${a.sel} starts at y ${box.y.toFixed(0)}, want 0..${a.maxY}: `
+          + 'the frame is not anchored on it',
         );
       }
       return;

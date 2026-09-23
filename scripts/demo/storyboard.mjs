@@ -98,6 +98,43 @@ export const TOP_FINDING_CAND_LINK = `${TOP_FINDING_FIRST_PROP} >> a[data-cand]`
 /** The alignments `scrollAlign` and `scrollStepped` accept for their `block` option. */
 export const ALIGN_BLOCKS = new Set(['start', 'center']);
 
+/**
+ * How far below the top of the frame a `block: 'start'` alignment has to land inside each
+ * of the page's two tables, so that what it aligns is not hidden by the table's own
+ * header.
+ *
+ * `table.lb th` and `table.fnd th` are both `position: sticky; top: 0` inside a scrolling
+ * ancestor, so aligning a row to the top of its scroller parks it *underneath* that
+ * header. Nothing in the DOM notices: every text and attribute assertion passes on a row
+ * the header is sitting on top of, and the first recording of the findings beat lost the
+ * paper's title, its `paper` tag and its publisher to exactly this, leaving a detail panel
+ * belonging to a finding the frame never named.
+ *
+ * Measured on the rendered page at 1440x810, not estimated: the leaderboard's header box
+ * is 34px tall and the catalogue's, whose `PAIR CANDIDATES` label wraps to two lines, is
+ * 49px. The values below clear those with a few pixels of gap. The beats that use them
+ * assert `unoccluded` on the thing the clearance exists to reveal, so a header that grows
+ * fails the render instead of quietly eating a row again.
+ */
+export const STICKY_CLEARANCE_LB = 48;
+export const STICKY_CLEARANCE_FND = 56;
+
+/**
+ * The gap above the closing section, which has no sticky header to clear and needs only
+ * to not sit flush against the top edge of the frame: aligned at 0 its heading's box
+ * starts at y=0 exactly.
+ */
+export const CLOSE_CLEARANCE = 24;
+
+/**
+ * Slack allowed when asserting where an alignment landed.
+ *
+ * `scrollIntoView` lands on fractional device pixels and the browser reports the box back
+ * rounded, so an exact comparison against a clearance would be flaky by a pixel or two.
+ * Small enough that it cannot absorb a whole heading.
+ */
+export const ALIGN_TOLERANCE_PX = 8;
+
 const CUTS = new Set(['gif', 'full']);
 const BOTH = ['gif', 'full'];
 const FULL_ONLY = ['full'];
@@ -303,8 +340,20 @@ export const BEATS = [
          viewer the proposals belong to the candidate they just read about. The distance
          is ~568px -- 451px of it inside the leaderboard's own max-height scroller and
          117px the document -- driven in ten hops, so the recording holds frames at
-         intermediate scroll positions instead of one before and one after. */
-      { type: 'scrollStepped', sel: `${DRILL_IN_ROW} .d-props`, block: 'start', steps: 10, stepMs: 90 },
+         intermediate scroll positions instead of one before and one after.
+
+         The clearance matters here as much as the travel: aligned flush, the list's own
+         "11 proposals" heading -- the figure the caption leads with -- landed at y -1..15,
+         behind the leaderboard's sticky header, so the beat arrived at a wall of proposal
+         prose with the count that explains it covered up. */
+      {
+        type: 'scrollStepped',
+        sel: `${DRILL_IN_ROW} .d-props`,
+        block: 'start',
+        marginTop: STICKY_CLEARANCE_LB,
+        steps: 10,
+        stepMs: 90,
+      },
       { type: 'pause', ms: 600 },
     ],
     asserts: [
@@ -316,6 +365,16 @@ export const BEATS = [
          `inViewport` can never accept, so the question worth asking is how much of the
          frame it fills. 0.30 at the write-up, 1.00 once it has arrived. */
       { type: 'viewportCoverage', sel: `${DRILL_IN_ROW} .d-props`, minFraction: PROPOSALS_VIEWPORT_COVERAGE },
+      /* The caption's "11 proposals" is legible where the travel arrived, not behind the
+         leaderboard's sticky header. Coverage cannot ask this: the list fills the frame
+         either way, which is precisely how the heading went missing unnoticed.
+         `inViewport` is not the guard here either, and neither is any text assertion: flush
+         against the scroller the h4's box was y -1..15, which the text assertions above
+         pass regardless and which inViewport rejects only by the one pixel that happened
+         to hang off the top edge. `unoccluded` asks the browser what is painted at the
+         heading's centre, so the leaderboard's sticky `th` covering it fails the render
+         however nearly it fits. */
+      { type: 'unoccluded', sel: `${DRILL_IN_ROW} .d-props > h4` },
     ],
   },
   {
@@ -424,8 +483,15 @@ export const BEATS = [
          way down the frame, so without this the expansion happens off screen. 'start' on
          the whole tbody rather than on the detail's own body: aligning `.fbody` puts the
          "technique extracted" and "supporting evidence" headings underneath the table's
-         48px sticky `th`, and those headings are half of what the shot is for. */
-      { type: 'scrollAlign', sel: TOP_FINDING, block: 'start' },
+         sticky `th`, and those headings are half of what the shot is for.
+
+         With the clearance, and not without it. Aligned flush, the tbody's own first row
+         went under that 49px header -- title at y 10..29, `paper` tag at 12..33 -- so the
+         recorded frame held a detail panel whose finding it never named, and the beat
+         claiming to open a *paper* showed no paper. At 56 the title, the tag and the
+         publisher sit clear of the header and the candidate link still lands at y 398,
+         well above the caption. */
+      { type: 'scrollAlign', sel: TOP_FINDING, block: 'start', marginTop: STICKY_CLEARANCE_FND },
       { type: 'pause', ms: 600 },
     ],
     asserts: [
@@ -478,6 +544,14 @@ export const BEATS = [
       /* And it is in frame. The whole point of the re-frame is that the link is legible
          in the recording, which no amount of DOM truth can witness. */
       { type: 'inViewport', sel: TOP_FINDING_CAND_LINK },
+      /* And so is the finding it belongs to. These three cells name it: the paper's
+         title, the `paper` tag that says what kind of source it is, and the site it was
+         published on. Every assertion above is satisfied by a row the catalogue's sticky
+         header is sitting on top of -- which is what the first recording of this beat was,
+         an anonymous detail panel -- so what has to be asserted is that it is not. */
+      { type: 'unoccluded', sel: `${TOP_FINDING} >> tr.frow .ftitle` },
+      { type: 'unoccluded', sel: `${TOP_FINDING} >> tr.frow .tag` },
+      { type: 'unoccluded', sel: `${TOP_FINDING} >> tr.frow .fhost` },
     ],
   },
   {
@@ -488,12 +562,29 @@ export const BEATS = [
       full: '3 evolve scaffolds · 2 patches applied · <b>nothing measured yet</b> — the page says so',
       gif: '3 evolve scaffolds · 2 applied · <b>nothing measured yet</b>',
     },
-    actions: [{ type: 'scrollTo', sel: DOWNSTREAM_SECTION }],
+    actions: [
+      /* Not `scrollTo`, which was a no-op here from the moment the findings beat moved
+         in front of this one. The catalogue sits directly above the downstream section, so
+         the section was always already part-way into frame, and scrollIntoViewIfNeeded
+         does nothing at all in that case: the closing shot stayed parked on the previous
+         beat's expanded finding with the three tiles crowded into the last 130px of the
+         frame, under a caption that lay across them. Measured there, the section's box was
+         y 681..810: flush against the bottom edge, and inside the frame by a fraction of a
+         pixel -- which is all `inViewport` asks, and is why it passed in the recording. */
+      { type: 'scrollAlign', sel: DOWNSTREAM_SECTION, block: 'start', marginTop: CLOSE_CLEARANCE },
+    ],
     asserts: [
       /* The two domContains guard the caption's figures wherever they sit in the
-         document; only inViewport can witness that the closing frame is actually
-         looking at the tiles, which is what the caption claims. */
+         document. Neither can witness that the closing frame is actually looking at the
+         tiles, which is what the caption claims, so the two geometry assertions do: the
+         section is in frame, and the frame is anchored on it. */
       { type: 'inViewport', sel: DOWNSTREAM_SECTION },
+      /* The section fitting is not the same as the section being the shot, and the
+         difference is the whole defect: a 129px section fits from anywhere in the frame,
+         including the bottom strip it was stranded in, under the caption, below most of
+         the previous beat's expanded finding. inViewport cannot tell those apart, so this
+         asserts where the alignment actually landed. */
+      { type: 'nearTop', sel: DOWNSTREAM_SECTION, maxY: CLOSE_CLEARANCE + ALIGN_TOLERANCE_PX },
       { type: 'domContains', text: 'Awaiting measurement' },
       { type: 'domContains', text: 'no candidate has a measured speedup yet' },
     ],
@@ -518,6 +609,63 @@ export function totalDuration(cut) {
   return Math.round(total * 10) / 10;
 }
 
+/**
+ * Everything checkable about one beat on its own.
+ *
+ * Separate from `validateStoryboard` so a rule can be tested by handing it a beat that
+ * breaks it. The alternative is a test that re-states the rule over the real BEATS, which
+ * proves the storyboard is currently clean and proves nothing about the check: it passes
+ * just as well when the check has been deleted.
+ */
+export function beatProblems(beat) {
+  const problems = [];
+  if (!beat.caption.full) problems.push(`${beat.id}: missing full caption`);
+  if (typeof beat.dwell.full !== 'number') problems.push(`${beat.id}: missing full dwell`);
+  if (beat.asserts.length === 0) problems.push(`${beat.id}: no assertions`);
+
+  for (const a of beat.asserts) {
+    if (a.type === 'textMatches') {
+      try {
+        new RegExp(a.pattern);
+      } catch {
+        problems.push(`${beat.id}: uncompilable pattern ${a.pattern}`);
+      }
+    }
+    /* Without a bound, `box.y > undefined` is false and the assertion passes from
+       anywhere in the frame -- the vacuous assertion it was added to replace. */
+    if (a.type === 'nearTop' && !(Number.isFinite(a.maxY) && a.maxY >= 0)) {
+      problems.push(`${beat.id}: nearTop needs a non-negative maxY, got ${a.maxY}`);
+    }
+  }
+  for (const a of beat.actions) {
+    if (a.sel === '#theme') problems.push(`${beat.id}: clicks the theme toggle`);
+    /* The two scroll actions that take an alignment take the same alignments, and a
+       typo in one would otherwise reach record.mjs as a silent default. */
+    if (a.type === 'scrollAlign' || a.type === 'scrollStepped') {
+      if (!ALIGN_BLOCKS.has(a.block)) problems.push(`${beat.id}: ${a.type} block ${a.block}`);
+      /* `marginTop` is optional and defaults to 0, so a misspelled or negative one
+         would reach the recorder as "align flush" -- the framing this exists to stop,
+         and the one failure mode nothing else here would notice. */
+      if (a.marginTop !== undefined && !(Number.isFinite(a.marginTop) && a.marginTop >= 0)) {
+        problems.push(`${beat.id}: ${a.type} marginTop must be a non-negative number, got ${a.marginTop}`);
+      }
+    }
+    if (a.type === 'scrollStepped') {
+      if (!(Number.isInteger(a.steps) && a.steps >= 2)) {
+        problems.push(`${beat.id}: scrollStepped needs at least 2 steps, got ${a.steps}`);
+      }
+      if (!(typeof a.stepMs === 'number' && a.stepMs > 0)) {
+        problems.push(`${beat.id}: scrollStepped needs a positive stepMs, got ${a.stepMs}`);
+      }
+    }
+  }
+  if (beat.cuts.includes('gif')) {
+    if (!beat.caption.gif) problems.push(`${beat.id}: in gif cut but has no gif caption`);
+    if (typeof beat.dwell.gif !== 'number') problems.push(`${beat.id}: in gif cut but has no gif dwell`);
+  }
+  return problems;
+}
+
 /** Returns a list of problems. Empty means the storyboard is internally consistent. */
 export function validateStoryboard() {
   const problems = [];
@@ -526,40 +674,7 @@ export function validateStoryboard() {
   for (const beat of BEATS) {
     if (seen.has(beat.id)) problems.push(`duplicate beat id: ${beat.id}`);
     seen.add(beat.id);
-
-    if (!beat.caption.full) problems.push(`${beat.id}: missing full caption`);
-    if (typeof beat.dwell.full !== 'number') problems.push(`${beat.id}: missing full dwell`);
-    if (beat.asserts.length === 0) problems.push(`${beat.id}: no assertions`);
-
-    for (const a of beat.asserts) {
-      if (a.type === 'textMatches') {
-        try {
-          new RegExp(a.pattern);
-        } catch {
-          problems.push(`${beat.id}: uncompilable pattern ${a.pattern}`);
-        }
-      }
-    }
-    for (const a of beat.actions) {
-      if (a.sel === '#theme') problems.push(`${beat.id}: clicks the theme toggle`);
-      /* The two scroll actions that take an alignment take the same alignments, and a
-         typo in one would otherwise reach record.mjs as a silent default. */
-      if (a.type === 'scrollAlign' || a.type === 'scrollStepped') {
-        if (!ALIGN_BLOCKS.has(a.block)) problems.push(`${beat.id}: ${a.type} block ${a.block}`);
-      }
-      if (a.type === 'scrollStepped') {
-        if (!(Number.isInteger(a.steps) && a.steps >= 2)) {
-          problems.push(`${beat.id}: scrollStepped needs at least 2 steps, got ${a.steps}`);
-        }
-        if (!(typeof a.stepMs === 'number' && a.stepMs > 0)) {
-          problems.push(`${beat.id}: scrollStepped needs a positive stepMs, got ${a.stepMs}`);
-        }
-      }
-    }
-    if (beat.cuts.includes('gif')) {
-      if (!beat.caption.gif) problems.push(`${beat.id}: in gif cut but has no gif caption`);
-      if (typeof beat.dwell.gif !== 'number') problems.push(`${beat.id}: in gif cut but has no gif dwell`);
-    }
+    problems.push(...beatProblems(beat));
   }
 
   /* 64.0, not 62.0: the findings beat's dwell went 4.0 -> 6.0 to pay for opening the top
