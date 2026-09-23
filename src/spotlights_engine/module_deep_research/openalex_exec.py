@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -50,6 +51,46 @@ _FETCH_BACKOFF_SECONDS = 1.5
 # by retrying 429 with backoff in `_fetch_works`.
 _MIN_INTERVAL_SECONDS = float(os.environ.get("OPENALEX_MIN_INTERVAL_SECONDS", "0.5"))
 _last_fetch_ts = 0.0
+
+# Extra wall-clock slack over the socket timeout for the hard fetch bound below.
+_FETCH_HARD_MARGIN_SECONDS = 10.0
+
+
+def _read_url_hard_bounded(request: urllib.request.Request, timeout_s: float | None) -> str:
+    """Fetch a URL body under a hard wall-clock bound the socket timeout can't reach.
+
+    `urllib`'s `timeout=` only covers individual socket recv/connect ops once the
+    kernel is in a normal blocking read. It does NOT cover a native `getaddrinfo`
+    or a TLS/connect that black-holes — the exact failure that hung a real run
+    for 6h with the nominal 30s timeout never firing (14 CLOSE_WAIT + 99 stuck
+    ESTABLISHED sockets to a Cloudflare IPv6 route). So we run the blocking fetch
+    on a daemon thread and `join` it under a hard deadline: if the socket op is
+    wedged in a native call, the join returns anyway and we raise `TimeoutError`
+    (retryable in `_fetch_works`). The orphaned daemon thread dies at process
+    exit — acceptable in a short-lived per-run engine.
+    """
+    socket_timeout = timeout_s if timeout_s is not None else 30.0
+    box: dict[str, object] = {}
+
+    def _work() -> None:
+        try:
+            with urllib.request.urlopen(request, timeout=socket_timeout) as resp:
+                box["body"] = resp.read().decode("utf-8")
+        except BaseException as exc:  # noqa: BLE001 - surfaced to the caller below
+            box["exc"] = exc
+
+    worker = threading.Thread(target=_work, daemon=True)
+    worker.start()
+    hard = socket_timeout + _FETCH_HARD_MARGIN_SECONDS
+    worker.join(hard)
+    if worker.is_alive():
+        raise TimeoutError(
+            f"OpenAlex fetch exceeded hard {hard:.0f}s bound "
+            "— socket op stuck in a native call (DNS/connect/TLS black-hole)"
+        )
+    if "exc" in box:
+        raise box["exc"]  # type: ignore[misc]
+    return box["body"]  # type: ignore[return-value]
 
 # Fields we ask OpenAlex to return — keeps the response small and fast.
 _SELECT_FIELDS = (
@@ -368,10 +409,7 @@ class OpenAlexRunner:
             _last_fetch_ts = time.monotonic()
             try:
                 request = urllib.request.Request(url, headers=self._headers())
-                with urllib.request.urlopen(
-                    request, timeout=self.options.timeout_seconds
-                ) as resp:
-                    body = resp.read().decode("utf-8")
+                body = _read_url_hard_bounded(request, self.options.timeout_seconds)
                 data = json.loads(body)
                 works = data.get("results") if isinstance(data, dict) else None
                 return works if isinstance(works, list) else []
@@ -398,7 +436,14 @@ class OpenAlexRunner:
         ua = "spotlights-engine/openalex"
         if mailto:
             ua += f" (mailto:{mailto})"
-        return {"User-Agent": ua, "Accept": "application/json"}
+        # Connection: close — no keep-alive pooling. A pooled socket left
+        # half-open by a wedged read stacks up as leaked ESTABLISHED/CLOSE_WAIT
+        # fds; closing per response bounds the leak to at most one live socket.
+        return {
+            "User-Agent": ua,
+            "Accept": "application/json",
+            "Connection": "close",
+        }
 
 
 # --------------------------------------------------------------------------
