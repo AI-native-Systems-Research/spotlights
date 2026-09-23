@@ -64,6 +64,19 @@ def test_ancestor_fallback_picks_longest_ancestor() -> None:
     assert out == ["v1/attention"]
 
 
+def test_ancestor_fallback_expands_ancestor_subtree(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A resolved ancestor follows the same subtree contract as a direct include."""
+    modules = ["v1/attention", "v1/attention/gpu", "v1/attention/ops"]
+    with caplog.at_level(logging.WARNING):
+        out = apply_filter(modules, ModuleFilter(include=["v1/attention/backends/fusion"]))
+    direct = apply_filter(modules, ModuleFilter(include=["v1/attention"]))
+    assert out == direct
+    assert "v1/attention/backends/fusion" in caplog.text
+    assert "nearest ancestor subtree 'v1/attention' (3 modules)" in caplog.text
+
+
 def test_leaf_without_ancestor_module_is_ignored(
     caplog: pytest.LogCaptureFixture,
 ) -> None:

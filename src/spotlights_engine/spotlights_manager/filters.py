@@ -27,8 +27,9 @@ class ModuleFilter(BaseModel):
     expands to every module nested beneath it (e.g. a source-root package
     segment like `spotlights_engine`). User-supplied order is preserved across
     entries so smoke runs are reproducible. A name finer-grained than any
-    module falls back to its nearest existing ancestor module; a name matching
-    neither a module, a prefix, nor an ancestor is warned and skipped.
+    module falls back to its nearest existing ancestor module and that
+    ancestor's subtree; a name matching neither a module, a prefix, nor an
+    ancestor is warned and skipped.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -61,11 +62,12 @@ def apply_filter(qualified_names: Iterable[str], filt: ModuleFilter | None) -> l
     prefix and expands to every module nested beneath it (e.g. a source-root
     package segment like `spotlights_engine`). A name that is finer-grained than
     any module the extractor emitted (matches nothing above) falls back to its
-    nearest existing ancestor module (e.g. `v1/attention/backends` selects
-    `v1/attention` when the extractor kept attention as one module). Names that
-    resolve to none of the above (a typo, or a leaf with no ancestor module) are
-    logged as a warning and ignored, so a coarse extractor granularity does not
-    abort a run after the expensive extraction step.
+    nearest existing ancestor module and its subtree (e.g.
+    `v1/attention/backends` selects `v1/attention` and its descendants when the
+    extractor kept attention as one module). Names that resolve to none of the
+    above (a typo, or a leaf with no ancestor module) are logged as a warning and
+    ignored, so a coarse extractor granularity does not abort a run after the
+    expensive extraction step.
     """
     qns = list(qualified_names)
     if filt is None or not filt.include:
@@ -76,25 +78,22 @@ def apply_filter(qualified_names: Iterable[str], filt: ModuleFilter | None) -> l
     seen: set[str] = set()
     unknown: list[str] = []
     for name in filt.include:
-        if name in available:
-            # Exact module: the CLI contract treats it as a subtree root.
-            prefix = name + "/"
-            matches = [qn for qn in qns if qn == name or qn.startswith(prefix)]
-        else:
-            # Virtual prefix (no module resolves to `name`): expand descendants.
-            prefix = name + "/"
-            matches = [qn for qn in qns if qn.startswith(prefix)]
+        # Exact modules and virtual prefixes both define subtree roots.
+        prefix = name + "/"
+        matches = [qn for qn in qns if qn == name or qn.startswith(prefix)]
         if not matches:
             # Finer-grained than any module: fall back to nearest ancestor.
             ancestor = _nearest_ancestor(name, available)
             if ancestor is not None:
+                ancestor_prefix = ancestor + "/"
+                matches = [qn for qn in qns if qn == ancestor or qn.startswith(ancestor_prefix)]
                 _log.warning(
                     "ModuleFilter.include: %r matches no module; "
-                    "using nearest ancestor module %r instead",
+                    "using nearest ancestor subtree %r (%d modules) instead",
                     name,
                     ancestor,
+                    len(matches),
                 )
-                matches = [ancestor]
             else:
                 unknown.append(name)
                 continue
