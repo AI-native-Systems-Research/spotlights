@@ -6,32 +6,31 @@ This page covers installing the engine, the bundled Claude Code slash commands, 
 
 ## Installing the engine
 
-**Prerequisites:** Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/).
+**Prerequisites:** Python ≥ 3.11, plus `git` and `curl`. [uv](https://docs.astral.sh/uv/) is installed for you if it is missing.
 
 ### Quick install (recommended)
 
 Installs `spotlights-engine` (and the sibling CLIs) into an isolated venv and puts them on your PATH in `~/.local/bin` — no shell activation needed afterwards:
 
 ```bash
-uv tool install --force "git+https://github.com/AI-native-Systems-Research/spotlights.git@main"
+curl -fsSL https://raw.githubusercontent.com/AI-native-Systems-Research/spotlights/main/install.sh | sh
 ```
 
-Pin a version by replacing `main` with any git tag, branch, or commit:
+The script installs `uv` if missing, installs the engine, and fixes up your PATH. It is idempotent — re-run it to upgrade an existing install in place.
+
+Pin a version with `SPOTLIGHTS_VERSION` (any git tag, branch, or commit):
 
 ```bash
-uv tool install --force "git+https://github.com/AI-native-Systems-Research/spotlights.git@v0.1.0"
+curl -fsSL https://raw.githubusercontent.com/AI-native-Systems-Research/spotlights/main/install.sh | SPOTLIGHTS_VERSION=v0.1.0 sh
 ```
-
-`--force` makes the command idempotent — re-run it to upgrade an existing install in place.
 
 If `spotlights-engine` is not found afterwards, open a new terminal (or run `uv tool update-shell`) so `~/.local/bin` is on your PATH.
 
-> [!NOTE]
-> Once the repo is public, this simplifies to a one-liner (TBD until then):
-> ```bash
-> curl -fsSL https://raw.githubusercontent.com/AI-native-Systems-Research/spotlights/main/install.sh | sh
-> ```
-> That script installs `uv` if missing, runs the `uv tool install` above, and fixes up your PATH.
+If you already have `uv` and would rather skip the script, it runs this underneath:
+
+```bash
+uv tool install --force "git+https://github.com/AI-native-Systems-Research/spotlights.git@main"
+```
 
 ### From source (development)
 
