@@ -14,6 +14,12 @@
 
 Point Spotlights at a repo and a goal (e.g., `reduce p99 latency`, `minimize memory allocations`) and it returns a ranked, browsable map of the few places worth touching — each with a concrete, evidence-backed proposal grounded in the code, the literature, and your goal.
 
+<p align="center">
+  <img src="docs/demo.gif" alt="A walkthrough of a Spotlights report: 173 ranked candidates, one opened to its write-up and proposals, the run as a tree, and the findings catalogue narrowed to the paper that produced the top candidate" width="940">
+</p>
+
+<p align="center"><sub>A real run over 8 modules of <a href="https://github.com/vllm-project/vllm">vLLM</a>: the ranked candidates, what each one argues, and the evidence behind them.</sub></p>
+
 Most code-research tools either scan broadly and return shallow hits, or dive deeply into a single file you already picked. **Spotlights acts as the targeting system**: it decides which functions and code regions across the whole repo are worth deep investigation for your goal, then spends real research effort on each one.
 
 The core philosophy behind the project: execution tooling — coding agents, evolutionary search, experiment harnesses — is abundant and improving fast. The harder, less-solved problem is knowing **where to point it**. Spotlights treats that as a first-class discovery problem: build a map of the codebase, converge independent signal sources onto that map, and let the places where evidence piles up — the *spots that light up* — surface as candidates worth optimizing.
