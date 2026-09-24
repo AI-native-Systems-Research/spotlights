@@ -137,23 +137,17 @@ For LiteLLM gateway config, picking which model each CLI runs on, and a quick re
 <a id="quickstart"></a>
 ## Quickstart (Example on a vLLM subset)
 
-**Prerequisites:** Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/).
+**Prerequisites:** Python ≥ 3.11. ([uv](https://docs.astral.sh/uv/) is installed for you if missing.)
 
 **1. Install the engine** ([Quick install](docs/INSTALL.md#quick-install-recommended))
 
-Quick install — puts `spotlights-engine` on your PATH (in `~/.local/bin`) via [uv](https://docs.astral.sh/uv/):
+Quick install — puts `spotlights-engine` on your PATH (in `~/.local/bin`):
 
 ```bash
-uv tool install --force "git+https://github.com/AI-native-Systems-Research/spotlights.git@main"
+curl -fsSL https://raw.githubusercontent.com/AI-native-Systems-Research/spotlights/main/install.sh | sh
 ```
 
-Pin a version by replacing `main` with any git tag, branch, or commit. No shell activation needed after this.
-
-> [!NOTE]
-> Once the repo is public, this simplifies to a one-liner (TBD until then):
-> ```bash
-> curl -fsSL https://raw.githubusercontent.com/AI-native-Systems-Research/spotlights/main/install.sh | sh
-> ```
+Pin a version with `SPOTLIGHTS_VERSION` (any git tag, branch, or commit). No shell activation needed after this.
 
 Or install from source for development ([Development install](docs/INSTALL.md#from-source-development)):
 
