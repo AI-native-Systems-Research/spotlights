@@ -1,6 +1,7 @@
 """Stage 01 — signal extraction (Bundle A).
 
-Three branches, in order of preference:
+This module owns the **file/JSON telemetry source** plus the stage entry
+point (`run`, `SPEC`). Three file-based branches, in order of preference:
 
 1. **Pre-cooked Signals JSON** — `--telemetry-from <file.json>` or a
    directory containing `01_signals.json` (alternates: `signals.json`,
@@ -18,6 +19,11 @@ Three branches, in order of preference:
 3. **Synthetic fallback** — `telemetry_from is None`. Placeholder so the
    runner state-machine tests don't need a fixture. Goes away when
    `spotlight-observability` ships its real Bundle A.
+
+A separate **SigNoz/SQL source** lives in `s01_signal_extraction_signoz`;
+`run` dispatches there when `ctx.signal_input.signoz` is set (mutually
+exclusive with `--telemetry-from`, enforced at the CLI). The shared stage
+contract (error type, output schema, budgets) lives in `_s01_signal_common`.
 
 The output schema is the minimal contract: `{workload, traces,
 anomalies}` with `workload.workload_id` required. The lite Pydantic
@@ -38,8 +44,13 @@ from spotlights_engine.signal_pipeline.schemas import (
     TraceSummaryLite,
     WorkloadProfileLite,
 )
+from spotlights_engine.signal_pipeline.stages._s01_signal_common import (
+    MAX_TURNS,
+    OUTPUT_JSON_SCHEMA,
+    TIMEOUT_S,
+    SignalExtractionError,
+)
 from spotlights_engine.signal_pipeline.stages._types import StageContext, StageSpec
-
 
 # Filename candidates the pre-cooked-JSON branch will try, in order.
 _DIR_CANDIDATES = ("01_signals.json", "signals.json", "signal.json")
@@ -52,30 +63,6 @@ _OTEL_DISCRIMINATOR = "traces.jsonl"
 _PROMPT_TEMPLATE_PATH = (
     Path(__file__).parent.parent / "prompts" / "signal_extraction.md"
 )
-
-# Minimal output schema. Top-level keys required, plus `workload_id` —
-# everything else is the agent's call. `additionalProperties` is
-# *unspecified* so the agent can surface richer fields without violating
-# the constraint.
-_OUTPUT_JSON_SCHEMA = {
-    "type": "object",
-    "required": ["workload", "traces", "anomalies"],
-    "properties": {
-        "workload": {
-            "type": "object",
-            "required": ["workload_id"],
-            "properties": {
-                "workload_id": {"type": "string", "minLength": 1},
-            },
-        },
-        "traces": {"type": "array", "items": {"type": "object"}},
-        "anomalies": {"type": "array", "items": {"type": "object"}},
-    },
-}
-
-# Generous budget — agent may iterate to grep, jq, sample, then summarize.
-_MAX_TURNS = 60
-_TIMEOUT_S = 1800
 
 
 def parse_artifact(raw: Any) -> Signals:
@@ -134,15 +121,15 @@ def _extract_signals_via_claude(
     prompt = _PROMPT_TEMPLATE_PATH.read_text(encoding="utf-8").format(
         target_dir=str(target_dir),
     )
-    schema_text = json.dumps(_OUTPUT_JSON_SCHEMA)
+    schema_text = json.dumps(OUTPUT_JSON_SCHEMA)
 
     result = run_claude(
         prompt=prompt,
         log_dir=log_dir,
         json_schema=schema_text,
         cwd=target_dir,
-        max_turns=_MAX_TURNS,
-        timeout_s=_TIMEOUT_S,
+        max_turns=MAX_TURNS,
+        timeout_s=TIMEOUT_S,
         permission_mode="plan",  # read-only; agent never edits the dir
         allowed_tools=("Read", "Bash"),
         on_event=on_event,
@@ -158,10 +145,6 @@ def _extract_signals_via_claude(
     # surfaced (vllm-specific metrics, richer anomaly metadata, etc.)
     # round-trip through `01_signals.json` and reach Bundle C unchanged.
     return Signals.model_validate(result.structured_output)
-
-
-class SignalExtractionError(RuntimeError):
-    pass
 
 
 def _synthetic_signals() -> Signals:
@@ -193,6 +176,16 @@ def _synthetic_signals() -> Signals:
 
 
 def run(ctx: StageContext) -> Signals:
+    # SigNoz source is a separate module; dispatch by flag. Lazy import keeps
+    # the two extraction paths decoupled and avoids importing signoz_tool
+    # unless the SigNoz path is actually taken.
+    if ctx.signal_input.signoz:
+        from spotlights_engine.signal_pipeline.stages import (
+            s01_signal_extraction_signoz,
+        )
+
+        return s01_signal_extraction_signoz.extract(ctx)
+
     target = ctx.signal_input.telemetry_from
     if target is None:
         return _synthetic_signals()

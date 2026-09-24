@@ -162,6 +162,13 @@ class SignalPipelineInput(BaseModel):
 
     subject_root: Path
     telemetry_from: Path | None = None
+    # SigNoz telemetry source (stage 01). `signoz=True` reads a run live from
+    # SigNoz/ClickHouse instead of `--telemetry-from`; `run_id` refines it to a
+    # specific run (None → stage 01 auto-selects the latest). The two sources
+    # are mutually exclusive — the CLI rejects `--signoz`/`--run-id` combined
+    # with `--telemetry-from`, and `--run-id` without `--signoz`.
+    signoz: bool = False
+    run_id: str | None = None
     # Backend id forwarded to stage 05. Default mirrors `mvp_module_apis.md` §"MVP backend".
     backend_id: str = "claude_code"
     # When True (default), stage 02 may short-circuit using the cross-run

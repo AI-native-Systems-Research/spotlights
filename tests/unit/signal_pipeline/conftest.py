@@ -84,6 +84,19 @@ def _default_stage_stubs(request, monkeypatch):
         s01_signal_extraction, "_extract_signals_via_claude", _fake_extract_signals
     )
 
+    # The SigNoz branch (`--signoz`) lives in its own module and would
+    # otherwise hit the network via `SignozClient`; stub its `extract` entry
+    # with the same placeholder so any pipeline test that sets `signoz=True`
+    # stays claude-/network-free.
+    from spotlights_engine.signal_pipeline.stages import s01_signal_extraction_signoz
+
+    def _fake_extract_signals_signoz(ctx):
+        return _fake_extract_signals(ctx.log_dir, ctx.log_dir, ctx.on_event, ctx.model)
+
+    monkeypatch.setattr(
+        s01_signal_extraction_signoz, "extract", _fake_extract_signals_signoz
+    )
+
     # ── Stage 02 ─────────────────────────────────────────────────────
     from spotlights_engine.signal_pipeline.stages import s02_projecttree
 
