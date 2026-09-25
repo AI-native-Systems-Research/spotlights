@@ -567,6 +567,72 @@ def _validate_setup(input: SpotlightsManagerInput, paths: ManagerPaths) -> None:
         )
 
 
+def _manifest_has_progress(existing: dict[str, Any]) -> bool:
+    """True if the run dir holds work worth protecting from an auto-reset.
+
+    Progress = the extractor finished, or at least one module reached a
+    terminal COMPLETED state. A run dir that only got as far as a crashed /
+    partial extractor carries nothing worth resuming.
+    """
+    if (existing.get("extractor") or {}).get("completed"):
+        return True
+    for module_state in (existing.get("modules") or {}).values():
+        if (
+            isinstance(module_state, dict)
+            and str(module_state.get("status", "")).upper() == "COMPLETED"
+        ):
+            return True
+    return False
+
+
+def _reset_run_dir(paths: ManagerPaths) -> None:
+    """Delete the manager run dir so init_manifest can recreate it fresh."""
+    import shutil
+
+    shutil.rmtree(paths.root, ignore_errors=True)
+
+
+def _reinit_or_raise(
+    paths: ManagerPaths,
+    input: SpotlightsManagerInput,
+    input_fp: dict[str, Any],
+    config_fp: dict[str, Any],
+    context: SpotlightContext,
+    *,
+    existing: dict[str, Any],
+    reason: str,
+    existing_val: Any,
+    current_val: Any,
+) -> dict[str, Any]:
+    """Auto-recover from an incompatible run dir when it has no completed work.
+
+    A leftover run dir from an earlier attempt (different prompt/flags/schema)
+    otherwise aborts the whole run with ResumeMismatchError. When that stale
+    dir holds no completed work there is nothing to protect, so we reset and
+    start fresh instead of failing. If real progress exists we still raise, to
+    avoid silently discarding usable results.
+    """
+    if _manifest_has_progress(existing):
+        raise ResumeMismatchError(reason, existing=existing_val, current=current_val)
+    _log.warning(
+        "spotlights_manager run dir at %s is incompatible (%s) but has no "
+        "completed work; reinitializing a fresh run dir instead of aborting.",
+        paths.root,
+        reason,
+    )
+    _reset_run_dir(paths)
+    return P.init_manifest(
+        paths,
+        input_fingerprint=input_fp,
+        config_fingerprint=config_fp,
+        context=context,
+        provenance=collect_provenance(
+            repo_path=input.repo_path,
+            repo_url=input.repo_url,
+        ),
+    )
+
+
 def _ensure_resume_compatible(
     paths: ManagerPaths,
     input: SpotlightsManagerInput,
@@ -598,19 +664,25 @@ def _ensure_resume_compatible(
 
     existing_schema_version = existing.get("schema_version", 1)
     if existing_schema_version != P.SCHEMA_VERSION:
-        raise ResumeMismatchError(
-            "manager run dir schema_version "
-            f"{existing_schema_version!r} is incompatible with the current "
-            f"schema_version {P.SCHEMA_VERSION!r}; start a fresh artifacts_dir",
-            existing=existing_schema_version,
-            current=P.SCHEMA_VERSION,
+        return _reinit_or_raise(
+            paths, input, input_fp, config_fp, context,
+            existing=existing,
+            reason=(
+                "manager run dir schema_version "
+                f"{existing_schema_version!r} is incompatible with the current "
+                f"schema_version {P.SCHEMA_VERSION!r}; start a fresh artifacts_dir"
+            ),
+            existing_val=existing_schema_version,
+            current_val=P.SCHEMA_VERSION,
         )
 
     if existing.get("input_fingerprint") != input_fp:
-        raise ResumeMismatchError(
-            "input fingerprint changed since the manager run dir was created",
-            existing=existing.get("input_fingerprint"),
-            current=input_fp,
+        return _reinit_or_raise(
+            paths, input, input_fp, config_fp, context,
+            existing=existing,
+            reason="input fingerprint changed since the manager run dir was created",
+            existing_val=existing.get("input_fingerprint"),
+            current_val=input_fp,
         )
 
     # One-shot forward migration for pre-step-5 manifests: if the existing
@@ -636,10 +708,12 @@ def _ensure_resume_compatible(
             existing_fp = existing["config_fingerprint"]
 
     if existing_fp != config_fp:
-        raise ResumeMismatchError(
-            "config fingerprint changed since the manager run dir was created",
-            existing=existing.get("config_fingerprint"),
-            current=config_fp,
+        return _reinit_or_raise(
+            paths, input, input_fp, config_fp, context,
+            existing=existing,
+            reason="config fingerprint changed since the manager run dir was created",
+            existing_val=existing.get("config_fingerprint"),
+            current_val=config_fp,
         )
 
     # Resuming: clear terminal status so a previously-FAILED run can re-enter.

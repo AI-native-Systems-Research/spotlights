@@ -70,11 +70,21 @@ def apply_filter(
     if filt is None or not filt.include:
         return qns
 
+    # Repo-root sentinels ("." / "" / "./" / "/") name the whole tree, not a
+    # module. A run scoped to the repo root (e.g. `--include .` for a whole-repo
+    # objective) means "every module", identical to an empty filter. Without
+    # this, "." resolves to no module, no prefix, and no ancestor, so the filter
+    # selects zero modules and the deep-research stage never runs.
+    _root = {".", "", "./", "/"}
+    includes = [name for name in filt.include if name not in _root]
+    if not includes:
+        return qns
+
     available = set(qns)
     selected: list[str] = []
     seen: set[str] = set()
     unknown: list[str] = []
-    for name in filt.include:
+    for name in includes:
         if name in available:
             # Exact module: select just this module, not its submodules.
             matches = [name]

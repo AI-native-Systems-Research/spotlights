@@ -1630,21 +1630,43 @@ async def _metadata_batch_attempts(
         )
         stage_tag = f"03_metadata[{batch.key}]{repair_tag}"
         result: ClaudeStageResult[ModuleMetadataBatch]
-        result, attempt_rel = await _run_stage_with_api_retry(
-            output_type=ModuleMetadataBatch,
-            repo_path=repo_path,
-            prompt=prompt,
-            stage_name=f"metadata:{batch.key}",
-            label=f"metadata batch {batch.key}",
-            base=base,
-            attempt_rel=f"{batch_rel}/attempt_{attempt:02d}",
-            timeout_s=timeout_s,
-            config=config,
-            telemetry=telemetry,
-            stage_tag=stage_tag,
-            on_event=on_event,
-            salvage=True,
-        )
+        try:
+            result, attempt_rel = await _run_stage_with_api_retry(
+                output_type=ModuleMetadataBatch,
+                repo_path=repo_path,
+                prompt=prompt,
+                stage_name=f"metadata:{batch.key}",
+                label=f"metadata batch {batch.key}",
+                base=base,
+                attempt_rel=f"{batch_rel}/attempt_{attempt:02d}",
+                timeout_s=timeout_s,
+                config=config,
+                telemetry=telemetry,
+                stage_tag=stage_tag,
+                on_event=on_event,
+                salvage=True,
+            )
+        except ExtractorAgentError as exc:
+            # CLI exhausted its own structured-output budget (or otherwise hard-
+            # exited) without an API-level cause — a fresh session with an
+            # explicit repair prompt usually recovers. Spend one repair pass
+            # instead of tearing down the whole audit over one flaky batch.
+            if _spend_repair("agent", repaired_kinds, attempt):
+                notify(
+                    on_event,
+                    f"extractor: metadata batch {batch.key} claude stage failed "
+                    f"({exc}); repairing with a fresh session",
+                )
+                prompt = _repair_prompt(
+                    base_prompt,
+                    f"The previous session failed to return a schema-valid "
+                    f"object. Return ONE complete JSON object whose top-level "
+                    f"key is exactly `modules` and nothing else. ({exc})",
+                    previous_payload=None,
+                )
+                continue
+            _record_failure()
+            raise
         telemetry.add_claude(stage_tag, result)
 
         if result.parsed is None:
