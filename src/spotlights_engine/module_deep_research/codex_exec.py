@@ -29,6 +29,13 @@ class CodexExecOptions(BaseModel):
     cwd: Path | str = Field(default_factory=Path.cwd)
     codex_bin: str = "codex"
     model: str | None = None
+    # Sampling determinism knobs, emitted as `-c model_temperature=` / `-c
+    # model_seed=` config overrides when set. Pinning temperature=0 + a fixed
+    # seed makes a pure text transform (e.g. the OpenAlex query-writer) emit the
+    # same query set across runs instead of re-paraphrasing the same intent into
+    # different keyword strings each pass. None = leave the CLI/proxy default.
+    temperature: float | None = None
+    seed: int | None = None
     profile: str | None = None
     sandbox: str = "workspace-write"
     approval: str = "never"
@@ -82,6 +89,10 @@ class CodexExecClient:
         cmd = [resolve_cli_executable(opt.codex_bin)]
         if opt.model:
             cmd += ["--model", opt.model]
+        if opt.temperature is not None:
+            cmd += ["-c", f"model_temperature={opt.temperature}"]
+        if opt.seed is not None:
+            cmd += ["-c", f"model_seed={opt.seed}"]
         if opt.profile:
             cmd += ["--profile", opt.profile]
         if opt.approval:

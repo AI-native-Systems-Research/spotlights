@@ -132,7 +132,7 @@ class OpenAlexRunnerOptions(BaseModel):
     # offset the added semantic slice below (fewer pre-dedup findings => fewer
     # downstream step-4 pairs) with negligible recall loss: when a query carries
     # the paper's title/method tokens the exact match collapses into the top ~20.
-    max_results: int = 20
+    max_results: int = 6
     # Per query, ALSO fetch this many meaning-matched works via OpenAlex
     # `search.semantic` (GTE-Large-EN embeddings; cosine similarity), merged
     # after the keyword hits and deduped.
@@ -150,7 +150,7 @@ class OpenAlexRunnerOptions(BaseModel):
     #   Recall is decided by query phrasing (title/method tokens), not depth: a
     #   generic query MISSES at any size. Set 0 to disable. NOT recency-sorted:
     #   semantic ignores citations, so fresh works already rank fairly.
-    semantic_results: int = 30
+    semantic_results: int = 32
     # Per query, ALSO fetch this many most-recent works (sort=publication_date
     # :desc) as a second slice, merged after the relevance hits and deduped.
     #   Why: OpenAlex `relevance_score` is citation-weighted, so a brand-new
@@ -161,7 +161,7 @@ class OpenAlexRunnerOptions(BaseModel):
     #   recency slice per query rescues these low-cited-but-exact preprints
     #   without disturbing the relevance ordering (it only appends to the tail).
     #   Set 0 to disable. Bounded by the same `search` + `base_filter`.
-    recency_results: int = 3
+    recency_results: int = 2
     # Max distinct OpenAlex searches issued per run = number of facet POOLS. In
     # "codex" mode the query-writer emits up to this many one-per-line queries
     # (each facet gets its own relevance-ranked search); results are merged +
@@ -192,6 +192,17 @@ class OpenAlexRunnerOptions(BaseModel):
     #   "codex" — a Codex query-writer distills the prompt into keywords, with
     #             a regex fallback if Codex yields nothing. Default.
     query_mode: Literal["regex", "codex"] = "codex"
+    # Determinism knobs for the "codex" query-writer. The writer is a free-text
+    # LLM: at default sampling it re-paraphrases the same intent into different
+    # keyword strings each run (measured wording Jaccard ~0.05 across whole-run
+    # reruns), and since OpenAlex keyword `search` is wording-sensitive, that
+    # alone tanks cross-run paper overlap. Pinning temperature=0 + a fixed seed
+    # makes the writer emit a near-stable query set (0.2 keeps a little slack so
+    # facet coverage isn't collapsed to one phrasing). Complemented by post-hoc
+    # query canonicalization (see `_canonicalize_queries`) and the semantic-heavy
+    # pool (semantic recall is wording-insensitive). None = leave the CLI default.
+    query_writer_temperature: float | None = 0.2
+    query_writer_seed: int | None = 7
 
 
 class _QueryWriter(Protocol):
@@ -310,6 +321,8 @@ class OpenAlexRunner:
                 # Query writing is a pure text transform: no web/tools needed,
                 # and bound the turn so a stuck session can't hang the runner.
                 search=False,
+                temperature=self.options.query_writer_temperature,
+                seed=self.options.query_writer_seed,
                 timeout_seconds=self.options.timeout_seconds,
             )
         )
@@ -572,22 +585,70 @@ def _sanitize_query(raw: str) -> str:
     return _sanitize_line(lines[-1]) if lines else ""
 
 
-def _parse_query_lines(raw: str, *, limit: int) -> list[str]:
-    """Parse a multi-line reply into up to `limit` distinct OpenAlex queries."""
-    out: list[str] = []
-    seen: set[str] = set()
-    for line in raw.splitlines():
-        query = _sanitize_line(line)
-        if not query:
+# Function words dropped when building a query's token-set key, so paraphrases
+# that differ only in glue words ("ColBERT retrieval" vs "retrieval via ColBERT")
+# collapse to the same key. Content tokens (maxsim, colbert, retrieval, memory,
+# …) are kept — they carry the facet.
+_QUERY_STOPWORDS = frozenset(
+    {"a", "an", "the", "of", "for", "and", "or", "to", "in", "on", "with",
+     "by", "via", "using", "based", "vs", "at"}
+)
+# Two queries whose content-token sets overlap at least this much (Jaccard) are
+# treated as the same facet; the later one is dropped. Subset/superset pairs
+# ("ColBERT retrieval" ⊂ "ColBERT late interaction retrieval") always collapse.
+_QUERY_NEAR_DUPE_JACCARD = 0.8
+
+
+def _query_token_key(query: str) -> frozenset[str]:
+    """Order-independent content-token signature of a query for dedup."""
+    return frozenset(
+        t for t in re.findall(r"[a-z0-9]+", query.lower())
+        if t not in _QUERY_STOPWORDS
+    )
+
+
+def _canonicalize_queries(queries: list[str], *, limit: int) -> list[str]:
+    """Collapse paraphrase-equivalent queries to a stable, deduped subset.
+
+    The codex query-writer re-words the same facet differently each run; since
+    OpenAlex keyword `search` is wording-sensitive, those near-duplicates
+    fragment recall and destroy cross-run overlap. We keep the first query of
+    each facet (identity fixed by its content-token set) and drop later exact,
+    subset/superset, or high-Jaccard variants, then cap at `limit`.
+    """
+    kept: list[str] = []
+    kept_keys: list[frozenset[str]] = []
+    for query in queries:
+        key = _query_token_key(query)
+        if not key:
             continue
-        key = query.lower()
-        if key in seen:
+        dup = False
+        for prior in kept_keys:
+            if key == prior or key <= prior or prior <= key:
+                dup = True
+                break
+            union = key | prior
+            if union and len(key & prior) / len(union) >= _QUERY_NEAR_DUPE_JACCARD:
+                dup = True
+                break
+        if dup:
             continue
-        seen.add(key)
-        out.append(query)
-        if len(out) >= max(1, limit):
+        kept.append(query)
+        kept_keys.append(key)
+        if len(kept) >= max(1, limit):
             break
-    return out
+    return kept
+
+
+def _parse_query_lines(raw: str, *, limit: int) -> list[str]:
+    """Parse a multi-line reply into up to `limit` distinct OpenAlex queries.
+
+    Sanitizes every line, then canonicalizes: paraphrase-equivalent queries
+    (same content-token set, subset/superset, or Jaccard >= threshold) collapse
+    so the wording drift between reruns does not fragment the search pool.
+    """
+    sanitized = [q for q in (_sanitize_line(ln) for ln in raw.splitlines()) if q]
+    return _canonicalize_queries(sanitized, limit=limit)
 
 
 def _derive_query(prompt: str) -> str:
