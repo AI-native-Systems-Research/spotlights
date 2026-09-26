@@ -69,6 +69,12 @@ def apply_filter(
     qns = list(qualified_names)
     if filt is None or not filt.include:
         return qns
+    # A whole-repo include ('.', './', '') is the repo root, not a module
+    # qualified name; it selects everything. Treat it as no filter so a
+    # whole-repo scope (INCLUDE_PATHS=(.)) keeps all modules instead of
+    # matching nothing and dropping the run.
+    if all(name.strip(" ./") == "" for name in filt.include):
+        return qns
 
     available = set(qns)
     selected: list[str] = []

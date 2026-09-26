@@ -13,6 +13,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -580,6 +581,28 @@ def _ensure_resume_compatible(
             existing=existing_schema_version,
             current=P.SCHEMA_VERSION,
         )
+
+    # Opt-in resume override: when explicitly requested, rewrite the stored
+    # input/config fingerprints to the current run's values instead of raising.
+    # Lets a caller resume from on-disk checkpoints after a deliberate config or
+    # repo-path change (e.g. re-running from trimmed candidates.json). Sidecar
+    # presence still drives which step resumes. No-op when the env var is unset.
+    if os.getenv("SPOTLIGHTS_RESUME_ALLOW_REINIT", "").lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
+        if existing.get("input_fingerprint") != input_fp or (
+            existing.get("config_fingerprint") or {}
+        ) != config_fp:
+            _log.warning(
+                "SPOTLIGHTS_RESUME_ALLOW_REINIT set: rewriting stored "
+                "input/config fingerprints to current values on resume"
+            )
+            existing["input_fingerprint"] = input_fp
+            existing["config_fingerprint"] = dict(config_fp)
+            P.write_manifest(paths, existing)
 
     if existing.get("input_fingerprint") != input_fp:
         raise ResumeMismatchError(
