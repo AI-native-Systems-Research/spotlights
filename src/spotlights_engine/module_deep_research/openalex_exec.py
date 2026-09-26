@@ -47,6 +47,14 @@ _log = logging.getLogger(__name__)
 _FETCH_RETRIES = 4
 _FETCH_BACKOFF_SECONDS = 1.5
 
+# Hard cap on any single retry backoff, including a server-sent Retry-After.
+# OpenAlex answers a quota-exhausted 429 with a multi-hour Retry-After (observed
+# ~25000s); honoring it verbatim makes the fetch sleep for hours at 0% CPU,
+# which looks exactly like a hung run. Cap the wait so the retry budget is spent
+# quickly and the fetch fails fast (letting deep_research finish empty) instead
+# of blocking the whole run. Override via OPENALEX_MAX_BACKOFF_SECONDS.
+_MAX_BACKOFF_SECONDS = float(os.environ.get("OPENALEX_MAX_BACKOFF_SECONDS", "60"))
+
 # Minimum wall-clock gap between consecutive works fetches in this process, to
 # stay under the OpenAlex free-pool burst limit (bursts trigger HTTP 429).
 # Override via OPENALEX_MIN_INTERVAL_SECONDS. Cross-process bursts are handled
@@ -443,6 +451,14 @@ class OpenAlexRunner:
                         delay = max(delay, float(exc.headers.get("Retry-After", 0)))
                     except (TypeError, ValueError):
                         pass
+                if delay > _MAX_BACKOFF_SECONDS:
+                    _log.warning(
+                        "openalex: capping %.1fs backoff (server Retry-After?) "
+                        "to %.1fs — quota likely exhausted",
+                        delay,
+                        _MAX_BACKOFF_SECONDS,
+                    )
+                    delay = _MAX_BACKOFF_SECONDS
                 _log.info("openalex: retrying after %.1fs backoff", delay)
                 time.sleep(delay)
         assert last_exc is not None  # unreachable; loop either returns or raises
