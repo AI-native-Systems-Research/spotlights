@@ -22,6 +22,7 @@ Result count is bounded by `max_results` (OpenAlex `per_page`); downstream
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import time
@@ -41,6 +42,8 @@ OPENALEX_MAILTO_ENV = "OPENALEX_MAILTO"
 OPENALEX_WORKS_URL = "https://api.openalex.org/works"
 
 # Transient-failure retry budget for a single works fetch (see `_fetch_works`).
+_log = logging.getLogger(__name__)
+
 _FETCH_RETRIES = 4
 _FETCH_BACKOFF_SECONDS = 1.5
 
@@ -248,13 +251,37 @@ class OpenAlexRunner:
         writer = self._query_writer or self._default_query_writer()
         if writer is None:
             return []
+        _log.info(
+            "openalex: codex query-gen start (timeout=%ss)",
+            self.options.timeout_seconds,
+        )
+        started = time.monotonic()
         try:
             result = writer.run(_QUERY_WRITER_INSTRUCTION + _query_brief(prompt), check=False)
-        except Exception:
+        except Exception as exc:
+            _log.warning(
+                "openalex: codex query-gen failed in %.1fs (%s) — "
+                "falling back to regex query",
+                time.monotonic() - started,
+                exc,
+            )
             return []
         if result.returncode != 0 or not result.final_message:
+            _log.warning(
+                "openalex: codex query-gen empty in %.1fs (rc=%s) — "
+                "falling back to regex query",
+                time.monotonic() - started,
+                result.returncode,
+            )
             return []
-        return _parse_query_lines(result.final_message, limit=self.options.max_queries)
+        queries = _parse_query_lines(result.final_message, limit=self.options.max_queries)
+        _log.info(
+            "openalex: codex query-gen done in %.1fs — %d quer%s",
+            time.monotonic() - started,
+            len(queries),
+            "y" if len(queries) == 1 else "ies",
+        )
+        return queries
 
     def _default_query_writer(self) -> _QueryWriter | None:
         from spotlights_engine.module_deep_research.codex_exec import (
@@ -277,6 +304,13 @@ class OpenAlexRunner:
         queries = self._resolve_queries(prompt)
         plans = [(q, self._query_urls(q)) for q in queries]
         safe_cmd = ["GET", *(_redact_api_key(u) for _q, us in plans for u in us)]
+        _log.info(
+            "openalex: %d quer%s → %d URL(s) to fetch (mode=%s)",
+            len(plans),
+            "y" if len(plans) == 1 else "ies",
+            sum(len(us) for _q, us in plans),
+            self.options.query_mode,
+        )
 
         per_query: list[tuple[str, str, list]] = []
         first_error: tuple[int, str] | None = None
@@ -366,6 +400,14 @@ class OpenAlexRunner:
             if gap < _MIN_INTERVAL_SECONDS:
                 time.sleep(_MIN_INTERVAL_SECONDS - gap)
             _last_fetch_ts = time.monotonic()
+            _log.info(
+                "openalex: fetch attempt %d/%d (timeout=%ss) %s",
+                attempt + 1,
+                _FETCH_RETRIES + 1,
+                self.options.timeout_seconds,
+                _redact_api_key(url),
+            )
+            fetch_started = time.monotonic()
             try:
                 request = urllib.request.Request(url, headers=self._headers())
                 with urllib.request.urlopen(
@@ -374,8 +416,20 @@ class OpenAlexRunner:
                     body = resp.read().decode("utf-8")
                 data = json.loads(body)
                 works = data.get("results") if isinstance(data, dict) else None
-                return works if isinstance(works, list) else []
+                works = works if isinstance(works, list) else []
+                _log.info(
+                    "openalex: fetch done in %.1fs — %d work(s)",
+                    time.monotonic() - fetch_started,
+                    len(works),
+                )
+                return works
             except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
+                _log.warning(
+                    "openalex: fetch attempt %d failed in %.1fs: %s",
+                    attempt + 1,
+                    time.monotonic() - fetch_started,
+                    exc,
+                )
                 # 429 (Too Many Requests) is retryable — the burst limit clears
                 # after a short wait; honor Retry-After when the server sends it.
                 is_http = isinstance(exc, urllib.error.HTTPError)
@@ -389,6 +443,7 @@ class OpenAlexRunner:
                         delay = max(delay, float(exc.headers.get("Retry-After", 0)))
                     except (TypeError, ValueError):
                         pass
+                _log.info("openalex: retrying after %.1fs backoff", delay)
                 time.sleep(delay)
         assert last_exc is not None  # unreachable; loop either returns or raises
         raise last_exc
