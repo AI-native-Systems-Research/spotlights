@@ -311,15 +311,42 @@ class OpenAlexRunner:
         self.options = options or OpenAlexRunnerOptions()
         # Injectable for tests; built lazily from Codex in "codex" query mode.
         self._query_writer = query_writer
+        # Rotating pointer into the resolved key pool; advanced on a blocked
+        # (429/402/403) fetch so an exhausted key hands off to the next one.
+        self._key_idx = 0
+
+    def _api_keys(self) -> list[str]:
+        """Ordered, de-duped premium-key pool. Empty => free polite-pool access.
+
+        Sources, in order: explicit ``options.api_key``; a comma/space list in
+        ``OPENALEX_API_KEYS``; then the numbered singletons ``OPENALEX_API_KEY``,
+        ``OPENALEX_API_KEY_2``, ``OPENALEX_API_KEY_3`` ... (env or ``options.env``).
+        Rotation across this pool lets a 429/exhausted key fail over to the next.
+        """
+        opt = self.options
+        env = dict(os.environ)
+        if opt.env:
+            env.update(opt.env)
+        keys: list[str] = []
+        if opt.api_key:
+            keys.append(opt.api_key)
+        for raw in re.split(r"[,\s]+", env.get("OPENALEX_API_KEYS", "")):
+            if raw.strip():
+                keys.append(raw.strip())
+        base = opt.api_key_env
+        for name in (base, *(f"{base}_{i}" for i in range(2, 10))):
+            v = env.get(name)
+            if v and v.strip():
+                keys.append(v.strip())
+        seen: set[str] = set()
+        return [k for k in keys if not (k in seen or seen.add(k))]
 
     def _optional_api_key(self) -> str | None:
-        """Resolve the premium key if configured; None means free access."""
-        opt = self.options
-        if opt.api_key:
-            return opt.api_key
-        if opt.env and opt.api_key_env in opt.env:
-            return opt.env[opt.api_key_env]
-        return os.environ.get(opt.api_key_env) or None
+        """Current premium key from the rotating pool; None means free access."""
+        keys = self._api_keys()
+        if not keys:
+            return None
+        return keys[self._key_idx % len(keys)]
 
     def _resolve_mailto(self) -> str | None:
         opt = self.options
@@ -360,6 +387,10 @@ class OpenAlexRunner:
             )
             if flt:
                 params["filter"] = flt
+        # Opt-in: query the full expanded corpus (datasets + repository records,
+        # formerly "XPAC") instead of the curated core, for ~10-60% more works.
+        if _bool_env("OPENALEX_CORPUS_ALL"):
+            params["corpus"] = "all"
         mailto = self._resolve_mailto()
         if mailto:
             params["mailto"] = mailto
@@ -601,6 +632,16 @@ class OpenAlexRunner:
                 urls.append(self._build_url(query, per_page=s, semantic=True))
         return urls
 
+    @staticmethod
+    def _swap_api_key(url: str, new_key: str) -> str:
+        """Return `url` with its api_key query param replaced by `new_key`."""
+        parts = urllib.parse.urlsplit(url)
+        q = dict(urllib.parse.parse_qsl(parts.query, keep_blank_values=True))
+        q["api_key"] = new_key
+        return urllib.parse.urlunsplit(
+            parts._replace(query=urllib.parse.urlencode(q))
+        )
+
     def _fetch_works(self, url: str) -> list:
         # The semantic endpoint (and occasionally the main one) returns transient
         # 5xx / times out under load; retry a couple of times with backoff before
@@ -643,6 +684,21 @@ class OpenAlexRunner:
                 # 429 (Too Many Requests) is retryable — the burst limit clears
                 # after a short wait; honor Retry-After when the server sends it.
                 is_http = isinstance(exc, urllib.error.HTTPError)
+                # Key-block codes: a spent/blocked key (402 no credit, 401/403
+                # auth, 429 rate) fails over to the next key in the pool before we
+                # fall back to plain backoff. Rewrite the api_key in-place and
+                # retry immediately (no wait) as long as an unused key remains.
+                if is_http and exc.code in (401, 402, 403, 429):
+                    keys = self._api_keys()
+                    if len(keys) > 1 and self._key_idx + 1 < len(keys) and attempt < _FETCH_RETRIES:
+                        self._key_idx += 1
+                        url = self._swap_api_key(url, keys[self._key_idx])
+                        _log.warning(
+                            "openalex: key blocked (HTTP %d); rotating to key #%d/%d",
+                            exc.code, self._key_idx + 1, len(keys),
+                        )
+                        last_exc = exc
+                        continue
                 retryable = (not is_http) or exc.code >= 500 or exc.code == 429
                 if not retryable or attempt == _FETCH_RETRIES:
                     raise
