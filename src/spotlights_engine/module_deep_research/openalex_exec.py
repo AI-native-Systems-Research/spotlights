@@ -124,8 +124,15 @@ def _int_env(name: str, default: int) -> int:
         return default
 
 
-def _bool_env(name: str) -> bool:
-    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+def _bool_env(name: str, default: bool = False) -> bool:
+    v = os.environ.get(name, "").strip().lower()
+    if not v:
+        return default
+    if v in {"1", "true", "yes", "on"}:
+        return True
+    if v in {"0", "false", "no", "off"}:
+        return False
+    return default
 
 
 # Post-fetch relevance gate (opt-in). A fetched work is kept only when its
@@ -157,7 +164,18 @@ _STABLE_SORT = _bool_env("OPENALEX_STABLE_SORT")
 # TERMS) so two equivalent briefs collapse to byte-identical text; the writer
 # then extracts from the stable canonical brief. Off (default) → byte-identical
 # to prior behavior. Override via OPENALEX_CANONICALIZE_BRIEF.
-_CANONICALIZE_BRIEF = _bool_env("OPENALEX_CANONICALIZE_BRIEF")
+_CANONICALIZE_BRIEF = _bool_env("OPENALEX_CANONICALIZE_BRIEF", default=True)
+
+# Second LLM pass over the GENERATED queries (opt-out). Brief canonicalization
+# fixes the input, but the query-writer at temp>0 can still emit a decorative or
+# run-specific modifier on one run and not the other (e.g. "ragged image-patch
+# batching" vs "image-patch batching"), and OpenAlex keyword search is
+# wording-sensitive, so that lone-word wobble fragments the fetched work set.
+# When on, an LLM normalizes the query LIST to canonical minimal phrasing before
+# the deterministic dedup, collapsing such variants to byte-identical queries.
+# Off → deterministic dedup only (prior behavior). Override via
+# OPENALEX_CANONICALIZE_QUERIES.
+_CANONICALIZE_QUERIES = _bool_env("OPENALEX_CANONICALIZE_QUERIES", default=True)
 
 # Query tokens that carry no topical signal — OpenAlex boolean operators and
 # common stop words the query-writer may emit; excluded from the overlap count.
@@ -279,7 +297,7 @@ class OpenAlexRunnerOptions(BaseModel):
     # facet coverage isn't collapsed to one phrasing). Complemented by post-hoc
     # query canonicalization (see `_canonicalize_queries`) and the semantic-heavy
     # pool (semantic recall is wording-insensitive). None = leave the CLI default.
-    query_writer_temperature: float | None = 0.1
+    query_writer_temperature: float | None = 0.05
     query_writer_seed: int | None = 7
     # Brief canonicalization is a stricter transform than query-gen: its whole
     # job is to collapse two differently-worded briefs to ONE byte-identical
@@ -389,7 +407,7 @@ class OpenAlexRunner:
                 params["filter"] = flt
         # Opt-in: query the full expanded corpus (datasets + repository records,
         # formerly "XPAC") instead of the curated core, for ~10-60% more works.
-        if _bool_env("OPENALEX_CORPUS_ALL"):
+        if _bool_env("OPENALEX_CORPUS_ALL", default=True):
             params["corpus"] = "all"
         mailto = self._resolve_mailto()
         if mailto:
@@ -444,7 +462,13 @@ class OpenAlexRunner:
                 result.returncode,
             )
             return []
-        queries = _parse_query_lines(result.final_message, limit=self.options.max_queries)
+        sanitized = [
+            q for q in (_sanitize_line(ln) for ln in result.final_message.splitlines()) if q
+        ]
+        if _CANONICALIZE_QUERIES and sanitized:
+            canon_writer = self._query_writer or self._canonicalize_writer()
+            sanitized = self._canonicalize_query_list(canon_writer or writer, sanitized)
+        queries = _canonicalize_queries(sanitized, limit=self.options.max_queries)
         _log.info(
             "openalex: codex query-gen done in %.1fs — %d quer%s",
             time.monotonic() - started,
@@ -490,6 +514,49 @@ class OpenAlexRunner:
             len(canonical),
         )
         return canonical
+
+    def _canonicalize_query_list(
+        self, writer: "_QueryWriter", queries: list[str]
+    ) -> list[str]:
+        """LLM pass-1 normalizing generated queries to canonical phrasing.
+
+        Mirrors `_canonicalize_brief`: understand each query and map it to its
+        single canonical minimal form so two runs' paraphrase-variant query sets
+        collapse to byte-identical text, which (OpenAlex `search` being
+        deterministic per query) yields the same fetched works. Best-effort: any
+        failure returns the input queries unchanged, so this pass can never make a
+        run worse than the deterministic-dedup-only path.
+        """
+        if not queries:
+            return queries
+        started = time.monotonic()
+        _log.info("openalex: canonicalize queries start (%d in)", len(queries))
+        try:
+            result = writer.run(_QUERY_CANON_INSTRUCTION + "\n".join(queries), check=False)
+        except Exception as exc:
+            _log.warning(
+                "openalex: canonicalize queries failed in %.1fs (%s) — using raw queries",
+                time.monotonic() - started,
+                exc,
+            )
+            return queries
+        text = (result.final_message or "").strip()
+        if result.returncode != 0 or not text:
+            _log.warning(
+                "openalex: canonicalize queries empty in %.1fs (rc=%s) — using raw queries",
+                time.monotonic() - started,
+                result.returncode,
+            )
+            return queries
+        out = [q for q in (_sanitize_line(ln) for ln in text.splitlines()) if q]
+        if not out:
+            return queries
+        _log.info(
+            "openalex: canonicalize queries done in %.1fs (%d out)",
+            time.monotonic() - started,
+            len(out),
+        )
+        return out
 
     def _default_query_writer(self) -> _QueryWriter | None:
         from spotlights_engine.module_deep_research.codex_exec import (
@@ -915,6 +982,60 @@ _CANONICALIZE_INSTRUCTION = (
     "any text outside the 4 labeled lines.\n"
     "\n"
     "--- BRIEF ---\n"
+)
+
+# Pass-1 LLM standardizer for the GENERATED queries (OPENALEX_CANONICALIZE_QUERIES).
+# The query-writer emits from the canonical brief but at temp>0 can still vary a
+# decorative modifier or facet phrasing run-to-run. This pass maps the query list
+# onto ONE FIXED 5-line canonical query STRUCTURE built from the SAME closed
+# vocabulary as the brief canon (TECHNIQUE / GOAL-CLASS / OBJECT nouns / EXAMPLES),
+# so equivalent query sets collapse to byte-identical text by construction — not by
+# soft heuristics. Deterministic dedup (`_canonicalize_queries`) still runs after.
+_QUERY_CANON_INSTRUCTION = (
+    "You normalize a list of OpenAlex `search` queries into ONE FIXED CANONICAL "
+    "QUERY STRUCTURE. Two query lists expressing the SAME facets — however "
+    "differently worded across runs — MUST produce BYTE-IDENTICAL output. This is "
+    "normalization to a fixed pattern, NOT writing: map each concept onto the "
+    "controlled vocabulary below and emit the structure; discard the input's "
+    "incidental wording.\n"
+    "\n"
+    "Output EXACTLY 5 lines, ONE query per line, in THIS FIXED ORDER, each built "
+    "ONLY from the controlled vocabulary — and NOTHING else:\n"
+    "  line 1 CORE    -> the canonical SUBJECT noun-phrase alone, lowercase, in "
+    "double quotes (the operation being optimized; minimal established phrase, no "
+    "decorative modifier).\n"
+    "  line 2 METHOD  -> <TECHNIQUE> \"<SUBJECT>\"  (technique term, then the "
+    "quoted subject phrase).\n"
+    "  line 3 DATA    -> the OBJECT nouns, space-joined, sorted ALPHABETICALLY.\n"
+    "  line 4 METHODS -> the EXAMPLES named methods for the chosen TECHNIQUE, "
+    "sorted ALPHABETICALLY (if the technique has none, repeat line 1's value).\n"
+    "  line 5 CLASS   -> <GOAL-CLASS> \"<SUBJECT>\"  (optimization class, then the "
+    "quoted subject phrase).\n"
+    "\n"
+    "CONTROLLED VOCABULARY (identical to the brief canon; pick the listed term "
+    "whose meaning matches, never invent):\n"
+    "  TECHNIQUE in {batched gather, deferred materialization, in-place update, "
+    "kernel fusion, precompute-and-cache, segmented reduction, tiled reduction, "
+    "vectorized cumulative-count, vectorized reduction, other reduction}\n"
+    "  GOAL-CLASS in {allocation reduction, host-sync elimination, kernel "
+    "vectorization, memory reduction}\n"
+    "  OBJECT nouns in {cluster labels, embedding tensor, index tensor, offset "
+    "vector, padding mask, patch tensor, similarity tensor, token mask}\n"
+    "  EXAMPLES by technique: batched gather->gather index_select; deferred "
+    "materialization->pad_sequence torch.split; in-place update->masked_fill_ "
+    "scatter_; kernel fusion->flash attention; precompute-and-cache->memoization; "
+    "segmented reduction->scatter-add segment_csr; tiled reduction->flash "
+    "attention; vectorized cumulative-count->cumsum; vectorized reduction->amax "
+    "logsumexp; other reduction->(none)\n"
+    "\n"
+    "RULES: DROP any decorative or run-specific modifier that is not in the "
+    "vocabulary (e.g. \"ragged\"/\"jagged\"/\"variable-length\" qualifying a "
+    "batching noun) — such adjectives are exactly what drifts between runs. Do NOT "
+    "reorder words inside an established phrase, change casing, or expand/contract "
+    "acronyms. Emit NO numbering, bullets, markdown, blank lines, file paths, "
+    "class/variable names, or host framework name — just the 5 query lines.\n"
+    "\n"
+    "--- QUERIES ---\n"
 )
 
 # Deterministic pass-2 over the LLM's canonical draft. The LLM (pass 1) picks the
