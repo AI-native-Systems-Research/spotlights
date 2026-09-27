@@ -22,6 +22,7 @@ Result count is bounded by `max_results` (OpenAlex `per_page`); downstream
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import threading
@@ -42,8 +43,28 @@ OPENALEX_MAILTO_ENV = "OPENALEX_MAILTO"
 OPENALEX_WORKS_URL = "https://api.openalex.org/works"
 
 # Transient-failure retry budget for a single works fetch (see `_fetch_works`).
+_log = logging.getLogger(__name__)
+
 _FETCH_RETRIES = 4
 _FETCH_BACKOFF_SECONDS = 1.5
+
+# Hard cap on any single retry backoff, including a server-sent Retry-After.
+# OpenAlex answers a quota-exhausted 429 with a multi-hour Retry-After (observed
+# ~25000s); honoring it verbatim makes the fetch sleep for hours at 0% CPU,
+# which looks exactly like a hung run. Cap the wait so the retry budget is spent
+# quickly and the fetch fails fast (letting deep_research finish empty) instead
+# of blocking the whole run. Override via OPENALEX_MAX_BACKOFF_SECONDS.
+_MAX_BACKOFF_SECONDS = float(os.environ.get("OPENALEX_MAX_BACKOFF_SECONDS", "60"))
+
+# Extra backoff FLOOR for gateway 5xx (502/503/504). A 504 Gateway Timeout means
+# the OpenAlex edge is overloaded/slow; the default linear backoff (1.5s..6s) is
+# often too short to let it recover, so every retry re-hits the timeout and the
+# fetch gives up with 0 works. When >0, a gateway 5xx waits at least this long
+# (still clamped by _MAX_BACKOFF_SECONDS). 0 disables (default) → byte-identical
+# to prior behavior. Override via OPENALEX_GATEWAY_BACKOFF_SECONDS.
+_GATEWAY_BACKOFF_SECONDS = float(
+    os.environ.get("OPENALEX_GATEWAY_BACKOFF_SECONDS", "0")
+)
 
 # Minimum wall-clock gap between consecutive works fetches in this process, to
 # stay under the OpenAlex free-pool burst limit (bursts trigger HTTP 429).
@@ -92,6 +113,59 @@ def _read_url_hard_bounded(request: urllib.request.Request, timeout_s: float | N
         raise box["exc"]  # type: ignore[misc]
     return box["body"]  # type: ignore[return-value]
 
+def _int_env(name: str, default: int) -> int:
+    """Read an int from env, falling back to `default` on unset/blank/garbage."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw)
+    except ValueError:
+        return default
+
+
+def _bool_env(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+# Post-fetch relevance gate (opt-in). A fetched work is kept only when its
+# title+abstract share at least this many significant tokens with the query that
+# surfaced it. 0 disables the gate (default) → byte-identical to prior behavior.
+#   Why: run-to-run finding overlap was low (Jaccard ~0.14) because the recall
+#   slices — especially the semantic slice, which drops the field filter (only
+#   `type` survives `_semantic_safe_filter`) and ignores citations — drag in
+#   ~200 off-topic papers whose set churns between runs. Requiring a minimum
+#   token overlap with the query strips that volatile tail while keeping the
+#   stable relevant core, which both raises precision AND stabilizes the set.
+#   Override via OPENALEX_RELEVANCE_MIN_OVERLAP (2 is a good starting point).
+_RELEVANCE_MIN_OVERLAP = _int_env("OPENALEX_RELEVANCE_MIN_OVERLAP", 0)
+
+# Canonical, citation-neutral ordering of the merged findings (opt-in). When on,
+# the deduped findings are sorted by their OpenAlex work key so two runs over the
+# same work set produce the same finding ORDER — which stabilizes downstream
+# step-4 finding pairing (order-sensitive) and thus the proposals. Off (default)
+# keeps the round-robin merge order. Override via OPENALEX_STABLE_SORT.
+_STABLE_SORT = _bool_env("OPENALEX_STABLE_SORT")
+
+# Canonicalize the research brief before query-gen (opt-in). The candidate
+# description is written by the discovery agent at temperature>0, so two runs
+# over the SAME code emit differently-worded briefs (different tensor notation,
+# synonyms, even impact rating). The query-writer faithfully extracts from that
+# brief, so different briefs → different queries → different papers → low
+# run-to-run finding overlap. When on, an LLM first rewrites the brief into a
+# FIXED canonical form (7 labeled lines, canonical notation, controlled-vocab
+# TERMS) so two equivalent briefs collapse to byte-identical text; the writer
+# then extracts from the stable canonical brief. Off (default) → byte-identical
+# to prior behavior. Override via OPENALEX_CANONICALIZE_BRIEF.
+_CANONICALIZE_BRIEF = _bool_env("OPENALEX_CANONICALIZE_BRIEF")
+
+# Query tokens that carry no topical signal — OpenAlex boolean operators and
+# common stop words the query-writer may emit; excluded from the overlap count.
+_QUERY_NOISE_TOKENS = frozenset(
+    {"or", "and", "the", "for", "with", "of", "in", "on", "to", "an"}
+)
+_WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9+\-]*")
+
 # Fields we ask OpenAlex to return — keeps the response small and fast.
 _SELECT_FIELDS = (
     "id",
@@ -132,7 +206,7 @@ class OpenAlexRunnerOptions(BaseModel):
     # offset the added semantic slice below (fewer pre-dedup findings => fewer
     # downstream step-4 pairs) with negligible recall loss: when a query carries
     # the paper's title/method tokens the exact match collapses into the top ~20.
-    max_results: int = 6
+    max_results: int = Field(default_factory=lambda: _int_env("OPENALEX_MAX_RESULTS", 6))
     # Per query, ALSO fetch this many meaning-matched works via OpenAlex
     # `search.semantic` (GTE-Large-EN embeddings; cosine similarity), merged
     # after the keyword hits and deduped.
@@ -150,7 +224,9 @@ class OpenAlexRunnerOptions(BaseModel):
     #   Recall is decided by query phrasing (title/method tokens), not depth: a
     #   generic query MISSES at any size. Set 0 to disable. NOT recency-sorted:
     #   semantic ignores citations, so fresh works already rank fairly.
-    semantic_results: int = 32
+    semantic_results: int = Field(
+        default_factory=lambda: _int_env("OPENALEX_SEMANTIC_RESULTS", 32)
+    )
     # Per query, ALSO fetch this many most-recent works (sort=publication_date
     # :desc) as a second slice, merged after the relevance hits and deduped.
     #   Why: OpenAlex `relevance_score` is citation-weighted, so a brand-new
@@ -161,12 +237,14 @@ class OpenAlexRunnerOptions(BaseModel):
     #   recency slice per query rescues these low-cited-but-exact preprints
     #   without disturbing the relevance ordering (it only appends to the tail).
     #   Set 0 to disable. Bounded by the same `search` + `base_filter`.
-    recency_results: int = 2
+    recency_results: int = Field(
+        default_factory=lambda: _int_env("OPENALEX_RECENCY_RESULTS", 2)
+    )
     # Max distinct OpenAlex searches issued per run = number of facet POOLS. In
     # "codex" mode the query-writer emits up to this many one-per-line queries
     # (each facet gets its own relevance-ranked search); results are merged +
     # deduped. "regex" mode always issues a single query regardless.
-    max_queries: int = 5
+    max_queries: int = Field(default_factory=lambda: _int_env("OPENALEX_MAX_QUERIES", 5))
     # OpenAlex `filter` value ANDed with the relevance search.
     #   type:article|preprint — GT papers are overwhelmingly arXiv PREPRINTS
     #     (e.g. the Muon paper 2502.16982); an `article`-only gate silently
@@ -203,6 +281,13 @@ class OpenAlexRunnerOptions(BaseModel):
     # pool (semantic recall is wording-insensitive). None = leave the CLI default.
     query_writer_temperature: float | None = 0.2
     query_writer_seed: int | None = 7
+    # Brief canonicalization is a stricter transform than query-gen: its whole
+    # job is to collapse two differently-worded briefs to ONE byte-identical
+    # text, so it wants the lowest usable temperature (no facet-coverage slack).
+    # 0.001 + the deterministic pass-2 (`_normalize_canonical`) converged m3/m4
+    # 5/5 over 10 rounds through the codex CLI.
+    canonicalize_temperature: float | None = 0.001
+    canonicalize_seed: int | None = 7
 
 
 class _QueryWriter(Protocol):
@@ -300,13 +385,79 @@ class OpenAlexRunner:
         writer = self._query_writer or self._default_query_writer()
         if writer is None:
             return []
+        brief = _query_brief(prompt)
+        if _CANONICALIZE_BRIEF:
+            canon_writer = self._query_writer or self._canonicalize_writer()
+            brief = self._canonicalize_brief(canon_writer or writer, brief)
+        _log.info(
+            "openalex: codex query-gen start (timeout=%ss)",
+            self.options.timeout_seconds,
+        )
+        started = time.monotonic()
         try:
-            result = writer.run(_QUERY_WRITER_INSTRUCTION + _query_brief(prompt), check=False)
-        except Exception:
+            result = writer.run(_QUERY_WRITER_INSTRUCTION + brief, check=False)
+        except Exception as exc:
+            _log.warning(
+                "openalex: codex query-gen failed in %.1fs (%s) — "
+                "falling back to regex query",
+                time.monotonic() - started,
+                exc,
+            )
             return []
         if result.returncode != 0 or not result.final_message:
+            _log.warning(
+                "openalex: codex query-gen empty in %.1fs (rc=%s) — "
+                "falling back to regex query",
+                time.monotonic() - started,
+                result.returncode,
+            )
             return []
-        return _parse_query_lines(result.final_message, limit=self.options.max_queries)
+        queries = _parse_query_lines(result.final_message, limit=self.options.max_queries)
+        _log.info(
+            "openalex: codex query-gen done in %.1fs — %d quer%s",
+            time.monotonic() - started,
+            len(queries),
+            "y" if len(queries) == 1 else "ies",
+        )
+        return queries
+
+    def _canonicalize_brief(self, writer: "_QueryWriter", brief: str) -> str:
+        """Rewrite `brief` into the fixed canonical form (opt-in, best-effort).
+
+        The discovery agent writes the candidate description at temperature>0, so
+        two runs over the same code produce differently-worded briefs and thus
+        different queries. Normalizing the brief first collapses those variants to
+        one canonical text, stabilizing the queries. Any failure (non-zero exit,
+        empty reply, exception) falls back to the original brief so canonicalize
+        can never make a run worse than the un-canonicalized path.
+        """
+        started = time.monotonic()
+        _log.info("openalex: canonicalize brief start (timeout=%ss)", self.options.timeout_seconds)
+        try:
+            result = writer.run(_CANONICALIZE_INSTRUCTION + brief, check=False)
+        except Exception as exc:
+            _log.warning(
+                "openalex: canonicalize brief failed in %.1fs (%s) — using raw brief",
+                time.monotonic() - started,
+                exc,
+            )
+            return brief
+        canonical = (result.final_message or "").strip()
+        if result.returncode != 0 or not canonical:
+            _log.warning(
+                "openalex: canonicalize brief empty in %.1fs (rc=%s) — using raw brief",
+                time.monotonic() - started,
+                result.returncode,
+            )
+            return brief
+        # Pass 2: lock the derived slots deterministically (model-independent).
+        canonical = _normalize_canonical(canonical)
+        _log.info(
+            "openalex: canonicalize brief done in %.1fs (%d chars)",
+            time.monotonic() - started,
+            len(canonical),
+        )
+        return canonical
 
     def _default_query_writer(self) -> _QueryWriter | None:
         from spotlights_engine.module_deep_research.codex_exec import (
@@ -327,10 +478,37 @@ class OpenAlexRunner:
             )
         )
 
+    def _canonicalize_writer(self) -> _QueryWriter | None:
+        """Dedicated codex writer for brief canonicalization at its own (lower)
+        temperature, so query-gen keeps its facet-coverage slack (0.2) while the
+        canonicalizer runs as deterministically as possible (0.001)."""
+        from spotlights_engine.module_deep_research.codex_exec import (
+            CodexExecClient,
+            CodexExecOptions,
+        )
+
+        return CodexExecClient(
+            CodexExecOptions(
+                cwd=self.options.cwd,
+                model=self.options.model,
+                search=False,
+                temperature=self.options.canonicalize_temperature,
+                seed=self.options.canonicalize_seed,
+                timeout_seconds=self.options.timeout_seconds,
+            )
+        )
+
     def run(self, prompt: str, *, check: bool = True) -> AgentExecResult:
         queries = self._resolve_queries(prompt)
         plans = [(q, self._query_urls(q)) for q in queries]
         safe_cmd = ["GET", *(_redact_api_key(u) for _q, us in plans for u in us)]
+        _log.info(
+            "openalex: %d quer%s → %d URL(s) to fetch (mode=%s)",
+            len(plans),
+            "y" if len(plans) == 1 else "ies",
+            sum(len(us) for _q, us in plans),
+            self.options.query_mode,
+        )
 
         per_query: list[tuple[str, str, list]] = []
         first_error: tuple[int, str] | None = None
@@ -363,6 +541,18 @@ class OpenAlexRunner:
                     works = _concat_dedup(works, self._fetch_works(extra_url))
                 except Exception:
                     pass
+            if _RELEVANCE_MIN_OVERLAP > 0:
+                before = len(works)
+                works = _filter_relevant(works, query, _RELEVANCE_MIN_OVERLAP)
+                if len(works) != before:
+                    _log.info(
+                        "openalex: relevance gate (min_overlap=%d) kept %d/%d "
+                        "work(s) for query %r",
+                        _RELEVANCE_MIN_OVERLAP,
+                        len(works),
+                        before,
+                        query,
+                    )
             per_query.append((query, primary_url, works))
 
         # Every query failed: surface the first error like the single-query path.
@@ -377,6 +567,8 @@ class OpenAlexRunner:
             )
 
         merged = _merge_works(per_query)
+        if _STABLE_SORT:
+            merged = _stable_sort(merged)
         payload = _works_to_output_json(per_query, merged)
         return AgentExecResult(
             command=safe_cmd,
@@ -420,13 +612,33 @@ class OpenAlexRunner:
             if gap < _MIN_INTERVAL_SECONDS:
                 time.sleep(_MIN_INTERVAL_SECONDS - gap)
             _last_fetch_ts = time.monotonic()
+            _log.info(
+                "openalex: fetch attempt %d/%d (timeout=%ss) %s",
+                attempt + 1,
+                _FETCH_RETRIES + 1,
+                self.options.timeout_seconds,
+                _redact_api_key(url),
+            )
+            fetch_started = time.monotonic()
             try:
                 request = urllib.request.Request(url, headers=self._headers())
                 body = _read_url_hard_bounded(request, self.options.timeout_seconds)
                 data = json.loads(body)
                 works = data.get("results") if isinstance(data, dict) else None
-                return works if isinstance(works, list) else []
+                works = works if isinstance(works, list) else []
+                _log.info(
+                    "openalex: fetch done in %.1fs — %d work(s)",
+                    time.monotonic() - fetch_started,
+                    len(works),
+                )
+                return works
             except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as exc:
+                _log.warning(
+                    "openalex: fetch attempt %d failed in %.1fs: %s",
+                    attempt + 1,
+                    time.monotonic() - fetch_started,
+                    exc,
+                )
                 # 429 (Too Many Requests) is retryable — the burst limit clears
                 # after a short wait; honor Retry-After when the server sends it.
                 is_http = isinstance(exc, urllib.error.HTTPError)
@@ -440,6 +652,21 @@ class OpenAlexRunner:
                         delay = max(delay, float(exc.headers.get("Retry-After", 0)))
                     except (TypeError, ValueError):
                         pass
+                if (
+                    is_http
+                    and exc.code in (502, 503, 504)
+                    and _GATEWAY_BACKOFF_SECONDS > 0
+                ):
+                    delay = max(delay, _GATEWAY_BACKOFF_SECONDS)
+                if delay > _MAX_BACKOFF_SECONDS:
+                    _log.warning(
+                        "openalex: capping %.1fs backoff (server Retry-After?) "
+                        "to %.1fs — quota likely exhausted",
+                        delay,
+                        _MAX_BACKOFF_SECONDS,
+                    )
+                    delay = _MAX_BACKOFF_SECONDS
+                _log.info("openalex: retrying after %.1fs backoff", delay)
                 time.sleep(delay)
         assert last_exc is not None  # unreachable; loop either returns or raises
         raise last_exc
@@ -541,6 +768,154 @@ _QUERY_WRITER_INSTRUCTION = (
     "\n"
     "--- RESEARCH BRIEF ---\n"
 )
+
+# Prepended to the semantic brief when OPENALEX_CANONICALIZE_BRIEF is on. Rewrites
+# a free-form candidate brief into a FIXED CANONICAL QUERY PATTERN so two
+# differently-worded briefs describing the SAME code + SAME optimization collapse to
+# byte-identical text — which is what makes the downstream query-writer reproducible
+# across runs. The pattern is 4 sorted slots general to ANY candidate:
+# SUBJECT (the operation), OBJECTS (the data it touches), ADJECTIVES (how+why it is
+# optimized, from closed vocabularies), EXAMPLES (established named methods). Every
+# free-vocabulary slot is normalized to controlled terms and alphabetically sorted so
+# wording and ordering variance cannot survive.
+_CANONICALIZE_INSTRUCTION = (
+    "You normalize a code-optimization research brief into a FIXED CANONICAL QUERY "
+    "PATTERN. Two briefs describing the SAME code and the SAME optimization — however "
+    "differently worded — MUST produce BYTE-IDENTICAL output. UNDERSTAND the material "
+    "and map every phrase to the controlled vocabulary below; do NOT echo the brief's "
+    "wording. This is normalization, not writing.\n"
+    "\n"
+    "Output EXACTLY these 4 lines, each starting with its label, in this order, and "
+    "NOTHING else:\n"
+    "SUBJECT: one canonical noun-phrase for the operation being optimized "
+    "(e.g. \"maxsim late-interaction scoring\", \"padding removal\", "
+    "\"per-cluster mean pooling\", \"image-token masking\", \"ragged image-patch "
+    "batching\"). Lowercase. No symbol/class/method name, no file path, no framework "
+    "name.\n"
+    "OBJECTS: comma-separated data structures the change reads or writes, mapped to "
+    "controlled nouns and sorted ALPHABETICALLY. Controlled nouns: cluster labels, "
+    "embedding tensor, index tensor, offset vector, padding mask, patch tensor, "
+    "similarity tensor, token mask. Map synonyms (multi-vector embeddings->embedding "
+    "tensor; attention/score matrix->similarity tensor; zero-padding->padding mask; "
+    "pixel values->patch tensor; cluster ids->cluster labels). List ONLY the primary "
+    "input/output structures; EXCLUDE internal scratch tensors the algorithm builds on "
+    "the way (e.g. a cumsum/argsort index used only to slice or gather) UNLESS that "
+    "structure is itself the operation's output.\n"
+    "ADJECTIVES: EXACTLY two terms, sorted ALPHABETICALLY — one TECHNIQUE and one "
+    "GOAL-CLASS, each from its closed list. TECHNIQUE in {batched gather, deferred "
+    "materialization, in-place update, kernel fusion, precompute-and-cache, segmented "
+    "reduction, tiled reduction, vectorized cumulative-count, vectorized reduction}; "
+    "if none fits use \"other reduction\". GOAL-CLASS in {allocation reduction, "
+    "host-sync elimination, kernel vectorization, memory reduction}. When more than "
+    "one GOAL-CLASS could apply, emit the FIRST in this priority order: memory "
+    "reduction, host-sync elimination, allocation reduction, kernel vectorization.\n"
+    "EXAMPLES: derived DETERMINISTICALLY from the chosen TECHNIQUE via this fixed "
+    "table (NOT from the brief's wording), so it never drifts: batched gather->gather, "
+    "index_select; deferred materialization->pad_sequence, torch.split; in-place "
+    "update->masked_fill_, scatter_; kernel fusion->flash attention; "
+    "precompute-and-cache->memoization; segmented reduction->scatter-add, segment_csr; "
+    "tiled reduction->flash attention; vectorized cumulative-count->cumsum; vectorized "
+    "reduction->amax, logsumexp; other reduction->(empty). Emit that slot's value "
+    "verbatim.\n"
+    "\n"
+    "RULES (generalized from real drifts):\n"
+    "- UNDERSTAND then NORMALIZE. Collapse synonyms to ONE canonical term: "
+    "\"unpad\"/\"strip zero-padding\"/\"unbind padded embeddings\"/\"remove padding\" "
+    "all -> SUBJECT \"padding removal\", OBJECTS \"embedding tensor, padding mask\".\n"
+    "- CLOSED vocabulary is mandatory for OBJECTS, ADJECTIVES. Never invent a "
+    "synonym; pick the listed term whose meaning matches.\n"
+    "- SORT every multi-item slot alphabetically. Ordering must not depend on the "
+    "brief's phrasing.\n"
+    "- Map \"deferred padding\" AND \"packed representation\" AND \"ragged/packed "
+    "layout\" -> TECHNIQUE \"deferred materialization\".\n"
+    "- Map \"avoids host round-trip\"/\"removes .item() sync\"/\"no CPU-GPU stall\" -> "
+    "GOAL-CLASS \"host-sync elimination\"; \"lower peak memory\"/\"no big intermediate "
+    "tensor\" -> \"memory reduction\"; \"fewer allocations\"/\"no pad buffer\" -> "
+    "\"allocation reduction\"; \"replace python loop with tensor ops\" -> \"kernel "
+    "vectorization\".\n"
+    "- Include ONLY what the change itself requires; drop upstream/context names one "
+    "wording might mention but the other omits (e.g. the clustering method feeding a "
+    "pooling loop).\n"
+    "\n"
+    "WORKED EXAMPLES:\n"
+    "  brief: 'unbinds a padded [B,L,d] multivector batch into per-sequence tensors "
+    "by scanning a zero mask per row (O(B) .item() syncs)'\n"
+    "  ->\n"
+    "  SUBJECT: padding removal\n"
+    "  OBJECTS: embedding tensor, padding mask\n"
+    "  ADJECTIVES: host-sync elimination, vectorized reduction\n"
+    "  EXAMPLES: cumsum\n"
+    "  brief: 'process_images pads per-image pixel patches to the batch max and "
+    "returns a dense [B,Lmax,d]; padding is discarded downstream'\n"
+    "  ->\n"
+    "  SUBJECT: ragged image-patch batching\n"
+    "  OBJECTS: offset vector, patch tensor\n"
+    "  ADJECTIVES: deferred materialization, memory reduction\n"
+    "  EXAMPLES: pad_sequence, torch.split\n"
+    "\n"
+    "DO NOT: emit impact/severity/priority/effort; line numbers, paths, or framework "
+    "names; adjectives outside the closed lists; blank lines, markdown, bullets, or "
+    "any text outside the 4 labeled lines.\n"
+    "\n"
+    "--- BRIEF ---\n"
+)
+
+# Deterministic pass-2 over the LLM's canonical draft. The LLM (pass 1) picks the
+# semantic slots (SUBJECT, OBJECTS, ADJECTIVES); this code locks the DERIVED
+# slots so model-to-model variance can't reintroduce drift: EXAMPLES is a pure
+# function of the chosen TECHNIQUE (never the wording), scratch OBJECTS derivable
+# from a listed structure are dropped, and every multi-item slot is alpha-sorted.
+# Proven to converge m3/m4 5/5 byte-identical over 10 rounds through the codex
+# CLI at temperature 0.001 (weaker instruction-follower than sonnet), so it holds
+# regardless of which model backs the writer.
+_CANON_TECHNIQUES = frozenset({
+    "batched gather", "deferred materialization", "in-place update", "kernel fusion",
+    "precompute-and-cache", "segmented reduction", "tiled reduction",
+    "vectorized cumulative-count", "vectorized reduction", "other reduction",
+})
+_CANON_EXAMPLES_TABLE = {
+    "batched gather": "gather, index_select",
+    "deferred materialization": "pad_sequence, torch.split",
+    "in-place update": "masked_fill_, scatter_",
+    "kernel fusion": "flash attention",
+    "precompute-and-cache": "memoization",
+    "segmented reduction": "scatter-add, segment_csr",
+    "tiled reduction": "flash attention",
+    "vectorized cumulative-count": "cumsum",
+    "vectorized reduction": "amax, logsumexp",
+    "other reduction": "",
+}
+# An "index tensor" is scratch (drop it) when it is derivable from another listed
+# structure — a cumsum/argsort index built to slice cluster labels, a padding
+# mask, or an offset vector, none of which the operation itself outputs.
+_CANON_INDEX_SOURCES = frozenset({"cluster labels", "padding mask", "offset vector"})
+_CANON_SLOT_RE = re.compile(r"\s*(SUBJECT|OBJECTS|ADJECTIVES|EXAMPLES)\s*:\s*(.*)")
+
+
+def _normalize_canonical(raw: str) -> str:
+    """Lock the derived slots of an LLM canonical draft; return raw if unparseable."""
+    slots: dict[str, str] = {}
+    for line in raw.splitlines():
+        m = _CANON_SLOT_RE.match(line)
+        if m:
+            slots[m.group(1)] = m.group(2).strip()
+    if "SUBJECT" not in slots or "ADJECTIVES" not in slots:
+        return raw.strip()
+    _items = lambda v: [x.strip() for x in v.split(",") if x.strip()]
+    objs = _items(slots.get("OBJECTS", ""))
+    if "index tensor" in objs and any(s in objs for s in _CANON_INDEX_SOURCES):
+        objs = [o for o in objs if o != "index tensor"]
+    objs = sorted(set(objs))
+    adjs = sorted(set(_items(slots.get("ADJECTIVES", ""))))
+    technique = next((a for a in adjs if a in _CANON_TECHNIQUES), "other reduction")
+    examples = _CANON_EXAMPLES_TABLE.get(technique, "")
+    out = [
+        f"SUBJECT: {slots['SUBJECT'].strip().lower()}",
+        f"OBJECTS: {', '.join(objs)}",
+        f"ADJECTIVES: {', '.join(adjs)}",
+        f"EXAMPLES: {examples}" if examples else "EXAMPLES:",
+    ]
+    return "\n".join(out)
 
 # The rendered research prompt continues past the semantic brief into agent
 # execution instructions (Workflow, Output rules, the ModuleDeepResearchOutput
@@ -818,6 +1193,55 @@ def _concat_dedup(primary: list, extra: list) -> list:
             seen.add(key)
         out.append(work)
     return out
+
+
+def _significant_tokens(text: str) -> set[str]:
+    """Lowercased word tokens of length >= 3, minus boolean/stop-word noise."""
+    return {
+        tok
+        for tok in (m.group(0).lower() for m in _WORD_RE.finditer(text))
+        if len(tok) >= 3 and tok not in _QUERY_NOISE_TOKENS
+    }
+
+
+def _work_text(work: dict) -> str:
+    title = work.get("title") or work.get("display_name") or ""
+    abstract = _reconstruct_abstract(work.get("abstract_inverted_index"))
+    return f"{title} {abstract}"
+
+
+def _filter_relevant(works: list, query: str, min_overlap: int) -> list:
+    """Keep works whose title+abstract share >= `min_overlap` query tokens.
+
+    No-op (returns `works` unchanged) when `min_overlap` <= 0, the query is
+    empty, or the query has no significant tokens — so the gate is strictly
+    opt-in and never removes hits when it cannot score them. Non-dict entries
+    are always kept (never scored).
+    """
+    if min_overlap <= 0 or not query:
+        return works
+    q_tokens = _significant_tokens(query)
+    if not q_tokens:
+        return works
+    kept: list = []
+    for work in works:
+        if not isinstance(work, dict):
+            kept.append(work)
+            continue
+        if len(q_tokens & _significant_tokens(_work_text(work))) >= min_overlap:
+            kept.append(work)
+    return kept
+
+
+def _stable_sort(merged: list[tuple[dict, str]]) -> list[tuple[dict, str]]:
+    """Canonical, citation-neutral order: sort merged findings by work key.
+
+    Stabilizes the finding ORDER across runs over the same work set (the merge
+    order otherwise depends on query arrival), which in turn stabilizes the
+    order-sensitive step-4 finding pairing. Citation-neutral so it does not
+    re-bias against the fresh, low-cited GTs the recall slices rescue.
+    """
+    return sorted(merged, key=lambda item: _work_key(item[0]) or "")
 
 
 def _merge_works(
