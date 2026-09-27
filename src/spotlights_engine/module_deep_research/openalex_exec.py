@@ -279,14 +279,15 @@ class OpenAlexRunnerOptions(BaseModel):
     # facet coverage isn't collapsed to one phrasing). Complemented by post-hoc
     # query canonicalization (see `_canonicalize_queries`) and the semantic-heavy
     # pool (semantic recall is wording-insensitive). None = leave the CLI default.
-    query_writer_temperature: float | None = 0.2
+    query_writer_temperature: float | None = 0.1
     query_writer_seed: int | None = 7
     # Brief canonicalization is a stricter transform than query-gen: its whole
     # job is to collapse two differently-worded briefs to ONE byte-identical
     # text, so it wants the lowest usable temperature (no facet-coverage slack).
-    # 0.001 + the deterministic pass-2 (`_normalize_canonical`) converged m3/m4
-    # 5/5 over 10 rounds through the codex CLI.
-    canonicalize_temperature: float | None = 0.001
+    # A sweep (no seed, codex CLI) held m3/m4 5/5 at 0.001 and 0.1 but broke at
+    # 0.5 (a GOAL-CLASS flip pass-2 can't re-derive), so canonicalization runs at
+    # 0.05 — deep inside the stable band, a touch of slack over 0.001.
+    canonicalize_temperature: float | None = 0.05
     canonicalize_seed: int | None = 7
 
 
