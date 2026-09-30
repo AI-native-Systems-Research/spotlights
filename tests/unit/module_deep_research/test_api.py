@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from spotlights_engine.module_deep_research.api import research_module, resolve_target_module
 from spotlights_engine.module_deep_research.claude_exec import ClaudeExecClient
 from spotlights_engine.module_deep_research.codex_exec import CodexExecClient, CodexExecResult
@@ -320,3 +322,92 @@ def test_select_runners_enable_claude_search_adds_claude(tmp_path: Path) -> None
     assert len(runners) == 2
     assert isinstance(runners[0], CodexExecClient)
     assert isinstance(runners[1], ClaudeExecClient)
+
+
+# --- codex rate-limit retry -------------------------------------------------
+
+
+def _codex_result(returncode: int, stderr: str = "") -> CodexExecResult:
+    return CodexExecResult(
+        command=["codex"],
+        returncode=returncode,
+        stdout="",
+        stderr=stderr,
+        output_last_message=None,
+    )
+
+
+def _codex_client_with_results(
+    tmp_path: Path, results: list[CodexExecResult], monkeypatch: pytest.MonkeyPatch
+) -> tuple[CodexExecClient, list[float]]:
+    """A client whose `_run_once` yields `results` in order, with sleeps captured
+    instead of taken (the real backoff starts at 120s)."""
+    from spotlights_engine.module_deep_research import codex_exec
+
+    client = CodexExecClient(codex_exec.CodexExecOptions(cwd=tmp_path))
+    pending = list(results)
+    monkeypatch.setattr(client, "_run_once", lambda prompt: pending.pop(0))
+
+    slept: list[float] = []
+    monkeypatch.setattr(codex_exec.time, "sleep", slept.append)
+    return client, slept
+
+
+def test_codex_retries_rate_limit_then_succeeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, slept = _codex_client_with_results(
+        tmp_path,
+        [
+            _codex_result(1, "Your requests to gpt-5.5 have exceeded rate limit."),
+            _codex_result(1, "stream disconnected before completion"),
+            _codex_result(0),
+        ],
+        monkeypatch,
+    )
+
+    result = client.run("prompt", check=False)
+
+    assert result.returncode == 0
+    # Exponential: first wait is the base, second is 2x it.
+    assert slept == [120.0, 240.0]
+
+
+def test_codex_does_not_retry_non_rate_limit_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, slept = _codex_client_with_results(
+        tmp_path,
+        [_codex_result(1, "SyntaxError: invalid syntax")],
+        monkeypatch,
+    )
+
+    result = client.run("prompt", check=False)
+
+    assert result.returncode == 1
+    assert slept == []  # returned immediately, no backoff
+
+
+def test_codex_gives_up_after_configured_retries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from spotlights_engine.module_deep_research import codex_exec
+
+    client = CodexExecClient(
+        codex_exec.CodexExecOptions(
+            cwd=tmp_path, rate_limit_retries=2, rate_limit_backoff_seconds=1.0
+        )
+    )
+    calls = {"n": 0}
+
+    def _always_rate_limited(prompt: str) -> CodexExecResult:
+        calls["n"] += 1
+        return _codex_result(1, "http 429")
+
+    monkeypatch.setattr(client, "_run_once", _always_rate_limited)
+    monkeypatch.setattr(codex_exec.time, "sleep", lambda _s: None)
+
+    result = client.run("prompt", check=False)
+
+    assert result.returncode == 1
+    assert calls["n"] == 3  # initial attempt + 2 retries, then gives up
