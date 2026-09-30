@@ -163,3 +163,31 @@ def test_absent_bundled_file_is_not_an_error(monkeypatch, tmp_path):
     monkeypatch.delenv(MODELS_ENV_VAR, raising=False)
     monkeypatch.setattr(mc, "_BUNDLED_MODELS_PATH", tmp_path / "gone.yaml")
     assert load_model_config() == ModelConfig()
+
+
+@pytest.mark.parametrize(
+    ("value", "ok"),
+    [
+        ("aws/claude-opus-5", True),
+        ("claude-opus-5[1m]", True),
+        ("anthropic.claude-opus-4-v1:0", True),
+        ("bad model id", False),
+        # `match` with a trailing `$` also accepts a trailing newline, so this
+        # would have passed before the validator moved to `fullmatch`.
+        ("opus\n", False),
+        ("opus\t", False),
+    ],
+)
+def test_model_id_error_uses_fullmatch_semantics(value: str, ok: bool) -> None:
+    from spotlights_engine.model_config import (
+        CLAUDE_MODEL_EXPECTED,
+        CLAUDE_MODEL_RE,
+        model_id_error,
+    )
+
+    problem = model_id_error(
+        "src", value, pattern=CLAUDE_MODEL_RE, expected=CLAUDE_MODEL_EXPECTED
+    )
+    assert (problem is None) is ok
+    if problem is not None:
+        assert "src" in problem and "not a valid model id" in problem

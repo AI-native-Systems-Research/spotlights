@@ -20,7 +20,13 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
-from spotlights_engine.model_config import load_model_config
+from spotlights_engine.model_config import (
+    CLAUDE_MODEL_EXPECTED,
+    CLAUDE_MODEL_RE,
+    load_model_config,
+    model_id_error,
+    models_path,
+)
 from spotlights_engine.one_shot_apply.api import (
     NOTES_NAME,
     OneShotApplyConfig,
@@ -189,11 +195,30 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.claude_model is None:
             claude_model = load_model_config().claude
+            model_source = f"{models_path()} (claude)"
         else:
             claude_model = args.claude_model.strip() or None
+            model_source = "--claude-model"
     except (OSError, ValueError) as exc:
         print(f"apply: {exc}", file=sys.stderr)
         return 2
+
+    # Validate the id the same way the main CLI does. `OneShotApplyInput`'s
+    # `claude_model` carries no pattern — nothing downstream of it constrains a
+    # Claude id — so without this check a value like "bad model id" reaches
+    # `claude --model` and fails as an opaque subprocess error, after a worktree
+    # has already been created. The main CLI rejects the identical value at
+    # startup, so the two entry points disagreed about the same file.
+    if claude_model:
+        problem = model_id_error(
+            model_source,
+            claude_model,
+            pattern=CLAUDE_MODEL_RE,
+            expected=CLAUDE_MODEL_EXPECTED,
+        )
+        if problem is not None:
+            print(f"apply: {problem}", file=sys.stderr)
+            return 2
 
     try:
         inp = OneShotApplyInput(
