@@ -17,6 +17,7 @@ from spotlights_engine.module_deep_research.openalex_exec import (
 )
 from spotlights_engine.module_deep_research.claude_exec import ClaudeExecClient, ClaudeExecOptions
 from spotlights_engine.module_deep_research.codex_exec import CodexExecClient, CodexExecOptions
+from spotlights_engine.module_deep_research.vocab_synthesis import ModuleVocab
 from spotlights_engine.module_deep_research.validation import (
     AgentModuleDeepResearchOutput,
     normalize_module_deep_research_output,
@@ -72,6 +73,7 @@ def select_runners(
     enable_openalex: bool = False,
     openalex_model: str | None = None,
     openalex_query_mode: str = "codex",
+    openalex_module_vocab: "ModuleVocab | None" = None,
 ) -> tuple[ModuleResearchRunner, ...]:
     """Resolve caller-provided runners or create the default runner set.
 
@@ -100,6 +102,7 @@ def select_runners(
                     cwd=repo_path,
                     model=openalex_model,
                     query_mode=openalex_query_mode,
+                    module_vocab=openalex_module_vocab,
                 )
             ),
         )

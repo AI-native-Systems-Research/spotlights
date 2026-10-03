@@ -55,6 +55,30 @@ def _format_candidates(candidates: list[Candidate]) -> str:
     return "\n\n".join(blocks)
 
 
+def _candidate_objective(candidate: Candidate, module_objective: str) -> str:
+    """Build a single-target research objective from one candidate's fields.
+
+    Used only in per-candidate deep research: each pass gets an objective scoped
+    to its own hot spot so it hunts for sources bearing on THAT symbol instead of
+    drifting across the whole module (which otherwise finds another candidate's
+    papers, mis-tags them, and drops them at the 1:1 proposal pairing)."""
+    loc = _format_candidate_location(candidate)
+    return (
+        f"Research mission — improve exactly ONE target: {loc}.\n"
+        f"- What it does today: {candidate.current_approach}\n"
+        f"- Why it is worth changing: {candidate.evolve_rationale}\n"
+        f"- What a stronger version looks like: {candidate.description}\n"
+        f"- Expected payoff ({candidate.estimated_impact}): "
+        f"{candidate.estimated_impact_explanation}\n"
+        "Hunt for sources carrying a concrete method, algorithm, or design idea "
+        "that moves THIS target from its current approach toward the desired "
+        "improvement. A source about a different part of the module does NOT "
+        "count, however interesting — it belongs to another target's pass.\n"
+        "For orientation only (do NOT widen your search to the whole module): "
+        f"this target serves the broader module goal {module_objective!r}."
+    )
+
+
 def _format_module(module: Module, module_qualified_name: str) -> str:
     depends_on = ", ".join(module.depends_on) or "(none)"
     return (
@@ -78,14 +102,44 @@ def render_module_deep_research_prompt(
         AgentModuleDeepResearchOutput.model_json_schema(), indent=2
     )
     repo_path = str(request.repo_path)
+    # Per-candidate deep research runs one pass per hot spot with exactly one
+    # candidate. When scoped like that, the hot spot is a STRICT scope and the
+    # objective is rewritten to that single target; otherwise hot spots stay
+    # module-wide hints and the caller's module objective is used verbatim.
+    scoped = request.include_candidate_hotspots and len(request.candidates) == 1
+    objective_text = request.context.objective
+    focus_section = ""
     hotspots_section = ""
     if request.include_candidate_hotspots and request.candidates:
+        if scoped:
+            scope_note = (
+                "This run is SCOPED TO THE SINGLE target shown under Objective\n"
+                "below. Treat it as a STRICT scope, not a hint: search only for\n"
+                "sources that improve that one symbol. Ignore the module's other\n"
+                "symbols even if they look improvable — each is researched in its\n"
+                "own separate pass.\n"
+            )
+        else:
+            scope_note = (
+                "These are the symbols the discovery step flagged as worth\n"
+                "evolving in this module. Use them to steer your search toward\n"
+                "sources that address them; they are hints, not a strict scope.\n"
+            )
         hotspots_section = (
             "\nIdentified hot spots (from candidate_discovery):\n"
-            "These are the symbols the discovery step flagged as worth\n"
-            "evolving in this module. Use them to steer your search toward\n"
-            "sources that address them; they are hints, not a strict scope.\n"
+            f"{scope_note}"
             f"{_format_candidates(request.candidates)}\n"
+        )
+    if scoped:
+        objective_text = _candidate_objective(
+            request.candidates[0], request.context.objective
+        )
+        focus_section = (
+            "Scope directive:\n"
+            "Although step 1 asks you to understand the module, keep both your\n"
+            "code reading and your literature search tightly centered on the one\n"
+            "target symbol above and its immediate callers/callees. Do NOT build\n"
+            "a module-wide improvement list.\n\n"
         )
     return f"""You are running the Spotlights module_deep_research pipeline step.
 Do not modify files. Do not ask questions.
@@ -109,13 +163,14 @@ Target module:
 {_format_module(module, request.module_qualified_name)}
 {hotspots_section}
 Caller context:
-Objective: {request.context.objective}
+Objective:
+{objective_text}
 Workload hints:
 {_format_list(request.context.workload_hints)}
 Validation plan:
 {_format_list(request.context.validation_plan)}
 
-Workflow:
+{focus_section}Workflow:
 1. First understand the target module before searching. Open the module's
    main files (and any nearby files needed to make sense of them) to learn
    what the module does, its responsibilities, key abstractions, data flow,

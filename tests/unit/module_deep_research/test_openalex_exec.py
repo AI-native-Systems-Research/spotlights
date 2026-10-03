@@ -202,7 +202,10 @@ def test_codex_query_brief_strips_execution_sections(monkeypatch):
     )
     client.run(prompt)
 
-    seen = writer.prompts[0]
+    # prompts[0] is instruction + brief; check only the brief tail so the
+    # instruction's own vocabulary (which legitimately names "severity" in its
+    # DO-NOT list) is not mistaken for a leak from the research prompt.
+    seen = writer.prompts[0].split("--- BRIEF ---", 1)[-1]
     assert "Objective: fuse optimizer kernels" in seen
     assert "Workflow:" not in seen
     assert "findings" not in seen
@@ -259,6 +262,74 @@ def test_codex_mode_issues_one_search_per_query_line(monkeypatch):
     ]
 
 
+def test_fallback_reprompts_broader_query_when_first_tier_empty(monkeypatch):
+    # Tier 1's narrow query returns nothing; tier 2's broadened re-prompt lands
+    # a work, so the run still yields a finding instead of an empty result.
+    monkeypatch.setattr(openalex_exec, "_CANONICALIZE_BRIEF", False)
+    monkeypatch.setattr(openalex_exec, "_CANONICALIZE_QUERIES", False)
+
+    def fake_urlopen(request, timeout=None):
+        url = request.full_url
+        results = [_work(title="ColBERT Paper")] if "retrieval" in url else []
+        return io.BytesIO(json.dumps({"results": results}).encode("utf-8"))
+
+    monkeypatch.setattr(openalex_exec.urllib.request, "urlopen", fake_urlopen)
+
+    class _TieredWriter:
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        def run(self, prompt: str, *, check: bool = True) -> AgentExecResult:
+            self.prompts.append(prompt)
+            if "too narrow" in prompt:  # tier 2 simplify re-prompt
+                msg = "colbert retrieval"
+            elif "STILL returned" in prompt:  # tier 3 keyword re-prompt
+                msg = "colbert"
+            else:  # tier 1 structured writer -> narrow, no "retrieval" -> empty
+                msg = "maxsim late interaction scoring"
+            return AgentExecResult(
+                command=["codex", "exec"],
+                returncode=0,
+                stdout="",
+                stderr="",
+                final_message=msg,
+                usage=None,
+            )
+
+    writer = _TieredWriter()
+    client = OpenAlexRunner(
+        OpenAlexRunnerOptions(
+            query_mode="codex", recency_results=0, semantic_results=0
+        ),
+        query_writer=writer,
+    )
+    result = client.run("Qualified name: ir/colbert\nObjective: cut memory\n")
+
+    parsed = parse_agent_output(result.final_message)
+    assert [f.title for f in parsed.findings] == ["ColBERT Paper"]
+    # The broadening re-prompt (tier 2) was actually issued.
+    assert any("too narrow" in p for p in writer.prompts)
+
+
+def test_fallback_not_triggered_when_first_tier_has_works(monkeypatch):
+    # Tier 1 lands a work, so no broadening re-prompt is ever issued.
+    monkeypatch.setattr(openalex_exec, "_CANONICALIZE_BRIEF", False)
+    monkeypatch.setattr(openalex_exec, "_CANONICALIZE_QUERIES", False)
+    _install_fake_urlopen(monkeypatch, results=[_work()])
+
+    writer = _FakeQueryWriter("colbert late interaction")
+    client = OpenAlexRunner(
+        OpenAlexRunnerOptions(
+            query_mode="codex", recency_results=0, semantic_results=0
+        ),
+        query_writer=writer,
+    )
+    client.run("Qualified name: ir/colbert\nObjective: cut memory\n")
+
+    assert all("too narrow" not in p for p in writer.prompts)
+    assert all("STILL returned" not in p for p in writer.prompts)
+
+
 def test_codex_mode_dedups_same_work_across_queries(monkeypatch):
     # Both queries return the SAME work (same OpenAlex id) -> one finding.
     def fake_urlopen(request, timeout=None):
@@ -296,6 +367,28 @@ def test_sanitize_query_drops_unbalanced_quotes():
 def test_sanitize_query_empty_inputs():
     assert _sanitize_query("") == ""
     assert _sanitize_query("\n  \n") == ""
+
+
+def test_sanitize_caps_stacked_quoted_phrases_to_one():
+    # The stacking bug: 3 ANDed exact phrases -> near-zero OpenAlex hits. Keep
+    # only the first phrase quoted; later phrases drop to bare ANDed tokens.
+    out = _sanitize_query('"predicate pushdown" "columnar scan" "late materialization"')
+    assert out == '"predicate pushdown" columnar scan late materialization'
+    assert out.count('"') == 2
+
+
+def test_sanitize_keeps_single_quoted_phrase():
+    assert _sanitize_query('"packrat parsing" memoization') == (
+        '"packrat parsing" memoization'
+    )
+
+
+def test_sanitize_preserves_quoted_phrases_in_or_group():
+    # ORed phrases inside parens are a deliberate synonym construct, not the
+    # AND-stacking bug, so both quoted phrases must survive.
+    out = _sanitize_query('("write-ahead log" OR "redo log") recovery')
+    assert out == '("write-ahead log" OR "redo log") recovery'
+    assert out.count('"') == 4
 
 
 # --------------------------------------------------------------------------
@@ -513,3 +606,69 @@ def test_works_to_output_json_roundtrips_through_parser():
     assert f.source_type == "paper"
     assert f.technique_summary
     assert "OpenAlex" in f.supporting_evidence
+
+
+def _db_vocab():
+    """A non-tensor (query-engine) ModuleVocab, to prove the canonicalizer is
+    not pinned to the built-in PyTorch domain."""
+    from spotlights_engine.module_deep_research.vocab_synthesis import ModuleVocab
+
+    return ModuleVocab(
+        object_nouns=["column batch", "row group"],
+        techniques=["predicate pushdown", "vectorized execution"],
+        goal_classes=["throughput increase", "memory reduction"],
+        examples_by_technique={
+            "predicate pushdown": "filter_scan",
+            "vectorized execution": "simd_eval",
+        },
+    ).normalized()
+
+
+def test_vocab_canonicalize_instruction_uses_module_vocab():
+    # The synthesized instruction must carry the module's own controlled lists
+    # and NOT the built-in tensor vocabulary.
+    vocab = _db_vocab()
+    text = openalex_exec._render_canonicalize_instruction(vocab)
+    assert "column batch" in text and "predicate pushdown" in text
+    assert "throughput increase" in text
+    # built-in tensor terms must be gone
+    assert "embedding tensor" not in text
+    assert "kernel fusion" not in text
+
+
+def test_vocab_normalize_locks_examples_from_vocab_table():
+    # EXAMPLES is derived DETERMINISTICALLY from the chosen TECHNIQUE via the
+    # vocab's own table, overriding whatever the model emitted.
+    vocab = _db_vocab()
+    raw = (
+        "SUBJECT: scan filtering\n"
+        "OBJECTS: row group, column batch\n"
+        "ADJECTIVES: predicate pushdown, throughput increase\n"
+        "EXAMPLES: something the model made up\n"
+    )
+    out = openalex_exec._normalize_canonical_with(raw, vocab)
+    assert "EXAMPLES: filter_scan" in out
+    # OBJECTS alpha-sorted
+    assert "OBJECTS: column batch, row group" in out
+
+
+def test_runner_feeds_vocab_instruction_to_canonicalizer(monkeypatch):
+    # End to end: a runner carrying a module_vocab canonicalizes the brief with
+    # the vocab-derived instruction (fake writer records the prompt it saw).
+    monkeypatch.setattr(openalex_exec, "_CANONICALIZE_QUERIES", False)
+    _install_fake_urlopen(monkeypatch, results=[_work()])
+    vocab = _db_vocab()
+    writer = _FakeQueryWriter(
+        "SUBJECT: scan filtering\n"
+        "OBJECTS: column batch, row group\n"
+        "ADJECTIVES: predicate pushdown, throughput increase\n"
+        "EXAMPLES: ignored\n"
+    )
+    client = OpenAlexRunner(
+        OpenAlexRunnerOptions(query_mode="codex", module_vocab=vocab),
+        query_writer=writer,
+    )
+    client.run("Objective: speed up scans\nTarget module: db/scan\n")
+    # prompts[0] is the brief-canonicalize call; it must use the vocab lists.
+    assert "predicate pushdown" in writer.prompts[0]
+    assert "embedding tensor" not in writer.prompts[0]

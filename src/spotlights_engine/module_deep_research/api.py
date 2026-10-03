@@ -16,7 +16,15 @@ from spotlights_engine.module_deep_research.orchestration import (
     run_runners,
     select_runners,
 )
+from spotlights_engine.module_deep_research.openalex_exec import (
+    _SYNTHESIZE_VOCAB,
+    build_vocab_writer,
+)
 from spotlights_engine.module_deep_research.prompts import render_module_deep_research_prompt
+from spotlights_engine.module_deep_research.vocab_synthesis import (
+    ModuleVocab,
+    load_or_build_vocab,
+)
 from spotlights_engine.schemas.common import StepIssue
 from spotlights_engine.schemas.finding import Finding
 from spotlights_engine.schemas.pipeline import (
@@ -103,6 +111,40 @@ def _combine_per_candidate(
     )
 
 
+def _synthesize_module_vocab(
+    request: ModuleDeepResearchInput, module: Module, seg: str
+) -> ModuleVocab | None:
+    """Build (once per module) the controlled vocabulary that drives OpenAlex
+    brief/query canonicalization, from the module and ALL its candidate briefs —
+    before the per-candidate rephrase. Gated by OPENALEX_SYNTHESIZE_VOCAB; a
+    None result makes the runner fall back to its built-in vocabulary."""
+    if not (_SYNTHESIZE_VOCAB and request.enable_openalex and request.candidates):
+        return None
+    briefs = [
+        " ".join(
+            part
+            for part in (
+                c.description,
+                getattr(c, "current_approach", ""),
+                getattr(c, "evolve_rationale", ""),
+            )
+            if part
+        )
+        for c in request.candidates
+    ]
+    writer = build_vocab_writer(
+        cwd=request.repo_path, model=request.openalex_model
+    )
+    return load_or_build_vocab(
+        writer,
+        cache_dir=request.repo_path / ".spotlights" / "vocab",
+        module_slug=seg,
+        module_name=module.name,
+        module_description=module.description or "",
+        candidate_briefs=briefs,
+    )
+
+
 def research_module_with_telemetry(
     request: ModuleDeepResearchInput,
     codex_options: CodexExecOptions | None = None,
@@ -129,6 +171,7 @@ def research_module_with_telemetry(
             )
         )
 
+    module_vocab = _synthesize_module_vocab(request, module, seg)
     active_runners = select_runners(
         repo_path=request.repo_path,
         codex_options=codex_options,
@@ -139,6 +182,7 @@ def research_module_with_telemetry(
         enable_openalex=request.enable_openalex,
         openalex_model=request.openalex_model,
         openalex_query_mode=request.openalex_query_mode,
+        openalex_module_vocab=module_vocab,
     )
     # Per-candidate mode: one scoped research pass per hot spot (each pass sees a
     # single candidate). Each pass's outcomes are merged/deduped/capped on their

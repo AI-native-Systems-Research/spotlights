@@ -37,6 +37,7 @@ from typing import Literal, Protocol
 from pydantic import BaseModel, ConfigDict, Field
 
 from spotlights_engine.local_agent.base import AgentExecResult
+from spotlights_engine.module_deep_research.vocab_synthesis import ModuleVocab
 
 OPENALEX_API_KEY_ENV = "OPENALEX_API_KEY"
 OPENALEX_MAILTO_ENV = "OPENALEX_MAILTO"
@@ -45,7 +46,7 @@ OPENALEX_WORKS_URL = "https://api.openalex.org/works"
 # Transient-failure retry budget for a single works fetch (see `_fetch_works`).
 _log = logging.getLogger(__name__)
 
-_FETCH_RETRIES = 4
+_FETCH_RETRIES = 2
 _FETCH_BACKOFF_SECONDS = 1.5
 
 # Hard cap on any single retry backoff, including a server-sent Retry-After.
@@ -177,6 +178,17 @@ _CANONICALIZE_BRIEF = _bool_env("OPENALEX_CANONICALIZE_BRIEF", default=True)
 # OPENALEX_CANONICALIZE_QUERIES.
 _CANONICALIZE_QUERIES = _bool_env("OPENALEX_CANONICALIZE_QUERIES", default=True)
 
+# Synthesize the canonicalization vocabulary PER MODULE instead of using the
+# built-in PyTorch/tensor closed vocabulary baked into _CANONICALIZE_INSTRUCTION.
+# When on, the manager builds one ModuleVocab per module (from the module
+# description + every candidate brief, before the per-candidate rephrase) and
+# threads it into OpenAlexRunnerOptions.module_vocab; the canonicalize prompts
+# and the derived-slot locker are then generated FROM that vocab, so the
+# canonicalizer generalizes to any domain (parsers, databases, networking, ...).
+# Off (default) → byte-identical to the built-in-vocabulary path. Override via
+# OPENALEX_SYNTHESIZE_VOCAB.
+_SYNTHESIZE_VOCAB = _bool_env("OPENALEX_SYNTHESIZE_VOCAB", default=False)
+
 # Query tokens that carry no topical signal — OpenAlex boolean operators and
 # common stop words the query-writer may emit; excluded from the overlap count.
 _QUERY_NOISE_TOKENS = frozenset(
@@ -307,12 +319,42 @@ class OpenAlexRunnerOptions(BaseModel):
     # 0.05 — deep inside the stable band, a touch of slack over 0.001.
     canonicalize_temperature: float | None = 0.05
     canonicalize_seed: int | None = 7
+    # Per-module synthesized controlled vocabulary (OPENALEX_SYNTHESIZE_VOCAB).
+    # When set, the canonicalize prompts and the derived-slot locker are built
+    # FROM this vocab instead of the built-in PyTorch/tensor closed lists, so
+    # canonicalization generalizes to the module's own domain. None → built-in.
+    module_vocab: ModuleVocab | None = None
 
 
 class _QueryWriter(Protocol):
     """Minimal runner interface used to distill a search query from the prompt."""
 
     def run(self, prompt: str, *, check: bool = ...) -> AgentExecResult: ...
+
+
+def build_vocab_writer(
+    *, cwd: Path | str, model: str | None = None, timeout_seconds: int | None = 30
+) -> _QueryWriter:
+    """Codex writer for per-module vocabulary synthesis.
+
+    Uses the same low-temperature/fixed-seed config as brief canonicalization so
+    the synthesized vocabulary is reproducible (vocab_synthesis's determinism
+    contract). Pure text transform: no web/tools."""
+    from spotlights_engine.module_deep_research.codex_exec import (
+        CodexExecClient,
+        CodexExecOptions,
+    )
+
+    return CodexExecClient(
+        CodexExecOptions(
+            cwd=cwd,
+            model=model,
+            search=False,
+            temperature=0.05,
+            seed=7,
+            timeout_seconds=timeout_seconds,
+        )
+    )
 
 
 class OpenAlexRunner:
@@ -477,6 +519,49 @@ class OpenAlexRunner:
         )
         return queries
 
+    def _fallback_queries(
+        self, brief: str, instruction: str, *, limit: int
+    ) -> list[str]:
+        """Broader re-prompt issued when a prior tier returned zero works.
+
+        Runs the query writer with a simpler instruction. Brief/query
+        canonicalization is deliberately skipped — those passes re-narrow toward
+        the structured 5-slot pattern this tier is trying to escape. Sanitizes
+        and dedups the reply. Best-effort: any failure returns []."""
+        writer = self._query_writer or self._default_query_writer()
+        if writer is None:
+            return []
+        started = time.monotonic()
+        try:
+            result = writer.run(instruction + brief, check=False)
+        except Exception as exc:
+            _log.warning(
+                "openalex: fallback query-gen failed in %.1fs (%s)",
+                time.monotonic() - started,
+                exc,
+            )
+            return []
+        if result.returncode != 0 or not result.final_message:
+            _log.warning(
+                "openalex: fallback query-gen empty in %.1fs (rc=%s)",
+                time.monotonic() - started,
+                result.returncode,
+            )
+            return []
+        sanitized = [
+            q
+            for q in (_sanitize_line(ln) for ln in result.final_message.splitlines())
+            if q
+        ]
+        queries = _canonicalize_queries(sanitized, limit=limit)
+        _log.info(
+            "openalex: fallback query-gen done in %.1fs — %d quer%s",
+            time.monotonic() - started,
+            len(queries),
+            "y" if len(queries) == 1 else "ies",
+        )
+        return queries
+
     def _canonicalize_brief(self, writer: "_QueryWriter", brief: str) -> str:
         """Rewrite `brief` into the fixed canonical form (opt-in, best-effort).
 
@@ -489,8 +574,14 @@ class OpenAlexRunner:
         """
         started = time.monotonic()
         _log.info("openalex: canonicalize brief start (timeout=%ss)", self.options.timeout_seconds)
+        vocab = self.options.module_vocab
+        instruction = (
+            _render_canonicalize_instruction(vocab)
+            if vocab is not None
+            else _CANONICALIZE_INSTRUCTION
+        )
         try:
-            result = writer.run(_CANONICALIZE_INSTRUCTION + brief, check=False)
+            result = writer.run(instruction + brief, check=False)
         except Exception as exc:
             _log.warning(
                 "openalex: canonicalize brief failed in %.1fs (%s) — using raw brief",
@@ -507,7 +598,11 @@ class OpenAlexRunner:
             )
             return brief
         # Pass 2: lock the derived slots deterministically (model-independent).
-        canonical = _normalize_canonical(canonical)
+        canonical = (
+            _normalize_canonical_with(canonical, vocab)
+            if vocab is not None
+            else _normalize_canonical(canonical)
+        )
         _log.info(
             "openalex: canonicalize brief done in %.1fs (%d chars)",
             time.monotonic() - started,
@@ -531,8 +626,14 @@ class OpenAlexRunner:
             return queries
         started = time.monotonic()
         _log.info("openalex: canonicalize queries start (%d in)", len(queries))
+        vocab = self.options.module_vocab
+        instruction = (
+            _render_query_canon_instruction(vocab)
+            if vocab is not None
+            else _QUERY_CANON_INSTRUCTION
+        )
         try:
-            result = writer.run(_QUERY_CANON_INSTRUCTION + "\n".join(queries), check=False)
+            result = writer.run(instruction + "\n".join(queries), check=False)
         except Exception as exc:
             _log.warning(
                 "openalex: canonicalize queries failed in %.1fs (%s) — using raw queries",
@@ -598,17 +699,99 @@ class OpenAlexRunner:
         )
 
     def run(self, prompt: str, *, check: bool = True) -> AgentExecResult:
-        queries = self._resolve_queries(prompt)
+        # Always-return fallback chain: tier 1 is the normal query resolver; if
+        # it fetches zero works, tier 2 re-prompts for broader unquoted queries
+        # and tier 3 for a single bare keyword. Each later tier's LLM call fires
+        # only when the previous tier came back empty, so the common path (tier 1
+        # succeeds) costs nothing extra.
+        per_query: list[tuple[str, str, list]] = []
+        all_urls: list[str] = []
+        first_error: tuple[int, str] | None = None
+        for tier, make_queries in enumerate(self._query_tiers(prompt), start=1):
+            queries = make_queries()
+            if not queries:
+                continue
+            pq, urls, err = self._fetch_queries(queries, check)
+            if err is not None and first_error is None:
+                first_error = err
+            works_found = sum(len(w) for _q, _u, w in pq)
+            if not per_query:
+                # Keep the first tier that actually issued fetches, so an
+                # all-empty run still logs its queries and emits the no-works
+                # issue even when later tiers add nothing.
+                per_query, all_urls = pq, urls
+            if works_found > 0:
+                per_query, all_urls = pq, urls
+                if tier > 1:
+                    _log.info(
+                        "openalex: fallback tier %d recovered %d work(s)",
+                        tier,
+                        works_found,
+                    )
+                break
+
+        safe_cmd = ["GET", *(_redact_api_key(u) for u in all_urls)]
+
+        # No tier produced works AND at least one hard error occurred: surface
+        # the first error like the single-query path did.
+        if not per_query and first_error is not None:
+            return AgentExecResult(
+                command=safe_cmd,
+                returncode=first_error[0],
+                stdout="",
+                stderr=first_error[1],
+                final_message=None,
+                usage=None,
+            )
+
+        merged = _merge_works(per_query)
+        if _STABLE_SORT:
+            merged = _stable_sort(merged)
+        payload = _works_to_output_json(per_query, merged)
+        return AgentExecResult(
+            command=safe_cmd,
+            returncode=0,
+            stdout=payload,
+            stderr="",
+            final_message=payload,
+            usage=None,
+        )
+
+    def _query_tiers(self, prompt: str):
+        """Yield lazy query producers for the always-return fallback chain.
+
+        Tier 1 is the normal resolver (codex structured writer, or regex). In
+        codex mode, tiers 2 and 3 re-prompt the writer for progressively broader
+        queries; they are lambdas so their LLM call fires only if an earlier tier
+        returned zero works. Regex mode has a single tier (no LLM to re-prompt)."""
+        yield lambda: self._resolve_queries(prompt)
+        if self.options.query_mode == "codex":
+            brief = _query_brief(prompt)
+            yield lambda: self._fallback_queries(
+                brief, _QUERY_WRITER_SIMPLIFY_INSTRUCTION, limit=3
+            )
+            yield lambda: self._fallback_queries(
+                brief, _QUERY_WRITER_KEYWORD_INSTRUCTION, limit=1
+            )
+
+    def _fetch_queries(
+        self, queries: list[str], check: bool
+    ) -> tuple[list[tuple[str, str, list]], list[str], tuple[int, str] | None]:
+        """Fetch one tier's query list; return (per_query, all_urls, first_error).
+
+        Each query's keyword slice is required; extra recency/semantic slices are
+        best-effort; the relevance gate is applied per query. In `check` mode a
+        hard HTTP/URL error raises; otherwise the first error is captured so the
+        caller can surface it only when no tier produced any works."""
         plans = [(q, self._query_urls(q)) for q in queries]
-        safe_cmd = ["GET", *(_redact_api_key(u) for _q, us in plans for u in us)]
+        all_urls = [u for _q, us in plans for u in us]
         _log.info(
             "openalex: %d quer%s → %d URL(s) to fetch (mode=%s)",
             len(plans),
             "y" if len(plans) == 1 else "ies",
-            sum(len(us) for _q, us in plans),
+            len(all_urls),
             self.options.query_mode,
         )
-
         per_query: list[tuple[str, str, list]] = []
         first_error: tuple[int, str] | None = None
         for query, urls in plans:
@@ -653,30 +836,7 @@ class OpenAlexRunner:
                         query,
                     )
             per_query.append((query, primary_url, works))
-
-        # Every query failed: surface the first error like the single-query path.
-        if not per_query and first_error is not None:
-            return AgentExecResult(
-                command=safe_cmd,
-                returncode=first_error[0],
-                stdout="",
-                stderr=first_error[1],
-                final_message=None,
-                usage=None,
-            )
-
-        merged = _merge_works(per_query)
-        if _STABLE_SORT:
-            merged = _stable_sort(merged)
-        payload = _works_to_output_json(per_query, merged)
-        return AgentExecResult(
-            command=safe_cmd,
-            returncode=0,
-            stdout=payload,
-            stderr="",
-            final_message=payload,
-            usage=None,
-        )
+        return per_query, all_urls, first_error
 
     def _query_urls(self, query: str) -> list[str]:
         """URLs to fetch for one query: keyword, then recency, then semantic.
@@ -838,26 +998,35 @@ _QUERY_WRITER_INSTRUCTION = (
     "- Space-separated words are ANDed by default, so every extra word narrows "
     "the results. Keep each query tight: 2-6 high-signal concepts, no filler.\n"
     '- Wrap a canonical multi-word term in double quotes for an exact phrase, '
-    'e.g. \"key-value cache\".\n'
+    'e.g. \"predicate pushdown\".\n'
+    "- CRITICAL: use AT MOST ONE double-quoted phrase per query, and NEVER put "
+    "two or more quoted phrases in the same query. OpenAlex ANDs exact phrases, "
+    'so stacking them (e.g. \"predicate pushdown\" \"columnar scan\" \"late '
+    'materialization\") almost always returns ZERO works. Quote only the single '
+    "most important multi-word term; leave every other term unquoted so its words "
+    "AND as ordinary tokens.\n"
     "- Use UPPERCASE OR with parentheses to allow a synonym for one concept, "
-    'e.g. (\"KV cache\" OR \"key-value cache\") compression.\n'
-    "- Use research-paper vocabulary describing the method/problem "
-    "(\"attention\", \"quantization\", \"speculative decoding\"); NEVER file "
+    'e.g. (\"write-ahead log\" OR \"redo log\") recovery.\n'
+    "- Use research-paper vocabulary describing the method/problem; NEVER file "
     "paths, class or variable names, or the host framework/library name unless "
-    "it is itself the research subject.\n"
-    "- Do NOT emit a bare generic term on its own (\"optimization\", \"deep "
-    "learning\", \"neural network\", \"machine learning\", \"gradient descent\", "
-    "\"matrix\"): alone they match tens of thousands of off-topic papers. Always "
+    "it is itself the research subject. (Domain examples: \"packrat parsing\" "
+    "for a parser, \"predicate pushdown\" for a query engine, \"zero-copy\" for "
+    "networking, \"spatial hashing\" for graphics, \"work stealing\" for a "
+    "scheduler.)\n"
+    "- Do NOT emit a bare generic term on its own (\"optimization\", "
+    "\"algorithm\", \"performance\", \"data structure\", \"parallelism\", "
+    "\"cache\"): alone they match tens of thousands of off-topic papers. Always "
     "pair a generic with the SPECIFIC method, structure, or problem "
-    '(e.g. \"orthogonalized momentum matrix optimizer\", not \"optimization\").\n'
+    '(e.g. \"predicate pushdown columnar scan\", not \"optimization\").\n'
     "- Prefer the method's proper name and its algorithmic mechanism if known "
-    '(e.g. \"Newton-Schulz iteration orthogonalization\", \"Muon optimizer\").\n'
+    '(e.g. \"packrat parsing memoization\", \"LSM-tree compaction\").\n'
     "- ANCHOR a method/algorithm name with its application domain in the SAME "
-    "query — a bare method name matches the wrong field (e.g. \"Newton-Schulz "
-    "orthogonalization\" alone returns pure-mathematics matrix-iteration papers; "
-    "\"Newton-Schulz orthogonalization momentum optimizer neural network\" "
-    "returns the machine-learning application). Add 2-3 application words "
-    "(the task, the model class, or \"optimizer\"/\"training\") to every "
+    "query — a bare method name matches the wrong field. E.g. \"Newton-Schulz "
+    "orthogonalization\" alone returns pure-mathematics matrix-iteration papers, "
+    "while \"Newton-Schulz orthogonalization momentum optimizer neural network\" "
+    "returns the intended application; likewise \"B-tree\" alone is generic but "
+    "\"B-tree concurrent index latch-free\" is specific. Add 2-3 application "
+    "words (the task, the system class, or the problem being solved) to every "
     "method-named query.\n"
     "- The target module and its hot spots (above) name the concrete method — "
     "USE those names verbatim; they are the research subject, not forbidden "
@@ -868,10 +1037,12 @@ _QUERY_WRITER_INSTRUCTION = (
     "this order. Treat this as an EXTRACTION task, not creative writing: for a "
     "given brief the same 5 lines must be produced every time.\n"
     "  slot 1 — the method's proper name copied VERBATIM from the brief + the "
-    'single most specific application-domain noun in the brief (e.g. \"Muon '
-    'optimizer neural network training\")\n'
+    'single most specific application-domain noun in the brief (e.g. \"packrat '
+    'parsing incremental compiler\", or \"predicate pushdown columnar query '
+    'engine\")\n'
     "  slot 2 — the core algorithmic mechanism, named with the brief's own terms "
-    '(e.g. \"Newton-Schulz iteration orthogonalization momentum\")\n'
+    '(e.g. \"memoized lookahead parse-table\", or \"late materialization vectorized '
+    'scan\")\n'
     "  slot 3 — the problem the method solves, in research-paper vocabulary drawn "
     "from the brief\n"
     "  slot 4 — the ONE most established published synonym for the method (the "
@@ -889,6 +1060,37 @@ _QUERY_WRITER_INSTRUCTION = (
     "Favor specificity over breadth (a precise 3-5 concept query beats a vague "
     "1-2 word one). No numbering, no bullets, no markdown, no blank lines, no "
     "explanation — just the 5 query strings, each on its own line.\n"
+    "\n"
+    "--- RESEARCH BRIEF ---\n"
+)
+
+# Fallback tier 2 (always-return chain). The structured 5-slot queries above can
+# all come back empty when the brief's terms are too narrow or niche for OpenAlex.
+# This re-prompt asks for a SMALL set of much broader, unquoted queries so a
+# second search still lands works. Issued only after tier 1 returned zero works.
+_QUERY_WRITER_SIMPLIFY_INSTRUCTION = (
+    "Your previous OpenAlex queries returned NO results — they were too narrow "
+    "(too many ANDed terms, or stacked exact phrases). Rewrite the search as a "
+    "SMALL set of BROADER queries for the research brief below.\n"
+    "Rules:\n"
+    "- Output AT MOST 3 queries, ONE PER LINE.\n"
+    "- Each query is 2-3 plain words naming the single most important "
+    "method or problem. NO double quotes, NO parentheses, NO OR, NO operators.\n"
+    "- Drop every narrow qualifier; keep only the core concept.\n"
+    "- No numbering, bullets, markdown, or prose — just the query lines.\n"
+    "\n"
+    "--- RESEARCH BRIEF ---\n"
+)
+
+# Fallback tier 3 (last resort). Even the broadened tier-2 queries came back
+# empty; ask for the single broadest keyword search that could still surface a
+# relevant paper. One line, 1-2 bare keywords.
+_QUERY_WRITER_KEYWORD_INSTRUCTION = (
+    "Earlier OpenAlex searches STILL returned nothing. Give the single broadest "
+    "search that could surface any relevant paper for the brief below.\n"
+    "Rules:\n"
+    "- Output EXACTLY ONE line: 1-2 plain keywords naming the core topic.\n"
+    "- NO quotes, operators, punctuation, numbering, or prose.\n"
     "\n"
     "--- RESEARCH BRIEF ---\n"
 )
@@ -1095,6 +1297,141 @@ def _normalize_canonical(raw: str) -> str:
     ]
     return "\n".join(out)
 
+
+# --------------------------------------------------------------------------
+# Vocabulary-driven canonicalization (OPENALEX_SYNTHESIZE_VOCAB)
+# --------------------------------------------------------------------------
+# When a per-module `ModuleVocab` is supplied, these builders generate the same
+# fixed-pattern canonicalize prompts and derived-slot locker the built-in path
+# uses, but with the module's OWN closed vocabulary substituted in — so the
+# canonicalizer collapses equivalent briefs to byte-identical text in ANY
+# domain, not just the hand-authored tensor one.
+
+
+def _render_canonicalize_instruction(vocab: ModuleVocab) -> str:
+    """Build the brief-canonicalize instruction from a synthesized vocabulary."""
+    objects = ", ".join(vocab.object_nouns)
+    techniques = ", ".join([*vocab.techniques, "other reduction"])
+    goals = ", ".join(vocab.goal_classes)
+    table = "; ".join(
+        f"{t}->{vocab.examples_by_technique.get(t) or '(empty)'}"
+        for t in vocab.techniques
+    )
+    return (
+        "You normalize a code-optimization research brief into a FIXED CANONICAL "
+        "QUERY PATTERN. Two briefs describing the SAME code and the SAME "
+        "optimization — however differently worded — MUST produce BYTE-IDENTICAL "
+        "output. UNDERSTAND the material and map every phrase to the controlled "
+        "vocabulary below; do NOT echo the brief's wording. This is "
+        "normalization, not writing.\n"
+        "\n"
+        "Output EXACTLY these 4 lines, each starting with its label, in this "
+        "order, and NOTHING else:\n"
+        "SUBJECT: one canonical lowercase noun-phrase for the operation being "
+        "optimized. Choose the SINGLE most established generic name and REUSE it "
+        "across differently-worded briefs: when the brief offers synonyms for the "
+        "operation, pick the term that aligns with the controlled OBJECT nouns and "
+        "the chosen TECHNIQUE below — never a run-specific paraphrase. No "
+        "symbol/class/method name, no file path, no framework name.\n"
+        "OBJECTS: comma-separated data structures the change reads or writes, each "
+        "mapped to ONE controlled noun and sorted ALPHABETICALLY. Controlled "
+        f"nouns: {objects}. Map synonyms onto the nearest controlled noun. List "
+        "ONLY the primary input/output structures; EXCLUDE internal scratch the "
+        "algorithm builds on the way unless it is itself the operation's output.\n"
+        "ADJECTIVES: EXACTLY two terms, sorted ALPHABETICALLY — one TECHNIQUE and "
+        f"one GOAL-CLASS. TECHNIQUE in {{{techniques}}}; if none fits use \"other "
+        f"reduction\". GOAL-CLASS in {{{goals}}}. When more than one GOAL-CLASS "
+        f"could apply, emit the FIRST in this priority order: {goals}.\n"
+        "EXAMPLES: derived DETERMINISTICALLY from the chosen TECHNIQUE via this "
+        f"fixed table (NOT from the brief's wording): {table}. Emit that slot's "
+        "value verbatim; leave empty when the table maps it to (empty).\n"
+        "\n"
+        "RULES:\n"
+        "- UNDERSTAND then NORMALIZE. Collapse synonyms to ONE canonical term.\n"
+        "- CLOSED vocabulary is mandatory for OBJECTS and ADJECTIVES. Never invent "
+        "a synonym; pick the listed term whose meaning matches.\n"
+        "- SORT every multi-item slot alphabetically.\n"
+        "- Include ONLY what the change itself requires; drop upstream/context "
+        "names one wording might mention but the other omits.\n"
+        "- lowercase every term.\n"
+        "\n"
+        "DO NOT: emit impact/severity/priority/effort; line numbers, paths, or "
+        "framework names; adjectives outside the closed lists; blank lines, "
+        "markdown, bullets, or any text outside the 4 labeled lines.\n"
+        "\n"
+        "--- BRIEF ---\n"
+    )
+
+
+def _render_query_canon_instruction(vocab: ModuleVocab) -> str:
+    """Build the query-list canonicalize instruction from a synthesized vocab."""
+    techniques = ", ".join([*vocab.techniques, "other reduction"])
+    goals = ", ".join(vocab.goal_classes)
+    objects = ", ".join(vocab.object_nouns)
+    table = "; ".join(
+        f"{t}->{(vocab.examples_by_technique.get(t) or '').replace(',', '') or '(none)'}"
+        for t in vocab.techniques
+    )
+    return (
+        "You normalize a list of OpenAlex `search` queries into ONE FIXED "
+        "CANONICAL QUERY STRUCTURE. Two query lists expressing the SAME facets — "
+        "however differently worded across runs — MUST produce BYTE-IDENTICAL "
+        "output. Map each concept onto the controlled vocabulary below and emit "
+        "the structure; discard the input's incidental wording.\n"
+        "\n"
+        "Output EXACTLY 5 lines, ONE query per line, in THIS FIXED ORDER, each "
+        "built ONLY from the controlled vocabulary — and NOTHING else:\n"
+        "  line 1 CORE    -> the canonical SUBJECT noun-phrase alone, lowercase, "
+        "in double quotes.\n"
+        "  line 2 METHOD  -> <TECHNIQUE> \"<SUBJECT>\".\n"
+        "  line 3 DATA    -> the OBJECT nouns, space-joined, sorted ALPHABETICALLY.\n"
+        "  line 4 METHODS -> the EXAMPLES named methods for the chosen TECHNIQUE, "
+        "sorted ALPHABETICALLY (if the technique has none, repeat line 1's "
+        "value).\n"
+        "  line 5 CLASS   -> <GOAL-CLASS> \"<SUBJECT>\".\n"
+        "\n"
+        "CONTROLLED VOCABULARY (identical to the brief canon; pick the listed term "
+        "whose meaning matches, never invent):\n"
+        f"  TECHNIQUE in {{{techniques}}}\n"
+        f"  GOAL-CLASS in {{{goals}}}\n"
+        f"  OBJECT nouns in {{{objects}}}\n"
+        f"  EXAMPLES by technique: {table}\n"
+        "\n"
+        "RULES: DROP any decorative or run-specific modifier not in the "
+        "vocabulary. Do NOT reorder words inside an established phrase, change "
+        "casing, or expand/contract acronyms. Emit NO numbering, bullets, "
+        "markdown, blank lines, file paths, class/variable names, or host "
+        "framework name — just the 5 query lines.\n"
+        "\n"
+        "--- QUERIES ---\n"
+    )
+
+
+def _normalize_canonical_with(raw: str, vocab: ModuleVocab) -> str:
+    """Vocab-driven twin of `_normalize_canonical`: lock the derived EXAMPLES slot
+    from the module's own technique table, else behave identically."""
+    slots: dict[str, str] = {}
+    for line in raw.splitlines():
+        m = _CANON_SLOT_RE.match(line)
+        if m:
+            slots[m.group(1)] = m.group(2).strip()
+    if "SUBJECT" not in slots or "ADJECTIVES" not in slots:
+        return raw.strip()
+    _items = lambda v: [x.strip().lower() for x in v.split(",") if x.strip()]
+    objs = sorted(set(_items(slots.get("OBJECTS", ""))))
+    adjs = sorted(set(_items(slots.get("ADJECTIVES", ""))))
+    technique_set = set(vocab.techniques)
+    technique = next((a for a in adjs if a in technique_set), "")
+    examples = vocab.examples_by_technique.get(technique, "") if technique else ""
+    out = [
+        f"SUBJECT: {slots['SUBJECT'].strip().lower()}",
+        f"OBJECTS: {', '.join(objs)}",
+        f"ADJECTIVES: {', '.join(adjs)}",
+        f"EXAMPLES: {examples}" if examples else "EXAMPLES:",
+    ]
+    return "\n".join(out)
+
+
 # The rendered research prompt continues past the semantic brief into agent
 # execution instructions (Workflow, Output rules, the ModuleDeepResearchOutput
 # JSON schema dump). Those trailing sections name wire fields like `findings`,
@@ -1114,6 +1451,8 @@ def _query_brief(prompt: str) -> str:
 _QUERY_ALLOWED_RE = re.compile(r'[^0-9A-Za-z "()\-]+')
 # Leading label ("Query:"), enumerator ("1.", "-", "*") the model may prepend.
 _QUERY_PREFIX_RE = re.compile(r"(?i)^(?:\d+[.)]|[-*•]|query|keywords|search)\s*[:.\-)]*\s*")
+# Boolean OR operator (uppercase, word-bounded) marking a deliberate synonym group.
+_OR_OP_RE = re.compile(r"\bOR\b")
 
 
 def _sanitize_line(line: str) -> str:
@@ -1129,7 +1468,32 @@ def _sanitize_line(line: str) -> str:
     line = _QUERY_ALLOWED_RE.sub(" ", line)
     if line.count('"') % 2:
         line = line.replace('"', " ")
+    line = _cap_quoted_phrases(line)
     return " ".join(line.split())[:256].strip()
+
+
+def _cap_quoted_phrases(query: str) -> str:
+    """Keep at most ONE double-quoted phrase; unquote any others.
+
+    OpenAlex ANDs exact-phrase matches, so two or more quoted phrases in one
+    `search` string collapse to near-zero hits (the stacking bug). Keep the
+    first balanced quoted phrase — the writer's highest-priority term — and
+    strip the quotes from every later phrase, leaving their words as ordinary
+    ANDed tokens. Assumes balanced quotes (the caller drops unbalanced ones).
+
+    Boolean/grouped queries are left untouched: multiple quoted phrases inside
+    `( ... OR ... )` are ORed, not ANDed, so they do not trigger the zero-hit
+    stacking bug and are a deliberate synonym construct we must preserve.
+    """
+    if query.count('"') <= 2:
+        return query
+    if "(" in query or _OR_OP_RE.search(query):
+        return query
+    first = query.index('"')
+    second = query.index('"', first + 1)
+    head = query[: second + 1]
+    tail = query[second + 1 :].replace('"', " ")
+    return head + tail
 
 
 def _sanitize_query(raw: str) -> str:
