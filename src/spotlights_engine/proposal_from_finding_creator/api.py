@@ -11,6 +11,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+import re
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Protocol
@@ -164,20 +166,101 @@ def _validate_setup(
         ensure_claude_available()
 
 
+def _spillover_enabled() -> bool:
+    return os.getenv("PROPOSAL_SPILLOVER", "1").strip().lower() not in (
+        "0",
+        "false",
+        "no",
+        "off",
+    )
+
+
+def _spillover_min_overlap() -> int:
+    try:
+        return max(1, int(os.getenv("PROPOSAL_SPILLOVER_MIN_OVERLAP", "2")))
+    except ValueError:
+        return 2
+
+
+_WORD_RE = re.compile(r"[a-z0-9]+")
+
+# Generic optimization filler shared by (almost) every candidate brief. Left in,
+# these words make the token gate trivially pass for every pair — the whole brief
+# vocabulary collapses to "optimize/performance/memory". Dropping them is what
+# makes the overlap gate actually discriminate between candidates.
+_SPILLOVER_STOPWORDS = frozenset(
+    {
+        "the", "and", "for", "with", "that", "this", "from", "into", "are", "was",
+        "has", "have", "will", "can", "its", "use", "used", "using", "uses",
+        "based", "approach", "current", "implementation", "code", "function",
+        "method", "methods", "data", "value", "values", "result", "results",
+        "performance", "optimize", "optimized", "optimization", "optimizations",
+        "improve", "improved", "improvement", "reduce", "reduced", "reducing",
+        "reduction", "faster", "fast", "speed", "speedup", "memory", "time",
+        "latency", "throughput", "efficient", "efficiency", "cost", "overhead",
+        "module", "candidate", "change", "changes", "better", "more", "less",
+        "when", "where", "which", "while", "than", "then", "they", "them",
+    }
+)
+
+
+def _tokens(text: str) -> set[str]:
+    return {
+        t
+        for t in _WORD_RE.findall(text.lower())
+        if len(t) >= 3 and t not in _SPILLOVER_STOPWORDS
+    }
+
+
+def _candidate_tokens(candidate: Candidate) -> set[str]:
+    # Gate on the RAW brief, not the canonicalized form: canonicalization can
+    # drop a candidate's distinctive term (closed-vocab miss), which would make a
+    # genuinely cross-applicable finding fail the gate. The untouched brief keeps
+    # those distinguishing tokens.
+    return _tokens(
+        " ".join(
+            (candidate.description, candidate.current_approach, candidate.evolve_rationale)
+        )
+    )
+
+
+def _finding_tokens(finding: Finding) -> set[str]:
+    return _tokens(
+        " ".join((finding.title, finding.technique_summary, finding.supporting_evidence))
+    )
+
+
+def _spillover_relevant(finding: Finding, candidate: Candidate, *, min_overlap: int) -> bool:
+    """Cheap, deterministic relevance gate for cross-candidate spillover: share at
+    least `min_overlap` meaningful tokens between the finding and the candidate's
+    raw brief."""
+    return len(_finding_tokens(finding) & _candidate_tokens(candidate)) >= min_overlap
+
+
 def _build_pair_keys(
     candidates: list[Candidate], findings: list[Finding]
 ) -> list[tuple[Candidate, Finding, str]]:
     """Return pairs in candidate-outer, finding-inner order.
 
-    A finding tagged with a `candidate_id` (per-candidate deep research) is paired
-    only with that candidate — no N×M cross product. A finding with
-    `candidate_id is None` (module-wide research) pairs with every candidate,
-    preserving the pre-per-candidate behavior."""
+    A finding tagged with a `candidate_id` (per-candidate deep research) always
+    pairs with its own candidate. It may ALSO spill over to other candidates in
+    the module, but only when a cheap token-overlap gate says it is relevant to
+    them — so a cross-applicable paper discovered in the "wrong" candidate's pass
+    still reaches the right proposal writer, without reviving the full N×M cross
+    product (and its many empty pairs). A finding with `candidate_id is None`
+    (module-wide research) pairs with every candidate, as before. Spillover can be
+    disabled via `PROPOSAL_SPILLOVER=0`, which restores strict 1:1 pairing."""
+    spillover_on = _spillover_enabled()
+    min_overlap = _spillover_min_overlap()
     pairs: list[tuple[Candidate, Finding, str]] = []
     for c in candidates:
         for f in findings:
             if f.candidate_id is not None and f.candidate_id != c.id:
-                continue
+                if not (
+                    spillover_on
+                    and _spillover_relevant(f, c, min_overlap=min_overlap)
+                ):
+                    continue
             pairs.append((c, f, f"{c.id}__{f.finding_id}"))
     return pairs
 

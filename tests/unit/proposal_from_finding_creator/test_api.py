@@ -55,6 +55,71 @@ def test_build_pair_keys_untagged_is_full_cross_product() -> None:
     assert len(pairs) == 4
 
 
+def test_build_pair_keys_spillover_pairs_relevant_cross_candidate() -> None:
+    # A finding researched for cand_a spills over to cand_b when it shares enough
+    # meaningful tokens with cand_b's raw brief; an irrelevant finding does not.
+    cand_a = make_candidate(0)
+    cand_b = make_candidate(1).model_copy(
+        update={
+            "description": "quantize attention projection weights",
+            "current_approach": "dense float projection matmul",
+            "evolve_rationale": "shrink projection footprint",
+        }
+    )
+    # Finding tagged to cand_a but clearly about cand_b's projection quantization.
+    spill = make_finding(0).model_copy(
+        update={
+            "candidate_id": cand_a.id,
+            "title": "Projection quantization for attention",
+            "technique_summary": "quantize projection weights to int8",
+        }
+    )
+    # Finding tagged to cand_a, unrelated to cand_b.
+    stay = make_finding(1).model_copy(
+        update={
+            "candidate_id": cand_a.id,
+            "title": "Ring buffer scheduling",
+            "technique_summary": "lock-free queue handoff",
+        }
+    )
+
+    got = {
+        (c.id, f.finding_id)
+        for c, f, _ in _build_pair_keys([cand_a, cand_b], [spill, stay])
+    }
+    # own-candidate pairs always present
+    assert (cand_a.id, spill.finding_id) in got
+    assert (cand_a.id, stay.finding_id) in got
+    # relevant spillover reaches cand_b; irrelevant one does not
+    assert (cand_b.id, spill.finding_id) in got
+    assert (cand_b.id, stay.finding_id) not in got
+
+
+def test_build_pair_keys_spillover_disabled_is_strict(monkeypatch) -> None:
+    monkeypatch.setenv("PROPOSAL_SPILLOVER", "0")
+    cand_a = make_candidate(0)
+    cand_b = make_candidate(1).model_copy(
+        update={
+            "description": "quantize attention projection weights",
+            "current_approach": "dense float projection matmul",
+            "evolve_rationale": "shrink projection footprint",
+        }
+    )
+    spill = make_finding(0).model_copy(
+        update={
+            "candidate_id": cand_a.id,
+            "title": "Projection quantization for attention",
+            "technique_summary": "quantize projection weights to int8",
+        }
+    )
+    got = {
+        (c.id, f.finding_id)
+        for c, f, _ in _build_pair_keys([cand_a, cand_b], [spill])
+    }
+    # strict 1:1 — even a relevant finding stays with its own candidate
+    assert got == {(cand_a.id, spill.finding_id)}
+
+
 @pytest.fixture
 def repo(tmp_path: Path) -> Path:
     r = tmp_path / "repo"

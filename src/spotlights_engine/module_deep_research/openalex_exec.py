@@ -185,9 +185,9 @@ _CANONICALIZE_QUERIES = _bool_env("OPENALEX_CANONICALIZE_QUERIES", default=True)
 # threads it into OpenAlexRunnerOptions.module_vocab; the canonicalize prompts
 # and the derived-slot locker are then generated FROM that vocab, so the
 # canonicalizer generalizes to any domain (parsers, databases, networking, ...).
-# Off (default) → byte-identical to the built-in-vocabulary path. Override via
-# OPENALEX_SYNTHESIZE_VOCAB.
-_SYNTHESIZE_VOCAB = _bool_env("OPENALEX_SYNTHESIZE_VOCAB", default=False)
+# On by default (part of the Udi-feedback fix set); set
+# OPENALEX_SYNTHESIZE_VOCAB=0 to fall back to the built-in-vocabulary path.
+_SYNTHESIZE_VOCAB = _bool_env("OPENALEX_SYNTHESIZE_VOCAB", default=True)
 
 # Query tokens that carry no topical signal — OpenAlex boolean operators and
 # common stop words the query-writer may emit; excluded from the overlap count.
@@ -820,7 +820,9 @@ class OpenAlexRunner:
             # deduped. A recency-slice failure must never sink the query.
             for extra_url in urls[1:]:
                 try:
-                    works = _concat_dedup(works, self._fetch_works(extra_url))
+                    works = _concat_dedup(
+                        works, self._fetch_works(extra_url, retries=0)
+                    )
                 except Exception:
                     pass
             if _RELEVANCE_MIN_OVERLAP > 0:
@@ -869,13 +871,16 @@ class OpenAlexRunner:
             parts._replace(query=urllib.parse.urlencode(q))
         )
 
-    def _fetch_works(self, url: str) -> list:
+    def _fetch_works(self, url: str, *, retries: int | None = None) -> list:
         # The semantic endpoint (and occasionally the main one) returns transient
         # 5xx / times out under load; retry a couple of times with backoff before
-        # giving up so a slow semantic slice still lands its rescue hits.
+        # giving up so a slow semantic slice still lands its rescue hits. Pass
+        # retries=0 for best-effort extra slices so a flaky semantic 504 fails
+        # fast instead of burning minutes of backoff on an optional rescue slice.
         global _last_fetch_ts
+        max_retries = _FETCH_RETRIES if retries is None else retries
         last_exc: Exception | None = None
-        for attempt in range(_FETCH_RETRIES + 1):
+        for attempt in range(max_retries + 1):
             # Throttle: never fire two fetches closer than _MIN_INTERVAL_SECONDS.
             gap = time.monotonic() - _last_fetch_ts
             if gap < _MIN_INTERVAL_SECONDS:
@@ -884,7 +889,7 @@ class OpenAlexRunner:
             _log.info(
                 "openalex: fetch attempt %d/%d (timeout=%ss) %s",
                 attempt + 1,
-                _FETCH_RETRIES + 1,
+                max_retries + 1,
                 self.options.timeout_seconds,
                 _redact_api_key(url),
             )
@@ -917,7 +922,7 @@ class OpenAlexRunner:
                 # retry immediately (no wait) as long as an unused key remains.
                 if is_http and exc.code in (401, 402, 403, 429):
                     keys = self._api_keys()
-                    if len(keys) > 1 and self._key_idx + 1 < len(keys) and attempt < _FETCH_RETRIES:
+                    if len(keys) > 1 and self._key_idx + 1 < len(keys) and attempt < max_retries:
                         self._key_idx += 1
                         url = self._swap_api_key(url, keys[self._key_idx])
                         _log.warning(
@@ -927,7 +932,7 @@ class OpenAlexRunner:
                         last_exc = exc
                         continue
                 retryable = (not is_http) or exc.code >= 500 or exc.code == 429
-                if not retryable or attempt == _FETCH_RETRIES:
+                if not retryable or attempt == max_retries:
                     raise
                 last_exc = exc
                 delay = _FETCH_BACKOFF_SECONDS * (attempt + 1)
