@@ -313,6 +313,33 @@ def _parse_vocab(text: str) -> ModuleVocab | None:
         return None
 
 
+def _rerank_goal_classes(vocab: ModuleVocab, candidate_briefs: list[str]) -> ModuleVocab:
+    """Replace the model's goal priority order with a deterministic one.
+
+    `goal_classes` is the only slot the canonicalizer treats as ORDERED (the
+    first applicable goal wins). Trusting the synthesis model's order makes that
+    tie-break non-reproducible across a cache rebuild. Re-rank instead by how many
+    candidate briefs motivate each goal (a goal's significant word appearing in a
+    brief), highest first, with an alphabetical tie-break. This keeps the semantic
+    intent (the most load-bearing goal still wins) while being fully deterministic
+    — unlike a plain alphabetical sort, which would discard priority entirely."""
+    goals = vocab.goal_classes
+    if len(goals) <= 1:
+        return vocab
+    briefs = [b.lower() for b in candidate_briefs]
+
+    def motivation(goal: str) -> int:
+        words = {w for w in re.findall(r"[a-z0-9]+", goal) if len(w) >= 4}
+        if not words:
+            return 0
+        return sum(1 for b in briefs if any(w in b for w in words))
+
+    ordered = sorted(goals, key=lambda g: (-motivation(g), g))
+    if ordered == goals:
+        return vocab
+    return vocab.model_copy(update={"goal_classes": ordered})
+
+
 def build_module_vocab(
     writer: _Writer,
     *,
@@ -345,7 +372,7 @@ def build_module_vocab(
     if parsed is None:
         _log.warning("vocab synthesis unparseable — using built-in vocabulary")
         return None
-    vocab = parsed.normalized()
+    vocab = _rerank_goal_classes(parsed.normalized(), candidate_briefs)
     if not vocab.is_usable():
         _log.warning("vocab synthesis produced empty slots — using built-in vocabulary")
         return None

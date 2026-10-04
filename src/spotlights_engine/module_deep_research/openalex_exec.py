@@ -21,6 +21,7 @@ Result count is bounded by `max_results` (OpenAlex `per_page`); downstream
 
 from __future__ import annotations
 
+import difflib
 import json
 import logging
 import os
@@ -1412,9 +1413,107 @@ def _render_query_canon_instruction(vocab: ModuleVocab) -> str:
     )
 
 
+def _vocab_word_authority(vocab: ModuleVocab) -> list[str]:
+    """The closed set of single words the SUBJECT may snap to: every word that
+    appears in an object noun or technique phrase, deduped and sorted (so the
+    difflib match target is itself deterministic)."""
+    words: set[str] = set()
+    for term in (*vocab.object_nouns, *vocab.techniques):
+        for m in _WORD_RE.finditer(term.lower()):
+            w = m.group(0)
+            if len(w) >= 3 and w not in _QUERY_NOISE_TOKENS:
+                words.add(w)
+    return sorted(words)
+
+
+def _common_prefix_len(a: str, b: str) -> int:
+    n = 0
+    for ca, cb in zip(a, b):
+        if ca != cb:
+            break
+        n += 1
+    return n
+
+
+def _snap_token(tok: str, authority: list[str]) -> str:
+    """Snap one SUBJECT token to a closed-vocabulary word, deterministically.
+
+    Order: exact hit → difflib close match (cutoff 0.8) → shared-prefix match
+    (>=4 chars and >=60% of the shorter word, which collapses inflections like
+    `score`/`scoring`/`scored` that difflib's ratio rates below 0.8) → bare token.
+    `authority` is pre-sorted so the first qualifying candidate is stable."""
+    if not authority or tok in authority:
+        return tok
+    close = difflib.get_close_matches(tok, authority, n=1, cutoff=0.8)
+    if close:
+        return close[0]
+    best = tok
+    best_len = 0
+    for w in authority:
+        pl = _common_prefix_len(tok, w)
+        if pl >= 4 and pl >= 0.6 * min(len(tok), len(w)) and pl > best_len:
+            best, best_len = w, pl
+    return best
+
+
+def _resolve_technique(adjs: list[str], techniques: list[str]) -> str:
+    """Pick the vocab technique an ADJECTIVE denotes, tolerating near-synonyms so
+    the EXAMPLES slot does not silently vanish on an inexact word.
+
+    Order (first hit wins; `techniques` is pre-sorted, so ties are stable):
+      1. exact membership (unchanged legacy behavior);
+      2. whole-phrase difflib close match (cutoff 0.8);
+      3. shared significant-word match by prefix (>=4 chars), which catches
+         `memoized lookahead` -> `memoization` that ratio-based matching misses.
+    Returns "" when nothing resolves (caller then emits an empty EXAMPLES slot)."""
+    if not techniques:
+        return ""
+    tset = set(techniques)
+    for a in adjs:
+        if a in tset:
+            return a
+    for a in adjs:
+        close = difflib.get_close_matches(a, techniques, n=1, cutoff=0.8)
+        if close:
+            return close[0]
+    tech_words = {
+        t: {m.group(0) for m in _WORD_RE.finditer(t) if len(m.group(0)) >= 4}
+        for t in techniques
+    }
+    for a in adjs:
+        a_words = [m.group(0) for m in _WORD_RE.finditer(a) if len(m.group(0)) >= 4]
+        for t in techniques:
+            if any(
+                _common_prefix_len(aw, tw) >= 4
+                for aw in a_words
+                for tw in tech_words[t]
+            ):
+                return t
+    return ""
+
+
+def _canonicalize_subject(subject: str, vocab: ModuleVocab) -> str:
+    """Canonicalize the SUBJECT line the same way the derived slots are: lowercase,
+    tokenize, drop noise/short tokens, SNAP each remaining token to its closest
+    closed-vocabulary word (so `scoring`/`score` collapse when the vocab holds the
+    base word), then dedupe and sort. Falls back to the bare token when no vocab
+    word is close enough. The whole point is to kill the SUBJECT wording wobble
+    that otherwise leaks into the OpenAlex query."""
+    authority = _vocab_word_authority(vocab)
+    tokens: list[str] = []
+    for m in _WORD_RE.finditer(subject.lower()):
+        tok = m.group(0)
+        if len(tok) < 3 or tok in _QUERY_NOISE_TOKENS:
+            continue
+        tokens.append(_snap_token(tok, authority))
+    # dict.fromkeys dedupes preserving first-seen; sort makes order canonical.
+    return " ".join(sorted(dict.fromkeys(tokens)))
+
+
 def _normalize_canonical_with(raw: str, vocab: ModuleVocab) -> str:
     """Vocab-driven twin of `_normalize_canonical`: lock the derived EXAMPLES slot
-    from the module's own technique table, else behave identically."""
+    from the module's own technique table, and snap SUBJECT to the closed vocab,
+    else behave identically."""
     slots: dict[str, str] = {}
     for line in raw.splitlines():
         m = _CANON_SLOT_RE.match(line)
@@ -1425,11 +1524,11 @@ def _normalize_canonical_with(raw: str, vocab: ModuleVocab) -> str:
     _items = lambda v: [x.strip().lower() for x in v.split(",") if x.strip()]
     objs = sorted(set(_items(slots.get("OBJECTS", ""))))
     adjs = sorted(set(_items(slots.get("ADJECTIVES", ""))))
-    technique_set = set(vocab.techniques)
-    technique = next((a for a in adjs if a in technique_set), "")
+    technique = _resolve_technique(adjs, vocab.techniques)
     examples = vocab.examples_by_technique.get(technique, "") if technique else ""
+    subject = _canonicalize_subject(slots["SUBJECT"], vocab) or slots["SUBJECT"].strip().lower()
     out = [
-        f"SUBJECT: {slots['SUBJECT'].strip().lower()}",
+        f"SUBJECT: {subject}",
         f"OBJECTS: {', '.join(objs)}",
         f"ADJECTIVES: {', '.join(adjs)}",
         f"EXAMPLES: {examples}" if examples else "EXAMPLES:",

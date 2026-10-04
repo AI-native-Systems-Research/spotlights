@@ -652,6 +652,64 @@ def test_vocab_normalize_locks_examples_from_vocab_table():
     assert "OBJECTS: column batch, row group" in out
 
 
+def test_subject_canonicalized_collapses_inflections():
+    # SUBJECT is snapped to the closed vocab + sorted/deduped, so differently
+    # inflected phrasings produce byte-identical SUBJECT lines.
+    vocab = _db_vocab()
+    base = (
+        "OBJECTS: row group\n"
+        "ADJECTIVES: predicate pushdown\n"
+        "EXAMPLES: ignored\n"
+    )
+    a = openalex_exec._normalize_canonical_with(
+        "SUBJECT: Row grouping of columns\n" + base, vocab
+    )
+    b = openalex_exec._normalize_canonical_with(
+        "SUBJECT: grouped column rows\n" + base, vocab
+    )
+    subj_a = next(l for l in a.splitlines() if l.startswith("SUBJECT:"))
+    subj_b = next(l for l in b.splitlines() if l.startswith("SUBJECT:"))
+    assert subj_a == subj_b  # inflection/order wobble collapsed
+    # snapped to vocab words, sorted
+    assert subj_a == "SUBJECT: column group row"
+
+
+def test_resolve_technique_fuzzy_keeps_examples():
+    # A near-synonym ADJECTIVE still resolves to its vocab technique, so EXAMPLES
+    # is not silently dropped.
+    vocab = _db_vocab()
+    raw = (
+        "SUBJECT: scan\n"
+        "OBJECTS: row group\n"
+        "ADJECTIVES: predicate push down\n"  # near-synonym of 'predicate pushdown'
+        "EXAMPLES: ignored\n"
+    )
+    out = openalex_exec._normalize_canonical_with(raw, vocab)
+    assert "EXAMPLES: filter_scan" in out
+
+
+def test_rerank_goal_classes_is_deterministic_by_brief_frequency():
+    from spotlights_engine.module_deep_research.vocab_synthesis import (
+        ModuleVocab,
+        _rerank_goal_classes,
+    )
+
+    vocab = ModuleVocab(
+        goal_classes=["throughput increase", "memory reduction"],
+        object_nouns=["x"],
+        techniques=["y"],
+    )
+    # 'memory' motivated by 2 briefs, 'throughput' by 1 -> memory first.
+    briefs = ["cut memory use", "lower memory footprint", "raise throughput"]
+    out = _rerank_goal_classes(vocab, briefs)
+    assert out.goal_classes == ["memory reduction", "throughput increase"]
+    # Order is independent of the model's input order (determinism).
+    flipped = vocab.model_copy(
+        update={"goal_classes": ["memory reduction", "throughput increase"]}
+    )
+    assert _rerank_goal_classes(flipped, briefs).goal_classes == out.goal_classes
+
+
 def test_runner_feeds_vocab_instruction_to_canonicalizer(monkeypatch):
     # End to end: a runner carrying a module_vocab canonicalizes the brief with
     # the vocab-derived instruction (fake writer records the prompt it saw).
