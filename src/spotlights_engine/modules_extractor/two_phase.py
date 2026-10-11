@@ -58,6 +58,7 @@ from spotlights_engine.modules_extractor.claude_stage import (
 )
 from spotlights_engine.modules_extractor.coverage import (
     CrossArtifactError,
+    drop_vacuous_exclusions,
     forced_repository_level_files,
     validate_source_root_decision,
 )
@@ -490,6 +491,15 @@ def _stage1_source_root(
         decision = _inject_forced_repository_level_files(
             result.parsed, detected_source_files
         )
+        decision, dropped_exclusions = drop_vacuous_exclusions(
+            decision, detected_source_files
+        )
+        if dropped_exclusions:
+            notify(
+                on_event,
+                f"extractor: stage-1 dropped {len(dropped_exclusions)} exclusion(s) "
+                f"covering no source file: {', '.join(dropped_exclusions)}",
+            )
         try:
             validate_source_root_decision(decision, repo_path, detected_source_files)
         except CrossArtifactError as exc:
@@ -514,6 +524,7 @@ def _stage1_source_root(
                 "repo_fingerprint": repo_fingerprint,
                 "algorithm_profile": ALGORITHM_PROFILE_VERSION,
                 "detected_source_files": sorted(detected_source_files),
+                "dropped_vacuous_exclusions": dropped_exclusions,
             },
         )
         _required_write_json(

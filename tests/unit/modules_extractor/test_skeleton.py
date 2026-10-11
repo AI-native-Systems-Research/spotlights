@@ -18,6 +18,8 @@ import pytest
 
 from spotlights_engine.modules_extractor.coverage import (
     CrossArtifactError,
+    drop_vacuous_exclusions,
+    vacuous_exclusions,
     validate_source_root_decision,
 )
 from spotlights_engine.modules_extractor.skeleton import (
@@ -214,6 +216,123 @@ def test_source_root_validation_exclusion_covering_no_source_fails(
     )
     with pytest.raises(CrossArtifactError, match="covers no detected source"):
         validate_source_root_decision(decision, tmp_path, scan.files)
+
+
+def _decision(source_root: str, *exclusions: str) -> SourceRootDecision:
+    return SourceRootDecision.model_validate(
+        {
+            "repository": {"name": "r", "summary": "s", "source_root": source_root},
+            "excluded_source_paths": [
+                {
+                    "path": path,
+                    "reason": "not_product_source",
+                    "explanation": f"excluded {path}",
+                }
+                for path in exclusions
+            ],
+        }
+    )
+
+
+def test_drop_vacuous_exclusions_keeps_source_bearing_entries(tmp_path: Path) -> None:
+    _write(tmp_path / "src" / "pkg" / "a.py")
+    _write(tmp_path / "tests" / "test_a.py")
+    scan = scan_source_files(tmp_path, "")
+
+    decision = _decision("src", "tests")
+    cleaned, dropped = drop_vacuous_exclusions(decision, scan.files)
+
+    assert dropped == []
+    assert cleaned is decision
+    assert [e.path for e in cleaned.excluded_source_paths] == ["tests"]
+
+
+def test_drop_vacuous_exclusions_unblocks_a_sourceless_directory(
+    tmp_path: Path,
+) -> None:
+    """The wnlp-ner-java-zos failure: docs/fixtures/build output excluded by name."""
+    _write(tmp_path / "src" / "pkg" / "a.py")
+    _write(tmp_path / "tests" / "test_a.py")
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "target" / "maven-status").mkdir(parents=True)
+    (tmp_path / "target" / "maven-status" / "createdFiles.lst").write_text("")
+    scan = scan_source_files(tmp_path, "")
+
+    decision = _decision("src", "tests", "docs", "target")
+    cleaned, dropped = drop_vacuous_exclusions(decision, scan.files)
+
+    assert dropped == ["docs", "target"]
+    assert [e.path for e in cleaned.excluded_source_paths] == ["tests"]
+    # The whole point: what the strict gate rejected now passes unchanged.
+    validate_source_root_decision(cleaned, tmp_path, scan.files)
+
+
+def test_drop_vacuous_exclusions_drops_non_source_root_files(tmp_path: Path) -> None:
+    """A root-level manifest has no source suffix, so excluding it is vacuous.
+
+    A root-level *script* is the opposite case: `.sh` is in `SOURCE_EXTENSIONS`,
+    so `build.sh` is a real source file and excluding it must survive.
+    """
+    _write(tmp_path / "src" / "pkg" / "a.py")
+    (tmp_path / "pom.xml").write_text("<project/>\n")
+    (tmp_path / "build.sh").write_text("#!/bin/sh\n")
+    scan = scan_source_files(tmp_path, "")
+
+    cleaned, dropped = drop_vacuous_exclusions(_decision("src", "pom.xml", "build.sh"), scan.files)
+
+    assert dropped == ["pom.xml"]
+    assert [e.path for e in cleaned.excluded_source_paths] == ["build.sh"]
+    validate_source_root_decision(cleaned, tmp_path, scan.files)
+
+
+def test_drop_vacuous_exclusions_is_coverage_neutral(tmp_path: Path) -> None:
+    """Every source file covered before the drop is still covered after it."""
+    _write(tmp_path / "src" / "pkg" / "a.py")
+    _write(tmp_path / "third_party" / "dep.py")
+    (tmp_path / "docs").mkdir()
+    scan = scan_source_files(tmp_path, "")
+
+    decision = _decision("src", "third_party", "docs")
+
+    def covered(d: SourceRootDecision) -> set[str]:
+        return {
+            path
+            for path in scan.files
+            for entry in d.excluded_source_paths
+            if path == entry.path or path.startswith(entry.path + "/")
+        }
+
+    cleaned, dropped = drop_vacuous_exclusions(decision, scan.files)
+
+    assert dropped == ["docs"]
+    assert covered(cleaned) == covered(decision) == {"third_party/dep.py"}
+
+
+def test_drop_vacuous_exclusions_collapses_duplicate_vacuous_paths(
+    tmp_path: Path,
+) -> None:
+    """Duplicates of a dropped path go too, so the duplicate gate cannot fire on it."""
+    _write(tmp_path / "src" / "pkg" / "a.py")
+    (tmp_path / "docs").mkdir()
+    scan = scan_source_files(tmp_path, "")
+
+    cleaned, dropped = drop_vacuous_exclusions(_decision("src", "docs", "docs"), scan.files)
+
+    assert dropped == ["docs"]
+    assert cleaned.excluded_source_paths == []
+    validate_source_root_decision(cleaned, tmp_path, scan.files)
+
+
+def test_vacuous_exclusions_reports_without_mutating(tmp_path: Path) -> None:
+    _write(tmp_path / "src" / "pkg" / "a.py")
+    _write(tmp_path / "tests" / "test_a.py")
+    (tmp_path / "docs").mkdir()
+    scan = scan_source_files(tmp_path, "")
+
+    decision = _decision("src", "tests", "docs")
+
+    assert vacuous_exclusions(decision, scan.files) == ["docs"]
+    assert [e.path for e in decision.excluded_source_paths] == ["tests", "docs"]
 
 
 def test_source_root_validation_exclusion_containing_root_fails(
