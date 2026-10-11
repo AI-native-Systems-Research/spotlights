@@ -76,6 +76,52 @@ def forced_repository_level_files(
     return sorted(path for path in detected_source_files if "/" not in path)
 
 
+def vacuous_exclusions(
+    decision: SourceRootDecision, detected_source_files: list[str]
+) -> list[str]:
+    """Exclusion paths in `decision` that cover no detected source file."""
+    return sorted(
+        {
+            entry.path
+            for entry in decision.excluded_source_paths
+            if not any(
+                path == entry.path or path.startswith(entry.path + "/")
+                for path in detected_source_files
+            )
+        }
+    )
+
+
+def drop_vacuous_exclusions(
+    decision: SourceRootDecision, detected_source_files: list[str]
+) -> tuple[SourceRootDecision, list[str]]:
+    """Drop exclusions covering no source file; return the decision and the drops.
+
+    The mirror image of `_inject_forced_repository_level_files`: where the
+    Stage-1 model under-lists root-level source files, it also over-lists
+    directories holding no source at all — docs, fixtures, vendored model
+    weights, a stale Maven `target/`. Stage 1 gets one repair attempt, and a
+    real `wnlp-ner-java-zos` run spent both on different sourceless paths
+    (`rbr/examples`, then `rbr/wnlp_entity_zOS/target`) before the whole
+    extraction failed.
+
+    Dropping them is coverage-neutral by construction: an exclusion that
+    covers no detected source file accounts for no source file, so removing it
+    cannot leave one unaccounted for. A subset of an antichain is still an
+    antichain, and the remaining paths are untouched, so every other
+    `validate_source_root_decision` invariant is preserved. Classifying the
+    exclusions that *do* cover source stays the model's job.
+    """
+    dropped = vacuous_exclusions(decision, detected_source_files)
+    if not dropped:
+        return decision, []
+    discard = set(dropped)
+    kept = [
+        entry for entry in decision.excluded_source_paths if entry.path not in discard
+    ]
+    return decision.model_copy(update={"excluded_source_paths": kept}), dropped
+
+
 def validate_source_root_decision(
     decision: SourceRootDecision,
     repo_path: Path,
@@ -127,6 +173,8 @@ def validate_source_root_decision(
 
 __all__ = [
     "CrossArtifactError",
+    "drop_vacuous_exclusions",
     "forced_repository_level_files",
+    "vacuous_exclusions",
     "validate_source_root_decision",
 ]
