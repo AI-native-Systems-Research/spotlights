@@ -73,9 +73,18 @@ exclude = [
 [tool.ruff]
 line-length = 100
 target-version = "py311"
+# pre-commit passes explicit filenames, and ruff ignores excludes for files
+# named explicitly on the command line unless force-exclude is set.
+force-exclude = true
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "UP", "B"]
+
+[tool.ruff.format]
+# A hand-laid-out HTML generator: the formatter would reflow 3.8k lines of
+# f-strings and destroy the alignment that makes the markup readable. Linting
+# still applies — this exempts formatting only.
+exclude = ["src/spotlights_engine/report/render.py"]
 
 [tool.mypy]
 python_version = "3.11"

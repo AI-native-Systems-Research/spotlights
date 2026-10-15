@@ -163,6 +163,12 @@ class SpotlightsManagerInput(BaseModel):
     # manager substitutes an empty ModuleDeepResearchOutput and step 4 takes
     # its zero-findings short-circuit.
     enable_deep_research: bool = True
+    # True -> a parent module whose own content is package plumbing is marked
+    # SKIPPED before step 2 instead of paying a discovery pass to analyze an
+    # `__init__.py`. Off by default: it changes which modules get analyzed, and
+    # the saving is only ever a routing node whose submodules are targets in
+    # their own right. See `spotlights_manager.filters.container_module_reason`.
+    skip_container_modules: bool = False
     continue_on_module_failure: bool = True
 
 
@@ -171,6 +177,11 @@ class RunInfo(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    # Which pipeline family produced the report, not which of its steps ran. A
+    # `deep_research` run launched with `enable_deep_research=False` skipped
+    # step 3 and is still `deep_research` here; the skip is recorded in the run
+    # manifest's `run_config`. Mirrored by `RunManifestSpotlights.pipeline`,
+    # which spells the same two families with a hyphen.
     pipeline: Literal["deep_research", "signal"]
 
     run_id: str = Field(min_length=1)

@@ -17,6 +17,7 @@ from pathlib import Path
 
 from spotlights_engine.agent_proposals.errors import AgentProposalsSetupError
 from spotlights_engine.costing.usage import AgentUsage, claude_usage_from_stream
+from spotlights_engine.utils.agent_stream import explain
 
 _DROP_EXACT = frozenset(
     {
@@ -117,7 +118,11 @@ def run_candidate_claude(
         return CandidateAgentRunResult(
             candidate_id=candidate_id,
             duration_s=duration,
-            error=f"claude timed out after {duration:.1f}s",
+            error=explain(
+                f"claude timed out after {duration:.1f}s",
+                stdout,
+                exc.stderr or b"",
+            ),
             stdout=stdout,
             stderr=exc.stderr or b"",
             usage=claude_usage_from_stream(stdout),
@@ -130,7 +135,11 @@ def run_candidate_claude(
         return CandidateAgentRunResult(
             candidate_id=candidate_id,
             duration_s=duration,
-            error=f"claude exit={completed.returncode}: stderr={stderr_tail!r}",
+            error=explain(
+                f"claude exit={completed.returncode}: stderr={stderr_tail!r}",
+                completed.stdout or b"",
+                completed.stderr or b"",
+            ),
             stdout=completed.stdout or b"",
             stderr=completed.stderr or b"",
             usage=usage,
@@ -152,7 +161,11 @@ def run_candidate_claude(
         return CandidateAgentRunResult(
             candidate_id=candidate_id,
             duration_s=duration,
-            error="claude stream-json had no terminal result event",
+            error=explain(
+                "claude stream-json had no terminal result event",
+                completed.stdout or b"",
+                completed.stderr or b"",
+            ),
             stdout=completed.stdout or b"",
             stderr=completed.stderr or b"",
             usage=usage,

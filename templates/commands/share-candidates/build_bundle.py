@@ -27,6 +27,9 @@ _TABLE_ROW = re.compile(r"^\|(.+)\|\s*$")
 _CAND_CELL = re.compile(r"\[`?([^`\]]+)`?\]\(([^)]+)\)")
 _PATCH_FIELD = re.compile(r"^#\s(candidate|module|repo|base):\s*(.+?)\s*$")
 _DIFF_GIT = re.compile(r"^diff --git a/(?:.+?) b/(.+)$")
+# apply.prompt.txt writes the same fields as the patch header, but as bare
+# uppercase labels above a `PROMPT:` line rather than `# `-prefixed comments.
+_PROMPT_FIELD = re.compile(r"^(CANDIDATE|MODULE|BASE|REPO|DIRTY):\s*(.+?)\s*$")
 
 
 def _is_external(href: str) -> bool:
@@ -442,6 +445,18 @@ th { background: #f6f7f9; color: #3a4149; font-weight: 600; }
 .apply-strip .dl { margin:.7rem 0 .2rem; font-size:.85rem; color:#8a5a00;
   background:#fdf6e7; border:1px solid #f0dfb8; }
 .apply-strip .dl:hover { background:#fbeed2; border-color:#e6cf9c; }
+/* The prompt-only page offers two downloads (the raw .txt and the zip); the
+   first .dl already carries the row's top margin, so only the gap is needed. */
+.apply-strip .dl + .dl { margin-left:.5rem; }
+/* pre-wrap, not the .diff/.engine treatment: a prompt's research-finding lines
+   run to several hundred characters of prose, and wrapping them reads far
+   better than a horizontal scrollbar. No max-height — the whole point of
+   opening the <details> is to read the thing. */
+.promptbox { border:1px solid #e2e5e9; border-radius:8px; overflow:hidden;
+  margin:.6rem 0 1.2rem; }
+.promptbox pre { margin:0; padding:.7em .85em; background:#fff;
+  white-space:pre-wrap; overflow-wrap:anywhere;
+  font:.82em/1.55 ui-monospace,Menlo,Consolas,monospace; }
 .diff { border:1px solid #e2e5e9; border-radius:8px; overflow:hidden;
   margin:.6rem 0 1.2rem; }
 .diff .file { background:#f6f7f9; border-bottom:1px solid #e2e5e9;
@@ -841,6 +856,30 @@ def parse_patch_header(patch_text: str) -> dict:
     return out
 
 
+def parse_prompt_header(prompt_text: str) -> dict:
+    """Read the `CANDIDATE/MODULE/BASE/REPO` block above the `PROMPT:` line.
+
+    The prompt-only twin of `parse_patch_header`, and it returns the same
+    *lowercase* keys, so both apply modes can feed `_repo_placeholder` and the
+    base-commit note without either caring which file the fields came from.
+
+    Scanning stops at `PROMPT:` so a line inside the prompt body can never be
+    read as a field — the body quotes code and shell commands, and `REPO:` in a
+    research finding would otherwise silently win over the real header. The
+    `WORKTREE:` field is deliberately not captured: its value is prose plus an
+    indented git command naming the producer's machine, which is exactly what
+    this page replaces with a portable recipe.
+    """
+    out: dict = {}
+    for line in prompt_text.splitlines():
+        if line.startswith("PROMPT:"):
+            break
+        m = _PROMPT_FIELD.match(line)
+        if m:
+            out[m.group(1).lower()] = m.group(2)
+    return out
+
+
 def _diff_line_kind(line: str, in_hunk: bool = False) -> str:
     """Classify one patch line: marker | hunk | add | del | context.
 
@@ -919,31 +958,66 @@ def format_diffstat_short(stat: dict) -> str:
 def find_apply(cand_id: str, apply_root: Path) -> dict | None:
     """Return a candidate's apply artifacts, or None.
 
-    Looks under <apply_root>/<module_slug>/<cand_id>/. `apply.patch` is required:
-    a directory holding only APPLY-NOTES.md is the legitimate "the change could
-    not be made" outcome, and a share bundle skips it entirely — no page, no
-    badge, no copies. APPLY-NOTES.md and apply.prompt.txt are optional.
+    Looks under <apply_root>/<module_slug>/<cand_id>/ and reports one of two
+    shapes through `mode`:
 
-    Returns the paths (`patch`, `notes`, `prompt`), the parsed contents
-    (`header`, `stat`), and the decoded text plus patch size (`patch_text`,
-    `notes_text`, `patch_kb`). `notes` and `notes_text` are None together when
-    the notes are absent; `header` may be `{}` and `stat["files"]` may be `[]`,
-    so callers use `.get()` on `header` rather than indexing it.
+    * `mode="patch"` — `apply.patch` exists. The full one-shot result, with
+      `header`, `stat`, `patch_text` and `patch_kb` populated.
+    * `mode="prompt"` — no patch, but `apply.prompt.txt` does. The engine wrote
+      the instruction and stopped, or the run has not finished: there is no diff
+      to show, but the prompt is still runnable by hand against a coding agent,
+      so it gets a page of its own. `header` (parsed from the prompt's own field
+      block), `prompt_text` and `prompt_kb` are populated; `patch`, `stat` and
+      `patch_text` are None.
 
-    `prompt` is a path only — apply.prompt.txt ships in the copies and the zip so
-    the recipient can see the instruction the patch came from, but nothing
-    renders its text, so it is never read here.
+    Returns None only when neither file exists — which includes the directory
+    holding APPLY-NOTES.md alone. That is the legitimate "the change could not
+    be made" outcome and a share bundle skips it entirely: no page, no badge,
+    no copies.
 
-    The text is read here and nowhere else. `build()` must not re-read either
-    file: this is the only place that knows how to decode `apply.patch` safely
-    (see the comment on the read below), and a second strict read elsewhere
-    would reintroduce a crash that takes the whole bundle with it.
+    In both modes `notes` and `notes_text` are None together when the notes are
+    absent, `header` may be `{}` and (in patch mode) `stat["files"]` may be `[]`
+    — so callers use `.get()` on `header` rather than indexing it.
+
+    The text is read here and nowhere else. `build()` must not re-read any of
+    these files: this is the only place that knows how to decode `apply.patch`
+    safely (see the comment on the read below), and a second strict read
+    elsewhere would reintroduce a crash that takes the whole bundle with it.
     """
     d = apply_root / _cand_module_slug(cand_id) / cand_id
     patch = d / "apply.patch"
-    if not patch.is_file():
+    prompt = d / "apply.prompt.txt"
+    if not patch.is_file() and not prompt.is_file():
         return None
     notes = d / "APPLY-NOTES.md"
+    # The notes are written through Python's text layer, so they are UTF-8 by
+    # construction — but they sit on disk next to the patch and are as easy to
+    # hand-edit, so they get the same lossy read as the patch below. No artifact
+    # this build merely *displays* is worth aborting the whole bundle over.
+    has_notes = notes.is_file()
+    notes_text = notes.read_text(encoding="utf-8", errors="replace") if has_notes else None
+    common = {
+        "notes": notes if has_notes else None,
+        "notes_text": notes_text,
+        "prompt": prompt if prompt.is_file() else None,
+    }
+
+    if not patch.is_file():
+        # Prompt-only. Unlike patch mode, the prompt's *text* is read and
+        # rendered here — it is the whole artifact — and it takes the same lossy
+        # read as the notes, for the same reason.
+        prompt_text = prompt.read_text(encoding="utf-8", errors="replace")
+        return {
+            **common,
+            "mode": "prompt",
+            "patch": None,
+            "header": parse_prompt_header(prompt_text),
+            "stat": None,
+            "patch_text": None,
+            "prompt_text": prompt_text,
+            "prompt_kb": prompt.stat().st_size / 1024,
+        }
+
     # `errors="replace"`, not strict: `apply.patch` is the one file here that is
     # deliberately NOT guaranteed to be UTF-8. The engine collects the diff as
     # raw bytes and writes it with `write_bytes`, because decoding and re-encoding
@@ -958,21 +1032,13 @@ def find_apply(cand_id: str, apply_root: Path) -> dict | None:
     # replacement character costs is one unreadable glyph in the rendered diff,
     # against a build that otherwise does not happen.
     patch_text = patch.read_text(encoding="utf-8", errors="replace")
-    # The notes are written through Python's text layer, so they are UTF-8 by
-    # construction — but they sit on disk next to the patch and are as easy to
-    # hand-edit, so they get the same lossy read. No artifact this build merely
-    # *displays* is worth aborting the whole bundle over.
-    has_notes = notes.is_file()
-    notes_text = notes.read_text(encoding="utf-8", errors="replace") if has_notes else None
-    prompt = d / "apply.prompt.txt"
     return {
+        **common,
+        "mode": "patch",
         "patch": patch,
-        "notes": notes if has_notes else None,
-        "prompt": prompt if prompt.is_file() else None,
         "header": parse_patch_header(patch_text),
         "stat": diffstat(patch_text),
         "patch_text": patch_text,
-        "notes_text": notes_text,
         "patch_kb": patch.stat().st_size / 1024,
     }
 
@@ -988,6 +1054,15 @@ _APPLY_UNVERIFIED = (
     "with no virtualenv and no compiled extensions, on a machine that may lack "
     "the hardware the performance oracle needs. Treat it as a proposal "
     "faithfully implemented — not as a measured win.")
+
+
+# The prompt page's twin of _APPLY_UNVERIFIED. A different warning, because a
+# different thing is missing: not "this was not measured" but "this was not even
+# attempted" — the reader must not mistake an instruction for a change.
+_APPLY_PROMPT_UNRUN = (
+    "No patch was produced. Nothing was implemented, nothing was tested, and "
+    "nothing was applied to any repository. What ships here is the instruction "
+    "itself — the same text the engine hands to its own agent.")
 
 
 def _repo_placeholder(repo: str | None) -> str:
@@ -1051,7 +1126,14 @@ def render_patch(patch_text: str, patch_href: str, size_kb: float) -> str:
 
 def render_apply_page(cand_id: str, symbol: str, fx: dict,
                       raw_reldir: str, back_href: str) -> str:
-    """The `…__apply.html` page: orientation, apply recipe, notes, then the diff."""
+    """The `…__apply.html` page: orientation, apply recipe, notes, then the diff.
+
+    Dispatches on `fx["mode"]`: a prompt-only candidate has no diff to render and
+    a different call to action, so it gets its own page (see
+    `_render_apply_prompt_page`) under the same filename.
+    """
+    if fx.get("mode") == "prompt":
+        return _render_apply_prompt_page(cand_id, symbol, fx, raw_reldir, back_href)
     hdr = fx.get("header") or {}
     base = hdr.get("base", "")
     ph = _repo_placeholder(hdr.get("repo"))
@@ -1113,8 +1195,107 @@ def render_apply_page(cand_id: str, symbol: str, fx: dict,
     return _doc(f"One-shot apply — {symbol}", "\n".join(body))
 
 
+def render_prompt_text(prompt_text: str, prompt_href: str, size_kb: float) -> str:
+    """apply.prompt.txt as a collapsed verbatim block.
+
+    Collapsed for the same reason the patch is: the strip above it is the
+    orientation, this is the detail. The `open raw ↗` link in the summary is what
+    lets a reader hand the file straight to an agent without expanding anything.
+    """
+    return (
+        f'<details class="patch"><summary>apply.prompt.txt '
+        f'<span class="sz">— {size_kb:.0f} KB · '
+        f'<a href="{html.escape(prompt_href)}">open raw ↗</a></span></summary>'
+        f'<div class="promptbox"><pre>{html.escape(prompt_text)}</pre></div>'
+        f'</details>')
+
+
+def _render_apply_prompt_page(cand_id: str, symbol: str, fx: dict,
+                              raw_reldir: str, back_href: str) -> str:
+    """The prompt-only `…__apply.html` page: run this with your own coding agent.
+
+    Reached from `render_apply_page` when `fx["mode"] == "prompt"`. Same filename
+    and same back-link as the patch page, so the candidate page and the index
+    card do not need to know which of the two they are pointing at.
+    """
+    hdr = fx.get("header") or {}
+    base = hdr.get("base", "")
+    ph = _repo_placeholder(hdr.get("repo"))
+    prompt_rel = f"{raw_reldir}/apply.prompt.txt"
+    body = [
+        f'<a class="back" href="{html.escape(back_href)}">← Back to candidate</a>',
+        f"<h1>One-shot apply — {html.escape(symbol)}</h1>",
+        f'<p class="subtitle">{html.escape(cand_id)} · prompt only — no patch</p>',
+        '<div class="orient">'
+        '<p><strong>What is this?</strong> A ready-to-run instruction for '
+        "implementing this candidate's proposal — the target lines, the research "
+        'behind them, the seed proposals, the in-scope files and the recorded '
+        'oracles, in one file. <strong>Hand it to a coding agent</strong> — Claude '
+        'Code, Codex, Cursor, whatever you use — in a checkout of the repository, '
+        'and it will make the change and write itself a '
+        '<code>CHANGE-SUMMARY.md</code>.</p>'
+        f'<p class="warn">⚠️ {html.escape(_APPLY_PROMPT_UNRUN)}</p></div>',
+    ]
+
+    work = f"/tmp/{cand_id}"
+    # PROMPT is captured *before* the cd, because $PWD is only the folder holding
+    # this page until then.
+    cmds = (
+        f"REPO={ph}\n"
+        f'PROMPT="$PWD/{prompt_rel}"    # run from the folder holding this page\n'
+        f'git -C "$REPO" worktree add --detach {work} {base or "<BASE_COMMIT>"}\n'
+        f'cd {work} && claude -p "$(cat "$PROMPT")"')
+    parts = ['<div class="apply-strip"><h2>Run this with a coding agent</h2>']
+    if base:
+        parts.append(
+            f'<p class="note">Base commit <span class="sha">{html.escape(base)}</span>'
+            ' — the prompt describes the code at this exact commit, and its line '
+            'numbers only hold there.</p>')
+    parts.append(f'<pre>{html.escape(cmds)}</pre>')
+    parts.append(
+        '<p class="note">Any agent works — swap the last line for '
+        '<code>codex exec "$(cat "$PROMPT")"</code>, <code>cursor-agent -p '
+        '"$(cat "$PROMPT")"</code>, or open the worktree in your editor and paste '
+        'the prompt into its agent. The throwaway worktree is a suggestion, not a '
+        'requirement; a branch works just as well. Clean up afterwards with '
+        f'<code>git -C "$REPO" worktree remove {html.escape(work)}</code>.</p>')
+    parts.append(
+        '<p class="note">The prompt tells the agent <em>not</em> to run tests, '
+        'build, or commit — it was written for a bare worktree, and the diff is '
+        'meant to be collected from the uncommitted working tree. The oracles it '
+        'lists are recorded for whoever has the hardware; relax that rule if that '
+        'is you.</p>')
+    parts.append(
+        '<p class="note">The header inside <code>apply.prompt.txt</code> names '
+        'the machine that produced it — substitute your own checkout, as above. '
+        'The file is copied here byte-for-byte and was not rewritten.</p>')
+    parts.append(
+        f'<a class="dl" href="{html.escape(prompt_rel)}" download>'
+        '⬇ Download apply.prompt.txt</a>')
+    parts.append(
+        f'<a class="dl" href="{html.escape(raw_reldir)}/apply.zip" download>'
+        '⬇ Download all (.zip)</a>')
+    parts.append("</div>")
+    body.append("".join(parts))
+
+    if fx.get("notes_text"):
+        body.append(md_to_html_body(fx["notes_text"]))
+    body.append("<h2>The prompt</h2>")
+    body.append(render_prompt_text(fx["prompt_text"], prompt_rel,
+                                   fx.get("prompt_kb", 0.0)))
+    return _doc(f"One-shot apply — {symbol}", "\n".join(body))
+
+
 def render_apply_section(fx: dict, apply_page_name: str) -> str:
     """The "One-shot apply" block appended to a candidate page."""
+    if fx.get("mode") == "prompt":
+        return (
+            '<div class="apply-section"><h2>One-shot apply</h2>'
+            '<p>An agent-ready instruction for implementing this candidate — '
+            '<strong>no patch was produced</strong>. Run it with your own coding '
+            'agent in a checkout of the repository.</p>'
+            f'<p><a href="{html.escape(apply_page_name)}">'
+            'View the prompt →</a></p></div>')
     return (
         '<div class="apply-section"><h2>One-shot apply</h2>'
         f'<p>A reviewable patch for this candidate: '
@@ -1132,11 +1313,11 @@ def _copy_apply_files(fx: dict, apply_dir: Path) -> None:
 
     The raw folder and the zip carry the same members, in the same order —
     apply.patch, then whichever of APPLY-NOTES.md and apply.prompt.txt exist.
-    Only the patch is guaranteed present.
+    Nothing is guaranteed present individually: in `mode="prompt"` there is no
+    patch, and `find_apply` guarantees only that the list is non-empty.
     """
     apply_dir.mkdir(parents=True, exist_ok=True)
-    members = [fx["patch"]]
-    members += [fx[k] for k in ("notes", "prompt") if fx.get(k)]
+    members = [fx[k] for k in ("patch", "notes", "prompt") if fx.get(k)]
     for f in members:
         shutil.copy2(f, apply_dir / f.name)
     with zipfile.ZipFile(apply_dir / "apply.zip", "w", zipfile.ZIP_DEFLATED) as zf:
@@ -1148,9 +1329,11 @@ def build(source_dir: str, top_n: int = 5) -> dict:
     """Parse sorted_candidates.md and build share-bundle/ + share-candidates.zip.
 
     Returns {title, count, bundle_dir, zip_path, skipped, evolve_bundles,
-    apply_bundles} — the last two being how many candidates got a folded-in
-    sibling tree. Candidates whose linked .md file cannot be found are skipped
-    (recorded in 'skipped'), not fatal.
+    apply_bundles, apply_prompts} — the last three being how many candidates got
+    a folded-in sibling tree. `apply_bundles` and `apply_prompts` are disjoint:
+    a candidate contributes to the first if `apply/` gave it a patch and to the
+    second if it gave only the prompt. Candidates whose linked .md file cannot be
+    found are skipped (recorded in 'skipped'), not fatal.
     """
     src = Path(source_dir).resolve()
     sorted_md = src / "sorted_candidates.md"
@@ -1175,6 +1358,7 @@ def build(source_dir: str, top_n: int = 5) -> dict:
     skipped: list[str] = []
     evolve_bundles = 0
     apply_bundles = 0
+    apply_prompts = 0
     for r in rows:
         cand_path = (src / r["rel_link"]).resolve()
         if not cand_path.is_file():
@@ -1194,19 +1378,28 @@ def build(source_dir: str, top_n: int = 5) -> dict:
         stem = Path(mod_rel).with_suffix("")                   # modules/pkg/file
         cand_page_name = Path(stem).name + ".html"             # sibling back-link
 
-        # Fold in the one-shot apply for this candidate, if a patch exists on disk.
+        # Fold in the one-shot apply for this candidate, if `apply/` gave it
+        # either a patch or (patch absent) a runnable prompt.
         fx = find_apply(r["cand_id"], apply_root)
         r["apply_stat"] = ""
         r["apply_badge_stat"] = ""
         r["apply_href"] = ""
         apply_section = ""
         if fx:
-            apply_bundles += 1
             apply_stem = str(stem) + "__apply"
             apply_reldir = Path(apply_stem).name                # relative to the page
             apply_page_name = apply_reldir + ".html"
-            r["apply_stat"] = format_diffstat(fx["stat"])
-            r["apply_badge_stat"] = format_diffstat_short(fx["stat"])
+            if fx["mode"] == "prompt":
+                apply_prompts += 1
+                # There is no diffstat to quote, so the badge and the footer pill
+                # say what the page actually offers: an instruction to run, not a
+                # diff to review. Both are free text as far as render_index goes.
+                r["apply_stat"] = "run with a coding agent"
+                r["apply_badge_stat"] = "prompt"
+            else:
+                apply_bundles += 1
+                r["apply_stat"] = format_diffstat(fx["stat"])
+                r["apply_badge_stat"] = format_diffstat_short(fx["stat"])
             r["apply_href"] = str(Path("candidates") / (apply_stem + ".html"))
             _copy_apply_files(fx, bundle / "candidates" / apply_stem)
             # No re-read here: `find_apply` already returned `patch_text`,
@@ -1264,6 +1457,7 @@ def build(source_dir: str, top_n: int = 5) -> dict:
         "skipped": skipped,
         "evolve_bundles": evolve_bundles,
         "apply_bundles": apply_bundles,
+        "apply_prompts": apply_prompts,
     }
 
 
@@ -1279,6 +1473,9 @@ def main() -> None:
     print(f"Zip:        {result['zip_path']}")
     if result.get("apply_bundles"):
         print(f"Apply:      {result['apply_bundles']} candidate(s) with one-shot patches")
+    if result.get("apply_prompts"):
+        print(f"Apply:      {result['apply_prompts']} candidate(s) with a prompt only "
+              "(no patch — run it with a coding agent)")
     if result.get("evolve_bundles"):
         print(f"Evolve:     {result['evolve_bundles']} candidate(s) with evolve bundles")
     if result["skipped"]:

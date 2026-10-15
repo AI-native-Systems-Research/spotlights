@@ -57,8 +57,8 @@ your responsibility to run the ranking step first.
 
 4. **Report** the printed summary: bundle title, number of candidates exported,
    the `share-bundle/` path, the `share-candidates.zip` path, how many candidates
-   got evolve bundles and how many got one-shot patches (if any), and any
-   skipped candidates.
+   got evolve bundles, how many got one-shot patches and how many got a prompt
+   only (each line prints only if non-zero), and any skipped candidates.
 
 ## What the bundle contains
 
@@ -100,6 +100,11 @@ output lives in a sibling `apply/` tree beside `sorted/`
 (`<run>/apply/<module>/<candidate>/`). The build folds it in automatically — no
 flag needed. If there is no `apply/` tree, the build behaves exactly as above.
 
+An `apply/` directory has one of **three** outcomes, and the build handles each:
+a patch (below), a prompt but no patch ("Prompt-only apply bundles"), or notes
+alone — the legitimate "the change could not be made" result, which is skipped
+entirely: no page, no badge, no copies.
+
 For each exported candidate that has an `apply.patch`, the bundle also gets:
 
 - `candidates/modules/<module>/<file>__apply.html` — a "One-shot apply" page:
@@ -117,14 +122,45 @@ For each exported candidate that has an `apply.patch`, the bundle also gets:
   an `apply · +X/−Y` badge and a footer link carrying the full
   `N file(s) changed, +X/−Y` stat.
 
-A candidate directory holding only `APPLY-NOTES.md` and no patch — the
-legitimate "the change could not be made" outcome — is skipped entirely: no
-page, no badge.
-
 > **Nothing in an apply bundle was verified:** no test was run, no benchmark
 > was measured, no build was attempted. The apply page states this prominently,
 > and carries the candidate's recorded oracles as the verification recipe for
 > whoever has the hardware.
+
+## Prompt-only apply bundles (automatic when present)
+
+A candidate directory can hold `apply.prompt.txt` and **no** `apply.patch` — the
+engine wrote the instruction it would have handed to its own agent and stopped,
+or the run has not finished. That is a shippable outcome, not a failure, so it
+gets a page of its own behind the same `<file>__apply.html` name; the candidate
+page and the index card do not need to know which of the two they point at.
+
+For each exported candidate in this state, the bundle gets:
+
+- `candidates/modules/<module>/<file>__apply.html` — a "One-shot apply" page
+  subtitled **prompt only — no patch**: what the prompt is, that nothing was
+  implemented, tested or applied, a **Run this with a coding agent** strip (real
+  base commit, the same `<YOUR_…_CHECKOUT>` placeholder, a throwaway `git
+  worktree add --detach`, then `claude -p "$(cat "$PROMPT")"` — with `codex exec`
+  and `cursor-agent -p` named as equivalents), the inlined `APPLY-NOTES.md` if
+  present, and the prompt as a collapsible verbatim block.
+- Two download buttons: **⬇ Download apply.prompt.txt** (the bare file, which is
+  what an agent actually needs) and **⬇ Download all (.zip)**.
+- `candidates/modules/<module>/<file>__apply/` — `apply.prompt.txt` and, when
+  present, `APPLY-NOTES.md`, copied verbatim, plus the same `apply.zip`.
+- The candidate page gains a "One-shot apply" section saying **no patch was
+  produced** and linking "View the prompt →", and its index card gains an
+  `apply · prompt` badge and a footer pill reading
+  `🔧 One-shot apply: run with a coding agent`.
+
+The summary reports the two shapes on separate lines, and the counts are
+disjoint — a run can mix them freely.
+
+> **The prompt embeds the producer's absolute repo path** (its `REPO:` field and
+> the paths in its prose), and ships byte-for-byte because an agent needs the
+> file the engine actually wrote. The page tells the recipient to substitute
+> their own checkout, but the path is still disclosed. Check before sharing
+> outside your organization.
 
 ## Link handling (built into the script)
 

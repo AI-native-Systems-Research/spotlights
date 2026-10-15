@@ -46,6 +46,14 @@ class RunManifestSpotlights(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     commit_sha: str = ""
+    # The *producing pipeline family*, not a record of which steps ran. A run
+    # launched with `--no-deep-research` is still a deep-research-pipeline run
+    # and still says `"deep-research"` here; what records the skipped step is
+    # `run_config.enable_deep_research`. Reading this field as "step 3 ran" and
+    # seeing it beside `enable_deep_research: false` looks like a contradiction
+    # and is not one -- I filed that bug against myself once already. Same
+    # meaning as `schemas.pipeline.RunInfo.pipeline`, whose `Literal` spells the
+    # family out: `deep_research` or `signal`.
     pipeline: str = "deep-research"
     config: dict[str, Any] = Field(default_factory=dict)
 
@@ -119,6 +127,49 @@ class RunManifestModelsRequested(BaseModel):
     codex: str = ""
 
 
+class RunManifestRunConfig(BaseModel):
+    """The knobs that shaped this run's cost and output volume.
+
+    Purely descriptive, like `models_requested`: written for whoever reads the
+    results later, never read back by the engine. Deliberately *not* part of
+    `spotlights.config` -- that block is the `--resume` fingerprint, so adding
+    keys to it would invalidate every run directory already on disk.
+
+    Without this, results are individually correct but not comparable. Two runs
+    on one target at the same module count can differ several-fold in spend
+    purely because one had deep research off, and nothing else in the manifest
+    distinguishes them.
+
+    Optional on `RunManifest` rather than default-constructed: field defaults
+    here are zero/False, not the engine's real defaults, so a block nobody
+    populated would assert "this run used 0 review iterations". A caller that
+    cannot supply the values leaves it `None`, which reaches the JSON as
+    `"run_config": null` -- `write_run_manifest` dumps without `exclude_none`,
+    so the key is present and empty rather than gone. `external_cost` reads as
+    `null` rather than $0 for the same reason.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    review_iterations: int = 0
+    max_findings_per_module: int = 0
+    include_candidate_hotspots: bool = False
+    enable_claude_search: bool = False
+    enable_deep_research: bool = False
+    skip_container_modules: bool = False
+    max_parallel_sessions: int = 0
+    max_parallel_pairs: int = 0
+    max_parallel_candidates: int = 0
+    # How long the engine was willing to wait out a rate limit. 1 attempt means
+    # the retry was off, which is the default -- recorded either way, because a
+    # run that took 3 hours instead of 1 needs to say whether it was waiting on
+    # purpose. The archived IOCR run had no such row and its 429s were reported
+    # as timeouts.
+    agent_retry_attempts: int = 0
+    agent_retry_base_s: float = 0.0
+    agent_retry_max_s: float = 0.0
+
+
 class RunManifest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -129,6 +180,7 @@ class RunManifest(BaseModel):
     models_requested: RunManifestModelsRequested = Field(
         default_factory=RunManifestModelsRequested
     )
+    run_config: RunManifestRunConfig | None = None
     models_used: list[ModelUsed] = Field(default_factory=list)
     total_tokens: int = 0
     cost: RunManifestCost
@@ -172,6 +224,7 @@ def build_run_manifest(
     module_status: dict[str, int],
     notes: list[str],
     models_requested: RunManifestModelsRequested | None = None,
+    run_config: RunManifestRunConfig | None = None,
 ) -> RunManifest:
     note_parts = list(notes)
     if cost.unpriced_models:
@@ -205,6 +258,7 @@ def build_run_manifest(
             config=dict(config_fingerprint),
         ),
         models_requested=models_requested or RunManifestModelsRequested(),
+        run_config=run_config,
         models_used=aggregate_models_used(records),
         total_tokens=sum(record.total_tokens for record in records),
         cost=cost_block(cost),
@@ -228,6 +282,7 @@ __all__ = [
     "RunManifest",
     "UsageTotals",
     "RunManifestModelsRequested",
+    "RunManifestRunConfig",
     "aggregate_models_used",
     "build_run_manifest",
     "cost_block",

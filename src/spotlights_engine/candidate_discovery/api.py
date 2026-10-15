@@ -90,11 +90,29 @@ class IterationTelemetry(BaseModel):
     modified: list[str] = Field(default_factory=list)
 
 
+class DiscoveryTruncation(BaseModel):
+    """Why the review loop stopped early, when its candidates were still kept.
+
+    Present on `DiscoveryResult` only when an iteration failed for an
+    environmental reason (rate limit, timeout, context exhaustion) *after* at
+    least one iteration had produced candidates. The candidates are real and
+    are returned; this records that the module got fewer refinement passes than
+    configured, so the caller can mark it DEGRADED rather than SUCCEEDED.
+    """
+
+    iteration: int
+    agent: str
+    error: str
+    cause: str | None = None
+    completed_iterations: int
+
+
 class DiscoveryResult(BaseModel):
     candidates: Candidates
     iterations: list[IterationTelemetry]
     total_duration_s: float
     total_cost_usd: float | None = None
+    truncated_by: DiscoveryTruncation | None = None
 
 
 def resolve_target_module(input: CandidateDiscoveryInput) -> Module:
@@ -176,6 +194,7 @@ def discover_candidates(
 __all__ = [
     "DiscoveryConfig",
     "DiscoveryResult",
+    "DiscoveryTruncation",
     "IterationTelemetry",
     "discover",
     "discover_candidates",

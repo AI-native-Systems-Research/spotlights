@@ -25,6 +25,7 @@ from spotlights_engine.costing.usage import (
     claude_usage_from_payload,
     codex_usage_from_stream,
 )
+from spotlights_engine.utils.agent_stream import describe as _diagnose
 
 if TYPE_CHECKING:  # pragma: no cover
     from spotlights_engine.candidate_discovery.api import DiscoveryConfig
@@ -57,7 +58,19 @@ class _SchemaParseError(Exception):
 
     Raised by `AgentRunner.invoke` (timeout / nonzero exit) and by
     `AgentRunner.parse_last_message` (missing / empty / non-JSON output).
+
+    `contract` separates the two reasons an attempt can fail, because they
+    have opposite consequences once both attempts are spent: an agent that
+    breaks the output contract is a deterministic bug that must stay fatal,
+    while an agent the environment cut off (rate limit, timeout, context
+    exhaustion) leaves the earlier iterations perfectly valid and so is
+    salvageable. Everything raised from this module is environmental, hence
+    the default.
     """
+
+    def __init__(self, message: str = "", *, contract: bool = False) -> None:
+        super().__init__(message)
+        self.contract = contract
 
 
 _RETRY_SEPARATOR = b"\n--- retry separator ---\n"
@@ -129,7 +142,7 @@ class AgentRunner(ABC):
             stderr = exc.stderr or b""
             _append_streams(stdout_path, stderr_path, stdout, stderr, is_retry)
             raise _SchemaParseError(
-                f"agent {self.name} timed out after {duration:.1f}s"
+                _explain(f"agent {self.name} timed out after {duration:.1f}s", iter_dir)
             ) from exc
 
         _append_streams(stdout_path, stderr_path, completed.stdout, completed.stderr, is_retry)
@@ -137,9 +150,11 @@ class AgentRunner(ABC):
         if completed.returncode != 0:
             stdout_tail = (completed.stdout or b"")[-500:].decode("utf-8", "replace")
             stderr_tail = (completed.stderr or b"")[-500:].decode("utf-8", "replace")
+            diagnosis = _diagnose(completed.stdout or b"", completed.stderr or b"")
             raise _SchemaParseError(
                 f"agent {self.name} exit={completed.returncode}: "
-                f"stderr={stderr_tail!r} stdout={stdout_tail!r}"
+                + (f"{diagnosis}; " if diagnosis else "")
+                + f"stderr={stderr_tail!r} stdout={stdout_tail!r}"
             )
 
         return self._parse_invocation_metadata(completed.stdout, iter_dir, start)
@@ -166,6 +181,23 @@ def _append_streams(
         if is_retry:
             fh.write(_RETRY_SEPARATOR)
         fh.write(stderr or b"")
+
+
+def _diagnose_iter_dir(iter_dir: Path) -> str | None:
+    """`_diagnose` over the persisted raw streams for an iteration directory."""
+    def _read(name: str) -> bytes:
+        path = iter_dir / name
+        try:
+            return path.read_bytes()
+        except OSError:
+            return b""
+
+    return _diagnose(_read("raw_stdout.log"), _read("raw_stderr.log"))
+
+
+def _explain(message: str, iter_dir: Path) -> str:
+    diagnosis = _diagnose_iter_dir(iter_dir)
+    return f"{message}; {diagnosis}" if diagnosis else message
 
 
 class ClaudeRunner(AgentRunner):
@@ -210,7 +242,9 @@ class ClaudeRunner(AgentRunner):
         result_event = self._extract_result_event(stdout)
         if result_event is None:
             last_message_path.write_text("", encoding="utf-8")
-            raise _SchemaParseError("claude stream-json had no terminal result event")
+            raise _SchemaParseError(
+                _explain("claude stream-json had no terminal result event", iter_dir)
+            )
 
         message_text = self._final_message_text(result_event)
         last_message_path.write_text(message_text, encoding="utf-8")
@@ -270,10 +304,10 @@ class ClaudeRunner(AgentRunner):
     def parse_last_message(self, iter_dir: Path) -> str:
         path = iter_dir / "last_message.json"
         if not path.exists():
-            raise _SchemaParseError("claude last_message.json missing")
+            raise _SchemaParseError(_explain("claude last_message.json missing", iter_dir))
         text = path.read_text(encoding="utf-8")
         if not text.strip():
-            raise _SchemaParseError("claude last_message.json empty")
+            raise _SchemaParseError(_explain("claude last_message.json empty", iter_dir))
         try:
             json.loads(text)
         except json.JSONDecodeError as e:
@@ -355,10 +389,10 @@ class CodexRunner(AgentRunner):
     def parse_last_message(self, iter_dir: Path) -> str:
         path = iter_dir / "last_message.json"
         if not path.exists():
-            raise _SchemaParseError("codex last_message.json missing")
+            raise _SchemaParseError(_explain("codex last_message.json missing", iter_dir))
         text = path.read_text(encoding="utf-8")
         if not text.strip():
-            raise _SchemaParseError("codex last_message.json empty")
+            raise _SchemaParseError(_explain("codex last_message.json empty", iter_dir))
         try:
             json.loads(text)
         except json.JSONDecodeError as e:

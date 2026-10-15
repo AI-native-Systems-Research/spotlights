@@ -5,6 +5,7 @@
 <h1 align="center">Spotlights</h1>
 
 <p align="center">
+  <a href="https://arxiv.org/abs/2609.20446"><img src="https://img.shields.io/badge/arXiv-2609.20446-b31b1b.svg" alt="arXiv:2609.20446"></a>
   <img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="License: Apache-2.0">
   <img src="https://img.shields.io/badge/python-%E2%89%A5%203.11-blue.svg" alt="Python ≥ 3.11">
 </p>
@@ -13,11 +14,18 @@
 
 Point Spotlights at a repo and a goal (e.g., `reduce p99 latency`, `minimize memory allocations`) and it returns a ranked, browsable map of the few places worth touching — each with a concrete, evidence-backed proposal grounded in the code, the literature, and your goal.
 
+<p align="center">
+  <img src="docs/demo.gif" alt="A walkthrough of a Spotlights report: 173 ranked candidates, one opened to its write-up and proposals, the run as a tree, and the findings catalogue narrowed to the paper that produced the top candidate" width="940">
+</p>
+
+<p align="center"><sub>A real run over 8 modules of <a href="https://github.com/vllm-project/vllm">vLLM</a>: the ranked candidates, what each one argues, and the evidence behind them.</sub></p>
+
 Most code-research tools either scan broadly and return shallow hits, or dive deeply into a single file you already picked. **Spotlights acts as the targeting system**: it decides which functions and code regions across the whole repo are worth deep investigation for your goal, then spends real research effort on each one.
 
 The core philosophy behind the project: execution tooling — coding agents, evolutionary search, experiment harnesses — is abundant and improving fast. The harder, less-solved problem is knowing **where to point it**. Spotlights treats that as a first-class discovery problem: build a map of the codebase, converge independent signal sources onto that map, and let the places where evidence piles up — the *spots that light up* — surface as candidates worth optimizing.
 
 <p align="center">
+  <a href="https://arxiv.org/abs/2609.20446">Paper</a> ·
   <a href="docs/INSTALL.md">Install</a> ·
   <a href="#quickstart">Quickstart</a> ·
   <a href="docs/cost-and-manifest.md">Cost</a> ·
@@ -65,6 +73,7 @@ spotlights-out/
   index.md                          # repo-level summary, one row per module
   result.json                       # full structured run output
   run_manifest.json                 # copy of the public run manifest (see artifacts/ below)
+  experiment.html                   # one self-contained page, written by 'spotlights-engine report'
   modules/
     vllm_v1_kv_offload.md           # module page: candidates table
     vllm_v1_kv_offload/
@@ -113,7 +122,7 @@ For LiteLLM gateway config, picking which model each CLI runs on, and a quick re
 
 | Command | Purpose |
 |---|---|
-| `spotlights-engine` | Main engine: structural map → candidates → proposals. Subcommands: `doctor`, `init`, `prep-evolve`, `apply`. |
+| `spotlights-engine` | Main engine: structural map → candidates → proposals. Subcommands: `doctor`, `init`, `prep-evolve`, `apply`, `report`. |
 | `signal-pipeline` | Telemetry-driven discovery (**preview**) — a separate entry point. |
 
 ## Skills
@@ -128,23 +137,17 @@ For LiteLLM gateway config, picking which model each CLI runs on, and a quick re
 <a id="quickstart"></a>
 ## Quickstart (Example on a vLLM subset)
 
-**Prerequisites:** Python ≥ 3.11 and [uv](https://docs.astral.sh/uv/).
+**Prerequisites:** Python ≥ 3.11. ([uv](https://docs.astral.sh/uv/) is installed for you if missing.)
 
 **1. Install the engine** ([Quick install](docs/INSTALL.md#quick-install-recommended))
 
-Quick install — puts `spotlights-engine` on your PATH (in `~/.local/bin`) via [uv](https://docs.astral.sh/uv/):
+Quick install — puts `spotlights-engine` on your PATH (in `~/.local/bin`):
 
 ```bash
-uv tool install --force "git+https://github.com/AI-native-Systems-Research/spotlights.git@main"
+curl -fsSL https://raw.githubusercontent.com/AI-native-Systems-Research/spotlights/main/install.sh | sh
 ```
 
-Pin a version by replacing `main` with any git tag, branch, or commit. No shell activation needed after this.
-
-> [!NOTE]
-> Once the repo is public, this simplifies to a one-liner (TBD until then):
-> ```bash
-> curl -fsSL https://raw.githubusercontent.com/AI-native-Systems-Research/spotlights/main/install.sh | sh
-> ```
+Pin a version with `SPOTLIGHTS_VERSION` (any git tag, branch, or commit). No shell activation needed after this.
 
 Or install from source for development ([Development install](docs/INSTALL.md#from-source-development)):
 
@@ -208,7 +211,15 @@ spotlights-engine --include vllm/v1/kv_offload --include vllm/v1/worker ...
 
 Point it at `./spotlights-out/result.json` and it writes a ranked `./spotlights-out/sorted/sorted_candidates.md` (a summary table linking each candidate to its write-up) plus a machine-readable `./spotlights-out/sorted/sorted_candidates.json`.
 
-**6. Share the top candidates (optional).** Once a run is ranked, the bundled `/spotlights-share-candidates` slash command packages the top-N candidates into a self-contained ZIP an external teammate can unzip and open by double-clicking `index.html` — no server, works offline. In Claude Code:
+**6. Render the run as one browsable page (optional).** `spotlights-engine report` turns a finished run into a single self-contained `experiment.html` beside its `result.json` — inlined CSS and JS, no external assets, every chart paired with a table view, openable offline by double-clicking:
+
+```bash
+spotlights-engine report ./spotlights-out
+```
+
+Only `result.json` is required. The run manifest, a `sorted/` ranking and the `evolve/` and `apply/` trees are folded in when present — so if you ranked the candidates first, the page comes out ranked. Pass `-o` to write the page somewhere else.
+
+**7. Share the top candidates (optional).** Once a run is ranked, the bundled `/spotlights-share-candidates` slash command packages the top-N candidates into a self-contained ZIP an external teammate can unzip and open by double-clicking `index.html` — no server, works offline. In Claude Code:
 
 ```
 /spotlights-share-candidates
@@ -253,6 +264,19 @@ The project is organized around signal sources, and the most useful contribution
 - **Adapters** — support for target repos and goals beyond the vLLM examples.
 
 Open an issue to discuss a direction before a large change. Bug reports and example runs on new repos are also valuable.
+
+## Citation
+
+If you use Spotlights for your research, please cite our [paper](https://arxiv.org/abs/2609.20446):
+
+```bibtex
+@article{barzelay2026spotlights,
+  title={Spotlights: Discovering Improvement Opportunities in Software Repositories},
+  author={Barzelay, Udi and Azulai, Ophir and Friedman, Idan and Shapira, Inbar and Abo Dahood, Foad and Burshtein, Yevgeny and Prince, Orit and Soloveitchik, Michael and Naparstek, Oshri and Pony, Roi and Drory, Tal and Factor, Michael},
+  journal={arXiv preprint arXiv:2609.20446},
+  year={2026}
+}
+```
 
 ## License
 

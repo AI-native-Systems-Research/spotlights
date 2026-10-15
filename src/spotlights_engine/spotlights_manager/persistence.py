@@ -22,6 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from spotlights_engine.agent_proposals import AgentProposalsConfig
 from spotlights_engine.candidate_discovery.api import (
     DiscoveryConfig,
+    DiscoveryTruncation,
     IterationTelemetry,
 )
 from spotlights_engine.costing.records import UsageRecord, UsageStep
@@ -246,6 +247,7 @@ class LoadedModuleState:
     discovery_telemetry: list[IterationTelemetry]
     discovery_total_duration_s: float | None
     discovery_total_cost_usd: float | None
+    discovery_truncation: DiscoveryTruncation | None
     deep_research: ModuleDeepResearchOutput | None
     deep_research_duration_s: float | None
     proposal_from_finding: ProposalFromFindingCreatorOutput | None
@@ -276,13 +278,24 @@ def _stable_hash(payload: Any) -> str:
 #: `enable_deep_research` omission in `build_input_fingerprint`.
 _OPTIONAL_MODEL_FIELDS = ("claude_model",)
 
+#: Agent-retry fields, omitted from the fingerprint while the retry is switched
+#: off. Identical reasoning to `_OPTIONAL_MODEL_FIELDS`, and the same trap: these
+#: arrived long after run dirs existed in the wild, and hashing three new keys
+#: would make every half-finished run fail `--resume` with a `ResumeMismatchError`
+#: for a feature it never used. `agent_retry_attempts=1` means "behave exactly as
+#: before", so it must hash exactly as before. Turning the retry *on* changes how
+#: an agent call is made and does invalidate resume, which is the point.
+_RETRY_FIELDS = ("agent_retry_attempts", "agent_retry_base_s", "agent_retry_max_s")
+_RETRY_OFF_ATTEMPTS = 1
+
 
 def hash_pydantic_excluding(model: BaseModel | None, *, exclude: set[str]) -> str:
     """Stable hash of a pydantic model with selected fields excluded.
 
     Used for `config_fingerprint` so that changing manager-owned path fields
     (`artifacts_dir`, `repo_path`) doesn't trigger a spurious resume mismatch.
-    Unset model-selection fields are excluded too; see `_OPTIONAL_MODEL_FIELDS`.
+    Unset model-selection fields are excluded too, as are the agent-retry fields
+    while the retry is off; see `_OPTIONAL_MODEL_FIELDS` and `_RETRY_FIELDS`.
     """
     if model is None:
         return _stable_hash(None)
@@ -291,7 +304,15 @@ def hash_pydantic_excluding(model: BaseModel | None, *, exclude: set[str]) -> st
         for field in _OPTIONAL_MODEL_FIELDS
         if getattr(model, field, None) is None
     }
-    payload = model.model_dump(mode="json", exclude=exclude | unset_models)
+    retry_off = (
+        set(_RETRY_FIELDS)
+        if getattr(model, "agent_retry_attempts", _RETRY_OFF_ATTEMPTS)
+        == _RETRY_OFF_ATTEMPTS
+        else set()
+    )
+    payload = model.model_dump(
+        mode="json", exclude=exclude | unset_models | retry_off
+    )
     return _stable_hash(payload)
 
 
@@ -304,6 +325,7 @@ def build_input_fingerprint(
     include_candidate_hotspots: bool = True,
     enable_claude_search: bool = False,
     enable_deep_research: bool = True,
+    skip_container_modules: bool = False,
 ) -> dict[str, Any]:
     fp: dict[str, Any] = {
         "repo_path": str(repo_path),
@@ -317,6 +339,12 @@ def build_input_fingerprint(
     # existed still resume; see design/disable_deep_research.md §6.
     if not enable_deep_research:
         fp["enable_deep_research"] = False
+    # Same reasoning, same shape: resuming with this flipped would mix policies
+    # -- modules the first run never discovered would be discovered now, under a
+    # manifest claiming a single policy. Omitted while off (the default) so run
+    # dirs created before the flag existed still resume.
+    if skip_container_modules:
+        fp["skip_container_modules"] = True
     return fp
 
 
@@ -452,6 +480,7 @@ def read_module_state(module_paths: ModulePaths) -> LoadedModuleState:
     discovery_telemetry: list[IterationTelemetry] = []
     discovery_total_duration_s: float | None = None
     discovery_total_cost_usd: float | None = None
+    discovery_truncation: DiscoveryTruncation | None = None
     if module_paths.discovery_telemetry_path.exists():
         payload = json.loads(
             module_paths.discovery_telemetry_path.read_text(encoding="utf-8")
@@ -462,6 +491,9 @@ def read_module_state(module_paths: ModulePaths) -> LoadedModuleState:
         ]
         discovery_total_duration_s = payload.get("total_duration_s")
         discovery_total_cost_usd = payload.get("total_cost_usd")
+        raw_truncation = payload.get("truncated_by")
+        if isinstance(raw_truncation, dict):
+            discovery_truncation = DiscoveryTruncation.model_validate(raw_truncation)
 
     deep_research: ModuleDeepResearchOutput | None = None
     deep_research_duration_s: float | None = None
@@ -528,6 +560,7 @@ def read_module_state(module_paths: ModulePaths) -> LoadedModuleState:
         discovery_telemetry=discovery_telemetry,
         discovery_total_duration_s=discovery_total_duration_s,
         discovery_total_cost_usd=discovery_total_cost_usd,
+        discovery_truncation=discovery_truncation,
         deep_research=deep_research,
         deep_research_duration_s=deep_research_duration_s,
         proposal_from_finding=proposal_from_finding,
@@ -558,11 +591,17 @@ def write_discovery_telemetry(
     iterations: list[IterationTelemetry],
     total_duration_s: float,
     total_cost_usd: float | None,
+    truncated_by: DiscoveryTruncation | None = None,
 ) -> None:
     payload = {
         "iterations": [it.model_dump(mode="json") for it in iterations],
         "total_duration_s": total_duration_s,
         "total_cost_usd": total_cost_usd,
+        # Persisted so a resume still knows the module was refined fewer times
+        # than configured, and keeps reporting DEGRADED rather than SUCCEEDED.
+        "truncated_by": (
+            truncated_by.model_dump(mode="json") if truncated_by is not None else None
+        ),
     }
     _atomic_write_json(module_paths.discovery_telemetry_path, payload)
 

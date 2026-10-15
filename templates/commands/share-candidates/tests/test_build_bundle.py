@@ -1193,15 +1193,341 @@ def test_build_skips_notes_only_apply_directory():
     c1 = (src / ".." / "modules" / "qiskit_compiler" / "foo__cand-a-0001.md").resolve()
     c1.parent.mkdir(parents=True, exist_ok=True)
     c1.write_text("# foo\n", encoding="utf-8")
-    _make_apply_tree(root, cand_id="cand-a-0001", slug="a", patch=False, notes=True)
+    # prompt=False matters: a directory holding notes *and* a prompt is a prompt
+    # bundle now, so "notes only" has to say so explicitly.
+    _make_apply_tree(root, cand_id="cand-a-0001", slug="a",
+                     patch=False, notes=True, prompt=False)
 
     result = bb.build(str(src), top_n=1)
     assert result["apply_bundles"] == 0
+    assert result["apply_prompts"] == 0
     bundle = Path(result["bundle_dir"])
     d = bundle / "candidates" / "modules" / "qiskit_compiler"
     assert not (d / "foo__cand-a-0001__apply.html").exists()
     assert "One-shot apply" not in (d / "foo__cand-a-0001.html").read_text(encoding="utf-8")
     assert "badge apply" not in (bundle / "index.html").read_text(encoding="utf-8")
+
+
+# ---------------------------------------------------------------------------
+# Prompt-only apply bundles.
+#
+# `spotlights-engine apply` has a second, equally legitimate outcome: it writes
+# apply.prompt.txt — the instruction it would have handed to its own agent — and
+# no patch, because nothing was implemented. Before this existed, find_apply()
+# returned None without a patch and such a run produced a silently empty share
+# bundle: 5 candidates, 0 apply pages, no explanation anywhere. The prompt is now
+# a first-class outcome with its own page behind the same `…__apply.html` name.
+# ---------------------------------------------------------------------------
+
+SAMPLE_PROMPT = """\
+CANDIDATE: cand-a-0001
+MODULE:    qiskit/compiler
+BASE:      433942b8fb4e726f6fb512686a511f7ddc782081
+REPO:      /Users/someone/checkouts/vllm
+DIRTY:     true
+WORKTREE:  (none — create one; it is yours to remove when you are done)
+  git -C /Users/someone/checkouts/vllm worktree add --detach <dir> 433942b8
+PROMPT:
+You are implementing ONE proposed optimization in an isolated git worktree.
+
+## Optimization goal
+Reduce circuit depth after transpilation (direction: minimize)
+
+MODULE: this line is inside the prompt body and is not a field
+"""
+
+
+def test_parse_prompt_header_extracts_the_fields_above_the_prompt_line():
+    h = bb.parse_prompt_header(SAMPLE_PROMPT)
+    assert h["candidate"] == "cand-a-0001"
+    assert h["module"] == "qiskit/compiler"
+    assert h["base"] == "433942b8fb4e726f6fb512686a511f7ddc782081"
+    assert h["repo"] == "/Users/someone/checkouts/vllm"
+    # Same lowercase keys as parse_patch_header, so both feed one renderer.
+    assert h["dirty"] == "true"
+
+
+def test_parse_prompt_header_stops_at_the_prompt_line():
+    # `MODULE:` appears again inside the prompt body. Scanning the whole file
+    # would let prose overwrite a real field — the last match would win and the
+    # apply strip would print a sentence where a module path belongs.
+    h = bb.parse_prompt_header(SAMPLE_PROMPT)
+    assert h["module"] == "qiskit/compiler"
+    # WORKTREE is deliberately not captured: its value is prose, and its
+    # indented continuation line must not be read as a field either.
+    assert "worktree" not in h
+    assert not any(v.startswith("git -C") for v in h.values())
+
+
+def test_parse_prompt_header_missing_fields_degrade():
+    assert bb.parse_prompt_header("PROMPT:\ndo the thing\n") == {}
+    assert bb.parse_prompt_header("BASE: abc123\nPROMPT:\nx\n") == {"base": "abc123"}
+    # A `#`-prefixed patch-style comment is NOT a prompt field.
+    assert bb.parse_prompt_header("# base: abc123\nPROMPT:\n") == {}
+
+
+def test_find_apply_prompt_only_directory_is_prompt_mode():
+    root = Path(tempfile.mkdtemp())
+    d = _make_apply_tree(root, patch=False, notes=False, prompt=True)
+    fx = bb.find_apply("cand-qiskit_compiler-0001", root / "apply")
+    assert fx is not None
+    assert fx["mode"] == "prompt"
+    assert fx["patch"] is None and fx["stat"] is None and fx["patch_text"] is None
+    assert fx["prompt"] == d / "apply.prompt.txt"
+    assert fx["header"]["candidate"] == "cand-qiskit_compiler-0001"
+    assert fx["prompt_kb"] > 0
+
+
+def test_find_apply_patch_wins_when_both_ship():
+    # The prompt ships beside the patch in every normal apply/ tree. Dispatching
+    # on the prompt first would replace every patch page with a prompt page.
+    root = Path(tempfile.mkdtemp())
+    _make_apply_tree(root, patch=True, prompt=True)
+    fx = bb.find_apply("cand-qiskit_compiler-0001", root / "apply")
+    assert fx["mode"] == "patch"
+    assert fx["stat"]["added"] == 4
+    assert fx["prompt"] is not None          # still shipped, just not the mode
+
+
+def test_find_apply_prompt_with_notes_is_prompt_mode_and_keeps_the_notes():
+    root = Path(tempfile.mkdtemp())
+    d = _make_apply_tree(root, patch=False, notes=True, prompt=True)
+    fx = bb.find_apply("cand-qiskit_compiler-0001", root / "apply")
+    assert fx["mode"] == "prompt"
+    assert fx["notes"] == d / "APPLY-NOTES.md"
+    assert "Apply notes" in fx["notes_text"]
+
+
+def test_find_apply_reads_a_prompt_that_is_not_valid_utf8():
+    # Same abort-with-nothing hazard as the patch: build() has already removed
+    # the previous share-bundle/ by the time it gets here.
+    root = Path(tempfile.mkdtemp())
+    d = root / "apply" / "qiskit_compiler" / "cand-qiskit_compiler-0001"
+    d.mkdir(parents=True)
+    (d / "apply.prompt.txt").write_bytes(
+        b"BASE:      abc123\nPROMPT:\nrename caf\xe9 to cafe\n")
+    fx = bb.find_apply("cand-qiskit_compiler-0001", root / "apply")
+    assert fx is not None and fx["mode"] == "prompt"
+    assert fx["header"]["base"] == "abc123"
+
+
+def test_copy_apply_files_without_a_patch_ships_the_prompt():
+    # `members` used to start from fx["patch"] unconditionally; in prompt mode
+    # that is None and shutil.copy2(None, …) raises TypeError.
+    root = Path(tempfile.mkdtemp())
+    d = _make_apply_tree(root, patch=False, notes=True, prompt=True)
+    fx = bb.find_apply("cand-qiskit_compiler-0001", root / "apply")
+
+    out = root / "out__apply"
+    bb._copy_apply_files(fx, out)
+    assert not (out / "apply.patch").exists()
+    assert filecmp.cmp(d / "apply.prompt.txt", out / "apply.prompt.txt", shallow=False)
+    with _zip.ZipFile(out / "apply.zip") as zf:
+        assert sorted(zf.namelist()) == ["apply/APPLY-NOTES.md", "apply/apply.prompt.txt"]
+
+
+def test_render_prompt_text_is_collapsed_with_a_raw_link():
+    out = bb.render_prompt_text("prompt <body> & more", "foo__apply/apply.prompt.txt", 12.4)
+    assert out.startswith('<details class="patch"><summary>apply.prompt.txt')
+    assert "— 12 KB" in out
+    assert 'href="foo__apply/apply.prompt.txt"' in out
+    assert "prompt &lt;body&gt; &amp; more" in out      # escaped exactly once
+    assert "<body>" not in out
+
+
+def _prompt_fx(**over):
+    fx = {"mode": "prompt", "patch": None, "stat": None, "patch_text": None,
+          "notes": None, "notes_text": None,
+          "prompt": Path("apply.prompt.txt"),
+          "header": bb.parse_prompt_header(SAMPLE_PROMPT),
+          "prompt_text": SAMPLE_PROMPT, "prompt_kb": 12.4}
+    fx.update(over)
+    return fx
+
+
+def test_render_apply_page_prompt_mode_has_the_agent_recipe_and_downloads():
+    out = bb.render_apply_page("cand-a-0001", "foo", _prompt_fx(),
+                               "foo__apply", "foo.html")
+    assert "<!DOCTYPE html>" in out
+    assert 'href="foo.html"' in out                       # same back link
+    assert "One-shot apply" in out
+    # It says, up front, that there is no patch and nothing was run.
+    assert "prompt only — no patch" in out
+    assert "nothing was implemented" in out.lower()
+    # The recipe: real base commit, placeholder repo, a worktree, an agent.
+    assert "433942b8fb4e726f6fb512686a511f7ddc782081" in out
+    assert "&lt;YOUR_VLLM_CHECKOUT&gt;" in out
+    assert "worktree add --detach" in out
+    assert "coding agent" in out
+    assert "claude -p" in out and "codex exec" in out and "cursor-agent -p" in out
+    # The producer's real path is never rendered as a command to run.
+    assert "REPO=/Users/someone" not in out
+    assert "producer" in out.lower() or "machine that produced" in out.lower()
+    # Both downloads: the bare prompt file and the zip.
+    assert 'href="foo__apply/apply.prompt.txt" download' in out
+    assert 'href="foo__apply/apply.zip" download' in out
+    # ...and the prompt itself is inlined.
+    assert "Reduce circuit depth after transpilation" in out
+
+
+def test_render_apply_page_prompt_mode_states_the_cwd_the_recipe_assumes():
+    # `PROMPT="$PWD/<raw_reldir>/apply.prompt.txt"` is cwd-dependent exactly as
+    # the patch recipe is, and fails the same opaque way from the wrong folder.
+    out = bb.render_apply_page("cand-a-0001", "foo", _prompt_fx(),
+                               "artifact_dir__apply", "foo.html")
+    assert "artifact_dir__apply" in out
+    assert "$PWD" in out and "folder holding this page" in out
+
+
+def test_render_apply_page_prompt_mode_degrades_without_base_or_repo():
+    out = bb.render_apply_page("cand-a-0001", "foo", _prompt_fx(header={}),
+                               "foo__apply", "foo.html")
+    assert "<!DOCTYPE html>" in out
+    assert "&lt;BASE_COMMIT&gt;" in out
+    assert "&lt;YOUR_REPO_CHECKOUT&gt;" in out
+    # With no base there is no "line numbers only hold there" claim to make.
+    assert "Base commit" not in out
+
+
+def test_render_apply_page_prompt_mode_omits_notes_when_absent():
+    with_notes = bb.render_apply_page(
+        "cand-a-0001", "foo",
+        _prompt_fx(notes_text="# Apply notes\n\n- **Objective:** speed\n"),
+        "foo__apply", "foo.html")
+    assert "Objective" in with_notes
+    assert "Objective" not in bb.render_apply_page(
+        "cand-a-0001", "foo", _prompt_fx(), "foo__apply", "foo.html")
+
+
+def test_render_apply_page_without_a_mode_key_still_renders_the_patch_page():
+    # Regression: the dispatch is `fx.get("mode") == "prompt"`, so every caller
+    # and every fixture that predates `mode` keeps getting the patch page.
+    fx = {"header": {"base": "abc123"}, "stat": bb.diffstat(SAMPLE_PATCH),
+          "patch_text": SAMPLE_PATCH, "notes_text": None, "patch_kb": 7.1}
+    out = bb.render_apply_page("cand-a-0001", "foo", fx, "foo__apply", "foo.html")
+    assert "The patch" in out and 'class="l d-add"' in out
+    assert "coding agent" not in out
+
+
+def test_render_apply_section_prompt_mode_says_no_patch():
+    out = bb.render_apply_section({"mode": "prompt"},
+                                  "foo__cand-a-0001__apply.html")
+    assert "One-shot apply" in out
+    assert 'href="foo__cand-a-0001__apply.html"' in out
+    assert "View the prompt →" in out
+    assert "no patch was produced" in out
+    # It must not reach for fx["stat"], which is None in prompt mode.
+    assert "files changed" not in out
+
+
+def test_build_end_to_end_with_prompt_only_apply():
+    root = Path(tempfile.mkdtemp())
+    src = root / "sorted"
+    src.mkdir(parents=True, exist_ok=True)
+    (src / "sorted_candidates.md").write_text(SAMPLE_SORTED, encoding="utf-8")
+    c1 = (src / ".." / "modules" / "qiskit_compiler" / "foo__cand-a-0001.md").resolve()
+    c1.parent.mkdir(parents=True, exist_ok=True)
+    c1.write_text("# foo\n", encoding="utf-8")
+    # SAMPLE_SORTED's top row is cand-a-0001 -> module slug "a"
+    _make_apply_tree(root, cand_id="cand-a-0001", slug="a", patch=False)
+
+    result = bb.build(str(src), top_n=1)
+    # The two counters are disjoint: this run produced no patch at all.
+    assert result["apply_prompts"] == 1
+    assert result["apply_bundles"] == 0
+
+    bundle = Path(result["bundle_dir"])
+    d = bundle / "candidates" / "modules" / "qiskit_compiler"
+    page = d / "foo__cand-a-0001__apply.html"
+    assert page.exists()
+    raw = d / "foo__cand-a-0001__apply"
+    assert not (raw / "apply.patch").exists()
+    assert (raw / "apply.prompt.txt").exists()
+    assert (raw / "APPLY-NOTES.md").exists()
+    assert (raw / "apply.zip").exists()
+
+    # Byte-for-byte, compared as bytes: the recipient hands this exact file to
+    # an agent, and a decode-and-rewrite would still pass a read_text() compare.
+    src_apply = root / "apply" / "a" / "cand-a-0001"
+    assert filecmp.cmp(src_apply / "apply.prompt.txt",
+                       raw / "apply.prompt.txt", shallow=False)
+
+    # The page's download button points at a file that is really there.
+    html_txt = page.read_text(encoding="utf-8")
+    assert 'href="foo__cand-a-0001__apply/apply.prompt.txt" download' in html_txt
+    assert 'href="foo__cand-a-0001.html"' in html_txt          # back link
+
+    # candidate page -> apply page, and it says there is no patch
+    cand_html = (d / "foo__cand-a-0001.html").read_text(encoding="utf-8")
+    assert 'href="foo__cand-a-0001__apply.html"' in cand_html
+    assert "no patch was produced" in cand_html
+
+    # INDEX-side wiring: build() has to set apply_stat/apply_badge_stat/apply_href
+    # from the prompt arm too, or a prompt-only run gets a page nothing links to.
+    idx = (bundle / "index.html").read_text(encoding="utf-8")
+    assert '<span class="badge apply">apply · prompt</span>' in idx
+    assert "🔧 One-shot apply: run with a coding agent →" in idx
+    apply_href = "candidates/modules/qiskit_compiler/foo__cand-a-0001__apply.html"
+    assert f'class="apply-link" href="{apply_href}"' in idx
+    assert (bundle / apply_href).exists()
+
+    # and the whole thing is in the outer zip
+    with _zip.ZipFile(Path(result["zip_path"])) as zf:
+        names = zf.namelist()
+    assert any(n.endswith("foo__cand-a-0001__apply.html") for n in names)
+    assert any(n.endswith("foo__cand-a-0001__apply/apply.prompt.txt") for n in names)
+
+
+def test_render_index_prompt_badge_and_footer_link():
+    # The badge and the pill are free text, so the prompt arm reuses the same
+    # two row keys the patch arm sets. This pins the strings build() puts there.
+    header = {"title": "T", "objective": "O"}
+    rows = [
+        {"rank": "1", "cand_id": "cand-a-0001", "module": "m", "symbol": "foo",
+         "impact": "high", "score": "96", "rationale": "R",
+         "html_href": "candidates/modules/m/foo__cand-a-0001.html",
+         "apply_stat": "run with a coding agent",
+         "apply_badge_stat": "prompt",
+         "apply_href": "candidates/modules/m/foo__cand-a-0001__apply.html"},
+    ]
+    idx = bb.render_index(header, rows)
+    assert '<span class="badge apply">apply · prompt</span>' in idx
+    assert "🔧 One-shot apply: run with a coding agent →" in idx
+    assert 'href="candidates/modules/m/foo__cand-a-0001__apply.html"' in idx
+
+
+def test_build_reports_both_apply_counters_when_a_run_mixes_the_two():
+    # A real run can have both: some candidates got a patch, others only a
+    # prompt. The two counters must not double-count or cross-count.
+    root = Path(tempfile.mkdtemp())
+    src = root / "sorted"
+    src.mkdir(parents=True, exist_ok=True)
+    (src / "sorted_candidates.md").write_text(SAMPLE_SORTED, encoding="utf-8")
+    # SAMPLE_SORTED's first two rows live under DIFFERENT module folders.
+    mods = (src / ".." / "modules").resolve()
+    (mods / "qiskit_compiler").mkdir(parents=True, exist_ok=True)
+    (mods / "qiskit_transpiler_passes").mkdir(parents=True, exist_ok=True)
+    (mods / "qiskit_compiler" / "foo__cand-a-0001.md").write_text(
+        "# foo\n", encoding="utf-8")
+    (mods / "qiskit_transpiler_passes" / "bar__cand-b-0002.md").write_text(
+        "# bar\n", encoding="utf-8")
+    _make_apply_tree(root, cand_id="cand-a-0001", slug="a", patch=True)
+    _make_apply_tree(root, cand_id="cand-b-0002", slug="b", patch=False)
+
+    result = bb.build(str(src), top_n=2)
+    assert result["count"] == 2
+    assert result["apply_bundles"] == 1
+    assert result["apply_prompts"] == 1
+    out = Path(result["bundle_dir"]) / "candidates" / "modules"
+    assert (out / "qiskit_compiler" / "foo__cand-a-0001__apply"
+            / "apply.patch").exists()
+    assert not (out / "qiskit_transpiler_passes" / "bar__cand-b-0002__apply"
+                / "apply.patch").exists()
+    assert (out / "qiskit_transpiler_passes" / "bar__cand-b-0002__apply"
+            / "apply.prompt.txt").exists()
+    idx = (Path(result["bundle_dir"]) / "index.html").read_text(encoding="utf-8")
+    assert '<span class="badge apply">apply · prompt</span>' in idx
+    assert '<span class="badge apply">apply · +4/−2</span>' in idx
 
 
 def test_build_end_to_end_with_both_arms():

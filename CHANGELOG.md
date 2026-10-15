@@ -15,6 +15,7 @@ The first end-to-end version: point it at a repo and a goal, get a ranked, brows
 - **Cost tracking** — `run_manifest.json` records provenance, token usage, and price.
 - **`prep-evolve`** — packages a chosen candidate as a ready-to-run bundle for an external evolver (skydiscover, coral, nous).
 - **`apply`** — one Claude Code session turns a candidate into a reviewable patch.
+- **`report`** — renders a finished run directory into one self-contained `experiment.html`: inlined CSS/JS, no external assets, every chart paired with a table view. Folds in the ranking, evolve and apply artifacts when they exist.
 
 ### Skills
 
@@ -22,6 +23,10 @@ The first end-to-end version: point it at a repo and a goal, get a ranked, brows
 - **`/spotlights-sort-candidates`** — ranks a finished run's candidates by estimated impact into `sorted_candidates.md` / `.json`.
 - **`/spotlights-share-candidates`** — packages the top-N candidates into a self-contained offline ZIP.
 - **`/spotlights-apply-candidate`** — drives `spotlights-engine apply` in-session.
+
+### Paper
+
+- **[Spotlights: Discovering Improvement Opportunities in Software Repositories](https://arxiv.org/abs/2609.20446)** (arXiv:2609.20446) — the method behind this release: the module map, the successive agent reviews that narrow it to candidates, and the evaluation across four domains.
 
 ### Known limitations
 

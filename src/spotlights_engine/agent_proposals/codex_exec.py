@@ -19,6 +19,7 @@ from pathlib import Path
 from spotlights_engine.agent_proposals.claude_exec import CandidateAgentRunResult
 from spotlights_engine.agent_proposals.errors import AgentProposalsSetupError
 from spotlights_engine.costing.usage import codex_usage_from_stream
+from spotlights_engine.utils.agent_stream import explain
 
 _DROP_EXACT = frozenset(
     {
@@ -124,7 +125,11 @@ def run_candidate_codex(
         return CandidateAgentRunResult(
             candidate_id=candidate_id,
             duration_s=duration,
-            error=f"codex timed out after {duration:.1f}s",
+            error=explain(
+                f"codex timed out after {duration:.1f}s",
+                stdout,
+                exc.stderr or b"",
+            ),
             stdout=stdout,
             stderr=exc.stderr or b"",
             usage=usage,
@@ -139,7 +144,11 @@ def run_candidate_codex(
         return CandidateAgentRunResult(
             candidate_id=candidate_id,
             duration_s=duration,
-            error=f"codex exit={completed.returncode}: stderr={stderr_tail!r}",
+            error=explain(
+                f"codex exit={completed.returncode}: stderr={stderr_tail!r}",
+                completed.stdout or b"",
+                completed.stderr or b"",
+            ),
             stdout=completed.stdout or b"",
             stderr=completed.stderr or b"",
             usage=usage,
@@ -149,7 +158,11 @@ def run_candidate_codex(
         return CandidateAgentRunResult(
             candidate_id=candidate_id,
             duration_s=duration,
-            error="codex output_last_message file missing",
+            error=explain(
+                "codex output_last_message file missing",
+                completed.stdout or b"",
+                completed.stderr or b"",
+            ),
             stdout=completed.stdout or b"",
             stderr=completed.stderr or b"",
             usage=usage,
@@ -159,7 +172,11 @@ def run_candidate_codex(
         return CandidateAgentRunResult(
             candidate_id=candidate_id,
             duration_s=duration,
-            error="codex output_last_message empty",
+            error=explain(
+                "codex output_last_message empty",
+                completed.stdout or b"",
+                completed.stderr or b"",
+            ),
             stdout=completed.stdout or b"",
             stderr=completed.stderr or b"",
             usage=usage,
