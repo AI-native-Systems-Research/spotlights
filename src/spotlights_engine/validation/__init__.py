@@ -4,8 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from spotlights_engine.validation.schemas import (
-    ExecutionResult,
     PreparationRun,
+    ValidationExecutionResult,
     ValidationPreparation,
     ValidationResult,
     ValidationRun,
@@ -13,40 +13,46 @@ from spotlights_engine.validation.schemas import (
 )
 
 __all__ = [
-    "prepare",
-    "start_validation",
+    "discover_validation_plan",
+    "specialize_validation_plan",
     "get_validation_status",
     "PreparationRun",
+    "ValidationExecutionResult",
     "ValidationPreparation",
     "ValidationRun",
     "ValidationResult",
     "ValidationStatus",
-    "ExecutionResult",
 ]
 
 
-async def prepare(
+async def discover_validation_plan(
     source_tree: Path,
     artifacts_dir: Path | None = None,
+    candidate: object | None = None,
+    change: object | None = None,
 ) -> PreparationRun:
     """Phase 1: discover test harness and build validation plan.
 
     In MVP, pass artifacts_dir to load pre-built artifacts from disk
     instead of running live discovery.
+
+    At least one of *candidate* or *change* must be provided to build a
+    prioritized validation plan — the plan is scoped to the components
+    affected by the candidate/change.
     """
-    raise NotImplementedError("prepare() is not yet implemented")
+    raise NotImplementedError("discover_validation_plan() is not yet implemented")
 
 
-async def start_validation(
+async def specialize_validation_plan(
     change: object,
-    execution_result: ExecutionResult,
+    execution_result: ValidationExecutionResult,
     preparation: PreparationRun,
 ) -> ValidationRun:
     """Phase 2: execute the validation plan.
 
     Awaits the preparation internally if Phase 1 is still running.
     """
-    raise NotImplementedError("start_validation() is not yet implemented")
+    raise NotImplementedError("specialize_validation_plan() is not yet implemented")
 
 
 async def get_validation_status(run_id: str) -> ValidationStatus:
