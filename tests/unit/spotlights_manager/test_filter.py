@@ -1,4 +1,5 @@
-"""Filter resolution: include keep-list, ordering, unknown-name warn-and-skip."""
+"""Filter resolution: include keep-list, ordering, suffix and ancestor fallbacks,
+unknown-name warn-and-skip."""
 
 from __future__ import annotations
 
@@ -131,3 +132,61 @@ def test_source_root_prefixed_names() -> None:
         "spotlights_engine/modules_extractor/agent",
         "spotlights_engine/modules_extractor/errors",
     ]
+
+
+def test_unique_suffix_selects_that_module_subtree(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """An entry written without its leading source-root segment resolves to the
+    one module it is a path suffix of, plus that module's subtree."""
+    modules = [
+        "hrl_ocr",
+        "hrl_ocr/pipeline",
+        "hrl_ocr/pipeline/ibm_ocr",
+        "hrl_ocr/pipeline/ibm_ocr/sub",
+        "hrl_ocr/pipeline/glue_components",
+        "hrl_ocr/models/recognition/ssocr",
+    ]
+    with caplog.at_level(logging.WARNING):
+        out = apply_filter(
+            modules,
+            ModuleFilter(include=["pipeline/ibm_ocr", "recognition/ssocr"]),
+        )
+    assert out == [
+        "hrl_ocr/pipeline/ibm_ocr",
+        "hrl_ocr/pipeline/ibm_ocr/sub",
+        "hrl_ocr/models/recognition/ssocr",
+    ]
+    assert "suffix of, 'hrl_ocr/pipeline/ibm_ocr' (2 modules)" in caplog.text
+
+
+def test_suffix_matches_only_at_a_path_boundary() -> None:
+    """`ocr` is a substring of `hrl_ocr` but not a path suffix of it."""
+    assert apply_filter(["hrl_ocr"], ModuleFilter(include=["ocr"])) == []
+
+
+def test_ambiguous_suffix_is_ignored(caplog: pytest.LogCaptureFixture) -> None:
+    """A suffix shared by several modules is not guessed at."""
+    modules = ["a/utils", "b/utils", "c"]
+    with caplog.at_level(logging.WARNING):
+        out = apply_filter(modules, ModuleFilter(include=["utils", "c"]))
+    assert out == ["c"]
+    assert "ambiguous" in caplog.text
+    assert "'a/utils', 'b/utils'" in caplog.text
+
+
+def test_exact_and_prefix_matches_win_over_suffix() -> None:
+    """A suffix is only tried when the entry matches no module from the start."""
+    modules = ["pipeline", "pipeline/str", "hrl_ocr/pipeline"]
+    assert apply_filter(modules, ModuleFilter(include=["pipeline"])) == [
+        "pipeline",
+        "pipeline/str",
+    ]
+
+
+def test_suffix_wins_over_ancestor_fallback() -> None:
+    """`v1/attention` exists as an ancestor, but `x/v1/attention/backends` is a
+    module the entry names exactly, modulo a leading segment."""
+    modules = ["v1/attention", "x/v1/attention/backends"]
+    out = apply_filter(modules, ModuleFilter(include=["v1/attention/backends"]))
+    assert out == ["x/v1/attention/backends"]

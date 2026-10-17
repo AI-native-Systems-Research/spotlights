@@ -18,7 +18,8 @@ class _ManagerError(RuntimeError):
 
 
 class ManagerSetupError(_ManagerError):
-    """Raised before any step runs (bad repo_path / artifacts_dir)."""
+    """Raised before any per-module step runs (bad repo_path / artifacts_dir,
+    or an `--include` filter that selects no module)."""
 
 
 class ResumeMismatchError(_ManagerError):

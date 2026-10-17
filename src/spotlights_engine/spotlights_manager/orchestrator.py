@@ -1993,6 +1993,15 @@ async def _run_async(
     all_modules: list[tuple[str, Module]] = list(tree.walk())
     all_qns = [qn for qn, _ in all_modules]
     selected = apply_filter(all_qns, config.module_filter)
+    if config.module_filter and config.module_filter.include and not selected:
+        # Every include entry missed: running on would "complete" with zero
+        # modules and exit 0, which hides the typo.
+        raise ManagerSetupError(
+            f"--include selected no modules: none of {config.module_filter.include!r} "
+            f"matches a module; available modules: {sorted(all_qns)!r}",
+            include=list(config.module_filter.include),
+            available=sorted(all_qns),
+        )
 
     # Slug collision check (theoretical — slash form is unique by construction).
     seen_slugs: dict[str, str] = {}
