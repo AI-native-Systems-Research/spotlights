@@ -1,0 +1,8 @@
+model = "gpt-5.5"
+model_provider = "litellm"
+
+[model_providers.litellm]
+name = "IBM LiteLLM"
+base_url = "https://ete-litellm.ai-models.vpc.res.ibm.com/v1"
+env_key = "OPENAI_API_KEY"
+wire_api = "responses"

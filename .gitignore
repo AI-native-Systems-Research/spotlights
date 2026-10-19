@@ -22,6 +22,9 @@ env/
 # templates/commands/. Contributors run init locally to dogfood the slash
 # commands the same way external users do.
 .claude/
+# ...except the DAM image's workspace seed, which must ship with the repo so
+# the docker build context includes Claude Code's LiteLLM routing config.
+!DAM/spotlights-agent/workspace/.claude/
 .spotlights/
 
 # Tooling caches

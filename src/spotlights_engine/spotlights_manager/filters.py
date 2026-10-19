@@ -26,10 +26,12 @@ class ModuleFilter(BaseModel):
     does not resolve to any module it is treated as a virtual prefix and
     expands to every module nested beneath it (e.g. a source-root package
     segment like `spotlights_engine`). User-supplied order is preserved across
-    entries so smoke runs are reproducible. A name finer-grained than any
-    module falls back to its nearest existing ancestor module and that
-    ancestor's subtree; a name matching neither a module, a prefix, nor an
-    ancestor is warned and skipped.
+    entries so smoke runs are reproducible. A name that is a unique path suffix
+    of one module (e.g. `pipeline/ibm_ocr` for `hrl_ocr/pipeline/ibm_ocr`)
+    selects that module's subtree. A name finer-grained than any module falls
+    back to its nearest existing ancestor module and that ancestor's subtree; a
+    name matching neither a module, a prefix, a unique suffix, nor an ancestor
+    is warned and skipped.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -53,6 +55,17 @@ def _nearest_ancestor(name: str, available: set[str]) -> str | None:
     return None
 
 
+def _suffix_matches(name: str, qns: list[str]) -> list[str]:
+    """Return the modules whose qualified name ends with `name` at a `/` boundary.
+
+    Catches an entry written without its leading source-root segments, e.g.
+    `pipeline/ibm_ocr` for the module `hrl_ocr/pipeline/ibm_ocr`. A bare
+    substring does not count: `ocr` does not match `hrl_ocr`.
+    """
+    suffix = "/" + name
+    return [qn for qn in qns if qn.endswith(suffix)]
+
+
 def apply_filter(qualified_names: Iterable[str], filt: ModuleFilter | None) -> list[str]:
     """Return the subset of `qualified_names` selected by `filt`.
 
@@ -60,14 +73,18 @@ def apply_filter(qualified_names: Iterable[str], filt: ModuleFilter | None) -> l
     submodules (e.g. `v1/worker` matches both `v1/worker` and
     `v1/worker/gpu`). A name that matches no module is treated as a virtual
     prefix and expands to every module nested beneath it (e.g. a source-root
-    package segment like `spotlights_engine`). A name that is finer-grained than
-    any module the extractor emitted (matches nothing above) falls back to its
-    nearest existing ancestor module and its subtree (e.g.
-    `v1/attention/backends` selects `v1/attention` and its descendants when the
-    extractor kept attention as one module). Names that resolve to none of the
-    above (a typo, or a leaf with no ancestor module) are logged as a warning and
-    ignored, so a coarse extractor granularity does not abort a run after the
-    expensive extraction step.
+    package segment like `spotlights_engine`). A name that matches none of those
+    but is the path suffix of exactly one module (e.g. `pipeline/ibm_ocr` for
+    `hrl_ocr/pipeline/ibm_ocr`) selects that module and its subtree; a suffix
+    shared by several modules is ambiguous and is treated as unknown. A name
+    that is finer-grained than any module the extractor emitted (matches
+    nothing above) falls back to its nearest existing ancestor module and its
+    subtree (e.g. `v1/attention/backends` selects `v1/attention` and its
+    descendants when the extractor kept attention as one module). Names that
+    resolve to none of the above (a typo, or a leaf with no ancestor module) are
+    logged as a warning and ignored, so a coarse extractor granularity does not
+    abort a run after the expensive extraction step. When every name is ignored
+    the result is empty; the orchestrator refuses to run on that.
     """
     qns = list(qualified_names)
     if filt is None or not filt.include:
@@ -81,6 +98,31 @@ def apply_filter(qualified_names: Iterable[str], filt: ModuleFilter | None) -> l
         # Exact modules and virtual prefixes both define subtree roots.
         prefix = name + "/"
         matches = [qn for qn in qns if qn == name or qn.startswith(prefix)]
+        if not matches:
+            # Written without its leading source-root segments: resolve a
+            # suffix only when it names exactly one module.
+            suffixed = _suffix_matches(name, qns)
+            if len(suffixed) == 1:
+                root = suffixed[0]
+                root_prefix = root + "/"
+                matches = [qn for qn in qns if qn == root or qn.startswith(root_prefix)]
+                _log.warning(
+                    "ModuleFilter.include: %r matches no module; "
+                    "using the module it is a suffix of, %r (%d modules)",
+                    name,
+                    root,
+                    len(matches),
+                )
+            elif len(suffixed) > 1:
+                _log.warning(
+                    "ModuleFilter.include: %r is a suffix of %d modules %r; "
+                    "ambiguous, write the full module name",
+                    name,
+                    len(suffixed),
+                    suffixed,
+                )
+                unknown.append(name)
+                continue
         if not matches:
             # Finer-grained than any module: fall back to nearest ancestor.
             ancestor = _nearest_ancestor(name, available)
