@@ -57,6 +57,45 @@ def test_probe_cli_unpriced_model_fails(monkeypatch):
     assert "docs/cost-and-manifest.md" in res.detail
 
 
+def test_probe_cli_gateway_prefixed_model_priced_by_suffix(monkeypatch):
+    monkeypatch.setattr(doctor.shutil, "which", lambda _n: "/bin/" + _n)
+    monkeypatch.setattr(
+        doctor,
+        "_probe_model",
+        lambda name, **_kw: ProbeOutcome(ok=True, model="claude/ibm/aws/claude-opus-4-8", error=""),
+    )
+    res = doctor.probe_cli("claude", rates=RATES)
+    assert res.ok is True
+    assert "priced as anthropic:claude-opus-4-8" in res.detail
+
+
+def test_probe_cli_unpriced_gateway_model_prints_fillable_template(monkeypatch):
+    monkeypatch.setattr(doctor.shutil, "which", lambda _n: "/bin/" + _n)
+    monkeypatch.setattr(
+        doctor,
+        "_probe_model",
+        lambda name, **_kw: ProbeOutcome(
+            ok=True, model="claude/ibm/aws/claude-haiku-4-5", error=""
+        ),
+    )
+    res = doctor.probe_cli("claude", rates=RATES)
+    assert res.ok is False
+    assert "'anthropic:claude-haiku-4-5'" in res.detail
+    for field in ("input", "output", "cache_read", "cache_create"):
+        assert f'"{field}": "<USD per' in res.detail
+
+
+def test_unfilled_rate_template_fails_validation(tmp_path):
+    """A template pasted without real prices must make the table invalid,
+    never price the model at $0."""
+    from spotlights_engine.costing.rates import load_rates
+
+    path = tmp_path / "rates.json"
+    path.write_text(doctor._rate_row_template("anthropic:aws/claude-haiku-4-5"))
+    with pytest.raises(ValueError):
+        load_rates(path)
+
+
 def test_probe_cli_codex_family_fallback_ok(monkeypatch):
     """Codex reports no model id → rate key falls back to the CLI family."""
     monkeypatch.setattr(doctor.shutil, "which", lambda _n: "/bin/" + _n)

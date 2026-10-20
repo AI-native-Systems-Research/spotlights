@@ -19,6 +19,7 @@ from spotlights_engine.spotlights_manager import (
     run_with_telemetry,
 )
 from spotlights_engine.spotlights_manager import orchestrator as orch
+from spotlights_engine.spotlights_manager.errors import ManagerSetupError
 from tests.unit.spotlights_manager._fakes import (
     make_discovery_result,
     make_extractor_result,
@@ -568,3 +569,23 @@ def test_fail_fast_cancels_after_unhandled_task_exception(
     cancelled = result.module_runs["v1/attention/paged_kv"]
     assert cancelled.status == "FAILED"
     assert cancelled.issues and all(iss.recoverable for iss in cancelled.issues)
+
+
+def test_include_that_selects_no_module_raises(monkeypatch, repo: Path, artifacts: Path) -> None:
+    """An `--include` list where every entry misses aborts the run instead of
+    "completing" with zero modules and exit 0."""
+    _patch_extractor(monkeypatch, make_tree())
+
+    def _discover(inp, *, config):
+        raise AssertionError("no module should be discovered")
+
+    monkeypatch.setattr(orch, "discover", _discover)
+    cfg = SpotlightsManagerConfig(
+        artifacts_dir=artifacts,
+        output_folder=artifacts.parent / "output",
+        module_filter=ModuleFilter(include=["does/not/exist"]),
+    )
+    with pytest.raises(ManagerSetupError, match="selected no modules") as exc_info:
+        run_with_telemetry(make_input(repo), config=cfg)
+    assert exc_info.value.context["include"] == ["does/not/exist"]
+    assert "v1/kv_offload" in exc_info.value.context["available"]
