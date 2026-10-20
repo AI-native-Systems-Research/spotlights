@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 import os
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Literal
 
@@ -186,6 +186,9 @@ _CONTEXT_TAG_RE = re.compile(r"\[[^\]]*\]$")
 # (e.g. HuggingFace org/model paths) and we don't want to eat those. The `+`
 # collapses stacked LiteLLM routes: LiteLLM's OpenRouter provider emits
 # "openrouter/anthropic/claude-opus-5", which must strip both segments.
+# Gateway-specific prefixes outside this list (e.g. "claude/ibm/aws/...") are
+# handled at lookup time by `resolve_rate_key`, not here: the allowlist only
+# shapes canonical keys and display strings.
 _ROUTE_PREFIX_RE = re.compile(
     r"^(?:(?:aws|bedrock|azure|azure_ai|vertex|vertex_ai|"
     r"openrouter|anthropic|openai|gemini)/)+"
@@ -234,6 +237,33 @@ def _canonical_rate_key(key: str) -> str:
     if not sep:
         return key
     return f"{provider}:{canonical_model_id(model)}"
+
+
+def resolve_rate_key(key: str, rates: Mapping[str, ModelRate]) -> str | None:
+    """Return the table key that prices `key` (a canonical `"provider:model"`),
+    or None when no row matches.
+
+    Exact match first; otherwise drop leading `/` segments of the model part one
+    at a time (`claude/ibm/aws/x` → `ibm/aws/x` → `aws/x` → `x`) and take the
+    first — i.e. longest — suffix that has a row. This covers gateway route
+    prefixes the `_ROUTE_PREFIX_RE` allowlist does not know. It stays safe for
+    ids with a real slash (HuggingFace `org/model`): a suffix only matches when
+    the table has a row for exactly that suffix. The provider is never changed,
+    and the model part is never peeled to empty.
+    """
+    if key in rates:
+        return key
+    provider, sep, model = key.partition(":")
+    if not sep:
+        return None
+    while "/" in model:
+        model = model.split("/", 1)[1]
+        if not model:
+            return None
+        candidate = f"{provider}:{model}"
+        if candidate in rates:
+            return candidate
+    return None
 
 
 def _rate_key(record: UsageRecord) -> tuple[str, bool]:
@@ -292,7 +322,13 @@ def compute_cost(
         key, resolved = _rate_key(record)
         if not resolved:
             unresolved += 1
-        rate = rates.get(key)
+        # A priced record reports the row that priced it (which may be a
+        # shorter suffix of `key`); an unpriced one keeps its full key so the
+        # operator sees the exact id that needs a row.
+        matched = resolve_rate_key(key, rates)
+        rate = rates[matched] if matched is not None else None
+        if matched is not None:
+            key = matched
         contribution = 0.0
         if rate is not None:
             contribution = (

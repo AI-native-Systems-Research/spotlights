@@ -22,6 +22,7 @@ is deliberate: it is the only way to verify auth and the reported model.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 from dataclasses import dataclass
@@ -34,6 +35,7 @@ from spotlights_engine.costing.rates import (
     _build_canonical_rate_map,
     canonical_model_id,
     load_rates,
+    resolve_rate_key,
 )
 from spotlights_engine.costing.records import PROVIDER_FOR_CLI
 from spotlights_engine.model_config import (
@@ -153,6 +155,32 @@ def _rate_key_for(name: str, model: str | None) -> str:
     return f"{provider}:{name}"
 
 
+def _short_rate_key(key: str) -> str:
+    """`provider:` + the last `/` segment of the model. `resolve_rate_key`
+    matches a row keyed this way for every routed form of the same model.
+    """
+    provider, _, model = key.partition(":")
+    return f"{provider}:{model.rsplit('/', 1)[-1]}"
+
+
+def _rate_row_template(key: str) -> str:
+    """A rate-table row for the user to fill in with their own contract prices.
+
+    The placeholders are strings on purpose: pasted unfilled, `ModelRate`
+    validation rejects them and doctor reports the table invalid — a forgotten
+    placeholder never prices a model at $0.
+    """
+    row = {
+        "input": "<USD per input token>",
+        "output": "<USD per output token>",
+        "cache_read": "<USD per cache-read token>",
+        "cache_create": "<USD per cache-write token>",
+        "unit": "per_token",
+        "note": "your contract price",
+    }
+    return json.dumps({_short_rate_key(key): row}, indent=2)
+
+
 def probe_cli(
     name: str,
     *,
@@ -188,22 +216,26 @@ def probe_cli(
         return CheckResult(name=name, ok=False, detail=outcome.error)
 
     key = _rate_key_for(name, outcome.model)
-    if key not in rates:
+    matched = resolve_rate_key(key, rates)
+    if matched is None:
         reported = outcome.model or "(no model id reported)"
         return CheckResult(
             name=name,
             ok=False,
             detail=(
                 f"reported model {reported!r} has no rate row ({key}). "
-                f"Add a row keyed {key!r} to the rate table or set {RATES_ENV_VAR} "
-                "to a table that prices it — an unpriced model silently drops from "
-                'the cost total. See docs/cost-and-manifest.md → "Adding a model to the rate table".'
+                f"Add a row keyed {_short_rate_key(key)!r} with YOUR contract prices "
+                f"to the table {RATES_ENV_VAR} points at (e.g. "
+                "~/.config/spotlights/rates.json) — an unpriced model silently drops "
+                "from the cost total. Do not copy another model's rate. Template:\n"
+                f"{_rate_row_template(key)}\n"
+                'See docs/cost-and-manifest.md → "Adding a model to the rate table".'
             ),
         )
     return CheckResult(
         name=name,
         ok=True,
-        detail=f"{resolved} → priced as {key}",
+        detail=f"{resolved} → priced as {matched}",
     )
 
 

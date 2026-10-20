@@ -86,15 +86,16 @@ If a model is missing from the table, Spotlights still writes the manifest and p
 
 ## Adding a model to the rate table
 
-If `doctor` (or a run's `unpriced_models`) reports a model with no rate row — e.g. `[FAIL] claude: reported model 'aws/claude-opus-4-7' has no rate row (anthropic:aws/claude-opus-4-7)` — add a row for it:
+If `doctor` (or a run's `unpriced_models`) reports a model with no rate row — e.g. `[FAIL] claude: reported model 'claude/ibm/aws/claude-haiku-4-5' has no rate row (anthropic:claude/ibm/aws/claude-haiku-4-5). Add a row keyed 'anthropic:claude-haiku-4-5' …` — add a row for it:
 
 ```bash
 # 1. Copy the bundled table (or start from your existing contracted one)
 mkdir -p "$HOME/.config/spotlights"
 cp src/spotlights_engine/costing/rates.json "$HOME/.config/spotlights/rates.json"
 
-# 2. Add a row keyed by the EXACT id doctor printed inside the parentheses,
-#    e.g. "anthropic:aws/claude-opus-4-7", with your per-token rates.
+# 2. Paste the row template doctor printed, keyed by the short id it suggests
+#    (e.g. "anthropic:claude-haiku-4-5"), and replace every "<USD per … token>"
+#    placeholder with YOUR contract price per token.
 
 # 3. Point the engine at your table and re-check
 export SPOTLIGHTS_RATES_FILE="$HOME/.config/spotlights/rates.json"
@@ -102,3 +103,7 @@ spotlights-engine doctor
 ```
 
 `doctor` reads the same table (`SPOTLIGHTS_RATES_FILE` if set, else the bundled default), so a green `doctor` means the run will price that model.
+
+Lookup is by path suffix: when no row matches the full id, the engine drops leading `/` segments one at a time (`claude/ibm/aws/claude-opus-5` → `ibm/aws/claude-opus-5` → `aws/claude-opus-5` → `claude-opus-5`) and uses the longest suffix that has a row. So one short-keyed row prices every gateway route of that model, and the manifest's `rate_key` names the row that was used.
+
+Use your real contract price. Do not copy another model's rate as a stand-in: the cost total would look complete but be wrong. An unfilled placeholder fails validation, and `doctor` reports the table as invalid, so it can never price a model at $0 by mistake.

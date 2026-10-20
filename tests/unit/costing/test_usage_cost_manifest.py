@@ -217,6 +217,58 @@ def test_compute_cost_strips_litellm_route_prefix_from_model_id() -> None:
     assert stacked.unpriced_models == []
 
 
+def test_resolve_rate_key_peels_leading_path_segments() -> None:
+    """Gateway prefixes outside the LiteLLM allowlist (`claude/ibm/aws/…`) fall
+    back to the longest suffix that has a row — never across providers, never
+    to an empty model."""
+    from spotlights_engine.costing.rates import resolve_rate_key
+
+    rate = ModelRate(input=0.01, output=0.02, cache_read=0.0, cache_create=0.0)
+    rates = {"anthropic:claude-opus-5": rate}
+
+    assert resolve_rate_key("anthropic:claude-opus-5", rates) == "anthropic:claude-opus-5"
+    assert (
+        resolve_rate_key("anthropic:claude/ibm/aws/claude-opus-5", rates)
+        == "anthropic:claude-opus-5"
+    )
+    assert resolve_rate_key("anthropic:claude/ibm/aws/claude-haiku-4-5", rates) is None
+    # The provider is part of the key and is never crossed.
+    assert resolve_rate_key("openai:ibm/azure/claude-opus-5", rates) is None
+    # Degenerate ids do not peel to an empty model.
+    assert resolve_rate_key("anthropic:aws/", {"anthropic:": rate}) is None
+    assert resolve_rate_key("anthropic:", rates) is None
+    # Longest suffix wins when several rows match.
+    both = {"anthropic:aws/x": rate, "anthropic:x": rate}
+    assert resolve_rate_key("anthropic:claude/ibm/aws/x", both) == "anthropic:aws/x"
+
+
+def test_compute_cost_prices_gateway_prefixed_model_by_suffix() -> None:
+    def _record(model: str) -> UsageRecord:
+        return UsageRecord.from_usage(
+            AgentUsage(input=100, output=10, model=model),
+            step="module_deep_research",
+            module_qualified_name="pkg/a",
+            session_index=1,
+            invocation_index=0,
+            invocation_id="i0",
+            cli="claude",
+            role="deep_research",
+        )
+
+    rate = ModelRate(input=0.01, output=0.02, cache_read=0.0, cache_create=0.0)
+    rates = {"anthropic:claude-opus-5": rate}
+
+    priced = compute_cost([_record("claude/ibm/aws/claude-opus-5")], rates)
+    assert priced.amount_usd == pytest.approx(100 * 0.01 + 10 * 0.02)
+    assert priced.unpriced_models == []
+    assert priced.coverage.priced_models == ["anthropic:claude-opus-5"]
+    assert [row.rate_key for row in priced.by_model] == ["anthropic:claude-opus-5"]
+
+    # An unmatched id is reported under its full canonical key.
+    unpriced = compute_cost([_record("claude/ibm/aws/claude-haiku-4-5")], rates)
+    assert unpriced.unpriced_models == ["anthropic:claude/ibm/aws/claude-haiku-4-5"]
+
+
 def test_canonical_model_id_preserves_degenerate_inputs() -> None:
     """An id that strips to empty is returned unchanged so a malformed id lands
     in `unpriced_models` under its own visibly-broken key rather than every bad
