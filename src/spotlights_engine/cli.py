@@ -822,6 +822,10 @@ def main(argv: list[str] | None = None) -> int:
         from spotlights_engine.report.cli import main as report_main
 
         return report_main(raw_argv[1:])
+    if raw_argv and raw_argv[0] == "rates":
+        from spotlights_engine.costing.refresh import main as rates_main
+
+        return rates_main(raw_argv[1:])
 
     args = _build_argparser().parse_args(argv)
 
