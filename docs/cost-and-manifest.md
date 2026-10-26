@@ -84,6 +84,33 @@ The key must be **exactly** the `provider:model` id the CLI reports — that is 
 
 If a model is missing from the table, Spotlights still writes the manifest and prices the models it can. The manifest's `cost.rate_note` and `notes` fields list any unpriced models so partial cost is visible.
 
+## Building the table from a LiteLLM gateway
+
+If your CLIs go through a LiteLLM proxy, let the engine read the prices the proxy bills at instead of typing them in:
+
+```bash
+spotlights-engine rates refresh --dry-run   # preview; writes nothing
+spotlights-engine rates refresh             # writes ~/.config/spotlights/rates.json
+export SPOTLIGHTS_RATES_FILE="$HOME/.config/spotlights/rates.json"
+```
+
+It fetches `/model/info` (falling back to `/v1/model/info`), keeps each Claude/OpenAI model that has an `input_cost_per_token` and `output_cost_per_token`, and merges those rows over the bundled table (or `--base <file>`). Rows merge by canonical key, so the gateway's `azure/gpt-5.5` replaces the bundled `openai:gpt-5.5`. The `openai:codex` fallback row takes the gateway price of the model Codex runs (`models.yaml`, then `~/.codex/config.toml`, or `--codex-model`). Models without a published price are listed and skipped, never filled with a list price.
+
+The endpoint comes from `--endpoint`, `SPOTLIGHTS_LITELLM_URL`, `LITELLM_BASE_URL`, `ANTHROPIC_BASE_URL` (env or `~/.claude/settings.json`), `OPENAI_BASE_URL`, or the Codex provider's `base_url`. The key comes from `--api-key-env`, `LITELLM_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, or the Codex provider's `env_key`, sent as `Authorization: Bearer`. For routers that scope the model list by a per-harness header, use `--claude-header` / `--codex-header`; rows from each fetch are keyed `anthropic:*` / `openai:*`. The `/spotlights-refresh-rates` skill (installed by `spotlights-engine init`) drives this end to end, including discovery problems and a coverage check.
+
+### Using a known gateway URL (no discovery, no skill)
+
+If you already know the gateway URL, pass it directly. `--endpoint` wins over every other source, so no endpoint discovery happens:
+
+```bash
+spotlights-engine rates refresh \
+  --endpoint https://your-gateway.example.com \
+  --api-key-env LITELLM_API_KEY \
+  --dry-run                      # drop --dry-run to write the table
+```
+
+`--endpoint` only fixes the URL; the key is still discovered unless you name the env var that holds it with `--api-key-env`. Leave it out for gateways that need no key. This is a plain CLI call, so it works anywhere the engine is installed, without the `/spotlights-refresh-rates` skill.
+
 ## Adding a model to the rate table
 
 If `doctor` (or a run's `unpriced_models`) reports a model with no rate row — e.g. `[FAIL] claude: reported model 'aws/claude-opus-4-7' has no rate row (anthropic:aws/claude-opus-4-7)` — add a row for it:

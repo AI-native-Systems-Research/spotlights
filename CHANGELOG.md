@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **`rates refresh`** — `spotlights-engine rates refresh` builds the contracted rate table from a LiteLLM gateway's `/model/info` prices, merged over the bundled table by canonical key. New `/spotlights-refresh-rates` skill drives it on any environment.
+
 ## v0 — first release (v0.1.0)
 
 The first end-to-end version: point it at a repo and a goal, get a ranked, browsable map of the few places worth optimizing, each with evidence-backed proposals.
